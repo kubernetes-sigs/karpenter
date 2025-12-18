@@ -32,7 +32,7 @@ import (
 // Emptiness is a subreconciler that deletes empty candidates.
 type Emptiness struct {
 	consolidation
-	validator ValidatorInterface
+	validator Validator
 }
 
 func NewEmptiness(c consolidation, opts ...option.Function[MethodOptions]) *Emptiness {

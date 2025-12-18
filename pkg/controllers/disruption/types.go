@@ -49,10 +49,10 @@ const (
 )
 
 type MethodOptions struct {
-	validator ValidatorInterface
+	validator Validator
 }
 
-func WithValidator(v ValidatorInterface) option.Function[MethodOptions] {
+func WithValidator(v Validator) option.Function[MethodOptions] {
 	return func(o *MethodOptions) {
 		o.validator = v
 	}

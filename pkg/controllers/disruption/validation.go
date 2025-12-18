@@ -59,6 +59,11 @@ func IsValidationError(err error) bool {
 	return errors.As(err, &validationError)
 }
 
+type Validator interface {
+	ValidateCandidates(context.Context, []*Candidate, ...option.Function[ValidatorOptions]) ([]*Candidate, error)
+	ValidateCommand(context.Context, Command, []*Candidate) error
+}
+
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
@@ -73,20 +78,15 @@ type validation struct {
 	reason        v1.DisruptionReason
 }
 
-type ValidatorInterface interface {
-	ValidateCandidates(context.Context, []*Candidate, ...option.Function[ValidatorOptions]) ([]*Candidate, error)
-	ValidateCommand(context.Context, Command, []*Candidate) error
-}
-
-type Validator struct {
+type BaseValidator struct {
 	validation
 	filter         CandidateFilter
 	validationType string
 }
 
-func NewEmptinessValidator(c consolidation) *Validator {
+func NewEmptinessValidator(c consolidation) *BaseValidator {
 	e := &Emptiness{consolidation: c}
-	return &Validator{
+	return &BaseValidator{
 		validation: validation{
 			clock:         c.clock,
 			cluster:       c.cluster,
@@ -102,15 +102,9 @@ func NewEmptinessValidator(c consolidation) *Validator {
 	}
 }
 
-type ConsolidationValidator struct {
-	validation
-	filter         CandidateFilter
-	validationType string
-}
-
-func NewSingleConsolidationValidator(c consolidation) *Validator {
+func NewSingleConsolidationValidator(c consolidation) *BaseValidator {
 	s := &SingleNodeConsolidation{consolidation: c}
-	return &Validator{
+	return &BaseValidator{
 		validation: validation{
 			clock:         c.clock,
 			cluster:       c.cluster,
@@ -126,9 +120,9 @@ func NewSingleConsolidationValidator(c consolidation) *Validator {
 	}
 }
 
-func NewMultiConsolidationValidator(c consolidation) *Validator {
+func NewMultiConsolidationValidator(c consolidation) *BaseValidator {
 	m := &MultiNodeConsolidation{consolidation: c}
-	return &Validator{
+	return &BaseValidator{
 		validation: validation{
 			clock:         c.clock,
 			cluster:       c.cluster,
@@ -144,7 +138,7 @@ func NewMultiConsolidationValidator(c consolidation) *Validator {
 	}
 }
 
-func (v *Validator) ValidateCandidates(ctx context.Context, candidates []*Candidate, opts ...option.Function[ValidatorOptions]) ([]*Candidate, error) {
+func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Candidate, opts ...option.Function[ValidatorOptions]) ([]*Candidate, error) {
 	o := option.Resolve(opts...)
 
 	// This GetCandidates call filters out nodes that were nominated
@@ -195,7 +189,7 @@ func (v *Validator) ValidateCandidates(ctx context.Context, candidates []*Candid
 }
 
 // ValidateCommand validates a command for a Method
-func (v *Validator) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) error {
+func (v *BaseValidator) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) error {
 	// None of the chosen candidate are valid for execution, so retry
 	if len(candidates) == 0 {
 		return NewValidationError(fmt.Errorf("no candidates"))

@@ -39,7 +39,7 @@ const SingleNodeConsolidationType = "single"
 type SingleNodeConsolidation struct {
 	consolidation
 	PreviouslyUnseenNodePools sets.Set[string]
-	validator                 ValidatorInterface
+	validator                 Validator
 }
 
 func NewSingleNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *SingleNodeConsolidation {

@@ -67,7 +67,7 @@ type TestEmptinessValidator struct {
 	nodes      []*corev1.Node
 	nodeClaims []*v1.NodeClaim
 	nodePool   *v1.NodePool
-	emptiness  *disruption.Validator
+	emptiness  *disruption.BaseValidator
 }
 
 type TestEmptinessValidatorOption func(*TestEmptinessValidator)
@@ -90,7 +90,7 @@ func WithEmptinessNodeNomination() TestEmptinessValidatorOption {
 	}
 }
 
-func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool, opts ...TestEmptinessValidatorOption) disruption.ValidatorInterface {
+func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool, opts ...TestEmptinessValidatorOption) disruption.Validator {
 	v := &TestEmptinessValidator{
 		nodes:      nodes,
 		nodeClaims: nodeClaims,
@@ -126,7 +126,7 @@ type TestConsolidationValidator struct {
 	nominated     bool
 	cluster       *state.Cluster
 	nodePool      *v1.NodePool
-	consolidation *disruption.Validator
+	consolidation *disruption.BaseValidator
 }
 
 type TestConsolidationValidatorOption func(*TestConsolidationValidator)
@@ -149,15 +149,15 @@ func WithUnderutilizedNodeNomination() TestConsolidationValidatorOption {
 	}
 }
 
-func NewTestSingleConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.ValidatorInterface {
+func NewTestSingleConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.Validator {
 	return newTestConsolidationValidator(nodePool, disruption.NewSingleConsolidationValidator(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)), opts...)
 }
 
-func NewTestMultiConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.ValidatorInterface {
+func NewTestMultiConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.Validator {
 	return newTestConsolidationValidator(nodePool, disruption.NewMultiConsolidationValidator(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)), opts...)
 }
 
-func newTestConsolidationValidator(nodePool *v1.NodePool, c *disruption.Validator, opts ...TestConsolidationValidatorOption) disruption.ValidatorInterface {
+func newTestConsolidationValidator(nodePool *v1.NodePool, c *disruption.BaseValidator, opts ...TestConsolidationValidatorOption) disruption.Validator {
 	v := &TestConsolidationValidator{
 		cluster:       cluster,
 		nodePool:      nodePool,
