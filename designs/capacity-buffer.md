@@ -5,41 +5,53 @@
 Karpenter currently operates as a dynamic cluster autoscaler, provisioning nodes just-in-time based on pending pod demand. However, several important use cases require maintaining pre-provisioned spare capacity:
 
 1. **Performance-critical applications** where just-in-time provisioning latency is unacceptable
-2. **Burst workloads** that need immediate scheduling for CI/CD, batch jobs, or event-driven applications
+2. **Burst workloads** that need immediate scheduling for CI/CD, batch jobs, or event-driven applications  
 3. **High-availability services** that require buffer capacity to handle traffic spikes or node failures
-4. **Consistent user experience** across different autoscaling solutions in the Kubernetes ecosystem
+4. **Intent-driven capacity configuration** allowing users to declaratively express "I want X amount of buffer capacity"
 
 Currently, users attempt to achieve buffer capacity through workarounds:
 - Deploying "balloon pods" or placeholder workloads to maintain minimum capacity
 - Using pause containers with resource requests to reserve capacity
-- Over-provisioning through static NodePools
+- Over-provisioning through static NodePools or manual capacity management
 
-The Kubernetes SIG Autoscaling has standardized a CapacityBuffer API to declare spare capacity/headroom in clusters. Cluster Autoscaler supports this API (autoscaling.x-k8s.io/v1alpha1), providing a vendor-agnostic way to express capacity requirements.
+The Kubernetes SIG Autoscaling has standardized a CapacityBuffer API (`autoscaling.x-k8s.io/v1alpha1`) to declare spare capacity/headroom in clusters. Cluster Autoscaler implemented this API in version 1.34.0 (September 2024), providing a vendor-agnostic way to express capacity requirements.
 
-## Proposal
+## User Experience
 
-Extend Karpenter to support the standard CapacityBuffer API (autoscaling.x-k8s.io/v1alpha1) by integrating buffer capacity into scheduling and consolidation algorithms.
+Users want to declaratively specify buffer capacity that Karpenter should maintain, similar to how they specify pod requirements. The experience should be:
 
 ```yaml
+# User creates a CapacityBuffer resource
 apiVersion: autoscaling.x-k8s.io/v1alpha1
 kind: CapacityBuffer
 metadata:
-  name: my-app-buffer
-  namespace: default
+  name: web-app-buffer
+  namespace: production
 spec:
-  # Reference existing workload to derive capacity
+  # Reference existing workload to derive capacity requirements
   scalableRef:
     apiGroup: apps
     kind: Deployment
-    name: my-app
-  replicas: 5  # Maintain buffer for 5 additional replicas
+    name: web-app
+  replicas: 5  # Maintain capacity for 5 additional replicas
 ```
 
-Key aspects:
-1. **Virtual Pod Approach**: Follow Cluster Autoscaler's pattern using in-memory virtual pods
-2. **Scheduling Integration**: Buffer pods participate in Karpenter's bin-packing algorithms
-3. **Consolidation Protection**: Ensure buffer capacity is preserved during node optimization
-4. **Standard Compatibility**: Use the same CRD as Cluster Autoscaler for ecosystem consistency
+**Expected behavior:**
+- Karpenter provisions and maintains capacity as if 5 additional web-app pods were scheduled
+- New pods from the web-app deployment can be scheduled immediately on this pre-provisioned capacity
+- Buffer capacity is preserved during consolidation (nodes aren't removed if they're providing buffer)
+- When real pods consume the buffer, Karpenter provisions additional capacity to restore it
+
+**This is similar to existing Karpenter features:**
+- Like StaticNodePools maintain fixed node counts, CapacityBuffers maintain fixed spare capacity
+- Like pod requirements drive provisioning decisions, buffer requirements also influence scheduling
+- Like disruption budgets control disruption, buffers participate in consolidation decisions
+
+## Proposal
+
+Extend Karpenter to support the standard CapacityBuffer API by treating buffer capacity as virtual pods that participate in scheduling and disruption decisions.
+
+**Goal:** Karpenter respects configured CapacityBuffers, maintaining additional capacity as if they were pods scheduled in the cluster.
 
 ### Modeling & Validation
 
@@ -299,8 +311,8 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
     scheduler := scheduling.NewScheduler(p.kubeClient, nodeClaimTemplates, ...)
     results, err := scheduler.Solve(ctx, allPods)
     
-    // 5. Track buffer NodeClaims for consolidation
-    p.bufferController.UpdateBufferNodeClaims(ctx, results.NewNodeClaims)
+    // 5. Track which NodeClaims are accommodating buffer pods
+    p.bufferController.UpdateProvisionedCapacity(ctx, results.NewNodeClaims, bufferPods)
     
     return results, err
 }
@@ -407,7 +419,7 @@ func (bc *BufferController) syncWithClusterState(ctx context.Context) error {
     
     // 2. Reconcile buffer allocations with actual cluster state
     for bufferName, bufferState := range bc.bufferCache {
-        // Check if buffer NodeClaims still exist
+        // Check if NodeClaims accommodating buffer pods still exist
         activeNodeClaims := bc.filterActiveNodeClaims(bufferState.NodeClaims, nodeClaims)
         
         // Update buffer state based on cluster reality
@@ -423,9 +435,9 @@ func (bc *BufferController) syncWithClusterState(ctx context.Context) error {
 }
 ```
 
-**Revised Protection Strategy**:
+**Protection Strategy**:
 
-1. **NodeClaim-Level Tracking**: Buffer capacity is tracked at the NodeClaim level, not just pod level
+1. **Virtual Pod Tracking**: Buffer capacity is represented as virtual pods that participate in scheduling decisions
 
 2. **State Synchronization**: Buffer controller maintains consistency with Karpenter's `state.Cluster`
 
@@ -491,13 +503,6 @@ status:
   provisioningStrategy: "buffer.x-k8s.io/active-capacity"
 ```
 
-**Supported Reference Types**:
-- `apps/v1/Deployment`
-- `apps/v1/ReplicaSet` 
-- `apps/v1/StatefulSet`
-- `core/v1/PodTemplate` (via PodTemplateRef)
-- Future: Custom scalable resources with scale subresource
-
 ### Buffer Translation and Reconciliation
 
 Following Cluster Autoscaler's pattern:
@@ -516,44 +521,82 @@ Following Cluster Autoscaler's pattern:
 
 ### Implementation Phases
 
-#### Phase 1: Foundation & Architecture Analysis (Week 1-2)
-- Add CapacityBuffer CRD watching and client setup
-- Implement buffer translators (following cluster-autoscaler patterns):
+#### Prerequisites
+
+Before implementation can begin:
+
+1. **CapacityBuffer CRD Availability**
+   - CRD is available in kubernetes/autoscaler repository (as of 1.34.0)
+   - Can be installed separately or via Helm
+   - Karpenter will not bundle the CRD by default (alpha feature)
+
+2. **Feature Gate Infrastructure**
+   - Feature gate mechanism must support `CapacityBuffer` flag
+   - CRD installation documentation must be prepared
+
+3. **Reference Implementation Available**
+   - Cluster Autoscaler 1.34.0+ provides reference implementation
+   - Can validate API compatibility and behavior
+
+#### Alpha Release Scope
+
+The initial alpha release must include:
+
+**Core Functionality:**
+- Support for `scalableRef` (Deployment, StatefulSet, ReplicaSet)
+- Support for `podTemplateRef`
+- Basic replica and percentage calculation
+- Virtual pod generation and injection into scheduling
+- Feature gate implementation (`--feature-gates=CapacityBuffer=true`)
+
+**API Support:**
+- CapacityBuffer CRD watching
+- Status updates (ReadyForProvisioning condition)
+- Filter by provisioning strategy (`buffer.x-k8s.io/active-capacity`)
+
+**Integration:**
+- Virtual pods participate in provisioner scheduling
+- Basic consolidation protection (treat as real pods)
+- Respect NodePool limits
+
+**Excluded from Alpha:**
+- Resource limits-based sizing (Option 4)
+- Advanced consolidation strategies
+- Cross-namespace references
+- Custom resource support beyond built-in types
+- Detailed metrics and observability
+
+#### Phase 1: Foundation (Week 1-2)
+- Add CapacityBuffer CRD client and watching
+- Implement feature gate
+- Implement buffer translators:
   - PodTemplateTranslator
-  - ScalableObjectsTranslator  
-  - ResourceLimitsTranslator
-- Implement filtering logic (strategy, status, generation)
-- **Deep analysis of Karpenter's state.Cluster integration points**
+  - ScalableObjectsTranslator (Deployment, StatefulSet, ReplicaSet)
+- Implement filtering logic (strategy, status)
 - Unit tests for translation logic
 
-#### Phase 2: State Management Integration (Week 3-4)
+#### Phase 2: Virtual Pod Generation (Week 3-4)
 - Build BufferController with reconciliation loop
-- **Implement state.Cluster synchronization for buffer NodeClaims**
+- Implement virtual pod generation with buffer labels
 - Implement status updater for buffer conditions
-- Virtual pod generation with NodeClaim-level tracking
-- Integration tests with cluster state
+- Integration tests with CRD lifecycle
 
-#### Phase 3: Provisioning Integration (Week 5-7)
-- **Modify provisioner.Schedule() to handle buffer pods correctly**
+#### Phase 3: Scheduling Integration (Week 5-6)
+- Modify provisioner.Schedule() to include buffer pods
 - Implement priority-based pod combination logic
-- **Integration with scheduling.Scheduler constraint solving**
-- Ensure buffer capacity triggers NodeClaim creation
-- **Handle topology spread constraints and affinity with buffer pods**
+- Ensure buffer virtual pods trigger provisioning correctly
 - E2E tests for provisioning scenarios
 
-#### Phase 4: Disruption Integration (Week 8-10)
-- **Analyze all disruption strategies (Emptiness, Drift, Consolidation)**
-- Implement buffer-aware consolidation simulation
-- **Integrate with disruption budget calculations**
-- Add buffer capacity preservation validation
-- **Handle parallel disruption command execution**
-- E2E tests for complex consolidation scenarios
+#### Phase 4: Consolidation Integration (Week 7-8)
+- Treat buffer pods as real pods during consolidation simulation
+- Validate consolidation doesn't remove buffer capacity
+- E2E tests for consolidation scenarios
 
-#### Phase 5: Observability & Polish (Week 11-12)
-- **Add buffer-specific metrics integration with state.Cluster**
-- User documentation with Karpenter-specific examples
-- Performance testing with large-scale buffer scenarios
-- **Validate integration with Karpenter's event system**
+#### Phase 5: Alpha Release Polish (Week 9-10)
+- Basic metrics (buffer count, virtual pod count)
+- User documentation with installation instructions
+- Alpha limitations documented
+- Performance baseline testing
 
 ## Alternatives Considered
 
@@ -649,6 +692,49 @@ Following the Buffer API proposal:
 - Memory overhead of virtual pods
 - Watch performance with many buffers
 
+## Feature Gating
+
+Capacity Buffer support will be introduced as an **alpha feature** with appropriate protections.
+
+### Feature Flag
+
+- **Flag Name:** `CapacityBuffer`
+- **Default State:** `disabled`
+- **Opt-in:** Users must explicitly enable via `--feature-gates=CapacityBuffer=true`
+
+### Alpha Protections
+
+Following Karpenter's standard alpha feature practices:
+
+1. **Disabled by Default**: Feature must be explicitly enabled
+2. **No SLA**: No guarantees on behavior, performance, or stability
+3. **May Have Bugs**: Alpha features may contain issues that could affect cluster stability
+4. **API Changes**: The integration approach may change in future releases
+5. **CRD Dependency**: Requires CapacityBuffer CRD to be installed in the cluster
+
+### CRD Installation
+
+The CapacityBuffer CRD (`autoscaling.x-k8s.io/v1alpha1`) must be installed separately:
+- Not bundled with Karpenter installation by default
+- Users must install from kubernetes/autoscaler repository or via Helm
+- Karpenter will gracefully handle missing CRD (log warning, skip buffer processing)
+
+### Graduation Criteria
+
+**Beta Requirements:**
+- Feature has been enabled in production environments for at least 2 releases
+- Comprehensive e2e tests covering common scenarios
+- Performance impact quantified and documented
+- At least 3 external adopters providing feedback
+- Documentation complete with examples and troubleshooting
+
+**Stable Requirements:**
+- Feature has been in beta for at least 2 releases
+- No major bugs reported for 1 release cycle
+- Performance acceptable (< 5% overhead on scheduling latency)
+- API compatibility verified with Cluster Autoscaler
+- Migration path documented for users switching between autoscalers
+
 ## Migration & Compatibility
 
 ### Existing Users
@@ -689,13 +775,13 @@ examples/buffer/
    - Consider future enhancement to support pod template discovery from CRD
 
 3. **Q**: How to handle buffer with no matching nodes?
-   **A**: Follow Karpenter's provisioning behavior - create suitable NodeClaims through scheduler constraint solving
+   **A**: Follow Karpenter's provisioning behavior - virtual buffer pods participate in scheduling, which creates NodeClaims as needed
 
 5. **Q**: How does buffer capacity interact with NodePool limits?
-   **A**: Buffer NodeClaims must respect NodePool resource limits and budget constraints
+   **A**: Virtual buffer pods participate in scheduling like real pods, so NodeClaims created to accommodate them must respect NodePool resource limits and budget constraints
 
 6. **Q**: Integration with Karpenter's drift detection?
-   **A**: Buffer NodeClaims participate in drift detection - when drifted, they trigger replacement through normal disruption flow
+   **A**: NodeClaims that accommodate buffer pods participate in drift detection like any other NodeClaim - when drifted, they trigger replacement through normal disruption flow
 
 7. **Q**: Handling of interruption events for buffer nodes?
    **A**: Buffer capacity on interrupted nodes should be re-provisioned immediately to maintain buffer requirements
