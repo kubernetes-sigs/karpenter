@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -194,6 +195,9 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
 	cmds = lo.Filter(cmds, func(c Command, _ int) bool { return c.Decision() != NoOpDecision })
+	if len(cmds) == 0 {
+		return false, nil
+	}
 	// Assign common fields
 	for i := range cmds {
 		cmds[i].Method = disruption
@@ -264,12 +268,12 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 }
 
 // validateCommands will do the following:
-// 1. wait for consolidationTTL time
+// 1. wait for consolidationTTL time (if not drifting)
 // 2. taint each candidate node for disruption and add the Disruption condition to the NodeClaim
 // 3. validate each commands according to the disruption method
 // 4. for each candidates deemed invalid, the disruption taint / condition will be removed from the Node / NodeClaim
 func (c *Controller) validateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, error) {
-	if consolidationTTL > 0 {
+	if consolidationTTL > 0 && m.Reason() != v1.DisruptionReasonDrifted {
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("interrupted")

@@ -80,8 +80,6 @@ var _ = Describe("Queue", func() {
 				},
 			},
 		)
-		node1.Spec.Taints = append(node1.Spec.Taints, v1.DisruptedNoScheduleTaint)
-		node2.Spec.Taints = append(node2.Spec.Taints, v1.DisruptedNoScheduleTaint)
 	})
 	Context("Reconcile", func() {
 		It("should keep nodes tainted when replacements haven't finished initialization", func() {
@@ -105,6 +103,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
@@ -139,6 +138,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(queue.HasAny(stateNode.ProviderID())).To(BeTrue()) // Expect the command to still be in the queue
@@ -164,6 +164,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			replacementNodeClaim := &v1.NodeClaim{}
@@ -195,6 +196,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			// Step the clock to trigger the timeout.
@@ -225,6 +227,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			replacementNodeClaim := &v1.NodeClaim{}
@@ -278,6 +281,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			replacementNodeClaim1 := &v1.NodeClaim{}
@@ -322,6 +326,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      nil,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
@@ -359,6 +364,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 			cmd2 := &disruption.Command{
 				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
@@ -368,6 +374,7 @@ var _ = Describe("Queue", func() {
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode2, NodePool: nodePool}},
 				Replacements:      replacements2,
 			}
+			Expect(queue.MarkDisrupted(ctx, cmd2)).To(BeNil())
 			Expect(queue.StartCommand(ctx, cmd2)).To(BeNil())
 
 			replacementNodeClaim1 := &v1.NodeClaim{}

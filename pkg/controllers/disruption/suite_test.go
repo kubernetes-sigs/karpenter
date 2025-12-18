@@ -2263,3 +2263,15 @@ func (h *hangCreateClient) Create(_ context.Context, _ client.Object, _ ...clien
 	h.hasWaiter.Store(false)
 	return nil
 }
+
+func ExpectDisruptionControllerReconciled(ctx context.Context, disruptionController *disruption.Controller) {
+	ExpectParallelized(
+		func() {
+			ExpectSingletonReconciled(ctx, disruptionController)
+		},
+		func() {
+			time.Sleep(1 * time.Second)
+			fakeClock.Step(5 * time.Second)
+		},
+	)
+}
