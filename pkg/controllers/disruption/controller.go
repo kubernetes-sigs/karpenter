@@ -194,6 +194,13 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
 	cmds = lo.Filter(cmds, func(c Command, _ int) bool { return c.Decision() != NoOpDecision })
+	// Assign common fields
+	for i := range cmds {
+		cmds[i].Method = disruption
+		cmds[i].ID = uuid.New()
+		cmds[i].CreationTimestamp = c.clock.Now()
+	}
+
 	cmds, err = c.validateCommands(ctx, disruption, cmds)
 	if err != nil {
 		return false, fmt.Errorf("validating commands, %w", err)
@@ -205,11 +212,6 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	errs := make([]error, len(cmds))
 	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) {
 		cmd := cmds[i]
-
-		// Assign common fields
-		cmd.CreationTimestamp = c.clock.Now()
-		cmd.ID = uuid.New()
-		cmd.Method = disruption
 
 		// Attempt to disrupt
 		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
