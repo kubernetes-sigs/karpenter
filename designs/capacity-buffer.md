@@ -102,8 +102,18 @@ spec:
 - `apps/v1/Deployment`
 - `apps/v1/ReplicaSet` 
 - `apps/v1/StatefulSet`
+- `batch/v1/Job`
+- `core/v1/ReplicationController`
 - `core/v1/PodTemplate` (via PodTemplateRef)
-- Any resource with scale subresource
+- Any resource with scale subresource (via ScaleObjectPodResolver)
+
+**Important Validation Rules** (from implementation):
+1. **XOR constraint**: Exactly one of `podTemplateRef` or `scalableRef` must be specified
+   - Validation: `!(has(self.podTemplateRef) && has(self.scalableRef))`
+2. **PodTemplateRef requirement**: If `podTemplateRef` is set, either `replicas` or `limits` must also be set
+   - Validation: `!has(self.podTemplateRef) || has(self.replicas) || has(self.limits)`
+3. **Field types**: `replicas` and `percentage` are `int32` (not `int`)
+4. **Minimum values**: Both `replicas` and `percentage` have `+kubebuilder:validation:Minimum=0`
 
 ### Virtual Pod Generation
 
@@ -111,7 +121,10 @@ Following Cluster Autoscaler's pattern:
 
 1. **ScalableRef Resolution**: Query the referenced workload's pod template
 2. **PodTemplateRef Resolution**: Directly use the referenced template
-3. **Replica Calculation**: Compute absolute replicas from relative percentages
+3. **Replica Calculation**:
+   - If `percentage` is set: calculate `percentage * currentReplicas / 100` (integer division)
+   - If `replicas` is set: use the specified value
+   - If both are set: use `min(percentageResult, replicas)` - see Design Decisions
 4. **Virtual Pod Creation**: Generate N in-memory pods with special labels:
    ```yaml
    labels:
@@ -120,6 +133,101 @@ Following Cluster Autoscaler's pattern:
      autoscaling.x-k8s.io/buffer-namespace: <buffer-namespace>
    ```
 5. **Priority Assignment**: Use system priority class or lowest priority to ensure user pods take precedence
+
+## Design Decisions
+
+### Replica Calculation Strategy
+
+When both `replicas` and `percentage` are specified in a CapacityBuffer, we must decide which value to use for buffer capacity.
+
+**Option A: Use minimum of both values (Cluster Autoscaler approach)**
+```yaml
+spec:
+  replicas: 10      # Absolute cap
+  percentage: 20    # 20% of current deployment
+# Result: min(10, ceiling(20% of deployment replicas))
+```
+
+**Pros**:
+- Prevents unexpected cost from over-provisioning
+- `percentage` acts as dynamic scaling, `replicas` as hard cap
+- Compatible with Cluster Autoscaler behavior for seamless migration
+- Intuitive cost control: "scale with workload, but never exceed N replicas"
+
+**Cons**:
+- May not meet minimum capacity expectations in some scenarios
+- Requires users to understand min() semantics
+
+**Option B: Use maximum of both values**
+```yaml
+# Result: max(10, ceiling(20% of deployment replicas))
+```
+
+**Pros**:
+- Ensures minimum buffer capacity is always maintained
+- More intuitive for "at least N replicas" use cases
+
+**Cons**:
+- Can lead to unexpected cost when percentage exceeds replicas
+- Diverges from Cluster Autoscaler, complicating migration
+- Less predictable cost control
+
+**Decision**: ✅ **Option A (minimum)**
+
+**Rationale**:
+1. **Compatibility**: Matches Cluster Autoscaler's implementation, enabling users to migrate between autoscalers without configuration changes
+2. **Cost Control**: Prevents over-provisioning surprises. Users can set `replicas` as a budget limit while allowing `percentage` to scale dynamically
+3. **Common Use Case**: "Scale buffer with workload (percentage), but cap at maximum cost (replicas)" is more common than "ensure at least N replicas regardless of workload size"
+
+**Example Scenario**:
+```yaml
+# Production deployment with 50 replicas
+# Buffer: 20% capacity with 10 replica maximum
+spec:
+  scalableRef:
+    kind: Deployment
+    name: web-app
+  percentage: 20  # 20% of 50 = 10 pods
+  replicas: 10    # Cap at 10 pods
+# Result: min(10, 10) = 10 buffer pods
+
+# During scale-up to 100 replicas
+# percentage: 20% of 100 = 20 pods
+# replicas: still 10 pods
+# Result: min(20, 10) = 10 buffer pods (cost protected)
+```
+
+### Percentage Calculation Precision
+
+**Decision**: ✅ **Use integer division (floor), no rounding**
+
+**Rationale**:
+- Matches Cluster Autoscaler behavior: `int32(percentage * scalableReplicas / 100)`
+- Simpler implementation with predictable behavior
+- Users can adjust percentage if exact numbers are critical
+
+**Example**:
+```yaml
+# Deployment with 15 replicas, 10% buffer
+# Calculation: 10 * 15 / 100 = 1.5 → 1 (floor)
+# Result: 1 buffer pod
+```
+
+### Cluster Autoscaler Compatibility
+
+**Goal**: Maintain full API compatibility to enable seamless migration between Karpenter and Cluster Autoscaler.
+
+**Design Principles**:
+1. Use identical CRD (`autoscaling.x-k8s.io/v1alpha1`)
+2. Support same validation rules and constraints
+3. Match behavior for replica calculations
+4. Preserve status field semantics
+
+**Benefits**:
+- Users can switch autoscalers without manifest changes
+- Hybrid clusters can use both autoscalers
+- Knowledge transfer between ecosystems
+- Shared tooling and documentation
 
 ## Implementation Details
 
@@ -338,7 +446,7 @@ metadata:
   name: my-app-buffer
   namespace: default
 spec:
-  # Default provisioning strategy
+  # Provisioning strategy (defaults to "buffer.x-k8s.io/active-capacity" if not specified)
   provisioningStrategy: "buffer.x-k8s.io/active-capacity"
   
   # Option 1: Reference existing workload
@@ -346,7 +454,7 @@ spec:
     apiGroup: apps
     kind: Deployment
     name: my-app
-  replicas: 5
+  replicas: 5  # Type: int32, minimum: 0
   
   # Option 2: Reference pod template
   # podTemplateRef:
@@ -354,25 +462,33 @@ spec:
   # replicas: 3
   
   # Option 3: Percentage-based buffer  
-  # percentage: 10  # 10% of referenced workload
+  # percentage: 10  # 10% of referenced workload (int32, minimum: 0)
+  #
+  # If both 'replicas' and 'percentage' are set, min() is used as a cap
+  # See Design Decisions section for rationale
   
   # Option 4: Resource limits
   # limits:
   #   cpu: "8"
   #   memory: "16Gi"
+  #   # Will create as many chunks as fit within these limits
     
 status:
   conditions:
     - type: ReadyForProvisioning
       status: "True"
-      reason: BufferTranslated
+      reason: AttributesSetSuccessfully
+      message: "Buffer is ready for provisioning"
+      lastTransitionTime: "2025-12-18T00:00:00Z"
     - type: Provisioning
       status: "True" 
       reason: CapacityProvisioned
+      message: "Buffer capacity has been provisioned"
   replicas: 5
   podTemplateRef:
     name: translated-template
   podTemplateGeneration: 1
+  provisioningStrategy: "buffer.x-k8s.io/active-capacity"
 ```
 
 **Supported Reference Types**:
@@ -382,15 +498,18 @@ status:
 - `core/v1/PodTemplate` (via PodTemplateRef)
 - Future: Custom scalable resources with scale subresource
 
-### Virtual Pod Generation
+### Buffer Translation and Reconciliation
 
 Following Cluster Autoscaler's pattern:
 1. **Controller watches CapacityBuffer CRDs**
-2. **Filter by provisioning strategy** (buffer.x-k8s.io/active-capacity)
+2. **Filter by provisioning strategy** (default: `buffer.x-k8s.io/active-capacity`)
 3. **Translate buffer specs**:
-   - ScalableRef → query target workload's pod template
-   - PodTemplateRef → use referenced template directly
-   - Calculate replica count (absolute, percentage, or resource-limited)
+   - **ScalableRef resolution**: 
+     - Query the referenced workload (Deployment, StatefulSet, etc.)
+     - Extract pod template from the workload
+     - Support scale subresource for custom resources
+   - **PodTemplateRef resolution**: Use referenced template directly
+   - Calculate replica count (absolute, percentage, or resource-limited) per Design Decisions
 4. **Generate virtual pods** with buffer-specific labels
 5. **Update buffer status** with translation results
 6. **Inject virtual pods** into Karpenter's scheduling pipeline
@@ -561,28 +680,34 @@ examples/buffer/
 ## Open Questions & Karpenter-Specific Considerations
 
 1. **Q**: Should we support buffer priorities?
-   **A**: Defer to future KEP - not in initial scope
+   **A**: Defer to future enhancement - not in initial scope
 
-2. **Q**: How to handle buffer with no matching nodes?
+2. **Q**: How to handle ScalableRef when no pods exist yet?
+   **A**: Cluster Autoscaler requires at least one existing pod for ScaleObjectPodResolver. For Karpenter, we should:
+   - Support the same requirement initially for compatibility
+   - For custom CRDs without existing pods, require PodTemplateRef
+   - Consider future enhancement to support pod template discovery from CRD
+
+3. **Q**: How to handle buffer with no matching nodes?
    **A**: Follow Karpenter's provisioning behavior - create suitable NodeClaims through scheduler constraint solving
 
-3. **Q**: How does buffer capacity interact with NodePool limits?
+5. **Q**: How does buffer capacity interact with NodePool limits?
    **A**: Buffer NodeClaims must respect NodePool resource limits and budget constraints
 
-4. **Q**: Integration with Karpenter's drift detection?
+6. **Q**: Integration with Karpenter's drift detection?
    **A**: Buffer NodeClaims participate in drift detection - when drifted, they trigger replacement through normal disruption flow
 
-5. **Q**: Handling of interruption events for buffer nodes?
+7. **Q**: Handling of interruption events for buffer nodes?
    **A**: Buffer capacity on interrupted nodes should be re-provisioned immediately to maintain buffer requirements
 
-6. **Q**: Metrics/observability for buffers?
+8. **Q**: Metrics/observability for buffers?
    **A**: Add Karpenter-specific metrics:
    - `karpenter_buffer_nodeclaims_total`
    - `karpenter_buffer_capacity_cpu_cores`
    - `karpenter_buffer_capacity_memory_bytes`
    - `karpenter_buffer_consolidation_blocked_total`
 
-7. **Q**: State persistence across Karpenter restarts?
+9. **Q**: State persistence across Karpenter restarts?
    **A**: Buffer state must be reconstructable from CapacityBuffer CRDs and current cluster state (NodeClaims, Nodes)
 
 ## References
