@@ -33,6 +33,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
+type ValidatorOptions struct {
+	atomic bool
+}
+
+func WithAtomic() option.Function[ValidatorOptions] {
+	return func(o *ValidatorOptions) {
+		o.atomic = true
+	}
+}
+
 type ValidationError struct {
 	error
 }
@@ -61,6 +71,11 @@ type validation struct {
 	recorder      events.Recorder
 	queue         *Queue
 	reason        v1.DisruptionReason
+}
+
+type ValidatorInterface interface {
+	ValidateCandidates(context.Context, []*Candidate, ...option.Function[ValidatorOptions]) ([]*Candidate, error)
+	ValidateCommand(context.Context, Command, []*Candidate) error
 }
 
 type Validator struct {

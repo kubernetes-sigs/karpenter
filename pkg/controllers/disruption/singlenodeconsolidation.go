@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -38,14 +39,15 @@ const SingleNodeConsolidationType = "single"
 type SingleNodeConsolidation struct {
 	consolidation
 	PreviouslyUnseenNodePools sets.Set[string]
-	validator                 *Validator
+	validator                 ValidatorInterface
 }
 
-func NewSingleNodeConsolidation(c consolidation) *SingleNodeConsolidation {
+func NewSingleNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *SingleNodeConsolidation {
+	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewSingleConsolidationValidator(c))}, opts...)...)
 	return &SingleNodeConsolidation{
 		consolidation:             c,
 		PreviouslyUnseenNodePools: sets.New[string](),
-		validator:                 NewSingleConsolidationValidator(c),
+		validator:                 o.validator,
 	}
 }
 

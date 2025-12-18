@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -31,11 +32,12 @@ import (
 // Emptiness is a subreconciler that deletes empty candidates.
 type Emptiness struct {
 	consolidation
-	validator *Validator
+	validator ValidatorInterface
 }
 
-func NewEmptiness(c consolidation) *Emptiness {
-	return &Emptiness{consolidation: c, validator: NewEmptinessValidator(c)}
+func NewEmptiness(c consolidation, opts ...option.Function[MethodOptions]) *Emptiness {
+	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewEmptinessValidator(c))}, opts...)...)
+	return &Emptiness{consolidation: c, validator: o.validator}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates

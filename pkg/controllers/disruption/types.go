@@ -48,13 +48,13 @@ const (
 	EventualDisruptionClass = "eventual" // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
 )
 
-type ValidatorOptions struct {
-	atomic bool
+type MethodOptions struct {
+	validator ValidatorInterface
 }
 
-func WithAtomic() option.Function[ValidatorOptions] {
-	return func(o *ValidatorOptions) {
-		o.atomic = true
+func WithValidator(v ValidatorInterface) option.Function[MethodOptions] {
+	return func(o *MethodOptions) {
+		o.validator = v
 	}
 }
 

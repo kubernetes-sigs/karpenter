@@ -18,8 +18,8 @@ package disruption_test
 
 import (
 	"context"
-	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -39,8 +39,11 @@ func NewMethodsWithRealValidator() []disruption.Method {
 
 type NopValidator struct{}
 
-func (n NopValidator) Validate(_ context.Context, command disruption.Command, _ time.Duration) (disruption.Command, error) {
-	return command, nil
+func (n NopValidator) ValidateCandidates(_ context.Context, candidates []*disruption.Candidate, _ ...option.Function[disruption.ValidatorOptions]) ([]*disruption.Candidate, error) {
+	return candidates, nil
+}
+func (n NopValidator) ValidateCommand(_ context.Context, _ disruption.Command, _ []*disruption.Candidate) error {
+	return nil
 }
 
 func NewMethodsWithNopValidator() []disruption.Method {
@@ -64,7 +67,7 @@ type TestEmptinessValidator struct {
 	nodes      []*corev1.Node
 	nodeClaims []*v1.NodeClaim
 	nodePool   *v1.NodePool
-	emptiness  *disruption.EmptinessValidator
+	emptiness  *disruption.Validator
 }
 
 type TestEmptinessValidatorOption func(*TestEmptinessValidator)
@@ -87,7 +90,7 @@ func WithEmptinessNodeNomination() TestEmptinessValidatorOption {
 	}
 }
 
-func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool, opts ...TestEmptinessValidatorOption) disruption.Validator {
+func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool, opts ...TestEmptinessValidatorOption) disruption.ValidatorInterface {
 	v := &TestEmptinessValidator{
 		nodes:      nodes,
 		nodeClaims: nodeClaims,
@@ -100,7 +103,11 @@ func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim,
 	return v
 }
 
-func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
+func (t *TestEmptinessValidator) ValidateCandidates(_ context.Context, candidates []*disruption.Candidate, _ ...option.Function[disruption.ValidatorOptions]) ([]*disruption.Candidate, error) {
+	return candidates, nil
+}
+
+func (t *TestEmptinessValidator) ValidateCommand(ctx context.Context, cmd disruption.Command, _ []*disruption.Candidate) error {
 	if t.blocked {
 		blockingBudget(t.nodes, t.nodeClaims, t.nodePool)
 	}
@@ -110,7 +117,7 @@ func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Co
 	if t.nominated {
 		nominated(t.nodes, t.nodeClaims)
 	}
-	return t.emptiness.Validate(ctx, cmd, 0)
+	return t.ValidateCommand(ctx, cmd, nil)
 }
 
 type TestConsolidationValidator struct {
@@ -119,7 +126,7 @@ type TestConsolidationValidator struct {
 	nominated     bool
 	cluster       *state.Cluster
 	nodePool      *v1.NodePool
-	consolidation *disruption.ConsolidationValidator
+	consolidation *disruption.Validator
 }
 
 type TestConsolidationValidatorOption func(*TestConsolidationValidator)
@@ -142,15 +149,15 @@ func WithUnderutilizedNodeNomination() TestConsolidationValidatorOption {
 	}
 }
 
-func NewTestSingleConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.Validator {
+func NewTestSingleConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.ValidatorInterface {
 	return newTestConsolidationValidator(nodePool, disruption.NewSingleConsolidationValidator(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)), opts...)
 }
 
-func NewTestMultiConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.Validator {
+func NewTestMultiConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.ValidatorInterface {
 	return newTestConsolidationValidator(nodePool, disruption.NewMultiConsolidationValidator(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)), opts...)
 }
 
-func newTestConsolidationValidator(nodePool *v1.NodePool, c *disruption.ConsolidationValidator, opts ...TestConsolidationValidatorOption) disruption.Validator {
+func newTestConsolidationValidator(nodePool *v1.NodePool, c *disruption.Validator, opts ...TestConsolidationValidatorOption) disruption.ValidatorInterface {
 	v := &TestConsolidationValidator{
 		cluster:       cluster,
 		nodePool:      nodePool,
@@ -162,7 +169,11 @@ func newTestConsolidationValidator(nodePool *v1.NodePool, c *disruption.Consolid
 	return v
 }
 
-func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
+func (t *TestConsolidationValidator) ValidateCandidates(_ context.Context, candidates []*disruption.Candidate, _ ...option.Function[disruption.ValidatorOptions]) ([]*disruption.Candidate, error) {
+	return candidates, nil
+}
+
+func (t *TestConsolidationValidator) ValidateCommand(ctx context.Context, cmd disruption.Command, _ []*disruption.Candidate) error {
 	stateNodes := t.cluster.DeepCopyNodes()
 	nodes := make([]*corev1.Node, len(stateNodes))
 	nodeClaims := make([]*v1.NodeClaim, len(stateNodes))
@@ -179,7 +190,7 @@ func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruptio
 	if t.nominated {
 		nominated(nodes, nodeClaims)
 	}
-	return t.consolidation.Validate(ctx, cmd, 0)
+	return t.consolidation.ValidateCommand(ctx, cmd, nil)
 }
 
 func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {

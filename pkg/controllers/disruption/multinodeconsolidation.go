@@ -23,6 +23,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -36,13 +37,14 @@ const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
-	validator *Validator
+	validator ValidatorInterface
 }
 
-func NewMultiNodeConsolidation(c consolidation) *MultiNodeConsolidation {
+func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *MultiNodeConsolidation {
+	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewMultiConsolidationValidator(c))}, opts...)...)
 	return &MultiNodeConsolidation{
 		consolidation: c,
-		validator:     NewMultiConsolidationValidator(c),
+		validator:     o.validator,
 	}
 }
 
