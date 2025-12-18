@@ -103,11 +103,7 @@ func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim,
 	return v
 }
 
-func (t *TestEmptinessValidator) ValidateCandidates(_ context.Context, candidates []*disruption.Candidate, _ ...option.Function[disruption.ValidatorOptions]) ([]*disruption.Candidate, error) {
-	return candidates, nil
-}
-
-func (t *TestEmptinessValidator) ValidateCommand(ctx context.Context, cmd disruption.Command, _ []*disruption.Candidate) error {
+func (t *TestEmptinessValidator) ValidateCandidates(ctx context.Context, candidates []*disruption.Candidate, opts ...option.Function[disruption.ValidatorOptions]) ([]*disruption.Candidate, error) {
 	if t.blocked {
 		blockingBudget(t.nodes, t.nodeClaims, t.nodePool)
 	}
@@ -117,7 +113,11 @@ func (t *TestEmptinessValidator) ValidateCommand(ctx context.Context, cmd disrup
 	if t.nominated {
 		nominated(t.nodes, t.nodeClaims)
 	}
-	return t.ValidateCommand(ctx, cmd, nil)
+	return t.emptiness.ValidateCandidates(ctx, candidates, opts...)
+}
+
+func (t *TestEmptinessValidator) ValidateCommand(_ context.Context, _ disruption.Command, _ []*disruption.Candidate) error {
+	return nil
 }
 
 type TestConsolidationValidator struct {
@@ -169,11 +169,7 @@ func newTestConsolidationValidator(nodePool *v1.NodePool, c *disruption.BaseVali
 	return v
 }
 
-func (t *TestConsolidationValidator) ValidateCandidates(_ context.Context, candidates []*disruption.Candidate, _ ...option.Function[disruption.ValidatorOptions]) ([]*disruption.Candidate, error) {
-	return candidates, nil
-}
-
-func (t *TestConsolidationValidator) ValidateCommand(ctx context.Context, cmd disruption.Command, _ []*disruption.Candidate) error {
+func (t *TestConsolidationValidator) ValidateCandidates(ctx context.Context, candidates []*disruption.Candidate, opts ...option.Function[disruption.ValidatorOptions]) ([]*disruption.Candidate, error) {
 	stateNodes := t.cluster.DeepCopyNodes()
 	nodes := make([]*corev1.Node, len(stateNodes))
 	nodeClaims := make([]*v1.NodeClaim, len(stateNodes))
@@ -190,7 +186,11 @@ func (t *TestConsolidationValidator) ValidateCommand(ctx context.Context, cmd di
 	if t.nominated {
 		nominated(nodes, nodeClaims)
 	}
-	return t.consolidation.ValidateCommand(ctx, cmd, nil)
+	return t.consolidation.ValidateCandidates(ctx, candidates, opts...)
+}
+
+func (t *TestConsolidationValidator) ValidateCommand(_ context.Context, _ disruption.Command, _ []*disruption.Candidate) error {
+	return nil
 }
 
 func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {

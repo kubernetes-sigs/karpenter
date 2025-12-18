@@ -205,7 +205,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		cmds[i].CreationTimestamp = c.clock.Now()
 	}
 
-	cmds, err = c.validateCommands(ctx, disruption, cmds)
+	cmds, err = c.ValidateCommands(ctx, disruption, cmds)
 	if err != nil {
 		return false, fmt.Errorf("validating commands, %w", err)
 	}
@@ -267,12 +267,12 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	}
 }
 
-// validateCommands will do the following:
+// ValidateCommands will do the following:
 // 1. wait for consolidationTTL time (if not drifting)
 // 2. taint each candidate node for disruption and add the Disruption condition to the NodeClaim
 // 3. validate each commands according to the disruption method
 // 4. for each candidates deemed invalid, the disruption taint / condition will be removed from the Node / NodeClaim
-func (c *Controller) validateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, error) {
+func (c *Controller) ValidateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, error) {
 	if consolidationTTL > 0 && m.Reason() != v1.DisruptionReasonDrifted {
 		select {
 		case <-ctx.Done():
@@ -299,7 +299,9 @@ func (c *Controller) validateCommands(ctx context.Context, m Method, cmds []Comm
 		if err != nil {
 			return nil, err
 		}
-		validated = append(validated, validCmd)
+		if validCmd.Decision() != NoOpDecision {
+			validated = append(validated, validCmd)
+		}
 	}
 	return validated, nil
 }

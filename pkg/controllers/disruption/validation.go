@@ -142,14 +142,17 @@ func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Ca
 	o := option.Resolve(opts...)
 
 	// This GetCandidates call filters out nodes that were nominated
+	// GracefulDisruptionClass is hardcoded here because ValidateCandidates is only used for consolidation disruption. All consolidation disruption is graceful disruption.
 	validatedCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.filter, GracefulDisruptionClass, v.queue)
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
-	if len(validatedCandidates) == 0 {
+
+	// If we are acting atomically and filtered out any candidates, return nil as some NodeClaims in the consolidation decision have changed.
+	if len(validatedCandidates) == 0 || (o.atomic && len(validatedCandidates) != len(candidates)) {
 		FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: v.validationType})
-		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)))
+		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)-len(validatedCandidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, v.cluster, v.clock, v.kubeClient, v.cloudProvider, v.recorder, v.reason)
 	if err != nil {
@@ -165,6 +168,7 @@ func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Ca
 		if v.cluster.IsNodeNominated(vc.ProviderID()) {
 			if o.atomic {
 				err = NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
+				validatedCandidates = []*Candidate{}
 				break
 			}
 			continue
@@ -172,6 +176,7 @@ func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Ca
 		if disruptionBudgetMapping[vc.NodePool.Name] == 0 {
 			if o.atomic {
 				err = NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
+				validatedCandidates = []*Candidate{}
 				break
 			}
 			continue
