@@ -47,8 +47,12 @@ func NewDaemonSetController(kubeClient client.Client, cluster *state.Cluster) *D
 	}
 }
 
+func (c *DaemonSetController) Name() string {
+	return "state.daemonset"
+}
+
 func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "state.daemonset")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	daemonSet := appsv1.DaemonSet{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
@@ -66,7 +70,7 @@ func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Reque
 
 func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("state.daemonset").
+		Named(c.Name()).
 		For(&appsv1.DaemonSet{}).
 		// We only want to watch the DaemonSet on Create and then re-poll every 1m
 		WithEventFilter(predicate.Funcs{

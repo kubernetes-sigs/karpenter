@@ -101,7 +101,7 @@ func (c *Controller) Name() string {
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("nodeclaim.expiration").
+		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

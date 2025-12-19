@@ -50,8 +50,12 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 	}
 }
 
+func (c *Controller) Name() string {
+	return "nodepool.readiness"
+}
+
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "nodepool.readiness")
+	ctx = injection.WithControllerName(ctx, c.Name())
 	stored := nodePool.DeepCopy()
 
 	nodeClass, err := nodepoolutils.GetNodeClass(ctx, c.kubeClient, nodePool, c.cloudProvider)
@@ -98,7 +102,7 @@ func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.O
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	b := controllerruntime.NewControllerManagedBy(m).
-		Named("nodepool.readiness").
+		Named(c.Name()).
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)})
 	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {

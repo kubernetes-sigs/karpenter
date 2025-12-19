@@ -116,9 +116,13 @@ func equal(oldIts map[string]*cloudprovider.InstanceType, newIts []*cloudprovide
 	return true
 }
 
+func (c *PricingController) Name() string {
+	return "state.pricing"
+}
+
 func (c *PricingController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("state.pricing").
+		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
 }
