@@ -54,6 +54,7 @@ const (
 	podHostInstanceType = "instance_type"
 	podPhase            = "phase"
 	podScheduled        = "scheduled"
+	podReady            = "ready"
 )
 
 var (
@@ -63,7 +64,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "state",
-			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, nodepool name, zone, architecture, capacity type, instance type and pod phase.",
+			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, nodepool name, zone, architecture, capacity type, instance type, pod phase, and pod readiness.",
 		},
 		labelNames(),
 	)
@@ -191,6 +192,7 @@ func labelNames() []string {
 		podHostCapacityType,
 		podHostInstanceType,
 		podPhase,
+		podReady,
 	}
 }
 
@@ -425,6 +427,11 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	metricLabels[podHostName] = pod.Spec.NodeName
 	metricLabels[podScheduled] = lo.Ternary(pod.Spec.NodeName != "", "true", "false")
 	metricLabels[podPhase] = string(pod.Status.Phase)
+
+	_, ready := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue
+	})
+	metricLabels[podReady] = lo.Ternary(ready, "true", "false")
 
 	node := &corev1.Node{}
 	if pod.Spec.NodeName != "" {
