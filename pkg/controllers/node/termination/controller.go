@@ -212,6 +212,8 @@ func (c *Controller) awaitDrain(
 	}
 
 	// If the nodeclaim exists, check if minDrainTime has elapsed. If it hasn't we should requeue.
+	// This check helps to ensure that we drain pods scheduled to the Node immediately after we taint it, which
+	// can occur when the scheduler has not seen the taint yet.
 	if nodeClaim != nil {
 		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained)
 		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < MinDrainTime) {
