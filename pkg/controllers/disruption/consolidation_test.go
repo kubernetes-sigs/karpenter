@@ -3986,6 +3986,9 @@ var _ = Describe("Consolidation", func() {
 				rs := test.ReplicaSet()
 				ExpectApplied(ctx, env.Client, rs)
 				pods := test.Pods(3, test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(5, resource.DecimalSI)},
+					},
 					ObjectMeta: metav1.ObjectMeta{Labels: labels,
 						OwnerReferences: []metav1.OwnerReference{
 							{
@@ -4031,14 +4034,15 @@ var _ = Describe("Consolidation", func() {
 						for i := 0; i < 2; i++ {
 							extraPods = append(extraPods, test.Pod(test.PodOptions{
 								ResourceRequirements: corev1.ResourceRequirements{
-									Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
+									Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(26, resource.DecimalSI)},
 								},
 							}))
 						}
 						ExpectApplied(ctx, env.Client, extraPods[0], extraPods[1])
-						// bind the extra pods to node1 and node 2 to make the consolidation decision invalid
+						// bind the extra pods to node 1 and node 2 to make the consolidation decision invalid
 						// we bind to 2 nodes so we can deterministically expect that node3 is consolidated in
 						// single nodeclaim consolidation
+						// node 1 and node 2 are full, so we expect a node 3 to be consolidated onto a new (and smaller) node
 						ExpectManualBinding(ctx, env.Client, extraPods[0], nodes[0])
 						ExpectManualBinding(ctx, env.Client, extraPods[1], nodes[1])
 
@@ -4061,14 +4065,15 @@ var _ = Describe("Consolidation", func() {
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
 				Expect(cmds).To(HaveLen(1))
+				ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
 				ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 				// Cascade any deletion of the nodeclaim to the node
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0], nodeClaims[1], nodeClaims[2])
 
 				// should have 2 nodes after single nodeclaim consolidation deletes one
-				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
-				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(3))
+				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
 				// and delete node3 in single nodeclaim consolidation
 				ExpectNotFound(ctx, env.Client, nodeClaims[2], nodes[2])
 			},

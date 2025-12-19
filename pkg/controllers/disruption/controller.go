@@ -268,23 +268,23 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 }
 
 // ValidateCommands will do the following:
-// 1. wait for consolidationTTL time (if not drifting)
-// 2. taint each candidate node for disruption and add the Disruption condition to the NodeClaim
+// 1. taint each candidate node for disruption and add the Disruption condition to the NodeClaim
+// 2. wait for consolidationTTL time (if not drifting)
 // 3. validate each commands according to the disruption method
 // 4. for each candidates deemed invalid, the disruption taint / condition will be removed from the Node / NodeClaim
 func (c *Controller) ValidateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, error) {
+	errs := make([]error, len(cmds))
+	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) { errs[i] = c.queue.MarkDisrupted(ctx, &cmds[i]) })
+	if err := multierr.Combine(errs...); err != nil {
+		return []Command{}, fmt.Errorf("disrupting candidates, %w", err)
+	}
+
 	if consolidationTTL > 0 && m.Reason() != v1.DisruptionReasonDrifted {
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("interrupted")
 		case <-c.clock.After(consolidationTTL): // channel which we wait for x duration until recieve and continue
 		}
-	}
-
-	errs := make([]error, len(cmds))
-	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) { errs[i] = c.queue.MarkDisrupted(ctx, &cmds[i]) })
-	if err := multierr.Combine(errs...); err != nil {
-		return []Command{}, fmt.Errorf("disrupting candidates, %w", err)
 	}
 
 	validated := make([]Command, 0, len(cmds))
