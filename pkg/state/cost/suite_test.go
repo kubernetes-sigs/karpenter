@@ -305,7 +305,7 @@ var _ = Describe("ClusterCost", func() {
 			Expect(initialCost).To(BeNumerically("~", 1.50, 0.001))
 			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      v1.NodePoolLabelKey,
 							Operator: corev1.NodeSelectorOpIn,

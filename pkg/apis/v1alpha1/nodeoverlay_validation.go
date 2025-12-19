@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"go.uber.org/multierr"
-
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -37,7 +36,7 @@ func (in *NodeOverlay) RuntimeValidate(ctx context.Context) error {
 // NodeOverlay requirements only support well known labels.
 func (in *NodeOverlaySpec) validateRequirements(ctx context.Context) (errs error) {
 	for _, requirement := range in.Requirements {
-		if err := v1.ValidateRequirement(ctx, v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: requirement}); err != nil {
+		if err := v1.ValidateRequirement(ctx, v1.NodeSelectorRequirementWithMinValues{Key: requirement.Key, Operator: requirement.Operator, Values: requirement.Values}); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("invalid value: %w in requirements, restricted", err))
 		}
 		if requirement.Operator == corev1.NodeSelectorOpNotIn && len(requirement.Values) == 0 {
