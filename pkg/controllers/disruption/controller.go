@@ -283,7 +283,7 @@ func (c *Controller) ValidateCommands(ctx context.Context, m Method, cmds []Comm
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("interrupted")
-		case <-c.clock.After(consolidationTTL): // channel which we wait for x duration until recieve and continue
+		case <-c.clock.After(consolidationTTL): // channel which we wait for x duration until receive and continue
 		}
 	}
 

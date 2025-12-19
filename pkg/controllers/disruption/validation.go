@@ -138,6 +138,7 @@ func NewMultiConsolidationValidator(c consolidation) *BaseValidator {
 	}
 }
 
+//nolint:gocyclo
 func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Candidate, opts ...option.Function[ValidatorOptions]) ([]*Candidate, error) {
 	o := option.Resolve(opts...)
 
@@ -168,7 +169,7 @@ func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Ca
 		if v.cluster.IsNodeNominated(vc.ProviderID()) {
 			if o.atomic {
 				err = NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
-				validatedCandidates = []*Candidate{}
+				validCandidates = []*Candidate{}
 				break
 			}
 			continue
@@ -176,7 +177,7 @@ func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Ca
 		if disruptionBudgetMapping[vc.NodePool.Name] == 0 {
 			if o.atomic {
 				err = NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
-				validatedCandidates = []*Candidate{}
+				validCandidates = []*Candidate{}
 				break
 			}
 			continue
