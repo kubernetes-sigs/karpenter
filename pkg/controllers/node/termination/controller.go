@@ -50,6 +50,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/termination"
@@ -110,7 +111,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, err
 	}
 
-	if err = c.terminator.Taint(ctx, node, v1.DisruptedNoScheduleTaint); err != nil {
+	if err = c.terminator.TaintForDisruption(ctx, node); err != nil {
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
@@ -136,6 +137,18 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		}
 
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+	// If annotation exists, check if minDrainTime has elapsed. If it hasn't we should requeue.
+	// This check helps to ensure that we drain pods scheduled to the Node immediately after we taint it, which
+	// can occur when the scheduler has not seen the taint yet.
+	if node.Annotations != nil {
+		if taintTimeStr, ok := node.Annotations[v1.DisruptedTaintTimeAnnotationKey]; ok {
+			if taintTime, err := time.Parse(time.RFC3339, taintTimeStr); err == nil {
+				if c.clock.Since(taintTime) < options.FromContext(ctx).MinNodeDrainTime {
+					return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+				}
+			}
+		}
 	}
 	NodesDrainedTotal.Inc(map[string]string{
 		metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
