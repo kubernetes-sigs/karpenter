@@ -315,7 +315,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// Get a set of the node claim names so that it's easy to check if a new one is made
 		nodeClaimNames := sets.New(lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string { return nc.Name })...)
-		ExpectDisruptionControllerReconciled(ctx, disruptionController)
+		ExpectSingletonReconciled(ctx, disruptionController)
 
 		// Expect a replace action
 		ExpectTaintedNodeCount(ctx, env.Client, 1)
@@ -329,7 +329,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		// which needs to be deployed
 		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
-		ExpectDisruptionControllerReconciled(ctx, disruptionController)
+		ExpectSingletonReconciled(ctx, disruptionController)
 
 		// Another replacement disruption action
 		ncs = ExpectNodeClaims(ctx, env.Client)
@@ -341,7 +341,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
-		ExpectDisruptionControllerReconciled(ctx, disruptionController)
+		ExpectSingletonReconciled(ctx, disruptionController)
 
 		// One more replacement disruption action
 		ncs = ExpectNodeClaims(ctx, env.Client)
@@ -354,7 +354,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		// Try one more time, but fail since the budgets only allow 3 disruptions.
-		ExpectDisruptionControllerReconciled(ctx, disruptionController)
+		ExpectSingletonReconciled(ctx, disruptionController)
 
 		ncs = ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(13))
@@ -512,7 +512,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		// Expect the disruption controller to attempt to create a replacement and hang creation when we try to create the replacement
-		go ExpectDisruptionControllerReconciled(ctx, dc)
+		go ExpectSingletonReconciled(ctx, dc)
 		Eventually(func(g Gomega) {
 			g.Expect(hangCreateClient.HasWaiter()).To(BeTrue())
 		}, time.Second*5).Should(Succeed())
@@ -603,7 +603,7 @@ var _ = Describe("Disruption Taints", func() {
 
 		// inform cluster state about nodes and nodeClaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectDisruptionControllerReconciled(ctx, disruptionController)
+		ExpectSingletonReconciled(ctx, disruptionController)
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 
@@ -1960,7 +1960,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-		ExpectDisruptionControllerReconciled(ctx, disruptionController)
+		ExpectSingletonReconciled(ctx, disruptionController)
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
@@ -1983,7 +1983,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectDisruptionControllerReconciled(ctx, disruptionController)
+		ExpectSingletonReconciled(ctx, disruptionController)
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "replace",
@@ -2144,7 +2144,7 @@ var _ = Describe("Metrics", func() {
 		timeoutCtx, cancel := context.WithTimeout(ctx, -disruption.MultiNodeConsolidationTimeoutDuration)
 		defer cancel()
 
-		ExpectDisruptionControllerReconciled(timeoutCtx, disruptionController)
+		ExpectSingletonReconciled(timeoutCtx, disruptionController)
 		// expect that due to timeout zero nodes were tainted in consolidation
 		ExpectTaintedNodeCount(ctx, env.Client, 0)
 	})
@@ -2264,13 +2264,15 @@ func (h *hangCreateClient) Create(_ context.Context, _ client.Object, _ ...clien
 	return nil
 }
 
+// use this helper function to reconcile the disruption controllers if you expect to wait for consolidationTTL before validation
 func ExpectDisruptionControllerReconciled(ctx context.Context, disruptionController *disruption.Controller) {
 	ExpectParallelized(
 		func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 		},
 		func() {
-			time.Sleep(1 * time.Second)
+			// wait until disruption controller waits to validate until consolidationTTL and step forward
+			Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
 			fakeClock.Step(5 * time.Second)
 		},
 	)
