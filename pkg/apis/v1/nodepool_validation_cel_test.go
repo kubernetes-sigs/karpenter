@@ -513,6 +513,22 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
 			}
 		})
+		It("should fail with invalid GTE or LTE values", func() {
+			for _, requirement := range []NodeSelectorRequirementWithMinValues{
+				{Key: v1.LabelTopologyZone, Operator: NodeSelectorOpGte, Values: []string{}},
+				{Key: v1.LabelTopologyZone, Operator: NodeSelectorOpGte, Values: []string{"1", "2"}},
+				{Key: v1.LabelTopologyZone, Operator: NodeSelectorOpGte, Values: []string{"a"}},
+				{Key: v1.LabelTopologyZone, Operator: NodeSelectorOpGte, Values: []string{"-1"}},
+				{Key: v1.LabelTopologyZone, Operator: NodeSelectorOpLte, Values: []string{}},
+				{Key: v1.LabelTopologyZone, Operator: NodeSelectorOpLte, Values: []string{"1", "2"}},
+				{Key: v1.LabelTopologyZone, Operator: NodeSelectorOpLte, Values: []string{"a"}},
+				{Key: v1.LabelTopologyZone, Operator: NodeSelectorOpLte, Values: []string{"-1"}},
+			} {
+				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{requirement}
+				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
+			}
+		})
 		It("should error when minValues is negative", func() {
 			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 				{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"insance-type-1"}, MinValues: lo.ToPtr(-1)},

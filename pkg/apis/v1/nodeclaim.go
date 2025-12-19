@@ -91,7 +91,7 @@ const (
 // and minValues that represent the requirement to have at least that many values.
 type NodeSelectorRequirementWithMinValues struct {
 	//nolint:kubeapilinter
-	// Key is the label key that the selector applies to.
+	// The label key that the selector applies to.
 	// +required
 	Key string `json:"key"`
 
@@ -99,13 +99,13 @@ type NodeSelectorRequirementWithMinValues struct {
 	// enum values into the ones already defined on v1.NodeSelectorOperator
 
 	//nolint:kubeapilinter
-	// Operator represents a key's relationship to a set of values.
-	// Valid operators are In, NotIn, Exists, DoesNotExist, Gt, Lt, Gte, and Lte.
+	// Represents a key's relationship to a set of values.
+	// Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
 	// +kubebuilder:validation:Enum:=Gte;Lte
 	// +required
 	Operator v1.NodeSelectorOperator `json:"operator,omitempty"`
 	//nolint:kubeapilinter
-	// Values is an array of string values. If the operator is In or NotIn,
+	// An array of string values. If the operator is In or NotIn,
 	// the values array must be non-empty. If the operator is Exists or DoesNotExist,
 	// the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
 	// array must have a single element, which will be interpreted as an integer.
