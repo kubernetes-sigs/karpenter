@@ -14,7 +14,9 @@ See further breakdown of some additional scenarios towards the bottom of the doc
 ## Clarifying the requirements and behavior 
 **Reason and Budget Definition:** Users should be able to define an reason and a corresponding budget(s).
 **Supported Reasons:** All disruption Reasons affected by the current Budgets implementation (Underutilized, Empty, Drifted) should be supported. 
-**Default Behavior for Unspecified Reasons:** Budgets should continue to support a default behavior for all disruption reasons. 
+**Default Behavior for Unspecified Reasons:** Budgets should continue to support a default behavior for all disruption reasons.
+
+> **Note on Expiration**: Budgets can control `Drifted`, `Empty`, and `Underutilized` disruption reasons. However, the `Expired` disruption reason (controlled by `expireAfter`) is not subject to budget restrictions as it uses [Forceful Expiration](./forceful-expiration.md). When a node reaches its `expireAfter` deadline, it will be disrupted regardless of budget settings. Conversely, if you have budgets that allow other disruption reasons (e.g., `Drifted`), nodes may be terminated before reaching their `expireAfter` deadline. See the [Forceful Expiration design document](./forceful-expiration.md#important-considerations-for-expireafter) for more details. 
 
 # API Design
 ### Approach A: List Approach With Multiple Reasons per Budget - Recommended

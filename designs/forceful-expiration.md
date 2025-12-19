@@ -64,4 +64,48 @@ If this semantic change is too large to do before v1, we can punt on this and re
 
 **Pro:** No changes to the current v1 plan for Upstream Karpenter.
 
-**Con:** Does not include native support for this use-case. 
+**Con:** Does not include native support for this use-case.
+
+## Important Considerations for `expireAfter`
+
+### `expireAfter` as a Maximum, Not a Minimum
+
+It's crucial to understand that `expireAfter` specifies the **maximum lifetime** (ceiling) of a node, not a minimum guaranteed lifetime. While `expireAfter` ensures that a node will be forcefully disrupted after the specified duration regardless of budgets or `do-not-disrupt` annotations, **other disruption reasons can terminate nodes earlier**.
+
+### Interaction with Other Disruption Reasons
+
+Nodes may be disrupted before reaching their `expireAfter` deadline due to other disruption reasons:
+
+- **Drift**: When a NodePool's configuration changes (e.g., AMI update), nodes become drifted and can be terminated earlier if budgets allow drift disruptions
+- **Underutilization**: Consolidation can remove underutilized nodes before expiration
+- **Emptiness**: Empty nodes can be removed before expiration
+
+If you have configured [Disruption Budgets by Reason](./disruption-controls-by-reason.md) that allow specific disruption reasons (e.g., `Drifted`), nodes may be disrupted well before their `expireAfter` deadline is reached. For example:
+
+```yaml
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  disruption:
+    expireAfter: 720h  # 30 days maximum lifetime
+    budgets:
+    - schedule: "0 9 * * mon-fri"
+      duration: 8h
+      reasons: [Drifted]
+      nodes: 10
+```
+
+In this configuration, even though `expireAfter` is set to 720h (30 days), if an AMI drift occurs and the budget allows it, nodes may be terminated during the scheduled window, potentially much earlier than 30 days.
+
+### Enforcing Node Lifetime
+
+If you need to enforce a strict node lifetime and prevent early disruptions:
+
+1. Set `expireAfter` to your desired maximum lifetime
+2. Configure budgets to restrict other disruption reasons during times when you want to prevent early termination
+3. Consider using `consolidationPolicy: WhenEmpty` to limit consolidation to only empty nodes
+4. Use the `karpenter.sh/do-not-disrupt` annotation on critical nodes (though this won't prevent forceful expiration once `expireAfter` is reached)
+
+**Remember**: `expireAfter` guarantees that nodes won't live *beyond* the specified duration, but other disruption mechanisms may terminate them *before* that time. 
