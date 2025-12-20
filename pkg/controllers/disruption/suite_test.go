@@ -1386,7 +1386,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err.Error()).To(Equal(fmt.Sprintf(`pdb prevents pod evictions (PodDisruptionBudget=[%s])`, client.ObjectKeyFromObject(budget))))
 		Expect(recorder.DetectedEvent(fmt.Sprintf(`Pdb prevents pod evictions (PodDisruptionBudget=[%s])`, client.ObjectKeyFromObject(budget)))).To(BeTrue())
 	})
-	It("should not consider candidates that have fully blocking PDBs on daemonset pods", func() {
+	It("should consider candidates that have fully blocking PDBs on daemonset pods since daemonset pods are not evicted", func() {
 		daemonSet := test.DaemonSet()
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1428,10 +1428,55 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
-		_, err = disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal(fmt.Sprintf(`pdb prevents pod evictions (PodDisruptionBudget=[%s])`, client.ObjectKeyFromObject(budget))))
-		Expect(recorder.DetectedEvent(fmt.Sprintf(`Pdb prevents pod evictions (PodDisruptionBudget=[%s])`, client.ObjectKeyFromObject(budget)))).To(BeTrue())
+		// DaemonSet pods are not evicted during disruption, so PDB does not block the node from being a candidate
+		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c).ToNot(BeNil())
+		Expect(c.NodeClaim.Name).To(Equal(nodeClaim.Name))
+	})
+	It("should consider candidates with only daemonset pods as these pods should not be evicted during disruption", func() {
+		daemonSet := test.DaemonSet()
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, daemonSet)
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "DaemonSet",
+						Name:       daemonSet.Name,
+						UID:        daemonSet.UID,
+						Controller: lo.ToPtr(true),
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+		var err error
+		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
+		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
+		// A candidate with only DaemonSet pods should be created successfully
+		// DaemonSet pods are not considered reschedulable, so the node should be treated similarly to an empty node
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c).ToNot(BeNil())
+		Expect(c.NodeClaim.Name).To(Equal(nodeClaim.Name))
+		Expect(c.Node.Name).To(Equal(node.Name))
 	})
 	It("should consider candidates that have fully blocking PDBs on mirror pods", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
