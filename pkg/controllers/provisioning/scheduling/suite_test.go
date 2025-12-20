@@ -2915,6 +2915,64 @@ var _ = Context("Scheduling", func() {
 			// 5 of the same PVC should all be schedulable on the same node
 			Expect(nodeList.Items).To(HaveLen(1))
 		})
+		It("should schedule pods using a PV with multiple zones", func() {
+			// Create a PV with multiple zones
+			pv := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{Name: "multi-zone-pv"},
+				Zones:      []string{"test-zone-1", "test-zone-2"},
+			})
+
+			// Create a PVC binding to the PV
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{Name: "multi-zone-pvc"},
+				VolumeName: pv.Name,
+			})
+			ExpectApplied(ctx, env.Client, pv, pvc)
+
+			// Create two pods using the PVC with anti-affinity to force them into different zones
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "pod-1",
+					Labels: map[string]string{"app": "multi-zone-app"},
+				},
+				PersistentVolumeClaims: []string{pvc.Name},
+				PodAntiRequirements: []corev1.PodAffinityTerm{
+					{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "multi-zone-app"},
+						},
+						TopologyKey: corev1.LabelTopologyZone,
+					},
+				},
+			})
+
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "pod-2",
+					Labels: map[string]string{"app": "multi-zone-app"},
+				},
+				PersistentVolumeClaims: []string{pvc.Name},
+				PodAntiRequirements: []corev1.PodAffinityTerm{
+					{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "multi-zone-app"},
+						},
+						TopologyKey: corev1.LabelTopologyZone,
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+
+			// Verify that nodes are created in different zones
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+
+			Expect(node1.Labels[corev1.LabelTopologyZone]).To(BeElementOf("test-zone-1", "test-zone-2"))
+			Expect(node2.Labels[corev1.LabelTopologyZone]).To(BeElementOf("test-zone-1", "test-zone-2"))
+			Expect(node1.Labels[corev1.LabelTopologyZone]).ToNot(Equal(node2.Labels[corev1.LabelTopologyZone]))
+		})
 		It("should launch nodes for pods with ephemeral volume using the specified storage class name", func() {
 			// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
 			sc := test.StorageClass(test.StorageClassOptions{
