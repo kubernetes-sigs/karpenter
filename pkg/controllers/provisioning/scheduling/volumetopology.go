@@ -31,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"slices"
+
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
@@ -49,17 +51,6 @@ type VolumeTopology struct {
 }
 
 func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
-	var requirements []v1.NodeSelectorRequirement
-	for _, volume := range pod.Spec.Volumes {
-		req, err := v.getRequirements(ctx, pod, volume)
-		if err != nil {
-			return err
-		}
-		requirements = append(requirements, req...)
-	}
-	if len(requirements) == 0 {
-		return nil
-	}
 	if pod.Spec.Affinity == nil {
 		pod.Spec.Affinity = &v1.Affinity{}
 	}
@@ -69,24 +60,46 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &v1.NodeSelector{}
 	}
-	if len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = []v1.NodeSelectorTerm{{}}
+
+	// Start with existing terms. If empty, use a single empty term (matches everything).
+	terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	if len(terms) == 0 {
+		terms = []v1.NodeSelectorTerm{{}}
 	}
 
-	// We add our volume topology zonal requirement to every node selector term.  This causes it to be AND'd with every existing
-	// requirement so that relaxation won't remove our volume requirement.
-	for i := 0; i < len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms); i++ {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions = append(
-			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions, requirements...)
+	for _, volume := range pod.Spec.Volumes {
+		volTerms, err := v.getRequirements(ctx, pod, volume)
+		if err != nil {
+			return err
+		}
+		if len(volTerms) == 0 {
+			continue
+		}
+
+		// We add our volume topology zonal requirement to every node selector term.  This causes it to be AND'd with every existing
+		// requirement so that relaxation won't remove our volume requirement.
+		// Since volTerms are ORed, we need to compute the cross product: terms = terms X volTerms
+		var newTerms []v1.NodeSelectorTerm
+		for _, t1 := range terms {
+			for _, t2 := range volTerms {
+				newTerms = append(newTerms, v1.NodeSelectorTerm{
+					MatchExpressions: slices.Concat(t1.MatchExpressions, t2.MatchExpressions),
+					MatchFields:      slices.Concat(t1.MatchFields, t2.MatchFields),
+				})
+			}
+		}
+		terms = newTerms
 	}
+
+	pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = terms
 
 	log.FromContext(ctx).
 		WithValues("Pod", klog.KObj(pod)).
-		V(1).Info(fmt.Sprintf("adding requirements derived from pod volumes, %s", requirements))
+		V(1).Info(fmt.Sprintf("adding requirements derived from pod volumes, %s", terms))
 	return nil
 }
 
-func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorTerm, error) {
 	pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, volume)
 	if err != nil {
 		return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
@@ -115,45 +128,43 @@ func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volum
 	return nil, nil
 }
 
-func (v *VolumeTopology) getStorageClassRequirements(ctx context.Context, storageClassName string) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) getStorageClassRequirements(ctx context.Context, storageClassName string) ([]v1.NodeSelectorTerm, error) {
 	storageClass := &storagev1.StorageClass{}
 	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
 		return nil, serrors.Wrap(fmt.Errorf("getting storage class, %w", err), "StorageClass", klog.KRef("", storageClassName))
 	}
-	var requirements []v1.NodeSelectorRequirement
-	if len(storageClass.AllowedTopologies) > 0 {
-		// Terms are ORed, only use the first term
-		for _, requirement := range storageClass.AllowedTopologies[0].MatchLabelExpressions {
+	var terms []v1.NodeSelectorTerm
+	for _, topology := range storageClass.AllowedTopologies {
+		var requirements []v1.NodeSelectorRequirement
+		for _, requirement := range topology.MatchLabelExpressions {
 			requirements = append(requirements, v1.NodeSelectorRequirement{Key: requirement.Key, Operator: v1.NodeSelectorOpIn, Values: requirement.Values})
 		}
+		terms = append(terms, v1.NodeSelectorTerm{MatchExpressions: requirements})
 	}
-	return requirements, nil
+	return terms, nil
 }
 
-func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, pod *v1.Pod, volumeName string) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, pod *v1.Pod, volumeName string) ([]v1.NodeSelectorTerm, error) {
 	pv := &v1.PersistentVolume{}
 	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volumeName, Namespace: pod.Namespace}, pv); err != nil {
 		return nil, serrors.Wrap(fmt.Errorf("getting persistent volume, %w", err), "PersistentVolume", klog.KRef("", volumeName))
 	}
-	if pv.Spec.NodeAffinity == nil {
+	if pv.Spec.NodeAffinity == nil || pv.Spec.NodeAffinity.Required == nil {
 		return nil, nil
 	}
-	if pv.Spec.NodeAffinity.Required == nil {
-		return nil, nil
-	}
-	var requirements []v1.NodeSelectorRequirement
-	if len(pv.Spec.NodeAffinity.Required.NodeSelectorTerms) > 0 {
-		// Terms are ORed, only use the first term
-		requirements = pv.Spec.NodeAffinity.Required.NodeSelectorTerms[0].MatchExpressions
+
+	var terms []v1.NodeSelectorTerm
+	for _, term := range pv.Spec.NodeAffinity.Required.NodeSelectorTerms {
 		// If we are using a Local volume or a HostPath volume, then we should ignore the Hostname affinity
 		// on it because re-scheduling this pod to a new node means not using the same Hostname affinity that we currently have
 		if pv.Spec.Local != nil || pv.Spec.HostPath != nil {
-			requirements = lo.Reject(requirements, func(n v1.NodeSelectorRequirement, _ int) bool {
-				return n.Key == v1.LabelHostname
+			term.MatchExpressions = lo.Reject(term.MatchExpressions, func(req v1.NodeSelectorRequirement, _ int) bool {
+				return req.Key == v1.LabelHostname
 			})
 		}
+		terms = append(terms, term)
 	}
-	return requirements, nil
+	return terms, nil
 }
 
 // ValidatePersistentVolumeClaims returns an error if the pod doesn't appear to be valid with respect to

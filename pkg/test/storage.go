@@ -77,9 +77,15 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 	}
 	var nodeAffinity *v1.VolumeNodeAffinity
 	if len(options.Zones) != 0 {
-		nodeAffinity = &v1.VolumeNodeAffinity{Required: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: []v1.NodeSelectorRequirement{
-			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: options.Zones},
-		}}}}}
+		nodeAffinity = &v1.VolumeNodeAffinity{
+			Required: &v1.NodeSelector{
+				NodeSelectorTerms: lo.Map(options.Zones, func(zone string, _ int) v1.NodeSelectorTerm {
+					return v1.NodeSelectorTerm{
+						MatchExpressions: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{zone}}},
+					}
+				}),
+			},
+		}
 	}
 	return &v1.PersistentVolume{
 		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
