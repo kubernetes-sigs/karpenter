@@ -192,13 +192,16 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		metrics.ReasonLabel: strings.ToLower(string(disruption.Reason())),
 	})
 
-	// If there are no candidates, move to the next disruption
-	if len(candidates) == 0 {
-		return false, nil
-	}
+	// Always build disruption budget mapping to ensure metrics are up-to-date,
+	// even when there are no candidates for disruption
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
+	}
+
+	// If there are no candidates, move to the next disruption
+	if len(candidates) == 0 {
+		return false, nil
 	}
 	// Determine the disruption action
 	cmds, err := disruption.ComputeCommands(ctx, disruptionBudgetMapping, candidates...)
