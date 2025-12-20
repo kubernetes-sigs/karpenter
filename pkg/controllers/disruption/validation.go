@@ -29,6 +29,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
@@ -57,14 +58,15 @@ type Validator interface {
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
 type validation struct {
-	clock         clock.Clock
-	cluster       *state.Cluster
-	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	queue         *Queue
-	reason        v1.DisruptionReason
+	clock          clock.Clock
+	cluster        *state.Cluster
+	kubeClient     client.Client
+	cloudProvider  cloudprovider.CloudProvider
+	provisioner    *provisioning.Provisioner
+	recorder       events.Recorder
+	queue          *Queue
+	reason         v1.DisruptionReason
+	volumeTopology *scheduling.VolumeTopology
 }
 
 type EmptinessValidator struct {
@@ -77,14 +79,15 @@ func NewEmptinessValidator(c consolidation) *EmptinessValidator {
 	e := &Emptiness{consolidation: c}
 	return &EmptinessValidator{
 		validation: validation{
-			clock:         c.clock,
-			cluster:       c.cluster,
-			kubeClient:    c.kubeClient,
-			provisioner:   c.provisioner,
-			cloudProvider: c.cloudProvider,
-			recorder:      c.recorder,
-			queue:         c.queue,
-			reason:        v1.DisruptionReasonEmpty,
+			clock:          c.clock,
+			cluster:        c.cluster,
+			kubeClient:     c.kubeClient,
+			provisioner:    c.provisioner,
+			cloudProvider:  c.cloudProvider,
+			recorder:       c.recorder,
+			queue:          c.queue,
+			reason:         v1.DisruptionReasonEmpty,
+			volumeTopology: c.volumeTopology,
 		},
 		filter:         e.ShouldDisrupt,
 		validationType: e.ConsolidationType(),
@@ -117,14 +120,15 @@ func NewSingleConsolidationValidator(c consolidation) *ConsolidationValidator {
 	s := &SingleNodeConsolidation{consolidation: c}
 	return &ConsolidationValidator{
 		validation: validation{
-			clock:         c.clock,
-			cluster:       c.cluster,
-			kubeClient:    c.kubeClient,
-			provisioner:   c.provisioner,
-			cloudProvider: c.cloudProvider,
-			recorder:      c.recorder,
-			queue:         c.queue,
-			reason:        v1.DisruptionReasonUnderutilized,
+			clock:          c.clock,
+			cluster:        c.cluster,
+			kubeClient:     c.kubeClient,
+			provisioner:    c.provisioner,
+			cloudProvider:  c.cloudProvider,
+			recorder:       c.recorder,
+			queue:          c.queue,
+			reason:         v1.DisruptionReasonUnderutilized,
+			volumeTopology: c.volumeTopology,
 		},
 		filter:         s.ShouldDisrupt,
 		validationType: s.ConsolidationType(),
@@ -135,14 +139,15 @@ func NewMultiConsolidationValidator(c consolidation) *ConsolidationValidator {
 	m := &MultiNodeConsolidation{consolidation: c}
 	return &ConsolidationValidator{
 		validation: validation{
-			clock:         c.clock,
-			cluster:       c.cluster,
-			kubeClient:    c.kubeClient,
-			provisioner:   c.provisioner,
-			cloudProvider: c.cloudProvider,
-			recorder:      c.recorder,
-			queue:         c.queue,
-			reason:        v1.DisruptionReasonUnderutilized,
+			clock:          c.clock,
+			cluster:        c.cluster,
+			kubeClient:     c.kubeClient,
+			provisioner:    c.provisioner,
+			cloudProvider:  c.cloudProvider,
+			recorder:       c.recorder,
+			queue:          c.queue,
+			reason:         v1.DisruptionReasonUnderutilized,
+			volumeTopology: c.volumeTopology,
 		},
 		filter:         m.ShouldDisrupt,
 		validationType: m.ConsolidationType(),
@@ -181,7 +186,7 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 
 func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
 	// This GetCandidates call filters out nodes that were nominated
-	validatedCandidates, err := GetCandidates(ctx, e.cluster, e.kubeClient, e.recorder, e.clock, e.cloudProvider, e.filter, GracefulDisruptionClass, e.queue)
+	validatedCandidates, err := GetCandidates(ctx, e.cluster, e.kubeClient, e.recorder, e.clock, e.cloudProvider, e.filter, GracefulDisruptionClass, e.queue, e.volumeTopology)
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}
@@ -222,7 +227,7 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 // If these conditions are met for all candidates, ValidateCandidates returns a slice with the updated representations.
 func (c *ConsolidationValidator) validateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
 	// GracefulDisruptionClass is hardcoded here because ValidateCandidates is only used for consolidation disruption. All consolidation disruption is graceful disruption.
-	validatedCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.filter, GracefulDisruptionClass, c.queue)
+	validatedCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.filter, GracefulDisruptionClass, c.queue, c.volumeTopology)
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}
