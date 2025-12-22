@@ -198,8 +198,8 @@ var _ = Describe("Savings Threshold", func() {
 		It("should return cheapest price from first instance type", func() {
 			// Precondition: instance types must be sorted by price
 			instanceTypes := cloudprovider.InstanceTypes{
-				makeInstanceType("cheap", 0.10, 0.15),   // cheapest type
-				makeInstanceType("expensive", 0.50),     // more expensive type
+				makeInstanceType("cheap", 0.10, 0.15), // cheapest type
+				makeInstanceType("expensive", 0.50),   // more expensive type
 			}
 			reqs := scheduling.NewRequirements()
 
