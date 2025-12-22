@@ -86,7 +86,8 @@ func (c *Candidate) OwnedByStaticNodePool() bool {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
-	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string) (*Candidate, error) {
+	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string,
+	volumeTopology *scheduling.VolumeTopology) (*Candidate, error) {
 	var err error
 	var pods []*corev1.Pod
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
@@ -121,13 +122,23 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 			return nil, err
 		}
 	}
+	// Filter reschedulable pods and inject volume topology requirements at state capture time.
+	// This ensures pods are fully prepared before entering the consolidation decision logic.
+	reschedulablePods := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) })
+	if volumeTopology != nil {
+		for _, p := range reschedulablePods {
+			if err := volumeTopology.Inject(ctx, p); err != nil {
+				return nil, fmt.Errorf("injecting volume topology for pod %s/%s, %w", p.Namespace, p.Name, err)
+			}
+		}
+	}
 	return &Candidate{
 		StateNode:         node,
 		instanceType:      instanceType,
 		NodePool:          nodePool,
 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
 		zone:              node.Labels()[corev1.LabelTopologyZone],
-		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
+		reschedulablePods: reschedulablePods,
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
 		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 	}, nil
