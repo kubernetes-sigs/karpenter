@@ -67,11 +67,31 @@ func EvaluateConsolidation(
 	results pscheduling.Results,
 	config ConsolidationDecisionConfig,
 ) (ConsolidationDecisionResult, error) {
+	if result, shouldReturn := validateConsolidationPreconditions(candidates, results); shouldReturn {
+		return result, nil
+	}
+
+	candidatePrice, err := getCandidatePrices(candidates)
+	if err != nil {
+		return ConsolidationDecisionResult{}, fmt.Errorf("getting offering price from candidate node, %w", err)
+	}
+
+	// sort the instanceTypes by price before we take any actions like truncation for spot-to-spot consolidation
+	results.NewNodeClaims[0].InstanceTypeOptions = results.NewNodeClaims[0].InstanceTypeOptions.OrderByPrice(results.NewNodeClaims[0].Requirements)
+
+	if allCandidatesAreSpot(candidates) && results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeSpot) {
+		return evaluateSpotToSpotConsolidation(candidates, results, candidatePrice, config)
+	}
+
+	return evaluateRegularConsolidation(candidates, results, candidatePrice)
+}
+
+func validateConsolidationPreconditions(candidates []*Candidate, results pscheduling.Results) (ConsolidationDecisionResult, bool) {
 	// if not all of the pods were scheduled, we can't do anything
 	if !results.AllNonPendingPodsScheduled() {
 		return ConsolidationDecisionResult{
 			Message: pretty.Sentence(results.NonPendingPodSchedulingErrors()),
-		}, nil
+		}, true
 	}
 
 	// were we able to schedule all the pods on the inflight candidates?
@@ -81,37 +101,31 @@ func EvaluateConsolidation(
 				Candidates: candidates,
 				Results:    results,
 			},
-		}, nil
+		}, true
 	}
 
 	// we're not going to turn a single node into multiple candidates
 	if len(results.NewNodeClaims) != 1 {
 		return ConsolidationDecisionResult{
 			Message: fmt.Sprintf("Can't remove without creating %d candidates", len(results.NewNodeClaims)),
-		}, nil
+		}, true
 	}
 
-	// get the current node price based on the offering
-	candidatePrice, err := getCandidatePrices(candidates)
-	if err != nil {
-		return ConsolidationDecisionResult{}, fmt.Errorf("getting offering price from candidate node, %w", err)
-	}
+	return ConsolidationDecisionResult{}, false
+}
 
-	allExistingAreSpot := true
+func allCandidatesAreSpot(candidates []*Candidate) bool {
 	for _, cn := range candidates {
 		if cn.capacityType != v1.CapacityTypeSpot {
-			allExistingAreSpot = false
+			return false
 		}
 	}
+	return true
+}
 
-	// sort the instanceTypes by price before we take any actions like truncation for spot-to-spot consolidation
-	results.NewNodeClaims[0].InstanceTypeOptions = results.NewNodeClaims[0].InstanceTypeOptions.OrderByPrice(results.NewNodeClaims[0].Requirements)
-
-	if allExistingAreSpot && results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeSpot) {
-		return evaluateSpotToSpotConsolidation(candidates, results, candidatePrice, config)
-	}
-
+func evaluateRegularConsolidation(candidates []*Candidate, results pscheduling.Results, candidatePrice float64) (ConsolidationDecisionResult, error) {
 	// filterByPrice returns the instanceTypes that are lower priced than the current candidate
+	var err error
 	results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, candidatePrice)
 	if err != nil {
 		return ConsolidationDecisionResult{
