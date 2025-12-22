@@ -58,6 +58,10 @@ func WithValidator(v Validator) option.Function[MethodOptions] {
 	}
 }
 
+// Method defines a disruption strategy (e.g., consolidation, drift, emptiness).
+// ComputeCommands returns a slice of Commands, though current implementations only ever
+// return zero or one command. A richer interface returning multiple prioritized commands
+// (e.g., "try delete, else replace, else no-op") could enable more sophisticated strategies.
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
 	ComputeCommands(context.Context, map[string]int, ...*Candidate) ([]Command, error)
@@ -67,6 +71,11 @@ type Method interface {
 }
 
 type CandidateFilter func(context.Context, *Candidate) bool
+
+// SchedulerFunc is a function that simulates scheduling candidates to determine
+// if they can be consolidated. This type allows the scheduler to be injected
+// as a dependency, enabling mock testing without real scheduling infrastructure.
+type SchedulerFunc func(ctx context.Context, candidates ...*Candidate) (scheduling.Results, error)
 
 // Candidate is a state.StateNode that we are considering for disruption along with extra information to be used in
 // making that determination
