@@ -34,7 +34,10 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 )
+
+const resourceType = "resource_type"
 
 // These are alpha metrics, they may not stay. Do not rely on them.
 var (
@@ -48,19 +51,43 @@ var (
 		},
 		[]string{metrics.NodePoolLabel},
 	)
+	// Stage: alpha
+	PodResources = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.PodSubsystem,
+			Name:      "resources_total",
+			Help:      "Total resource requests of all pods.",
+		},
+		[]string{resourceType},
+	)
+	// Stage: alpha
+	PodCount = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.PodSubsystem,
+			Name:      "nondaemonset_count",
+			Help:      "Total count of nondaemonset nodes",
+		},
+		[]string{},
+	)
 )
 
 type Controller struct {
-	client      client.Client
-	clusterCost *cost.ClusterCost
-	npMap       map[string]*v1.NodePool
+	client       client.Client
+	clusterCost  *cost.ClusterCost
+	podResources *podresources.PodResources
+	npMap        map[string]*v1.NodePool
 }
 
-func NewController(client client.Client, clusterCost *cost.ClusterCost) *Controller {
+func NewController(client client.Client, clusterCost *cost.ClusterCost, podResources *podresources.PodResources) *Controller {
 	return &Controller{
-		client:      client,
-		clusterCost: clusterCost,
-		npMap:       make(map[string]*v1.NodePool),
+		client:       client,
+		clusterCost:  clusterCost,
+		podResources: podResources,
+		npMap:        make(map[string]*v1.NodePool),
 	}
 }
 
@@ -90,6 +117,13 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			metrics.NodePoolLabel: np.Name,
 		})
 		c.npMap[string(np.UID)] = &np
+	}
+
+	PodCount.Set(float64(c.podResources.GetTotalPodCount()), map[string]string{})
+
+	totalResources := c.podResources.GetTotalPodResourceRequests()
+	for resourceName, allocatableResource := range totalResources {
+		PodResources.Set(allocatableResource.AsApproximateFloat64(), map[string]string{resourceType: resourceName.String()})
 	}
 
 	return reconciler.Result{RequeueAfter: time.Second * 10}, nil

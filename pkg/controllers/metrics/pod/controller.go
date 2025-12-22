@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -195,7 +196,7 @@ func labelNames() []string {
 }
 
 // NewController constructs a podController instance
-func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
+func NewController(kubeClient client.Client, cluster *state.Cluster, podResources *podresources.PodResources) *Controller {
 	return &Controller{
 		kubeClient:      kubeClient,
 		metricStore:     metrics.NewStore(),
