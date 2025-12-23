@@ -50,7 +50,10 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
-var allowedUnhealthyPercent = intstr.FromString("20%")
+// DefaultNodeRepairUnhealthyThreshold is the default threshold for unhealthy nodes
+// before node auto repair is blocked. This can be overridden per NodePool via
+// spec.disruption.nodeRepairUnhealthyThreshold.
+const DefaultNodeRepairUnhealthyThreshold = "20%"
 
 // Controller for the resource
 type Controller struct {
@@ -150,7 +153,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, err
 		}
 		if !clusterHealthy {
-			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
+			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more than %s nodes are unhealthy in the cluster", DefaultNodeRepairUnhealthyThreshold))...)
 			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 		}
 	}
@@ -226,19 +229,29 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 }
 
 // isNodePoolHealthy checks if the number of unhealthy nodes managed by the given NodePool exceeds the health threshold.
-// defined by the cloud provider
-// Up to 20% of Nodes may be unhealthy before the NodePool becomes unhealthy (or the nearest whole number, rounding up).
+// The threshold is configurable via spec.disruption.nodeRepairUnhealthyThreshold in the NodePool.
+// By default, up to 20% of Nodes may be unhealthy before the NodePool becomes unhealthy (or the nearest whole number, rounding up).
 // For example, given a NodePool with three nodes, one may be unhealthy without rendering the NodePool unhealthy, even though that's 33% of the total nodes.
 // This is analogous to how minAvailable and maxUnavailable work for PodDisruptionBudgets: https://kubernetes.io/docs/tasks/run-application/configure-pdb/#rounding-logic-when-specifying-percentages.
 func (c *Controller) isNodePoolHealthy(ctx context.Context, nodePoolName string) (bool, error) {
-	return c.areNodesHealthy(ctx, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName}))
+	np := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, np); err != nil {
+		return false, err
+	}
+
+	threshold := np.Spec.Disruption.NodeRepairUnhealthyThreshold
+	if threshold == "" {
+		threshold = DefaultNodeRepairUnhealthyThreshold
+	}
+
+	return c.areNodesHealthy(ctx, threshold, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName}))
 }
 
 func (c *Controller) isClusterHealthy(ctx context.Context) (bool, error) {
-	return c.areNodesHealthy(ctx)
+	return c.areNodesHealthy(ctx, DefaultNodeRepairUnhealthyThreshold)
 }
 
-func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOption) (bool, error) {
+func (c *Controller) areNodesHealthy(ctx context.Context, thresholdStr string, opts ...client.ListOption) (bool, error) {
 	nodeList := &corev1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList, append(opts, client.UnsafeDisableDeepCopy)...); err != nil {
 		return false, err
@@ -250,7 +263,8 @@ func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOpt
 		})
 		return found
 	})
-	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(allowedUnhealthyPercent), len(nodeList.Items), true))
+	allowedUnhealthy := intstr.FromString(thresholdStr)
+	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(allowedUnhealthy), len(nodeList.Items), true))
 	return unhealthyNodeCount <= threshold, nil
 }
 
@@ -259,6 +273,10 @@ func (c *Controller) publishNodePoolHealthEvent(ctx context.Context, node *corev
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: npName}, np); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more than %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String()))...)
+	threshold := np.Spec.Disruption.NodeRepairUnhealthyThreshold
+	if threshold == "" {
+		threshold = DefaultNodeRepairUnhealthyThreshold
+	}
+	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more than %s nodes are unhealthy in the nodepool", threshold))...)
 	return nil
 }
