@@ -163,13 +163,6 @@ func (u *UninitializedNodeError) Error() string {
 	return fmt.Sprintf("would schedule against uninitialized %s", strings.Join(info, ", "))
 }
 
-// instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
-func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovider.InstanceType) bool {
-	rhsNames := sets.NewString(lo.Map(rhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
-	lhsNames := sets.NewString(lo.Map(lhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
-	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
-}
-
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue,

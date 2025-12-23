@@ -20,13 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
 // Emptiness is a subreconciler that deletes empty candidates.
@@ -35,9 +35,8 @@ type Emptiness struct {
 	validator Validator
 }
 
-func NewEmptiness(c consolidation, opts ...option.Function[MethodOptions]) *Emptiness {
-	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewEmptinessValidator(c))}, opts...)...)
-	return &Emptiness{consolidation: c, validator: o.validator}
+func NewEmptiness(c consolidation) *Emptiness {
+	return &Emptiness{consolidation: c, validator: *NewEmptinessValidator(c)}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
@@ -96,20 +95,26 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 	return []Command{cmd}, nil
 }
 
-func (e *Emptiness) Validate(ctx context.Context, cmd Command) (Command, []*Candidate, error) {
+func (e *Emptiness) Validate(ctx context.Context, cmd Command) (Command, error) {
 	validatedCandidates, err := e.validator.ValidateCandidates(ctx, cmd.Candidates)
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, cmd.Candidates, nil
+			return Command{}, nil
 		}
-		return Command{}, cmd.Candidates, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
+
+	// for any partial accepted command, we should mark the state node as invalid
 	validatedNames := sets.NewString(lo.Map(validatedCandidates, func(c *Candidate, i int) string { return c.Name() })...)
-	invalidCandidates := lo.Filter(cmd.Candidates, func(c *Candidate, _ int) bool { return !validatedNames.Has(c.Name()) })
+	invalidNodes := lo.Map(
+		lo.Filter(cmd.Candidates, func(c *Candidate, _ int) bool { return !validatedNames.Has(c.Name()) }),
+		func(invalidCandidate *Candidate, _ int) *state.StateNode { return invalidCandidate.StateNode },
+	)
+	err = e.queue.markUndisrupted(ctx, invalidNodes...)
 
 	cmd.Candidates = validatedCandidates
-	return cmd, invalidCandidates, nil
+	return cmd, err
 }
 
 func (e *Emptiness) Reason() v1.DisruptionReason {

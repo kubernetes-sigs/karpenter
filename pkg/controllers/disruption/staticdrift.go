@@ -104,8 +104,8 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 	return cmds, nil
 }
 
-func (e *StaticDrift) Validate(_ctx context.Context, cmd Command) (Command, []*Candidate, error) {
-	return cmd, nil, nil
+func (e *StaticDrift) Validate(_ctx context.Context, cmd Command) (Command, error) {
+	return cmd, nil
 }
 
 func (d *StaticDrift) Reason() v1.DisruptionReason {

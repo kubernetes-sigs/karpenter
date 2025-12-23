@@ -25,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
@@ -67,20 +66,8 @@ type Controller struct {
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
 const pollingPeriod = 10 * time.Second
 
-type ControllerOptions struct {
-	methods []Method
-}
-
-func WithMethods(methods ...Method) option.Function[ControllerOptions] {
-	return func(o *ControllerOptions) {
-		o.methods = methods
-	}
-}
-
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, opts ...option.Function[ControllerOptions]) *Controller {
-
-	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue)...)}, opts...)...)
+	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue) *Controller {
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -90,7 +77,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
-		methods:       o.methods,
+		methods:       NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
 	}
 }
 
@@ -168,6 +155,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
+//nolint:gocyclo
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
@@ -205,7 +193,29 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		cmds[i].CreationTimestamp = c.clock.Now()
 	}
 
-	cmds, err = c.ValidateCommands(ctx, disruption, cmds)
+	// Taint each candidate node for disruption and add the Disruption condition to the NodeClaim
+	errs := make([]error, len(cmds))
+	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) { errs[i] = c.queue.MarkDisrupted(ctx, &cmds[i]) })
+	if err := multierr.Combine(errs...); err != nil {
+		return false, fmt.Errorf("disrupting candidates, %w", err)
+	}
+
+	// For non-drift methods, we wait consolidationTTL time and validate to catch the race condition in which kube-scheduler
+	// informers are not up-to-date after we taint the node with NoSchedule. This can cause kube-scheduler to bind a pod
+	// with the do-not-disrupt annotation to the node after we taint it.
+	cmds, invalidCmds, err := c.ValidateCommands(ctx, disruption, cmds)
+
+	// For any invalid commands, remove the disruption taint and condition
+	invalidNodes := lo.Reduce(invalidCmds, func(nodes []*state.StateNode, invalidCmd Command, _ int) []*state.StateNode {
+		cmdNodes := lo.Map(invalidCmd.Candidates, func(invalidCandidate *Candidate, _ int) *state.StateNode {
+			return invalidCandidate.StateNode
+		})
+		return append(nodes, cmdNodes...)
+	}, []*state.StateNode{})
+	if markedErr := c.queue.markUndisrupted(ctx, invalidNodes...); markedErr != nil {
+		err = lo.Ternary(err == nil, markedErr, fmt.Errorf("%w, %w", err, markedErr))
+	}
+
 	if err != nil {
 		return false, fmt.Errorf("validating commands, %w", err)
 	}
@@ -213,7 +223,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, nil
 	}
 
-	errs := make([]error, len(cmds))
+	errs = make([]error, len(cmds))
 	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) {
 		cmd := cmds[i]
 
@@ -267,41 +277,34 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	}
 }
 
-// ValidateCommands will do the following:
-// 1. taint each candidate node for disruption and add the Disruption condition to the NodeClaim
-// 2. wait for consolidationTTL time (if not drifting)
-// 3. validate each commands according to the disruption method
-// 4. for each candidates deemed invalid, the disruption taint / condition will be removed from the Node / NodeClaim
-func (c *Controller) ValidateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, error) {
-	errs := make([]error, len(cmds))
-	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) { errs[i] = c.queue.MarkDisrupted(ctx, &cmds[i]) })
-	if err := multierr.Combine(errs...); err != nil {
-		return []Command{}, fmt.Errorf("disrupting candidates, %w", err)
+// ValidateCommands returns a list of valid commands, invalid commands, and any associated errors.
+// If not drifting:
+// 1. wait for consolidationTTL time
+// 2. validate each commands according to the disruption method
+func (c *Controller) ValidateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, []Command, error) {
+	if m.Reason() == v1.DisruptionReasonDrifted {
+		return cmds, nil, nil
 	}
-
-	if consolidationTTL > 0 && m.Reason() != v1.DisruptionReasonDrifted {
+	if consolidationTTL > 0 {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("interrupted")
+			return nil, cmds, fmt.Errorf("interrupted")
 		case <-c.clock.After(consolidationTTL): // channel which we wait for x duration until receive and continue
 		}
 	}
 
-	validated := make([]Command, 0, len(cmds))
+	validatedCmd := make([]Command, 0, len(cmds))
+	invalidCmds := make([]Command, 0)
 	for _, cmd := range cmds {
-		validCmd, invalidCandidates, err := m.Validate(ctx, cmd)
-
-		invalidNodes := lo.Map(invalidCandidates, func(invalidCandidate *Candidate, _ int) *state.StateNode { return invalidCandidate.StateNode })
-		if markedErr := c.queue.markUndisrupted(ctx, invalidNodes...); markedErr != nil {
-			err = lo.Ternary(err == nil, markedErr, fmt.Errorf("%w, %w", err, markedErr))
+		newCmd, err := m.Validate(ctx, cmd)
+		if newCmd.Decision() == NoOpDecision {
+			invalidCmds = append(invalidCmds, newCmd)
+		} else {
+			validatedCmd = append(validatedCmd, newCmd)
 		}
-
 		if err != nil {
-			return nil, err
-		}
-		if validCmd.Decision() != NoOpDecision {
-			validated = append(validated, validCmd)
+			return nil, cmds, err
 		}
 	}
-	return validated, nil
+	return validatedCmd, invalidCmds, nil
 }

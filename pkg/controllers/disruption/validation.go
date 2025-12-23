@@ -59,11 +59,6 @@ func IsValidationError(err error) bool {
 	return errors.As(err, &validationError)
 }
 
-type Validator interface {
-	ValidateCandidates(context.Context, []*Candidate, ...option.Function[ValidatorOptions]) ([]*Candidate, error)
-	ValidateCommand(context.Context, Command, []*Candidate) error
-}
-
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
@@ -78,15 +73,15 @@ type validation struct {
 	reason        v1.DisruptionReason
 }
 
-type BaseValidator struct {
+type Validator struct {
 	validation
 	filter         CandidateFilter
 	validationType string
 }
 
-func NewEmptinessValidator(c consolidation) *BaseValidator {
+func NewEmptinessValidator(c consolidation) *Validator {
 	e := &Emptiness{consolidation: c}
-	return &BaseValidator{
+	return &Validator{
 		validation: validation{
 			clock:         c.clock,
 			cluster:       c.cluster,
@@ -102,9 +97,9 @@ func NewEmptinessValidator(c consolidation) *BaseValidator {
 	}
 }
 
-func NewSingleConsolidationValidator(c consolidation) *BaseValidator {
+func NewSingleConsolidationValidator(c consolidation) *Validator {
 	s := &SingleNodeConsolidation{consolidation: c}
-	return &BaseValidator{
+	return &Validator{
 		validation: validation{
 			clock:         c.clock,
 			cluster:       c.cluster,
@@ -120,9 +115,9 @@ func NewSingleConsolidationValidator(c consolidation) *BaseValidator {
 	}
 }
 
-func NewMultiConsolidationValidator(c consolidation) *BaseValidator {
+func NewMultiConsolidationValidator(c consolidation) *Validator {
 	m := &MultiNodeConsolidation{consolidation: c}
-	return &BaseValidator{
+	return &Validator{
 		validation: validation{
 			clock:         c.clock,
 			cluster:       c.cluster,
@@ -139,7 +134,7 @@ func NewMultiConsolidationValidator(c consolidation) *BaseValidator {
 }
 
 //nolint:gocyclo
-func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Candidate, opts ...option.Function[ValidatorOptions]) ([]*Candidate, error) {
+func (v *Validator) ValidateCandidates(ctx context.Context, candidates []*Candidate, opts ...option.Function[ValidatorOptions]) ([]*Candidate, error) {
 	o := option.Resolve(opts...)
 
 	// This GetCandidates call filters out nodes that were nominated
@@ -192,66 +187,4 @@ func (v *BaseValidator) ValidateCandidates(ctx context.Context, candidates []*Ca
 		lo.Ternary(o.atomic, float64(len(candidates)), float64(len(candidates)-len(validCandidates))), map[string]string{ConsolidationTypeLabel: v.validationType},
 	)
 	return lo.Ternary(err == nil, validCandidates, nil), err
-}
-
-// ValidateCommand validates a command for a Method
-func (v *BaseValidator) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) error {
-	// None of the chosen candidate are valid for execution, so retry
-	if len(candidates) == 0 {
-		return NewValidationError(fmt.Errorf("no candidates"))
-	}
-	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
-	if err != nil {
-		return fmt.Errorf("simluating scheduling, %w", err)
-	}
-	if !results.AllNonPendingPodsScheduled() {
-		return NewValidationError(errors.New(results.NonPendingPodSchedulingErrors()))
-	}
-
-	// We want to ensure that the re-simulated scheduling using the current cluster state produces the same result.
-	// There are three possible options for the number of new candidates that we need to handle:
-	// len(NewNodeClaims) == 0, as long as we weren't expecting a new node, this is valid
-	// len(NewNodeClaims) > 1, something in the cluster changed so that the candidates we were going to delete can no longer
-	//                    be deleted without producing more than one node
-	// len(NewNodeClaims) == 1, as long as the noe looks like what we were expecting, this is valid
-	if len(results.NewNodeClaims) == 0 {
-		if len(cmd.Replacements) == 0 {
-			// scheduling produced zero new NodeClaims and we weren't expecting any, so this is valid.
-			return nil
-		}
-		// if it produced no new NodeClaims, but we were expecting one we should re-simulate as there is likely a better
-		// consolidation option now
-		return NewValidationError(fmt.Errorf("scheduling simulation produced new results"))
-	}
-
-	// we need more than one replacement node which is never valid currently (all of our node replacement is m->1, never m->n)
-	if len(results.NewNodeClaims) > 1 {
-		return NewValidationError(fmt.Errorf("scheduling simulation produced new results"))
-	}
-
-	// we now know that scheduling simulation wants to create one new node
-	if len(cmd.Replacements) == 0 {
-		// but we weren't expecting any new NodeClaims, so this is invalid
-		return NewValidationError(fmt.Errorf("scheduling simulation produced new results"))
-	}
-
-	// We know that the scheduling simulation wants to create a new node and that the command we are verifying wants
-	// to create a new node. The scheduling simulation doesn't apply any filtering to instance types, so it may include
-	// instance types that we don't want to launch which were filtered out when the lifecycleCommand was created.  To
-	// check if our lifecycleCommand is valid, we just want to ensure that the list of instance types we are considering
-	// creating are a subset of what scheduling says we should create.  We check for a subset since the scheduling
-	// simulation here does no price filtering, so it will include more expensive types.
-	//
-	// This is necessary since consolidation only wants cheaper NodeClaims.  Suppose consolidation determined we should delete
-	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
-	// now says that we need to launch a 4xlarge. It's still launching the correct number of NodeClaims, but it's just
-	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.Replacements[0].InstanceTypeOptions, results.NewNodeClaims[0].InstanceTypeOptions) {
-		return NewValidationError(fmt.Errorf("scheduling simulation produced new results"))
-	}
-
-	// Now we know:
-	// - current scheduling simulation says to create a new node with types T = {T_0, T_1, ..., T_n}
-	// - our lifecycle command says to create a node with types {U_0, U_1, ..., U_n} where U is a subset of T
-	return nil
 }

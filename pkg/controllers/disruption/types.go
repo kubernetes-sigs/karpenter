@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/google/uuid"
 	"github.com/samber/lo"
@@ -48,21 +47,10 @@ const (
 	EventualDisruptionClass = "eventual" // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
 )
 
-type MethodOptions struct {
-	validator Validator
-}
-
-func WithValidator(v Validator) option.Function[MethodOptions] {
-	return func(o *MethodOptions) {
-		o.validator = v
-	}
-}
-
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
 	ComputeCommands(context.Context, map[string]int, ...*Candidate) ([]Command, error)
-	// returns the command (if valid), the list of invalidated candidates, and any associated errors
-	Validate(context.Context, Command) (Command, []*Candidate, error)
+	Validate(context.Context, Command) (Command, error)
 	Reason() v1.DisruptionReason
 	Class() string
 	ConsolidationType() string

@@ -23,7 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -42,12 +41,11 @@ type SingleNodeConsolidation struct {
 	validator                 Validator
 }
 
-func NewSingleNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *SingleNodeConsolidation {
-	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewSingleConsolidationValidator(c))}, opts...)...)
+func NewSingleNodeConsolidation(c consolidation) *SingleNodeConsolidation {
 	return &SingleNodeConsolidation{
 		consolidation:             c,
 		PreviouslyUnseenNodePools: sets.New[string](),
-		validator:                 o.validator,
+		validator:                 *NewSingleConsolidationValidator(c),
 	}
 }
 
@@ -115,25 +113,16 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 	return []Command{}, nil
 }
 
-func (s *SingleNodeConsolidation) Validate(ctx context.Context, cmd Command) (Command, []*Candidate, error) {
-	validatedCandidates, err := s.validator.ValidateCandidates(ctx, cmd.Candidates, WithAtomic())
+func (s *SingleNodeConsolidation) Validate(ctx context.Context, cmd Command) (Command, error) {
+	_, err := s.validator.ValidateCandidates(ctx, cmd.Candidates, WithAtomic())
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, cmd.Candidates, nil
+			return Command{}, nil
 		}
-		return Command{}, cmd.Candidates, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
-
-	if err := s.validator.ValidateCommand(ctx, cmd, validatedCandidates); err != nil {
-		if IsValidationError(err) {
-			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, cmd.Candidates, nil
-		}
-		return Command{}, cmd.Candidates, fmt.Errorf("validating consolidation, %w", err)
-	}
-
-	return cmd, nil, nil
+	return cmd, nil
 }
 
 func (s *SingleNodeConsolidation) Reason() v1.DisruptionReason {
