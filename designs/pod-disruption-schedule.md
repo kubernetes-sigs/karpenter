@@ -303,6 +303,6 @@ spec:
 4. Edge case tests (DST transitions, leap years, invalid schedules)
 
 ## Open Questions
-
+1. **Interaction with do-not-disrupt**: This currently treats disuption schedule as a separate mechanism vs do-not-disrupt. In my [earlier implementation](https://github.com/kubernetes-sigs/karpenter/pull/1720) these were combined but I've decided to split them here. Is that reasonable?
 1. **Multiple schedules**: Should we support multiple disruption windows per pod?
 2. **Metrics/Events**: What kind of metrics should be emitted when pods are protected by their schedule?
