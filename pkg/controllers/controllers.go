@@ -63,6 +63,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 )
 
 func NewControllers(
@@ -81,6 +82,7 @@ func NewControllers(
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
+	podResources := podresources.NewPodResources()
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
@@ -91,7 +93,7 @@ func NewControllers(
 		expiration.NewController(clock, kubeClient, cloudProvider),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
-		informer.NewPodController(kubeClient, cluster),
+		informer.NewPodController(kubeClient, cluster, podResources),
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
@@ -111,10 +113,10 @@ func NewControllers(
 
 	if !options.FromContext(ctx).DisableClusterStateObservability {
 		controllers = append(controllers,
-			metricspod.NewController(kubeClient, cluster),
+			metricspod.NewController(kubeClient, cluster, podResources),
 			metricsnodepool.NewController(kubeClient, cloudProvider),
 			metricsnode.NewController(cluster),
-			metricscluster.NewController(kubeClient, clusterCost),
+			metricscluster.NewController(kubeClient, clusterCost, podResources),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
 				mgr.GetEventRecorderFor("karpenter"),
