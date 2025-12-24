@@ -23,11 +23,13 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -36,18 +38,22 @@ import (
 
 // Drift is a subreconciler that deletes drifted candidates.
 type Drift struct {
-	kubeClient  client.Client
-	cluster     *state.Cluster
-	provisioner *provisioning.Provisioner
-	recorder    events.Recorder
+	kubeClient    client.Client
+	cluster       *state.Cluster
+	provisioner   *provisioning.Provisioner
+	recorder      events.Recorder
+	clock         clock.Clock
+	cloudProvider cloudprovider.CloudProvider
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
+func NewDrift(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Drift {
 	return &Drift{
-		kubeClient:  kubeClient,
-		cluster:     cluster,
-		provisioner: provisioner,
-		recorder:    recorder,
+		kubeClient:    kubeClient,
+		cluster:       cluster,
+		provisioner:   provisioner,
+		recorder:      recorder,
+		clock:         clk,
+		cloudProvider: cloudProvider,
 	}
 }
 
@@ -62,6 +68,12 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
 	})
+
+	// Build nodePoolMap for grace period filtering in SimulateScheduling
+	nodePoolMap, _, err := BuildNodePoolMap(ctx, d.kubeClient, d.cloudProvider)
+	if err != nil {
+		return []Command{}, err
+	}
 
 	emptyCandidates, nonEmptyCandidates := lo.FilterReject(candidates, func(c *Candidate, _ int) bool {
 		return len(c.reschedulablePods) == 0
@@ -78,7 +90,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			continue
 		}
 		// Check if we need to create any NodeClaims.
-		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
+		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, nodePoolMap, d.clock, candidate)
 		if err != nil {
 			// if a candidate is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {

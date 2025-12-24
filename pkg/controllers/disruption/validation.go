@@ -259,7 +259,12 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 	if len(candidates) == 0 {
 		return NewValidationError(fmt.Errorf("no candidates"))
 	}
-	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
+	// Build nodePoolMap for grace period filtering in SimulateScheduling
+	nodePoolMap, _, err := BuildNodePoolMap(ctx, v.kubeClient, v.cloudProvider)
+	if err != nil {
+		return fmt.Errorf("building nodepool map, %w", err)
+	}
+	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, nodePoolMap, v.clock, candidates...)
 	if err != nil {
 		return fmt.Errorf("simluating scheduling, %w", err)
 	}

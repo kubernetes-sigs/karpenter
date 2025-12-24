@@ -135,9 +135,14 @@ func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
 //
 // nolint:gocyclo
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
-	var err error
+	// Build nodePoolMap for grace period filtering in SimulateScheduling
+	nodePoolMap, _, err := BuildNodePoolMap(ctx, c.kubeClient, c.cloudProvider)
+	if err != nil {
+		return Command{}, fmt.Errorf("building nodepool map, %w", err)
+	}
+
 	// Run scheduling simulation to compute consolidation option
-	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
+	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, nodePoolMap, c.clock, candidates...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {
