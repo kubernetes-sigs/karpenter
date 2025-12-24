@@ -109,6 +109,14 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+	//nolint:kubeapilinter
+	// MinSavingsPerDisruptionCost is the minimum savings per unit of disruption cost
+	// required for consolidation. If not set, the controller-level default is used.
+	// A value of 0 disables this check. Example: "0.01" means save at least $0.01/hr
+	// per unit of disruption cost. Disruption cost is calculated as the sum of
+	// eviction costs for all pods on the node, scaled by the node's remaining lifetime.
+	// +optional
+	MinSavingsPerDisruptionCost *string `json:"minSavingsPerDisruptionCost,omitempty"`
 }
 
 // Budget defines when Karpenter will restrict the

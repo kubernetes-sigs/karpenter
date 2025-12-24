@@ -44,6 +44,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -53,16 +54,17 @@ import (
 )
 
 type Controller struct {
-	queue         *Queue
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
-	methods       []Method
-	mu            sync.Mutex
-	lastRun       map[string]time.Time
+	queue          *Queue
+	kubeClient     client.Client
+	cluster        *state.Cluster
+	provisioner    *provisioning.Provisioner
+	recorder       events.Recorder
+	clock          clock.Clock
+	cloudProvider  cloudprovider.CloudProvider
+	volumeTopology *scheduling.VolumeTopology
+	methods        []Method
+	mu             sync.Mutex
+	lastRun        map[string]time.Time
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
@@ -81,22 +83,24 @@ func WithMethods(methods ...Method) option.Function[ControllerOptions] {
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, opts ...option.Function[ControllerOptions]) *Controller {
 
-	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue)...)}, opts...)...)
+	volumeTopology := scheduling.NewVolumeTopology(kubeClient)
+	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue, volumeTopology)...)}, opts...)...)
 	return &Controller{
-		queue:         queue,
-		clock:         clk,
-		kubeClient:    kubeClient,
-		cluster:       cluster,
-		provisioner:   provisioner,
-		recorder:      recorder,
-		cloudProvider: cp,
-		lastRun:       map[string]time.Time{},
-		methods:       o.methods,
+		queue:          queue,
+		clock:          clk,
+		kubeClient:     kubeClient,
+		cluster:        cluster,
+		provisioner:    provisioner,
+		recorder:       recorder,
+		cloudProvider:  cp,
+		volumeTopology: volumeTopology,
+		lastRun:        map[string]time.Time{},
+		methods:        o.methods,
 	}
 }
 
-func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
-	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue, volumeTopology *scheduling.VolumeTopology) []Method {
+	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue, volumeTopology)
 	return []Method{
 		// Delete any empty NodeClaims as there is zero cost in terms of disruption.
 		NewEmptiness(c),
@@ -184,7 +188,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.volumeTopology)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}

@@ -40,6 +40,29 @@ var consolidation *disruption.SingleNodeConsolidation
 var nodePoolMap map[string]*v1.NodePool
 var nodePoolInstanceTypeMap map[string]map[string]*cloudprovider.InstanceType
 
+// These tests verify the candidate ordering and fairness behavior in single-node consolidation.
+//
+// KEY INSIGHT: Ordering is for FAIRNESS, not acceptance.
+//
+// The consolidation algorithm needs to be fair across NodePools - a cluster with 3 NodePools
+// should give each NodePool roughly equal opportunity to have its nodes considered for
+// consolidation, regardless of how many nodes each NodePool has.
+//
+// The ordering algorithm works as follows:
+//   1. Sort all candidates by disruption cost (lowest first) - cheap disruptions get priority
+//   2. Group candidates by NodePool
+//   3. Interweave candidates from each NodePool - take one from each, then repeat
+//   4. NodePools that timed out in previous runs get priority in the interweaving
+//
+// This means if NodePool A has 10 candidates and NodePool B has 2:
+//   - First round: one from A, one from B
+//   - Second round: one from A, one from B
+//   - Remaining rounds: all from A
+//
+// The threshold feature (MinSavingsPerDisruptionCost) is separate from ordering - it determines
+// ACCEPTANCE: whether a specific consolidation move is worth the disruption. A NodePool with
+// a high threshold still gets considered first (fairness), it just might reject more moves.
+
 var _ = Describe("SingleNodeConsolidation", func() {
 	BeforeEach(func() {
 		nodePool1 = test.NodePool(v1.NodePool{
@@ -90,7 +113,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 		}
 
 		// Create a single node consolidation controller
-		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, nil)
 		consolidation = disruption.NewSingleNodeConsolidation(c)
 	})
 
@@ -101,6 +124,15 @@ var _ = Describe("SingleNodeConsolidation", func() {
 	})
 
 	Context("Candidate Shuffling", func() {
+		// These tests verify the ordering algorithm that ensures fair consideration across NodePools.
+		// The algorithm:
+		//   1. Sorts by disruption cost (cheap disruptions first)
+		//   2. Interweaves across NodePools (round-robin style)
+		//   3. Prioritizes NodePools that timed out previously (they didn't get a chance)
+		//
+		// This ordering is purely about WHICH candidates get evaluated first - it doesn't
+		// determine whether a consolidation actually happens (that's the threshold's job).
+
 		It("should sort candidates by disruption cost", func() {
 			candidates, err := createCandidates(1.0, 3)
 			Expect(err).To(BeNil())
@@ -287,6 +319,7 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 			nodePoolInstanceTypeMap,
 			queue,
 			disruption.GracefulDisruptionClass,
+			nil, // volumeTopology - not needed for test
 		)
 		if err != nil {
 			return nil
