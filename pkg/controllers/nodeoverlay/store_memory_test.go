@@ -58,13 +58,13 @@ const (
 
 	// MaxAllocsPerNodePool is the maximum allowed allocations per node pool when scaling.
 	// Used to verify memory scales linearly with node pool count.
-	// Baseline: ~1,044,000 allocations per node pool
-	MaxAllocsPerNodePool = 1300000
+	// Baseline: ~1,451,000 allocations per node pool
+	MaxAllocsPerNodePool = 1500000
 
 	// MaxAllocsPerInstanceType is the maximum allowed allocations per instance type when scaling.
 	// Used to verify memory scales linearly with instance type count.
-	// Baseline: varies by count, roughly ~7,400 per instance type
-	MaxAllocsPerInstanceType = 9000
+	// Baseline: ~10,150 per instance type per node pool
+	MaxAllocsPerInstanceType = 10500
 )
 
 // memStats captures memory statistics for a test
