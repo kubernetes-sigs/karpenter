@@ -63,6 +63,7 @@ const (
 // the cluster as nodes and that they are properly initialized, ensuring that nodeclaims that do not have matching nodes
 // after some liveness TTL are removed
 type Controller struct {
+	clock         clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	recorder      events.Recorder
@@ -76,6 +77,7 @@ type Controller struct {
 
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, nodePoolState *nodepoolhealth.State) *Controller {
 	return &Controller{
+		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
@@ -172,7 +174,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		// We sleep here after a patch operation since we want to ensure that we are able to read our own writes
 		// so that we avoid duplicating metrics and log lines due to quick re-queues from our node watcher
 		// USE CAUTION when determining whether to increase this timeout or remove this line
-		time.Sleep(time.Second)
+		c.clock.Sleep(time.Second)
 	}
 	if errs != nil {
 		return reconcile.Result{}, errs

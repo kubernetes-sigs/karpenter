@@ -53,8 +53,12 @@ func NewPodController(kubeClient client.Client, cluster *state.Cluster) *PodCont
 	}
 }
 
+func (c *PodController) Name() string {
+	return "state.pod"
+}
+
 func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "state.pod")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	pod := &v1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
@@ -76,7 +80,7 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 
 func (c *PodController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("state.pod").
+		Named(c.Name()).
 		For(&v1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(c)

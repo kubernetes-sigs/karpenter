@@ -53,18 +53,14 @@ var _ = Describe("Instance Type Selection", func() {
 					Spec: v1.NodeClaimTemplateSpec{
 						Requirements: []v1.NodeSelectorRequirementWithMinValues{
 							{
-								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-									Key:      v1.CapacityTypeLabelKey,
-									Operator: corev1.NodeSelectorOpIn,
-									Values:   []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand},
-								},
+								Key:      v1.CapacityTypeLabelKey,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand},
 							},
 							{
-								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-									Key:      corev1.LabelArchStable,
-									Operator: corev1.NodeSelectorOpIn,
-									Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
-								},
+								Key:      corev1.LabelArchStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 							},
 						},
 					},
@@ -121,11 +117,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov arch = amd64)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelArchStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.ArchitectureAmd64},
-				},
+				Key:      corev1.LabelArchStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.ArchitectureAmd64},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -138,11 +132,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov arch = arm64)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelArchStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.ArchitectureArm64},
-				},
+				Key:      corev1.LabelArchStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.ArchitectureArm64},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -155,11 +147,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov os = windows)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelOSStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{string(corev1.Windows)},
-				},
+				Key:      corev1.LabelOSStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{string(corev1.Windows)},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -185,11 +175,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov os = windows)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelOSStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{string(corev1.Windows)},
-				},
+				Key:      corev1.LabelOSStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{string(corev1.Windows)},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -228,11 +216,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov zone = test-zone-2)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelTopologyZone,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"test-zone-2"},
-				},
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-2"},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -258,11 +244,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov ct = spot)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      v1.CapacityTypeLabelKey,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.CapacityTypeSpot},
-				},
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeSpot},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -288,18 +272,14 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov ct = ondemand, prov zone = test-zone-1)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      v1.CapacityTypeLabelKey,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.CapacityTypeOnDemand},
-				},
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeOnDemand},
 			},
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelTopologyZone,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"test-zone-1"},
-				},
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-1"},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -331,11 +311,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov ct = spot, pod zone = test-zone-2)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      v1.CapacityTypeLabelKey,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.CapacityTypeSpot},
-				},
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeSpot},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -353,32 +331,24 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov ct = ondemand/test-zone-1/arm64/windows)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelArchStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.ArchitectureArm64},
-				},
+				Key:      corev1.LabelArchStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.ArchitectureArm64},
 			},
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelOSStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{string(corev1.Windows)},
-				},
+				Key:      corev1.LabelOSStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{string(corev1.Windows)},
 			},
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      v1.CapacityTypeLabelKey,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.CapacityTypeOnDemand},
-				},
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeOnDemand},
 			},
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelTopologyZone,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"test-zone-1"},
-				},
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-1"},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -393,18 +363,14 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should schedule on one of the cheapest instances (prov = spot/test-zone-2, pod = amd64/linux)", func() {
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelArchStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.ArchitectureAmd64},
-				},
+				Key:      corev1.LabelArchStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.ArchitectureAmd64},
 			},
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelOSStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{string(corev1.Linux)},
-				},
+				Key:      corev1.LabelOSStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{string(corev1.Linux)},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -522,11 +488,9 @@ var _ = Describe("Instance Type Selection", func() {
 
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelArchStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.ArchitectureArm64},
-				},
+				Key:      corev1.LabelArchStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.ArchitectureArm64},
 			},
 		}
 		Expect(len(cloudProvider.InstanceTypes)).To(BeNumerically(">", 0))
@@ -644,11 +608,9 @@ var _ = Describe("Instance Type Selection", func() {
 		}
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      v1.CapacityTypeLabelKey,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"on-demand"},
-				},
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"on-demand"},
 			},
 		}
 
@@ -701,11 +663,10 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on instance-type requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"instance-type-1", "instance-type-2"},
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"instance-type-1", "instance-type-2"},
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -797,11 +758,10 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on instance generation using Gt operator in requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      instanceGeneration,
-						Operator: corev1.NodeSelectorOpGt,
-						Values:   []string{"2"},
-					},
+					Key:      instanceGeneration,
+					Operator: corev1.NodeSelectorOpGt,
+					Values:   []string{"2"},
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -875,10 +835,9 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on instance generation using Gt operator in requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      instanceGeneration,
-						Operator: corev1.NodeSelectorOpExists,
-					},
+					Key:      instanceGeneration,
+					Operator: corev1.NodeSelectorOpExists,
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -981,11 +940,10 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on instance generation using Lt operator in requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      instanceGeneration,
-						Operator: corev1.NodeSelectorOpLt,
-						Values:   []string{"4"},
-					},
+					Key:      instanceGeneration,
+					Operator: corev1.NodeSelectorOpLt,
+					Values:   []string{"4"},
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -1059,11 +1017,10 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on instance generation using Lt operator in requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      instanceGeneration,
-						Operator: corev1.NodeSelectorOpLt,
-						Values:   []string{"4"},
-					},
+					Key:      instanceGeneration,
+					Operator: corev1.NodeSelectorOpLt,
+					Values:   []string{"4"},
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -1145,19 +1102,17 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on both In and NotIn operators for instance-type requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+
 					MinValues: lo.ToPtr(1),
 				},
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpNotIn,
-						Values:   []string{"instance-type-3"},
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpNotIn,
+					Values:   []string{"instance-type-3"},
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -1264,19 +1219,17 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on instance generation using Gt operator in requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      instanceGeneration,
-						Operator: corev1.NodeSelectorOpGt,
-						Values:   []string{"2"},
-					},
+					Key:      instanceGeneration,
+					Operator: corev1.NodeSelectorOpGt,
+					Values:   []string{"2"},
+
 					MinValues: lo.ToPtr(1),
 				},
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      instanceGeneration,
-						Operator: corev1.NodeSelectorOpLt,
-						Values:   []string{"5"},
-					},
+					Key:      instanceGeneration,
+					Operator: corev1.NodeSelectorOpLt,
+					Values:   []string{"5"},
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -1320,10 +1273,9 @@ var _ = Describe("Instance Type Selection", func() {
 			// the number of instanceTypes that the scheduler has from the requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpExists,
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpExists,
+
 					MinValues: lo.ToPtr(11),
 				},
 			}
@@ -1380,11 +1332,10 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on instance-type requirement.
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"instance-type-1", "instance-type-2"},
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"instance-type-1", "instance-type-2"},
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -1452,18 +1403,16 @@ var _ = Describe("Instance Type Selection", func() {
 			// like "In", "Exists"
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpExists,
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpExists,
+
 					MinValues: lo.ToPtr(1),
 				},
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"instance-type-1", "instance-type-2"},
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"instance-type-1", "instance-type-2"},
+
 					MinValues: lo.ToPtr(2),
 				},
 			}
@@ -1536,18 +1485,16 @@ var _ = Describe("Instance Type Selection", func() {
 			// Define NodePool that has minValues on multiple requirements
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelArchStable,
-						Operator: corev1.NodeSelectorOpExists,
-					},
+					Key:      corev1.LabelArchStable,
+					Operator: corev1.NodeSelectorOpExists,
+
 					MinValues: lo.ToPtr(2),
 				},
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"instance-type-1", "instance-type-2"},
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"instance-type-1", "instance-type-2"},
+
 					MinValues: lo.ToPtr(1),
 				},
 			}
