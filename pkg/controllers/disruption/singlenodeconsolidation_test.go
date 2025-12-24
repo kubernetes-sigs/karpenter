@@ -90,7 +90,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 		}
 
 		// Create a single node consolidation controller
-		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, nil)
 		consolidation = disruption.NewSingleNodeConsolidation(c)
 	})
 
@@ -287,6 +287,7 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 			nodePoolInstanceTypeMap,
 			queue,
 			disruption.GracefulDisruptionClass,
+			nil, // volumeTopology - not needed for test
 		)
 		if err != nil {
 			return nil
