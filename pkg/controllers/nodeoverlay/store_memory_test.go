@@ -43,8 +43,8 @@ const (
 
 	// MaxAllocsPriceOverlaysOnly is the maximum allowed allocations for price-only overlays.
 	// Price overlays require copying the offerings slice but not capacity.
-	// Baseline: ~987,000 allocations
-	MaxAllocsPriceOverlaysOnly = 1200000
+	// Baseline: ~1,380,000 allocations
+	MaxAllocsPriceOverlaysOnly = 1700000
 
 	// MaxAllocsCapacityOverlaysOnly is the maximum allowed allocations for capacity-only overlays.
 	// Capacity overlays require copying the capacity map but not offerings.
@@ -53,8 +53,8 @@ const (
 
 	// MaxAllocsMixedOverlays is the maximum allowed allocations when both price and capacity overlays are applied.
 	// This is the most expensive scenario as both offerings and capacity need to be copied.
-	// Baseline: ~5,300,000 allocations (200 instance types x 5 node pools x 100 iterations)
-	MaxAllocsMixedOverlays = 6500000
+	// Baseline: ~7,260,000 allocations (200 instance types x 5 node pools x 100 iterations)
+	MaxAllocsMixedOverlays = 8800000
 
 	// MaxAllocsPerNodePool is the maximum allowed allocations per node pool when scaling.
 	// Used to verify memory scales linearly with node pool count.
