@@ -246,7 +246,6 @@ func TestMemoryUsage_OverlayScenarios(t *testing.T) {
 // TestMemoryUsage_ScaleWithNodePools measures memory growth as number of node pools increases.
 // Tests will FAIL if memory does not scale linearly (within acceptable bounds) with node pool count.
 func TestMemoryUsage_ScaleWithNodePools(t *testing.T) {
-	g := NewWithT(t)
 	instanceTypes := createRealisticInstanceTypes(200)
 	nodePoolCounts := []int{1, 5, 10, 20, 50}
 
@@ -275,18 +274,16 @@ func TestMemoryUsage_ScaleWithNodePools(t *testing.T) {
 
 			// Verify memory scales linearly with node pool count
 			// Allow for some overhead, but allocations should be roughly proportional
-			maxExpectedAllocs := uint64(count) * MaxAllocsPerNodePool
+			maxExpectedAllocs := uint64(count) * MaxAllocsPerNodePool //#nosec G115 -- count is always positive from nodePoolCounts slice
 			g.Expect(ms.totalAllocs).To(BeNumerically("<=", maxExpectedAllocs),
 				"memory allocations exceeded limit for %d node pools: got %d, max %d", count, ms.totalAllocs, maxExpectedAllocs)
 		})
 	}
-	_ = g // silence unused variable warning for outer g
 }
 
 // TestMemoryUsage_ScaleWithInstanceTypes measures memory growth as number of instance types increases.
 // Tests will FAIL if memory does not scale linearly (within acceptable bounds) with instance type count.
 func TestMemoryUsage_ScaleWithInstanceTypes(t *testing.T) {
-	g := NewWithT(t)
 	instanceTypeCounts := []int{50, 100, 200, 500}
 	nodePools := []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}
 
@@ -311,12 +308,11 @@ func TestMemoryUsage_ScaleWithInstanceTypes(t *testing.T) {
 
 			// Verify memory scales linearly with instance type count
 			// Factor in the number of node pools and iterations
-			maxExpectedAllocs := uint64(count) * uint64(len(nodePools)) * MaxAllocsPerInstanceType
+			maxExpectedAllocs := uint64(count) * uint64(len(nodePools)) * MaxAllocsPerInstanceType //#nosec G115 -- count and len(nodePools) are always positive
 			g.Expect(ms.totalAllocs).To(BeNumerically("<=", maxExpectedAllocs),
 				"memory allocations exceeded limit for %d instance types: got %d, max %d", count, ms.totalAllocs, maxExpectedAllocs)
 		})
 	}
-	_ = g // silence unused variable warning for outer g
 }
 
 // Helper functions

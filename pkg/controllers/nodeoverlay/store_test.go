@@ -33,8 +33,6 @@ import (
 
 //nolint:gocyclo
 func TestStoreApplySelectiveCopy(t *testing.T) {
-	g := NewWithT(t)
-
 	tests := []struct {
 		name                 string
 		instanceType         *cloudprovider.InstanceType
@@ -201,7 +199,6 @@ func TestStoreApplySelectiveCopy(t *testing.T) {
 			_ = tt.expectSharedCapacity
 		})
 	}
-	_ = g // silence unused variable warning for outer g
 }
 
 func TestStoreApplyCorrectnessWithPriceOverlay(t *testing.T) {
