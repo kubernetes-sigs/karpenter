@@ -22,18 +22,19 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-type topologyDomain struct {
+// topologyDomainAttributes stores attributes associated with a topology domain (the map key), such as the taints and
+// requirements that yield that domain.
+type topologyDomainAttributes struct {
 	taints       [][]v1.Taint
 	requirements []scheduling.Requirements
 }
 
-// TopologyDomainGroup tracks the domains for a single topology. Additionally, it tracks the taints associated with
-// each of these domains as well as the requirements that produce them. This enables us to determine which domains
-// should be considered by a pod if its NodeTaintPolicy or NodeAffinityPolicy is honor.
-type TopologyDomainGroup map[string]*topologyDomain
+// TopologyDomainGroup tracks the domains for a single topology. Additionally, it tracks the taints and requirements
+// that produce each domain. The "domain" is the string key (e.g. "us-west-2a" for "topology.kubernetes.io/zone").
+type TopologyDomainGroup map[string]*topologyDomainAttributes
 
 func NewTopologyDomainGroup() TopologyDomainGroup {
-	return map[string]*topologyDomain{}
+	return map[string]*topologyDomainAttributes{}
 }
 
 // Insert either adds a new domain to the TopologyDomainGroup or updates an existing domain. The provided requirements
@@ -41,7 +42,7 @@ func NewTopologyDomainGroup() TopologyDomainGroup {
 func (t TopologyDomainGroup) Insert(domain string, requirements scheduling.Requirements, taints ...v1.Taint) {
 	entry, ok := t[domain]
 	if !ok {
-		entry = &topologyDomain{}
+		entry = &topologyDomainAttributes{}
 		t[domain] = entry
 	}
 
@@ -70,7 +71,7 @@ func (t TopologyDomainGroup) ForEachDomain(pod *v1.Pod, filter TopologyNodeFilte
 	}
 }
 
-func (d *topologyDomain) matches(filter TopologyNodeFilter, pod *v1.Pod) bool {
+func (d *topologyDomainAttributes) matches(filter TopologyNodeFilter, pod *v1.Pod) bool {
 	if filter.TaintPolicy == v1.NodeInclusionPolicyHonor {
 		taintMatched := false
 		for _, taints := range d.taints {
