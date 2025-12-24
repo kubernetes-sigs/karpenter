@@ -19,7 +19,7 @@ package scheduling
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -64,7 +64,7 @@ func (p *Preferences) removePreferredNodeAffinityTerm(pod *v1.Pod) *string {
 	// Remove the terms if there are any (terms are an OR semantic)
 	if len(terms) > 0 {
 		// Sort descending by weight to remove heaviest preferences to try lighter ones
-		sort.SliceStable(terms, func(i, j int) bool { return terms[i].Weight > terms[j].Weight })
+		slices.SortStableFunc(terms, func(i, j v1.PreferredSchedulingTerm) int { return int(j.Weight - i.Weight) })
 		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = terms[1:]
 		return lo.ToPtr(fmt.Sprintf("removing: spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
 	}
@@ -107,7 +107,7 @@ func (p *Preferences) removePreferredPodAffinityTerm(pod *v1.Pod) *string {
 	// Remove the all the terms
 	if len(terms) > 0 {
 		// Sort descending by weight to remove heaviest preferences to try lighter ones
-		sort.SliceStable(terms, func(i, j int) bool { return terms[i].Weight > terms[j].Weight })
+		slices.SortStableFunc(terms, func(i, j v1.WeightedPodAffinityTerm) int { return int(j.Weight - i.Weight) })
 		pod.Spec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution = terms[1:]
 		return lo.ToPtr(fmt.Sprintf("removing: spec.affinity.podAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
 	}
@@ -122,7 +122,7 @@ func (p *Preferences) removePreferredPodAntiAffinityTerm(pod *v1.Pod) *string {
 	// Remove the all the terms
 	if len(terms) > 0 {
 		// Sort descending by weight to remove heaviest preferences to try lighter ones
-		sort.SliceStable(terms, func(i, j int) bool { return terms[i].Weight > terms[j].Weight })
+		slices.SortStableFunc(terms, func(i, j v1.WeightedPodAffinityTerm) int { return int(j.Weight - i.Weight) })
 		pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = terms[1:]
 		return lo.ToPtr(fmt.Sprintf("removing: spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
 	}
