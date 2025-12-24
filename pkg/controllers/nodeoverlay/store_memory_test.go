@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"testing"
 
+	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -28,6 +29,42 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+)
+
+// Memory limits for overlay scenarios (in number of allocations)
+// These limits are derived from baseline measurements and include a 20% buffer
+// to account for natural variance between test runs.
+// If these tests fail, it indicates a potential memory regression that should be investigated.
+const (
+	// MaxAllocsNoOverlays is the maximum allowed allocations when no overlays are applied.
+	// With no overlays, instance types should be returned with minimal copying.
+	// Baseline: ~72,000 allocations
+	MaxAllocsNoOverlays = 100000
+
+	// MaxAllocsPriceOverlaysOnly is the maximum allowed allocations for price-only overlays.
+	// Price overlays require copying the offerings slice but not capacity.
+	// Baseline: ~987,000 allocations
+	MaxAllocsPriceOverlaysOnly = 1200000
+
+	// MaxAllocsCapacityOverlaysOnly is the maximum allowed allocations for capacity-only overlays.
+	// Capacity overlays require copying the capacity map but not offerings.
+	// Baseline: ~72,000 allocations
+	MaxAllocsCapacityOverlaysOnly = 100000
+
+	// MaxAllocsMixedOverlays is the maximum allowed allocations when both price and capacity overlays are applied.
+	// This is the most expensive scenario as both offerings and capacity need to be copied.
+	// Baseline: ~5,300,000 allocations (200 instance types x 5 node pools x 100 iterations)
+	MaxAllocsMixedOverlays = 6500000
+
+	// MaxAllocsPerNodePool is the maximum allowed allocations per node pool when scaling.
+	// Used to verify memory scales linearly with node pool count.
+	// Baseline: ~1,044,000 allocations per node pool
+	MaxAllocsPerNodePool = 1300000
+
+	// MaxAllocsPerInstanceType is the maximum allowed allocations per instance type when scaling.
+	// Used to verify memory scales linearly with instance type count.
+	// Baseline: varies by count, roughly ~7,400 per instance type
+	MaxAllocsPerInstanceType = 9000
 )
 
 // memStats captures memory statistics for a test
@@ -76,7 +113,9 @@ func (ms *memStats) String() string {
 }
 
 // TestMemoryUsage_OverlayScenarios tests memory usage for different overlay configurations
-// This test validates the selective copy-on-write optimization reduces memory consumption
+// This test validates the selective copy-on-write optimization reduces memory consumption.
+// Tests will FAIL if memory allocations exceed the defined limits, providing automatic
+// guardrails for contributors who may inadvertently increase memory usage.
 //
 //nolint:gocyclo
 func TestMemoryUsage_OverlayScenarios(t *testing.T) {
@@ -84,6 +123,7 @@ func TestMemoryUsage_OverlayScenarios(t *testing.T) {
 	nodePools := []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}
 
 	t.Run("no_overlays", func(t *testing.T) {
+		g := NewWithT(t)
 		store := newInternalInstanceTypeStore()
 		for _, np := range nodePools {
 			store.evaluatedNodePools.Insert(np)
@@ -101,9 +141,14 @@ func TestMemoryUsage_OverlayScenarios(t *testing.T) {
 
 		ms.finalize()
 		t.Logf("No overlays - %s", ms.String())
+
+		// Verify allocations are within acceptable limits
+		g.Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsNoOverlays),
+			"memory allocations exceeded limit for no overlays scenario: got %d, max %d", ms.totalAllocs, MaxAllocsNoOverlays)
 	})
 
 	t.Run("price_overlays_only", func(t *testing.T) {
+		g := NewWithT(t)
 		store := newInternalInstanceTypeStore()
 		store.evaluatedNodePools.Insert("default")
 		store.updates["default"] = make(map[string]*instanceTypeUpdate)
@@ -136,9 +181,14 @@ func TestMemoryUsage_OverlayScenarios(t *testing.T) {
 
 		ms.finalize()
 		t.Logf("Price overlays only - %s", ms.String())
+
+		// Verify allocations are within acceptable limits
+		g.Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsPriceOverlaysOnly),
+			"memory allocations exceeded limit for price overlays only scenario: got %d, max %d", ms.totalAllocs, MaxAllocsPriceOverlaysOnly)
 	})
 
 	t.Run("capacity_overlays_only", func(t *testing.T) {
+		g := NewWithT(t)
 		store := newInternalInstanceTypeStore()
 		store.evaluatedNodePools.Insert("default")
 		store.updates["default"] = make(map[string]*instanceTypeUpdate)
@@ -164,9 +214,14 @@ func TestMemoryUsage_OverlayScenarios(t *testing.T) {
 
 		ms.finalize()
 		t.Logf("Capacity overlays only - %s", ms.String())
+
+		// Verify allocations are within acceptable limits
+		g.Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsCapacityOverlaysOnly),
+			"memory allocations exceeded limit for capacity overlays only scenario: got %d, max %d", ms.totalAllocs, MaxAllocsCapacityOverlaysOnly)
 	})
 
 	t.Run("mixed_overlays", func(t *testing.T) {
+		g := NewWithT(t)
 		store := createStoreWithOverlays(instanceTypes, nodePools)
 
 		ms := captureMemStats()
@@ -181,16 +236,23 @@ func TestMemoryUsage_OverlayScenarios(t *testing.T) {
 
 		ms.finalize()
 		t.Logf("Mixed overlays (price + capacity) - %s", ms.String())
+
+		// Verify allocations are within acceptable limits
+		g.Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsMixedOverlays),
+			"memory allocations exceeded limit for mixed overlays scenario: got %d, max %d", ms.totalAllocs, MaxAllocsMixedOverlays)
 	})
 }
 
-// TestMemoryUsage_ScaleWithNodePools measures memory growth as number of node pools increases
+// TestMemoryUsage_ScaleWithNodePools measures memory growth as number of node pools increases.
+// Tests will FAIL if memory does not scale linearly (within acceptable bounds) with node pool count.
 func TestMemoryUsage_ScaleWithNodePools(t *testing.T) {
+	g := NewWithT(t)
 	instanceTypes := createRealisticInstanceTypes(200)
 	nodePoolCounts := []int{1, 5, 10, 20, 50}
 
 	for _, count := range nodePoolCounts {
 		t.Run(fmt.Sprintf("nodepools_%d", count), func(t *testing.T) {
+			g := NewWithT(t)
 			nodePools := make([]string, count)
 			for i := 0; i < count; i++ {
 				nodePools[i] = fmt.Sprintf("nodepool-%d", i)
@@ -210,17 +272,27 @@ func TestMemoryUsage_ScaleWithNodePools(t *testing.T) {
 
 			ms.finalize()
 			t.Logf("NodePools=%d - %s", count, ms.String())
+
+			// Verify memory scales linearly with node pool count
+			// Allow for some overhead, but allocations should be roughly proportional
+			maxExpectedAllocs := uint64(count) * MaxAllocsPerNodePool
+			g.Expect(ms.totalAllocs).To(BeNumerically("<=", maxExpectedAllocs),
+				"memory allocations exceeded limit for %d node pools: got %d, max %d", count, ms.totalAllocs, maxExpectedAllocs)
 		})
 	}
+	_ = g // silence unused variable warning for outer g
 }
 
-// TestMemoryUsage_ScaleWithInstanceTypes measures memory growth as number of instance types increases
+// TestMemoryUsage_ScaleWithInstanceTypes measures memory growth as number of instance types increases.
+// Tests will FAIL if memory does not scale linearly (within acceptable bounds) with instance type count.
 func TestMemoryUsage_ScaleWithInstanceTypes(t *testing.T) {
+	g := NewWithT(t)
 	instanceTypeCounts := []int{50, 100, 200, 500}
 	nodePools := []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}
 
 	for _, count := range instanceTypeCounts {
 		t.Run(fmt.Sprintf("instances_%d", count), func(t *testing.T) {
+			g := NewWithT(t)
 			instanceTypes := createRealisticInstanceTypes(count)
 			store := createStoreWithOverlays(instanceTypes, nodePools)
 
@@ -236,8 +308,15 @@ func TestMemoryUsage_ScaleWithInstanceTypes(t *testing.T) {
 
 			ms.finalize()
 			t.Logf("InstanceTypes=%d - %s", count, ms.String())
+
+			// Verify memory scales linearly with instance type count
+			// Factor in the number of node pools and iterations
+			maxExpectedAllocs := uint64(count) * uint64(len(nodePools)) * MaxAllocsPerInstanceType
+			g.Expect(ms.totalAllocs).To(BeNumerically("<=", maxExpectedAllocs),
+				"memory allocations exceeded limit for %d instance types: got %d, max %d", count, ms.totalAllocs, maxExpectedAllocs)
 		})
 	}
+	_ = g // silence unused variable warning for outer g
 }
 
 // Helper functions
