@@ -67,8 +67,12 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 // Reconcile a control loop for the resource
+func (c *Controller) Name() string {
+	return "nodepool.counter"
+}
+
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "nodepool.counter")
+	ctx = injection.WithControllerName(ctx, c.Name())
 	if !nodepoolutils.IsManaged(nodePool, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
@@ -94,7 +98,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("nodepool.counter").
+		Named(c.Name()).
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool { return true },
 			UpdateFunc: func(e event.UpdateEvent) bool { return false },
