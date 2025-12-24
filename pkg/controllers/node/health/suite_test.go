@@ -384,6 +384,165 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[0])
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
+		It("should respect custom nodeRepairUnhealthyThreshold percentage on nodepool", func() {
+			// Set custom threshold to 50% on the nodepool
+			nodePool.Spec.Disruption.NodeRepairUnhealthyThreshold = "50%"
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create 10 nodes with 3 unhealthy (30% unhealthy)
+			// With default 20% threshold, repair would be blocked
+			// With 50% threshold, repair should proceed
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for i := range 3 {
+				nodes[i].Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:               "BadNode",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+				})
+			}
+			for i := range nodes {
+				nodes[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaims[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+			}
+			for i := range 10 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			fakeClock.Step(60 * time.Minute)
+
+			// With 50% threshold and 30% unhealthy, repair should proceed
+			nodeOne := nodes[0]
+			nodeClaimOne := nodeClaims[0]
+			ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
+			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
+		})
+		It("should block repair when unhealthy nodes exceed custom percentage threshold", func() {
+			// Set custom threshold to 25% on the nodepool
+			nodePool.Spec.Disruption.NodeRepairUnhealthyThreshold = "25%"
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create 10 nodes with 3 unhealthy (30% unhealthy)
+			// With 25% threshold, repair should be blocked
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for i := range 3 {
+				nodes[i].Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:               "BadNode",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+				})
+			}
+			for i := range nodes {
+				nodes[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaims[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+			}
+			for i := range 10 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			fakeClock.Step(60 * time.Minute)
+
+			// With 25% threshold and 30% unhealthy, repair should be blocked
+			nodeOne := nodes[0]
+			nodeClaimOne := nodeClaims[0]
+			result := ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+		})
+		It("should respect absolute count nodeRepairUnhealthyThreshold on nodepool", func() {
+			// Set custom threshold to absolute count of 3 on the nodepool
+			nodePool.Spec.Disruption.NodeRepairUnhealthyThreshold = "3"
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create 10 nodes with 3 unhealthy
+			// With threshold of 3, repair should proceed (3 <= 3)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for i := range 3 {
+				nodes[i].Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:               "BadNode",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+				})
+			}
+			for i := range nodes {
+				nodes[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaims[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+			}
+			for i := range 10 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			fakeClock.Step(60 * time.Minute)
+
+			// With absolute threshold of 3 and exactly 3 unhealthy, repair should proceed
+			nodeOne := nodes[0]
+			nodeClaimOne := nodeClaims[0]
+			ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
+			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
+		})
+		It("should block repair when unhealthy nodes exceed absolute count threshold", func() {
+			// Set custom threshold to absolute count of 2 on the nodepool
+			nodePool.Spec.Disruption.NodeRepairUnhealthyThreshold = "2"
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create 10 nodes with 3 unhealthy
+			// With threshold of 2, repair should be blocked (3 > 2)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for i := range 3 {
+				nodes[i].Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:               "BadNode",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+				})
+			}
+			for i := range nodes {
+				nodes[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaims[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+			}
+			for i := range 10 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			fakeClock.Step(60 * time.Minute)
+
+			// With absolute threshold of 2 and 3 unhealthy, repair should be blocked
+			nodeOne := nodes[0]
+			nodeClaimOne := nodeClaims[0]
+			result := ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+		})
+		It("should use default 20% threshold when nodeRepairUnhealthyThreshold is not set", func() {
+			// NodePool without custom threshold (empty string defaults to 20%)
+			nodePool.Spec.Disruption.NodeRepairUnhealthyThreshold = ""
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create 10 nodes with 3 unhealthy (30% unhealthy)
+			// With default 20% threshold, repair should be blocked
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for i := range 3 {
+				nodes[i].Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:               "BadNode",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+				})
+			}
+			for i := range nodes {
+				nodes[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaims[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+			}
+			for i := range 10 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			fakeClock.Step(60 * time.Minute)
+
+			// With default 20% threshold and 30% unhealthy, repair should be blocked
+			nodeOne := nodes[0]
+			nodeClaimOne := nodeClaims[0]
+			result := ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+		})
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when unhealthy", func() {
