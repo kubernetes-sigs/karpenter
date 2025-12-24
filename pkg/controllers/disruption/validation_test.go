@@ -51,7 +51,7 @@ func NewMethodsWithNopValidator() []disruption.Method {
 	return []disruption.Method{
 		emptiness,
 		disruption.NewStaticDrift(cluster, prov, cloudProvider),
-		disruption.NewDrift(env.Client, cluster, prov, recorder),
+		disruption.NewDrift(fakeClock, env.Client, cluster, prov, recorder),
 		multiNodeConsolidation,
 		singleNodeConsolidation,
 	}

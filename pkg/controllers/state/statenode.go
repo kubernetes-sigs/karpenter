@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -99,10 +100,10 @@ func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*core
 	return pods, nil
 }
 
-func (n StateNodes) CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+func (n StateNodes) CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, clk clock.Clock) ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
 	for _, node := range n {
-		p, err := node.CurrentlyReschedulablePods(ctx, kubeClient)
+		p, err := node.CurrentlyReschedulablePods(ctx, kubeClient, clk)
 		if err != nil {
 			return nil, err
 		}
@@ -227,23 +228,28 @@ func (in *StateNode) ValidateNodeDisruptable() error {
 }
 
 // ValidatePodDisruptable returns an error if the StateNode contains a pod that cannot be disrupted
-// This checks associated PDBs and do-not-disrupt annotations for each pod on the node.
+// This checks associated PDBs, do-not-disrupt annotations, and disruption schedules for each pod on the node.
 // ValidatePodDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
 //
 //nolint:gocyclo
-func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits) ([]*corev1.Pod, error) {
+func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits, clk clock.Clock) ([]*corev1.Pod, error) {
 	pods, err := in.Pods(ctx, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("getting pods from node, %w", err)
 	}
 	for _, po := range pods {
-		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
-		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
-		if !podutils.IsDisruptable(po) {
-			return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf(`pod has "karpenter.sh/do-not-disrupt" annotation`), "Pod", klog.KObj(po)))
+		// We only consider pods that are actively running for disruption checks
+		// This means that we will allow Mirror Pods and DaemonSets to block disruption using these annotations
+		if !podutils.IsDisruptable(po, clk) {
+			// Check the specific reason for blocking to provide a better error message
+			if podutils.HasDoNotDisrupt(po) {
+				return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf(`pod has "karpenter.sh/do-not-disrupt" annotation`), "Pod", klog.KObj(po)))
+			}
+			// Must be blocked by disruption schedule
+			return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf("pod is outside its disruption schedule window"), "Pod", klog.KObj(po)))
 		}
 	}
-	if pdbKeys, ok := pdbs.CanEvictPods(pods); !ok {
+	if pdbKeys, ok := pdbs.CanEvictPods(pods, clk); !ok {
 		if len(pdbKeys) > 1 {
 			return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf("eviction does not support multiple PDBs"), "PodDisruptionBudget(s)", pdbKeys))
 		}
@@ -254,11 +260,11 @@ func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient cli
 }
 
 // CurrentlyReschedulablePods gets the pods assigned to the Node that are currently reschedulable based on the kubernetes api-server bindings
-func (in *StateNode) CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+func (in *StateNode) CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, clk clock.Clock) ([]*corev1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetCurrentlyReschedulablePods(ctx, kubeClient, in.Node)
+	return nodeutils.GetCurrentlyReschedulablePods(ctx, kubeClient, clk, in.Node)
 }
 
 func (in *StateNode) HostName() string {
