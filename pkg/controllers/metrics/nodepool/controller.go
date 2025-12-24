@@ -19,6 +19,7 @@ package nodepool
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -37,6 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
@@ -46,33 +48,45 @@ const (
 )
 
 var (
-	Limit = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodePoolSubsystem,
-			Name:      "limit",
-			Help:      "Limits specified on the nodepool that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
-		},
-		[]string{
-			resourceTypeLabel,
-			nodePoolNameLabel,
-		},
-	)
-	Usage = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodePoolSubsystem,
-			Name:      "usage",
-			Help:      "The amount of resources that have been provisioned for a nodepool. Labeled by nodepool name and resource type.",
-		},
-		[]string{
-			resourceTypeLabel,
-			nodePoolNameLabel,
-		},
-	)
+	Limit opmetrics.GaugeMetric
+	Usage opmetrics.GaugeMetric
+	once  sync.Once
 )
+
+// initializeMetrics initializes metrics at runtime to ensure CLI flags are properly
+// parsed and additional labels are available before metric registration.
+func initializeMetrics(ctx context.Context) {
+	once.Do(func() {
+		opts := options.FromContext(ctx)
+
+		// Base labels + additional labels from CLI flags
+		labels := append(
+			[]string{resourceTypeLabel, nodePoolNameLabel},
+			opts.AdditionalNodePoolMetricLabels...,
+		)
+
+		Limit = opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodePoolSubsystem,
+				Name:      "limit",
+				Help:      "Limits specified on the nodepool that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
+			},
+			labels,
+		)
+		Usage = opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodePoolSubsystem,
+				Name:      "usage",
+				Help:      "The amount of resources that have been provisioned for a nodepool. Labeled by nodepool name and resource type.",
+			},
+			labels,
+		)
+	})
+}
 
 type Controller struct {
 	kubeClient    client.Client
@@ -81,7 +95,8 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+	initializeMetrics(ctx)
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
@@ -103,12 +118,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if !nodepoolutils.IsManaged(nodePool, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
-	c.metricStore.Update(req.String(), buildMetrics(nodePool))
+	c.metricStore.Update(req.String(), buildMetrics(ctx, nodePool))
 	// periodically update our metrics per nodepool even if nothing has changed
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
+func buildMetrics(ctx context.Context, nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		Usage: nodePool.Status.Resources,
 		Limit: getLimits(nodePool),
@@ -116,7 +131,7 @@ func buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
 		for k, v := range resourceList {
 			res = append(res, &metrics.StoreMetric{
 				GaugeMetric: gaugeVec,
-				Labels:      makeLabels(nodePool, strings.ReplaceAll(strings.ToLower(string(k)), "-", "_")),
+				Labels:      makeLabels(ctx, nodePool, strings.ReplaceAll(strings.ToLower(string(k)), "-", "_")),
 				Value:       lo.Ternary(k == corev1.ResourceCPU, float64(v.MilliValue())/float64(1000), float64(v.Value())),
 			})
 		}
@@ -131,11 +146,19 @@ func getLimits(nodePool *v1.NodePool) corev1.ResourceList {
 	return corev1.ResourceList{}
 }
 
-func makeLabels(nodePool *v1.NodePool, resourceTypeName string) prometheus.Labels {
-	return map[string]string{
+func makeLabels(ctx context.Context, nodePool *v1.NodePool, resourceTypeName string) prometheus.Labels {
+	opts := options.FromContext(ctx)
+	labels := prometheus.Labels{
 		resourceTypeLabel: resourceTypeName,
 		nodePoolNameLabel: nodePool.Name,
 	}
+
+	// Add values for additional labels from CLI flags
+	for _, labelKey := range opts.AdditionalNodePoolMetricLabels {
+		labels[labelKey] = nodePool.Labels[labelKey]
+	}
+
+	return labels
 }
 
 func (c *Controller) Name() string {
