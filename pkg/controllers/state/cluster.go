@@ -911,3 +911,7 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 func (c *Cluster) HasSynced() bool {
 	return c.hasSynced.Load()
 }
+
+func (c *Cluster) GetTotalPodResourceRequests() corev1.ResourceList {
+	return resources.Merge(lo.Values(c.nodePoolResources)...)
+}
