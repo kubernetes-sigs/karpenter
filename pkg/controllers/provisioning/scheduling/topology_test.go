@@ -1680,17 +1680,13 @@ var _ = Describe("Topology", func() {
 							}},
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      v1.CapacityTypeLabelKey,
-										Operator: corev1.NodeSelectorOpExists,
-									},
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpExists,
 								},
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      spreadLabel,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{spreadDomain},
-									},
+									Key:      spreadLabel,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{spreadDomain},
 								},
 							},
 						},
@@ -1709,17 +1705,13 @@ var _ = Describe("Topology", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      v1.CapacityTypeLabelKey,
-										Operator: corev1.NodeSelectorOpExists,
-									},
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpExists,
 								},
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      spreadLabel,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{spreadDomain, "2", "3"},
-									},
+									Key:      spreadLabel,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{spreadDomain, "2", "3"},
 								},
 							},
 						},
