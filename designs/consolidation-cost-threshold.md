@@ -2,7 +2,9 @@
 
 ## Problem Statement
 
-Karpenter consolidates whenever a cheaper alternative exists (`replacement_price < current_price`). This causes excessive churn when savings are marginal.
+Karpenter consolidation removes nodes from the cluster when doing so improves efficiency. Empty nodes are easy, but consolidating non-empty nodes causes disruptions to running pods.
+
+The current consolidation algorithm fires whenever a cheaper alternative exists (`replacement_price < current_price`). This causes excessive churn when savings are marginal.
 
 **Case study: [aws/karpenter-provider-aws#7146](https://github.com/aws/karpenter-provider-aws/issues/7146)**
 
@@ -18,7 +20,7 @@ Current workarounds (disabling spot-to-spot consolidation, extensive PDBs, multi
 
 This RFC builds on [spot-consolidation.md](spot-consolidation.md) (Ellis Tarn) and [RFC 2562](https://github.com/kubernetes-sigs/karpenter/pull/2562) (Jukie, open).
 
-## Background
+## Context
 
 Karpenter computes a **disruption cost** for each node to order consolidation candidates (see Appendix B for the full formula). For nodes with default-priority pods, disruption cost approximates pod count. We assume per-pod disruption cost remains in the range -10 to 10 (clamped), with lower being better.
 
@@ -30,7 +32,9 @@ required_savings = T * disruption_cost
 
 For a 5-pod node with threshold 0.01, required savings is $0.05/hr.
 
-> **Note on units:** This document uses USD/hour. Cloud providers price instances in local currencies; the threshold translates directly via the provider's hourly rate. See Appendix C for price calibration examples.
+**Why linear?** We use a linear relationship because it's the simplest monotonic function. Disrupting 10 pods requires 10x the savings of disrupting 1 pod. If community feedback suggests diminishing returns (log) or compounding effects (quadratic), we can revisit.
+
+> **Note on units:** This document uses USD/hour. Cloud providers price instances in local currencies; the threshold semantics are provider-agnostic. See Appendix C for price calibration examples.
 
 ## Design Options
 
@@ -60,7 +64,7 @@ Required: 0.01 * 5.0 = $0.05/hr
 Result: NO CONSOLIDATE ($0.006 < $0.05)
 ```
 
-The cascade is blocked at generation 1. Pods are not disrupted for less than a penny. For this 5-pod node with threshold 0.01, consolidation requires at least $0.05/hr savings.
+The cascade is blocked at generation 1. Pods are not disrupted for less than a penny. For this 5-pod node with threshold 0.01, consolidation requires at least $0.05/hr savings. (If the node were 90% through its lifetime, disruption cost drops to 0.5, required savings to $0.005/hr, and consolidation proceeds.)
 
 **Multi-node consolidation:**
 
@@ -78,7 +82,7 @@ Actual savings: $1.00 - $0.90 = $0.10/hr
 Result: CONSOLIDATE ($0.10 >= $0.10)
 ```
 
-The 7-pod node contributes more to the required savings than the 3-pod node, correctly reflecting that it's more disruptive to move.
+The 7-pod node contributes more to the required savings than the 3-pod node, correctly reflecting that it's more disruptive to move. (If these nodes were 50% through their lifetime, disruption cost drops to 5.0 and required savings to $0.05/hr - consolidation becomes easier as nodes age.)
 
 * 👍👍👍 Incorporates linear pod-level disruption cost: to save $0.10/hr, disrupting 5 pods passes (requires $0.05) while disrupting 50 pods fails (requires $0.50).
 * 👍👍 Filters candidates using primitives from existing code; the threshold distinguishes high-value from low-value moves
@@ -187,7 +191,7 @@ This prevents bad moves by preventing all moves. A node saving $2/hr is blocked 
 * 👎 Doesn't scale with savings magnitude
 * 👎 Interacts awkwardly with consolidateAfter
 
-## Open Questions
+## Discussion Topics
 
 ### Default Threshold Value
 
@@ -204,11 +208,11 @@ Actual savings: $0.10/hr
 Result: NO CONSOLIDATE
 ```
 
-Is this correct? We believe yes: the threshold says "to disrupt 20 pods, require $0.20/hr savings." This is intentional but represents a behavioral change from today, where consolidate-delete always proceeds if capacity exists elsewhere.
+We recommend treating this as correct: the threshold says "to disrupt 20 pods, require $0.20/hr savings." This is intentional but represents a behavioral change from today, where consolidate-delete always proceeds if capacity exists elsewhere. (If the node were 50% through its lifetime, disruption cost drops to 10.0, required savings to $0.10/hr, and consolidation proceeds.) Community feedback welcome.
 
 ### Disruption Cost Stability
 
-The threshold multiplies disruption cost. We assume per-pod disruption cost remains in the range -10 to 10 (clamped), with lower being better. If the disruption cost formula changes materially, thresholds may need recalibration. Should we version this interface?
+The threshold multiplies disruption cost. We assume per-pod disruption cost remains in the range -10 to 10 (clamped), with lower being better. If the disruption cost formula changes materially, thresholds may need recalibration. We recommend no versioning: disruption cost is an internal detail, and we accept the recalibration risk. Community feedback welcome.
 
 ### API Lifecycle
 
@@ -230,16 +234,16 @@ Option 1 (Disruption-Normalized Threshold) addresses the core problem: savings s
 
 **Rollback:** Set threshold to 0.
 
-## Appendix A: Spot Consolidation Example (SPOT PRICES)
+## Appendix A: Spot Consolidation Example
 
-**All prices in this appendix are SPOT prices**, typically 60-70% lower than on-demand. See Appendix C for on-demand price calibration.
+All prices in this appendix are spot prices, typically 60-70% lower than on-demand. See Appendix C for on-demand price calibration.
 
 For spot-to-spot single-node consolidation:
 
 1. Find instance types cheaper than current node
 2. Filter to types where `savings >= required_savings` for this source node
 3. Require 15+ remaining candidates (per spot-consolidation.md)
-4. Send viable candidates to PCO for selection
+4. Send viable candidates to PCO (Price Capacity Optimized) for selection
 
 **Example:**
 
@@ -259,7 +263,7 @@ Required minimum: 15
 Result: PROCEED with 38 candidates sent to PCO
 ```
 
-The 15-candidate requirement applies to candidates that pass the savings threshold. If fewer than 15 candidates yield sufficient savings, no spot-to-spot consolidation occurs.
+The 15-candidate requirement applies to candidates that pass the savings threshold. If fewer than 15 candidates yield sufficient savings, no spot-to-spot consolidation occurs. (If this node were 50% through its lifetime, disruption cost drops to 4.0, required savings to $0.04/hr, and all 50 candidates pass.)
 
 ## Appendix B: Disruption Cost Formula
 
