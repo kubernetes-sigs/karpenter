@@ -1,49 +1,5 @@
 # Consolidation Savings Threshold
 
-## Definitions and Current Algorithm
-
-Karpenter computes a **disruption cost** for each node to order consolidation candidates from easiest to hardest to disrupt. The complete formula (see `pkg/utils/disruption/disruption.go`):
-
-```
-disruption_cost = sum(per_pod_cost) * lifetime_remaining
-```
-
-Where:
-
-```
-per_pod_cost = clamp(1.0 + pod_priority/2^25 + pod_deletion_cost/2^27, -10.0, 10.0)
-```
-
-Breaking down each term:
-
-- **1.0 base per pod**: Ensures pod count contributes to cost even without explicit priority or deletion cost
-- **pod_priority/2^25**: From the pod's PriorityClass (default 0). Dividing by 2^25 (~33M) normalizes the int32 range to roughly [-64, +64]
-- **pod_deletion_cost/2^27**: From the `controller.kubernetes.io/pod-deletion-cost` annotation (default 0). Dividing by 2^27 (~134M) provides similar normalization
-- **clamp to [-10, 10]**: Prevents any single pod from dominating the total cost. A node with 50 system-critical pods gets 50 * 10 = 500, not 50 * 61 = 3050
-- **lifetime_remaining**: Fraction of time until `expireAfter`. A node at 50% of its lifetime has cost halved. Nodes without `expireAfter` have lifetime_remaining = 1.0
-
-This formula produces a unitless heuristic. The absolute value is not directly interpretable. It exists to enable consistent comparisons: higher cost means harder to disrupt.
-
-Example values (assuming lifetime_remaining = 1.0):
-- Empty node: disruption cost = 0.0
-- Node with 10 default-priority pods: 10 * 1.0 = 10.0
-- Node with 10 system-cluster-critical pods (priority ~2B): 10 * 10.0 = 100.0 (each pod clamped to max)
-
-The `lifetime_remaining` multiplier reduces effective disruption cost as nodes approach expiration:
-
-```
-Effective           |****
-Disruption Cost     |    ****
-                    |        ****
-                    |            ****
-                    |                ****
-                    |                    ****
-                    +----------------------------> Node Age
-                    new                     expireAfter
-```
-
-The intuition: a node nearing expiration will be disrupted soon anyway (drift or expiration). Voluntary consolidation now has lower marginal cost because we're not "stealing" much remaining lifetime from the workloads.
-
 ## Problem Statement
 
 The current consolidation algorithm fires whenever a cheaper alternative exists:
@@ -80,6 +36,35 @@ The workarounds are painful: disabling spot-to-spot consolidation entirely, exte
 
 This RFC builds on [spot-consolidation.md](spot-consolidation.md), which identified "Price Improvement Factor" as future work.
 
+## Definitions and Context
+
+Karpenter computes a **disruption cost** for each node to order consolidation candidates from easiest to hardest to disrupt. The formula (see `pkg/utils/disruption/disruption.go`):
+
+```
+disruption_cost = sum(per_pod_cost) * lifetime_remaining
+```
+
+Where `per_pod_cost = clamp(1.0 + pod_priority/2^25 + pod_deletion_cost/2^27, -10.0, 10.0)`. The base cost of 1.0 ensures pod count contributes even without explicit priority. Priority and deletion-cost annotations are normalized to avoid any single pod dominating the total. The `lifetime_remaining` multiplier (fraction of time until `expireAfter`) reduces effective cost as nodes approach expiration.
+
+This formula produces a unitless heuristic for ordering: higher cost means harder to disrupt. Example values (assuming `lifetime_remaining = 1.0`):
+- Empty node: 0.0
+- Node with 10 default-priority pods: 10.0
+- Node with 10 system-cluster-critical pods: 100.0 (each pod clamped to max 10.0)
+
+**Key assumption:** We treat disruption cost as a reasonable estimate for how costly it is to migrate pods off a node. The heuristic already encodes what we care about: pod count, priority, deletion cost, and remaining lifetime. Using the same signal to gate economic decisions is natural. The ordering says "disrupt this one before that one"; the threshold says "don't bother disrupting any of these." Same underlying question, different decision boundary.
+
+**EC2 price analysis:** To calibrate the threshold, we examined price differences between EC2 instance types:
+
+| Instance Type | vCPU | Memory (GiB) | On-Demand Price ($/hr) |
+|---------------|------|--------------|------------------------|
+| m8i.large     | 2    | 8            | $0.1058                |
+| c8i.xlarge    | 4    | 8            | $0.1874                |
+| m8i.xlarge    | 4    | 16           | $0.2117                |
+| r8i.xlarge    | 4    | 32           | $0.2778                |
+| m8i.2xlarge   | 8    | 32           | $0.4234                |
+
+Cross-family differences at xlarge: m8i to c8i saves $0.024/hr; r8i to m8i saves $0.066/hr. A threshold of 0.01 means a 5-pod node requires $0.05/hr savings to consolidate. This blocks m8i-to-c8i churn ($0.024 < $0.05) while allowing r8i-to-m8i moves ($0.066 >= $0.05) when capacity permits.
+
 ## Design Options
 
 **Motivating scenario:** A spot node running 8 pods could consolidate to 50 cheaper instance types. Of those, 12 save only $0.02-$0.05/hr while 38 save $0.08/hr or more. Should we include the marginal-savings options in our candidate pool, or filter them out?
@@ -104,14 +89,14 @@ The `savings > 0` check ensures we never consolidate when there's no cost reduct
 
 For a node with N default-priority pods (not near expiration), disruption cost is approximately N. At threshold T, required savings = T * N.
 
-**Issue #7146 with proposed algorithm (threshold = 1.0, meaning $0.01/hr per disruption cost unit):**
+**Issue #7146 with proposed algorithm (threshold = 0.01):**
 
 ```
 Node: m6a.large @ $0.086/hr, ~5 pods
-Disruption cost: 5 * 1.0 = 5.0
+Disruption cost: 5.0
 Replacement: m7i-flex.large @ $0.080/hr
 Savings: $0.006/hr
-Required: $0.01 * 5.0 = $0.05/hr
+Required: 0.01 * 5.0 = $0.05/hr
 
 Result: NO CONSOLIDATE ($0.006 < $0.05)
 ```
@@ -125,14 +110,14 @@ The decision flips when savings reaches $0.05/hr:
 ```
 Node: m6a.large @ $0.086/hr, ~5 pods
 Disruption cost: 5.0
-Replacement: (hypothetical) @ $0.036/hr
+Replacement: (hypothetical, assuming we can find such a node) @ $0.036/hr
 Savings: $0.05/hr
-Required: $0.05/hr
+Required: 0.01 * 5.0 = $0.05/hr
 
 Result: CONSOLIDATE ($0.05 >= $0.05)
 ```
 
-The threshold creates a clear decision boundary: for this 5-pod node with threshold 1.0, consolidation requires at least $0.05/hr savings.
+The threshold creates a clear decision boundary: for this 5-pod node with threshold 0.01, consolidation requires at least $0.05/hr savings.
 
 **Multi-node consolidation:**
 
@@ -142,7 +127,7 @@ When consolidating multiple nodes to one replacement, sum the disruption costs:
 Node A: $0.50/hr, 3 pods -> disruption cost = 3.0
 Node B: $0.50/hr, 7 pods -> disruption cost = 7.0
 Total disruption cost: 10.0
-Required savings: $0.01 * 10.0 = $0.10/hr
+Required savings: 0.01 * 10.0 = $0.10/hr
 
 Replacement: $0.90/hr
 Actual savings: $1.00 - $0.90 = $0.10/hr
@@ -194,112 +179,25 @@ This prevents bad moves by preventing all moves. A node saving $2/hr is blocked 
 * 👎 Doesn't scale with savings magnitude
 * 👎 Interacts awkwardly with consolidateAfter
 
-### Recommendation
+## Recommendation
 
-Option 1 (Disruption-Normalized Threshold) addresses the core problem: savings should justify disruption. Options 2-4 ignore pod-level disruption cost entirely.
+Option 1 (Disruption-Normalized Threshold) addresses the core problem: savings should justify disruption. Options 2-4 ignore pod-level disruption cost entirely. Options 2-4 could layer on top of Option 1 for defense in depth; we defer this layering until we learn from feedback.
 
-Options 2-4 could layer on top of Option 1 for defense in depth. In particular, a minimum absolute savings floor (Option 3) might prevent edge cases where very small nodes with few pods still experience marginal-savings churn. We defer this layering until we learn from feedback on Option 1.
+**Configuration:** We expose a NodePool-level `consolidationSavingsThreshold` field with a default of 0.0 (current behavior preserved). Users who want savings-based filtering set `consolidationSavingsThreshold: 0.01`. We collect feedback and consider flipping the default in a future release once we understand real-world impact. If the threshold is too high, we block all consolidation operations. It might be sensible to fail with an error message when creating a NodePool that doesn't allow consolidation with this parameter, because a customer with that use case almost certainly wants `WhenEmpty` consolidation, and this is a cheap but more-expensive-than-necessary way to get that.
 
-**Performance note:** The threshold check is asymptotically O(P) for a cluster with P total pods. We compute each node's disruption cost once by summing its pod costs, then apply O(1) threshold comparisons to each node. Because this is just arithmetic on already-computed values, multiple filters (percentage, absolute, disruption-normalized) could be evaluated in parallel and AND'd together with negligible overhead. A node rejected by any filter can be rejected by all, so there's even a future option of applying the most informative filters first. Layering them is computationally cheap.
+**Cloud provider variance:** The mechanism is vendor-neutral. Our EC2 analysis shows cross-family instance types typically differ by $0.02-0.07/hr; we expect similar patterns on GCP and Azure.
 
-## Configuration
+**Interactions:** The threshold filter applies before spot's 15-candidate flexibility check (see Appendix A). Existing disruption controls (consolidateAfter, ConsolidationPolicy, PDBs) determine candidacy; the threshold gates whether a candidate yields sufficient savings. DaemonSet pods contribute to disruption cost but don't require explicit rescheduling. For consolidate-delete (terminating a node without launching a replacement), savings equal the full source node price, so it will rarely be blocked by the threshold.
 
-We believe a default threshold (discussed in Cloud Provider Variance) will work for most users without configuration. This value blocks consolidations with marginal savings, eliminating the worst cascading behavior while preserving high-value consolidation opportunities.
+**Limitations:** This RFC addresses the obvious failure mode: consolidating for trivial savings while disrupting many pods. Algorithms like this are not correct in binary terms; they are incrementally less wrong over time. We lack information about destination node lifetime, workload termination probability, cascade effects, and spot market dynamics. The threshold blocks obviously wasteful consolidations but will not find globally optimal strategies. Future work includes node base costs, destination lifetime modeling, adaptive threshold tuning, and learning from outcomes.
 
-We defer exposing a user-configurable parameter until we have feedback. If users report that the default is too aggressive (blocking legitimate consolidations) or too permissive (still allowing excessive churn), we can add a NodePool-level field in a subsequent release.
+**Performance:** The threshold check adds O(1) arithmetic per node using already-computed disruption costs. Our analysis assumes a cold controller start; in practice, we can benefit from reusing values for unchanged nodes. This is an RFC, so we don't know exactly how much latency we'll add, but it should be minimal unless we screw up the implementation.
 
-## Cloud Provider Variance
-
-This feature is vendor-neutral. The threshold mechanism applies identically across cloud providers: compute disruption cost from pod metadata, compare savings against threshold, proceed or reject.
-
-Our analysis on EC2 is based on the observation that if we take all of the instances in a NodePool and sort by price, there's a minimum unit of price difference that we can distinguish by choosing different instances. On EC2, this minimum difference is approximately $0.01/hr, leading us to recommend a default threshold of 1.0 (meaning $0.01/hr per unit of disruption cost).
-
-To the extent that other environments like GCP, Azure, and others have similar minimum price differences, we expect the same threshold to work about as well. We welcome feedback from users on other cloud providers during implementation.
-
-## Interaction with Spot Consolidation
-
-The savings threshold filter applies before the 15-candidate flexibility check from [spot-consolidation.md](spot-consolidation.md). Candidates that don't meet the savings threshold are excluded from the candidate pool before we count whether 15+ options remain.
-
-This means consolidation ignores marginal savings options when building the spot candidate set. This is intentional: if a candidate doesn't meet the savings bar, it shouldn't count toward the flexibility requirement either.
-
-See Appendix A for a worked example.
-
-## Interaction with Other Disruption Controls
-
-The threshold composes with NodePool budgets naturally. Budgets limit disruption concurrency and timing; the threshold gates whether individual consolidations are worth doing.
-
-Existing filters run before the threshold check:
-- **consolidateAfter**: Nodes must have the `Consolidatable` condition
-- **ConsolidationPolicy**: Must be `WhenEmptyOrUnderutilized`
-- **PodDisruptionBudgets**: Respected during scheduling simulation
-
-These filters determine which nodes are candidates. The threshold determines whether a proposed consolidation yields sufficient savings.
-
-## DaemonSet Pod Handling
-
-DaemonSet pods are included in the disruption cost calculation but excluded from reschedulable pods. This is correct:
-
-- **Included in cost**: Evicting a DaemonSet pod causes real disruption (graceful termination, potential service interruption during restart)
-- **Excluded from rescheduling**: DaemonSet pods don't need explicit rescheduling; the DaemonSet controller automatically schedules them on the replacement node
-
-The existing Karpenter code handles this correctly. This RFC does not change that behavior.
-
-## Limitations
-
-This RFC addresses the obvious failure mode: consolidating for trivial savings while disrupting many pods. It does not solve the general problem of optimal consolidation decisions.
-
-The decision boundary remains fuzzy because we lack key information:
-
-1. **Destination node lifetime**: We don't always know how long the replacement will survive. Moving pods to a node that gets interrupted 5 minutes later wastes the move cost.
-
-2. **Workload termination probability**: A batch job at 95% completion might finish before we can amortize the move cost. We don't model this.
-
-3. **Cascade effects**: Consolidating node A might enable or block consolidating node B. We evaluate greedily, not globally.
-
-4. **Spot market dynamics**: Spot prices and availability change. A consolidation that looks marginal now might look great (or terrible) in an hour.
-
-The threshold is a heuristic that blocks obviously wasteful consolidations. It will not find the globally optimal strategy.
-
-## Observability
-
-**Logging:** Log blocked consolidations at info level:
-```
-consolidation blocked: savings $0.006/hr below required $0.05/hr (disruption_cost=5.0, threshold=1.0)
-```
-
-**Proposed metric:**
-```
-karpenter_consolidation_threshold_blocked_total{nodepool="default"}
-```
-
-Counter increments each time consolidation is rejected due to threshold. Operators can alert on this to detect overly aggressive thresholds.
-
-## Implementation Scope
-
-The threshold check integrates into the existing consolidation path:
-
-**Modified packages:**
-- `pkg/controllers/disruption/consolidation.go`: Add threshold check in `computeConsolidation()`
-
-**Key changes:**
-- In `computeConsolidation()`, after computing candidate prices, calculate `required_savings = threshold * disruption_cost` for all source nodes
-- Filter replacement options to those where `sum(candidatePrices) - replacementPrice >= required_savings`
-- Add metric increment when consolidation is blocked
-
-Estimated scope: ~100-150 lines including tests. No architectural changes; the threshold is an additional filter in the existing flow.
-
-## Future Work
-
-Several extensions are deferred to keep this RFC focused:
-
-- **Node base cost**: The current disruption cost formula sums per-pod costs, meaning empty nodes have disruption cost of zero. A base cost (e.g., 1.0) would capture operational overhead independent of pods: connection draining, API server load, cache invalidation. We defer this until we have cases where empty-node consolidation behavior is problematic.
-- **User-configurable threshold**: Expose the threshold as a NodePool-level field if the default of 1.0 proves unsuitable for common workloads.
-- **Destination lifetime consideration**: Factor in replacement node's remaining lifetime when evaluating savings.
-- **Adaptive threshold tuning**: AIMD-style adjustment based on consolidation outcomes (too much churn = increase threshold; costs stagnant = decrease).
-- **Spot candidate count interaction**: Analyze whether the 15-candidate requirement should be relaxed when savings threshold is high.
-- **Learning from outcomes**: Use historical consolidation data to calibrate thresholds automatically.
+**Observability:** Log blocked consolidations at info level with savings, required savings, disruption cost, and threshold. Add a counter metric `karpenter_consolidation_threshold_blocked_total{nodepool}` for alerting on overly aggressive thresholds. See Appendix B for details.
 
 ## Appendix A: Spot Consolidation Example
+
+Note: This example uses spot prices, which are typically 60-70% lower than on-demand prices shown in the Context section.
 
 For spot-to-spot single-node consolidation:
 
@@ -311,14 +209,14 @@ For spot-to-spot single-node consolidation:
 **Example:**
 
 ```
-Source: m5.xlarge spot @ $0.07/hr, 8 pods, threshold 1.0
-  Disruption cost: 8 * 1.0 = 8.0
-  Required savings: $0.01 * 8.0 = $0.08/hr
+Source: m5.xlarge spot @ $0.07/hr, 8 pods, threshold 0.01
+  Disruption cost: 8.0
+  Required savings: 0.01 * 8.0 = $0.08/hr
 
 Candidate pool (50 instance types cheaper than $0.07/hr):
-  - 12 types save $0.02-$0.05/hr  -> filtered out (below $0.08 threshold)
-  - 18 types save $0.08-$0.15/hr  -> pass threshold
-  - 20 types save $0.15-$0.30/hr  -> pass threshold
+  - 12 types save $0.02-$0.05/hr  -> filtered out (below $0.08/hr required savings)
+  - 18 types save $0.08-$0.15/hr  -> pass
+  - 20 types save $0.15-$0.30/hr  -> pass
 
 Candidates passing threshold: 38
 Required minimum: 15
@@ -327,3 +225,25 @@ Result: PROCEED with 38 candidates sent to PCO
 ```
 
 The 15-candidate requirement applies to candidates that pass the savings threshold. If fewer than 15 candidates yield sufficient savings, no spot-to-spot consolidation occurs.
+
+## Appendix B: Implementation Details
+
+**Modified packages:**
+- `pkg/controllers/disruption/consolidation.go`: Add threshold check in `computeConsolidation()`
+
+**Key changes:**
+- In `computeConsolidation()`, after computing candidate prices, calculate `required_savings = threshold * disruption_cost` for all source nodes
+- When launching a replacement node, filter candidates to those where `sum(candidate_source_prices) - replacement_destination_price >= required_savings`. For consolidate-delete (no replacement), savings equal the full source price
+- Add metric increment when consolidation is blocked
+
+**Logging format:**
+```
+consolidation blocked: savings $0.006/hr below required $0.05/hr (disruption_cost=5.0, threshold=0.01)
+```
+
+**Metric:**
+```
+karpenter_consolidation_threshold_blocked_total{nodepool="default"}
+```
+
+Estimated scope: ~100-150 lines including tests. No architectural changes; the threshold is an additional filter in the existing flow.
