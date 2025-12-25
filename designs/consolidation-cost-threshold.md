@@ -4,7 +4,7 @@
 
 Karpenter's consolidation logic creates excessive node churn by replacing nodes for marginal cost savings. Users report nodes being consolidated every 5-10 minutes, causing unnecessary pod disruption and reduced reliability. The workarounds are painful: disabling spot-to-spot consolidation, extensive PDB usage, or extended consolidateAfter periods.
 
-**Motivating example ([aws/karpenter-provider-aws#7146](https://github.com/aws/karpenter-provider-aws/issues/7146)):** A production EKS cluster with ~15 nodes experiences daily cascading consolidation during off-peak hours. Nodes get marked "Underutilised" and disrupted; replacements get marked underutilized within 5-10 minutes; this cascades for 2-3 generations. Nodes at 95% CPU utilization are terminated. The cluster ends with *more* nodes than before. Pods restart up to 4 times in succession. The user sees no actual efficiency gained - node topologies are comparable before and after. We call these "marginal consolidations" because the disruption doesn't justify the payoff.
+**Motivating example ([aws/karpenter-provider-aws#7146](https://github.com/aws/karpenter-provider-aws/issues/7146)):** A production EKS cluster with ~15 nodes experiences daily cascading consolidation during off-peak hours. Nodes get marked "Underutilised" and disrupted; replacements get marked underutilized within 5-10 minutes; this cascades for 2-3 generations. Nodes with 95% of vCPU allocated are terminated because Karpenter finds marginally cheaper alternatives. The cluster ends with *more* nodes than before. Pods restart up to 4 times in succession. The user sees no actual efficiency gained - node topologies are comparable before and after. We call these "marginal consolidations" because the disruption doesn't justify the payoff.
 
 The root cause is that Karpenter consolidates whenever a cheaper alternative exists, without requiring meaningful improvement. Two nodes at $0.50/hr each can consolidate to one node at $0.95/hr - saving $0.05/hr while disrupting all workloads on both nodes.
 
@@ -39,7 +39,7 @@ The node base cost ensures empty nodes have non-zero disruption cost, capturing 
 This design has useful properties:
 - An empty node has disruption cost = 1.0 (non-zero, so savings/cost is defined)
 - A node with 10 default pods has disruption cost = 11.0 (node base + pod count)
-- A node with 10 system-critical pods (priority 2B) has disruption cost = 101.0 (node base + each pod maxed at 10.0)
+- A node with 10 system-cluster-critical pods (priority ~2 billion) has disruption cost = 101.0 (node base + each pod maxed at 10.0)
 
 **Savings per disruption unit** is `savings / disruption_cost`. This ratio answers: "how much savings do we get per unit of disruption difficulty?" Higher values indicate more valuable consolidations.
 
@@ -54,13 +54,15 @@ Normalize savings by the disruption cost of the consolidation:
 For single-node consolidation:
 ```
 required_savings = threshold * disruption_cost
-consolidate when: savings >= required_savings
+consolidate when: savings > 0 AND savings >= required_savings
 ```
+
+The `savings > 0` check ensures we never consolidate when there's no actual cost reduction, even with threshold = 0.
 
 For multi-node consolidation, sum the required savings across all source nodes:
 ```
 required_savings = sum(node.threshold * node.disruption_cost for all source nodes)
-consolidate when: savings >= required_savings
+consolidate when: savings > 0 AND savings >= required_savings
 ```
 
 This "sum-of-products" approach is more principled than taking the maximum threshold. Each node's threshold applies to its own disruption contribution, not to the entire consolidation. A critical workload's high threshold protects *its* pods without blocking consolidation of other workloads that have lower requirements.
@@ -152,7 +154,7 @@ The [Spot Consolidation RFC](spot-consolidation.md) requires 15 cheaper instance
 
 For spot-to-spot single-node consolidation:
 
-1. Find instance types cheaper than current node
+1. Find instance types cheaper than current node (savings > 0)
 2. Filter to candidates where: `savings >= threshold * disruption_cost`
 3. Require 15+ remaining candidates (per spot-consolidation.md)
 4. Send viable candidates to PCO for selection
@@ -163,7 +165,7 @@ The 15-candidate requirement applies to candidates that pass the savings thresho
 
 The threshold is a sensitivity/specificity tradeoff:
 
-- **Threshold too low (approaching 0):** Current behavior - consolidation fires for marginal savings. Excessive churn persists. Use `karpenter_consolidation_threshold_blocked_total` metric; if it's always zero, threshold may be too low.
+- **Threshold too low (approaching 0):** Current behavior - consolidation fires for marginal savings. Excessive churn persists. If the proposed blocked-consolidation metric (see Observability) is always zero, threshold may be too low.
 
 - **Threshold too high:** Consolidation rarely fires. Nodes remain underutilized longer than necessary. Monitor for rising blocked count or stagnant node costs.
 
@@ -229,8 +231,13 @@ Node: m5.large @ $0.096/hr, 5 pods total
   - 4 default pods: 4 * 1.0 = 4.0
   - 1 batch pod (priority -1M): 1.0 + (-1M/2^25) = 1.0 - 0.03 = 0.97
 Disruption cost: 1.0 + 4.0 + 0.97 = 5.97
+Replacement: m5a.large @ $0.086/hr (savings = $0.01/hr)
+Required savings: 0.01 * 5.97 = $0.0597/hr
+Threshold: 0.01
+
+Result: NO CONSOLIDATE (0.01 < 0.0597)
 ```
-Negative priority makes nodes slightly easier to disrupt.
+Negative priority makes nodes slightly easier to disrupt, but doesn't dramatically change the threshold check.
 
 **Scenario 6: Multi-node consolidation with sum-of-products**
 ```
