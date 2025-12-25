@@ -77,7 +77,7 @@ spec:
     consolidationSavingsThreshold: "0.01"  # $/hr per disruption-unit
 ```
 
-If not set, threshold defaults to 0 (existing behavior). For cluster-wide defaults, use a policy tool like Kyverno to set thresholds across NodePools. A threshold of 0 means any positive savings justifies consolidation.
+If not set, threshold defaults to 0 (existing behavior). For cluster-wide defaults, use a policy tool like Kyverno to set thresholds across NodePools. A threshold of 0 means any positive savings justifies consolidation. Negative thresholds are invalid and rejected at admission.
 
 See appendix for examples.
 
@@ -166,7 +166,7 @@ The 15-candidate requirement applies to candidates that pass the savings thresho
 
 The threshold is a sensitivity/specificity tradeoff:
 
-- **Threshold too low (approaching 0):** Current behavior - consolidation fires for marginal savings. Excessive churn persists. If the proposed blocked-consolidation metric (see Observability) is always zero, threshold may be too low.
+- **Threshold too low (approaching 0):** Current behavior - consolidation fires for marginal savings. Excessive churn persists. Symptom: you observe churn in your cluster AND the proposed blocked-consolidation metric (see Observability) is always zero.
 
 - **Threshold too high:** Consolidation rarely fires. Nodes remain underutilized longer than necessary. Monitor for rising blocked count or stagnant node costs.
 
@@ -278,9 +278,27 @@ Result: NO CONSOLIDATE (0.05 < 0.351)
 ```
 Node A contributes only $0.10/hr to cost but dominates the threshold requirement. This correctly reflects that pool-critical's strict disruption bar applies to its pods.
 
+**Scenario 8: Successful multi-node consolidation**
+```
+Node A (pool-default): $0.50/hr, 5 pods, threshold 0.01
+  Disruption cost: 1.0 + 5 * 1.0 = 6.0
+  Required savings from A: 0.01 * 6.0 = $0.06/hr
+
+Node B (pool-default): $0.50/hr, 5 pods, threshold 0.01
+  Disruption cost: 1.0 + 5 * 1.0 = 6.0
+  Required savings from B: 0.01 * 6.0 = $0.06/hr
+
+Total required savings: $0.06 + $0.06 = $0.12/hr
+Replacement: $0.60/hr
+Actual savings: $1.00 - $0.60 = $0.40/hr
+
+Result: CONSOLIDATE (0.40 >= 0.12)
+```
+With uniform thresholds and sufficient savings, multi-node consolidation proceeds.
+
 ### Configuration Guidance
 
-**How to reason about the threshold:** For a node with N default-priority pods, disruption cost is approximately N+1 (1.0 node base + N pods at 1.0 each). At threshold 0.01, this means:
+**How to reason about the threshold:** For a node with N default-priority pods (not near expiration), disruption cost is approximately N+1 (1.0 node base + N pods at 1.0 each). At threshold 0.01, this means:
 
 - 10-pod node: requires $0.11/hr minimum savings (11.0 * 0.01)
 - 30-pod node: requires $0.31/hr minimum savings (31.0 * 0.01)
