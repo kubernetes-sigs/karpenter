@@ -28,18 +28,19 @@ Where:
 - **pod_deletion_cost**: From the `controller.kubernetes.io/pod-deletion-cost` annotation (default 0), divided by 2^27 (~134M) for similar normalization
 - **clamp**: Each pod's contribution is clamped to [-10, 10], preventing any single pod from dominating the cost
 
-This RFC proposes adding a **node_base_cost** of 1.0 to the total disruption cost:
+This RFC proposes adding a **node_base_cost** of 1.0 to the total disruption cost. Combined with the existing `lifetime_remaining` multiplier (see "Interaction with lifetime_remaining" below), the complete formula is:
 
 ```
-disruption_cost = node_base_cost + sum(per_pod_cost for all pods)
+disruption_cost = (node_base_cost + sum(per_pod_cost for all pods)) * lifetime_remaining
 ```
 
 The node base cost ensures empty nodes have non-zero disruption cost, capturing inherent overhead (connection draining, cache invalidation, API server load) independent of pod count. See "Design Decisions" below for rationale.
 
-This design has useful properties:
+This design has useful properties (assuming `lifetime_remaining = 1.0`):
 - An empty node has disruption cost = 1.0 (non-zero, so savings/cost is defined)
 - A node with 10 default pods has disruption cost = 11.0 (node base + pod count)
 - A node with 10 system-cluster-critical pods (priority ~2 billion) has disruption cost = 101.0 (node base + each pod maxed at 10.0)
+- A node at 50% of its expireAfter lifetime has these values halved
 
 **Savings per disruption unit** is `savings / disruption_cost`. This ratio answers: "how much savings do we get per unit of disruption difficulty?" Higher values indicate more valuable consolidations.
 
@@ -177,8 +178,10 @@ The threshold is a sensitivity/specificity tradeoff:
 
 ### Behavior Examples
 
-All scenarios assume pods with default priority (0) and no deletion cost annotation.
-Per-pod cost = clamp(1.0 + 0 + 0, -10, 10) = 1.0. Node base cost = 1.0.
+All scenarios assume:
+- Pods with default priority (0) and no deletion cost annotation: per-pod cost = 1.0
+- Node base cost = 1.0
+- `lifetime_remaining = 1.0` (nodes not near expiration)
 
 **Scenario 1: Marginal savings, light load**
 ```
