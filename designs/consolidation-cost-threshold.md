@@ -1,5 +1,31 @@
 # Consolidation Savings Threshold
 
+## Context
+
+Karpenter computes a **disruption cost** for each node to order consolidation candidates. For default-priority pods, disruption cost approximates pod count. Higher-priority pods contribute more to disruption cost; lower-priority pods contribute less.
+
+**Lifetime remaining:** The `lifetime_remaining` multiplier ranges from 1.0 (node just launched) to 0.0 (node at expiration). This linearly scales disruption cost, making nodes progressively easier to consolidate as they approach their configured TTL. A node 90% through its lifetime has a 0.1 multiplier, reducing required savings by 10x.
+
+```
+disruption_cost = sum(per_pod_cost) * lifetime_remaining
+
+per_pod_cost = clamp(1.0 + pod_priority/2**25 + pod_deletion_cost/2**27, -10.0, 10.0)
+```
+
+The magic numbers (2^25, 2^27) are tuned to provide reasonable scaling within Kubernetes' priority range. For most workloads: default-priority pods contribute ~1.0 each; system-critical pods contribute more; preemptible or low-priority pods contribute less (the clamp allows values as low as -10.0). This means a node with 20 low-priority pods may have a disruption cost well below 20, making it easier to consolidate than the examples suggest. See `pkg/utils/disruption/disruption.go` for implementation details.
+
+This is existing Karpenter behavior. We reuse it rather than inventing new calculations.
+
+**Savings threshold:** Given a threshold T (dollars per hour per unit of disruption cost):
+
+```
+required_savings = T * disruption_cost
+```
+
+For a 5-pod node with threshold 0.01, required savings is $0.05/hr. The threshold 0.01 is a conservative starting point: high enough to prevent marginal-savings churn, low enough to allow meaningful consolidation. Like spot-consolidation.md's "15 instance types" threshold, the exact value is less important than having a non-zero default. Users should tune based on their tolerance for disruption. See Appendix A for price gap examples and Appendix B for tuning guidance.
+
+**Why linear?** We use a linear relationship because it's the simplest monotonic function. Disrupting 10 pods requires 10x the savings of disrupting 1 pod. If production feedback suggests diminishing returns (log) or compounding effects (quadratic), we can revisit.
+
 ## Problem Statement
 
 Karpenter consolidation removes nodes from the cluster when doing so improves efficiency. Empty nodes are easy, but consolidating non-empty nodes causes disruptions to running pods.
@@ -18,29 +44,13 @@ Savings: $0.006/hr -> CONSOLIDATE
 
 Current workarounds (disabling spot-to-spot consolidation, extensive PDBs, multi-hour `consolidateAfter`) are painful.
 
+**Guiding principles:**
+
+1. **Reuse existing calculations.** Karpenter already computes disruption cost and lifetime remaining. We build on these rather than inventing parallel mechanisms.
+2. **General mechanism, not special-case fix.** Issue #7146 is one symptom. The solution should help any customer facing marginal-savings churn.
+3. **Minimize configurable parameters.** One threshold, not a family of knobs.
+
 This RFC builds on [spot-consolidation.md](spot-consolidation.md) (Ellis Tarn) and [RFC 2562](https://github.com/kubernetes-sigs/karpenter/pull/2562) (Jukie, open).
-
-## Context
-
-Karpenter computes a **disruption cost** for each node to order consolidation candidates. For nodes with default-priority pods, disruption cost approximates pod count. The `lifetime_remaining` multiplier reduces cost as nodes approach expiration - this means nodes naturally become easier to consolidate as they age, so disrupting a node with 10 minutes left costs less than disrupting one with 10 hours left.
-
-```
-disruption_cost = sum(per_pod_cost) * lifetime_remaining
-
-per_pod_cost = clamp(1.0 + pod_priority/2**25 + pod_deletion_cost/2**27, -10.0, 10.0)
-```
-
-This is existing Karpenter behavior; we could change it for this RFC, but don't see a compelling reason to do so. See `pkg/utils/disruption/disruption.go` for details.
-
-**Savings threshold:** Given a threshold T (dollars per hour per unit of disruption cost):
-
-```
-required_savings = T * disruption_cost
-```
-
-For a 5-pod node with threshold 0.01, required savings is $0.05/hr. We calibrated 0.01 against the minimum price step between instance types when sorted by cost in us-east-1 (see Appendix A). The absolute prices matter less than the relative gaps: a threshold that blocks cross-family churn ($0.024/hr difference) while allowing meaningful savings ($0.066/hr) should generalize across regions and providers with similar instance type diversity.
-
-**Why linear?** We use a linear relationship because it's the simplest monotonic function. Disrupting 10 pods requires 10x the savings of disrupting 1 pod. If production feedback suggests diminishing returns (log) or compounding effects (quadratic), we can revisit.
 
 ## Design Options
 
@@ -89,6 +99,8 @@ Actual savings: $1.00 - $0.90 = $0.10/hr
 
 Result: CONSOLIDATE ($0.10 >= $0.10)
 ```
+
+Disruption costs sum because all pods are disrupted together in a single operation. This is distinct from sequential single-node consolidations, which are evaluated independently. If consolidating A required disrupting A's pods, and consolidating B required disrupting B's pods in a separate command, those would be two separate decisions with independent thresholds.
 
 The 7-pod node contributes more to the required savings than the 3-pod node, correctly reflecting that it's more disruptive to move. (If these nodes were 50% through their lifetime, disruption cost drops to 5.0 and required savings to $0.05/hr - consolidation becomes easier as nodes age.)
 
@@ -199,13 +211,33 @@ Option 1 (Disruption-Normalized Threshold) addresses the core problem: savings s
 
 For example, layering a 10% percentage floor would block consolidation options that pass the disruption threshold but save less than 10% in relative terms. Some users might want this; we're open to it.
 
-> **Seeking feedback:** This RFC proposes alpha with default 0 (preserving existing behavior). We plan a follow-up RFC to change the default to 0.01 after gathering production feedback. We would like community input on: (1) if 0.01 is an appropriate value, or if we should pick something else, (2) the consolidate-delete behavior for cheap nodes with a lot of pods (we believe this is correct - cheap dense nodes *should* be harder to delete - but want confirmation), and (3) interaction with spot consolidation's 15-candidate minimum.
-
 **API:** NodePool-level `consolidationSavingsThreshold` field (dollars per hour per unit of disruption cost; approximately: dollars per hour per pod for default-priority workloads). The threshold is a NodePool-level setting because it governs node-level consolidation decisions. Pod-level disruption preferences are expressed through existing mechanisms: pod priority, PodDisruptionBudgets, and the `karpenter.sh/do-not-disrupt` annotation. Most users should not need to touch the default. See Appendix B for tuning guidance.
 
-**Lifecycle:** Starts as alpha, annotated with `// Note: This field is alpha.` in code. Default value of 0 preserves existing behavior (opt-in). Graduates to stable after production feedback.
+**Lifecycle:** Starts as alpha, annotated with `// Note: This field is alpha.` in code. Default value of 0.01. Users who want legacy behavior can set threshold to 0. Graduates to stable after production feedback.
 
-**Spot interaction:** The threshold filter applies before spot's 15-candidate flexibility check (see spot-consolidation.md). If threshold filtering leaves fewer than 15 candidates, no spot-to-spot consolidation occurs. Remaining candidates are sent to Price Capacity Optimized (PCO) allocation for selection. This is intentional: if no replacement offers sufficient savings, don't consolidate.
+**Spot interaction:** The threshold filter applies before spot's 15-candidate flexibility check (see spot-consolidation.md). If threshold filtering leaves fewer than 15 candidates, no spot-to-spot consolidation occurs. Remaining candidates are sent to Price Capacity Optimized (PCO) allocation for selection.
+
+This interaction is intentional. The two mechanisms are complementary:
+- Savings threshold: "don't consolidate unless savings justify disruption"
+- 15-candidate minimum: "don't consolidate spot unless we have flexibility to avoid racing to bottom"
+
+Edge case example:
+
+```
+Source: cheap spot node, 8 pods, threshold 0.01
+Required savings: $0.08/hr
+
+50 candidates cheaper than current price:
+  - 36 types save $0.02-$0.07/hr  -> filtered out (below $0.08/hr)
+  - 14 types save $0.08-$0.15/hr  -> pass
+
+Candidates passing threshold: 14
+Required minimum: 15
+
+Result: NO CONSOLIDATE (14 < 15 required)
+```
+
+When threshold filtering and the 15-candidate minimum combine to block consolidation, both conditions are doing their job: the threshold filters low-value moves, the minimum ensures sufficient flexibility for spot. If this blocks more consolidation than desired, lower the threshold.
 
 **Where this fits in the consolidation pipeline:**
 
@@ -227,12 +259,12 @@ SCHEDULING SIMULATION
   |
   v
 PRICING FILTERS (after scheduling simulation)
-  |
-  +-- Order instance types by price
-  +-- Filter to types < current price
-  +-- [THIS RFC] Filter to types meeting savings threshold  <--
-  +-- For spot single-node: require 15+ candidates
-  +-- Cap to 15 types for launch
+  |                                                   Example: 8-pod spot node
+  +-- Order instance types by price                   100 instance types
+  +-- Filter to types < current price                  50 candidates remain
+  +-- [THIS RFC] Filter to savings threshold           38 candidates remain
+  +-- For spot single-node: require 15+ candidates     38 >= 15, proceed
+  +-- Cap to cheapest 15 types for launch              15 sent to PCO
   |
   v
 VALIDATION (re-check before execution)
@@ -242,22 +274,31 @@ VALIDATION (re-check before execution)
   +-- Disruption budget still available
 ```
 
-The savings threshold filter slots in after removing more-expensive options but before spot's flexibility check.
+The savings threshold filter slots in after removing more-expensive options but before spot's flexibility check. The example shows an 8-pod node with threshold 0.01 requiring $0.08/hr savings; 12 marginal-savings candidates are filtered out, leaving 38 viable options.
 
 **Consolidate-delete behavior:** For consolidate-delete (terminating without replacement), savings equal the full node price. A $0.10/hr node with 20 pods requires $0.20/hr savings (threshold 0.01) - consolidation is blocked:
 
 ```
-Node: $0.10/hr, 20 pods -> required savings: 0.01 * 20 = $0.20/hr
-Savings: $0.10/hr (full node price) -> NO CONSOLIDATE
+Node: $0.10/hr, 20 pods, freshly launched (lifetime_remaining = 1.0)
+  Disruption cost: 20.0 * 1.0 = 20.0
+  Required savings: 0.01 * 20.0 = $0.20/hr
+  Savings: $0.10/hr (full node price) -> NO DELETE
 ```
 
-At 10 pods on this same node, required savings drops to $0.10/hr and consolidate-delete proceeds. The threshold creates a crossover point where cheap dense nodes stay put while cheap sparse nodes consolidate.
+The threshold creates a crossover point where cheap dense nodes stay put while cheap sparse nodes consolidate. However, the lifetime_remaining multiplier provides an escape: as nodes age, they become deletable regardless of pod count:
 
-We recommend this behavior: the threshold says "to disrupt 20 pods, require $0.20/hr savings." This represents a behavioral change.
+```
+Same node, 90% through its configured TTL (lifetime_remaining = 0.1)
+  Disruption cost: 20.0 * 0.1 = 2.0
+  Required savings: 0.01 * 2.0 = $0.02/hr
+  Savings: $0.10/hr -> DELETE PROCEEDS
+```
 
-**Default threshold:** We recommend 0.01 as the target value but will default to 0 for alpha to preserve existing behavior. Assuming positive production feedback, we will submit a follow-up RFC to change the default to 0.01.
+This behavior is intentional. We either believe disruption cost means something or we don't. If we don't, we should fix the disruption cost formula since it's used throughout Karpenter. If we do, then the threshold correctly applies a consistent standard: "to disrupt 20 pods, require savings proportional to 20 pods' worth of disruption."
 
-**Performance:** O(1) arithmetic per node; no measurable impact.
+Pod restarts have real costs: connection drains, cache warming, state reconstruction, brief unavailability. The disruption cost formula attempts to capture this. If a user believes their pods move "for free," they can lower the threshold. This represents a behavioral change from today, where any savings justifies any disruption.
+
+**Performance:** The threshold comparison is O(1) per candidate. Filtering candidates by threshold is O(candidates). This adds negligible overhead to the existing consolidation pipeline.
 
 **Observability:** Log blocked consolidations at info level. Add counter `karpenter_consolidation_threshold_blocked_total{nodepool}`.
 
@@ -312,9 +353,12 @@ Result: PROCEED with 38 candidates sent to PCO
 | r8i.xlarge    | 4    | 32           | 0.2778                 |
 | m8i.2xlarge   | 8    | 32           | 0.4234                 |
 
-Cross-family differences at xlarge: m8i to c8i saves $0.024/hr; r8i to m8i saves $0.066/hr. A threshold of 0.01 means a 5-pod node requires $0.05/hr savings to consolidate. This blocks m8i-to-c8i churn ($0.024 < $0.05) while allowing r8i-to-m8i moves ($0.066 >= $0.05) when capacity permits.
+Cross-family differences at xlarge: m8i to c8i saves $0.024/hr; r8i to m8i saves $0.066/hr. A threshold of 0.01 means a 5-pod node requires $0.05/hr savings to consolidate. At this default:
 
-Users who want to allow m8i-to-c8i moves can lower the threshold or reduce pod priorities. Users who want to block r8i-to-m8i moves can raise the threshold or increase pod priorities.
+- m8i-to-c8i moves are blocked ($0.024 < $0.05 required)
+- r8i-to-m8i moves are allowed ($0.066 >= $0.05 required)
+
+Whether this is the "right" behavior depends on the workload. Users who want to allow m8i-to-c8i moves can lower the threshold. Users who want to block r8i-to-m8i moves can raise the threshold. The default is conservative - it prevents more churn than it allows.
 
 ## Appendix B: Tuning Guide
 
