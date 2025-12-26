@@ -1,31 +1,5 @@
 # Consolidation Savings Threshold
 
-## Context
-
-Karpenter computes a **disruption cost** for each node to order consolidation candidates. For default-priority pods, disruption cost approximates pod count. Higher-priority pods contribute more to disruption cost; lower-priority pods contribute less.
-
-**Lifetime remaining:** The `lifetime_remaining` multiplier ranges from 1.0 (node just launched) to 0.0 (node at expiration). This linearly scales disruption cost, making nodes progressively easier to consolidate as they approach their configured TTL. A node 90% through its lifetime has a 0.1 multiplier, reducing required savings by 10x.
-
-```
-disruption_cost = sum(per_pod_cost) * lifetime_remaining
-
-per_pod_cost = clamp(1.0 + pod_priority/2**25 + pod_deletion_cost/2**27, -10.0, 10.0)
-```
-
-The magic numbers (2^25, 2^27) are tuned to provide reasonable scaling within Kubernetes' priority range. For most workloads: default-priority pods contribute ~1.0 each; system-critical pods contribute more; preemptible or low-priority pods contribute less (the clamp allows values as low as -10.0). This means a node with 20 low-priority pods may have a disruption cost well below 20, making it easier to consolidate than the examples suggest. See `pkg/utils/disruption/disruption.go` for implementation details.
-
-This is existing Karpenter behavior. We reuse it rather than inventing new calculations.
-
-**Savings threshold:** Given a threshold T (dollars per hour per unit of disruption cost):
-
-```
-required_savings = T * disruption_cost
-```
-
-For a 5-pod node with threshold 0.01, required savings is $0.05/hr. The threshold 0.01 is a conservative starting point: high enough to prevent marginal-savings churn, low enough to allow meaningful consolidation. Like spot-consolidation.md's "15 instance types" threshold, the exact value is less important than having a non-zero default. Users should tune based on their tolerance for disruption. See Appendix A for price gap examples and Appendix B for tuning guidance.
-
-**Why linear?** We use a linear relationship because it's the simplest monotonic function. Disrupting 10 pods requires 10x the savings of disrupting 1 pod. If production feedback suggests diminishing returns (log) or compounding effects (quadratic), we can revisit.
-
 ## Problem Statement
 
 Karpenter consolidation removes nodes from the cluster when doing so improves efficiency. Empty nodes are easy, but consolidating non-empty nodes causes disruptions to running pods.
@@ -44,6 +18,8 @@ Savings: $0.006/hr -> CONSOLIDATE
 
 Current workarounds (disabling spot-to-spot consolidation, extensive PDBs, multi-hour `consolidateAfter`) are painful.
 
+Karpenter already computes a **disruption cost** for each node to order consolidation candidates. We propose using this existing calculation to gate whether consolidation proceeds at all: require savings proportional to disruption.
+
 **Guiding principles:**
 
 1. **Reuse existing calculations.** Karpenter already computes disruption cost and lifetime remaining. We build on these rather than inventing parallel mechanisms.
@@ -61,6 +37,32 @@ Require savings to exceed a threshold scaled by disruption cost.
 **Motivating scenario:** A spot node running 8 pods could consolidate to 50 cheaper instance types. Of those, 12 save only $0.02-$0.05/hr while 38 save $0.08/hr or more. Should we include the marginal-savings options in our candidate pool, or filter them out?
 
 This approach filters to the 38 candidates that meet a per-pod savings bar. With 8 pods and threshold 0.01, require $0.08/hr savings.
+
+**How disruption cost works:**
+
+Karpenter computes disruption cost for each node. For default-priority pods, disruption cost approximates pod count. Higher-priority pods contribute more; lower-priority pods contribute less.
+
+```
+disruption_cost = sum(per_pod_cost) * lifetime_remaining
+
+per_pod_cost = clamp(1.0 + pod_priority/2**25 + pod_deletion_cost/2**27, -10.0, 10.0)
+```
+
+The magic numbers (2^25, 2^27) are tuned to scale within Kubernetes' priority range. For most workloads: default-priority pods contribute ~1.0 each; system-critical pods contribute more; low-priority pods contribute less (the clamp allows values as low as -10.0). A node with 20 low-priority pods may have disruption cost well below 20. See `pkg/utils/disruption/disruption.go` for details.
+
+The `lifetime_remaining` multiplier ranges from 1.0 (node just launched) to 0.0 (node at expiration). This makes nodes progressively easier to consolidate as they age. A node 90% through its TTL has a 0.1 multiplier, reducing required savings by 10x.
+
+**Savings threshold formula:**
+
+Given a threshold T (dollars per hour per unit of disruption cost):
+
+```
+required_savings = T * disruption_cost
+```
+
+For a 5-pod node with threshold 0.01, required savings is $0.05/hr. The threshold 0.01 is a conservative starting point: high enough to prevent marginal-savings churn, low enough to allow meaningful consolidation. Like spot-consolidation.md's "15 instance types" threshold, the exact value is less important than having a non-zero default. Users should tune based on their tolerance for disruption.
+
+**Why linear?** We use a linear relationship because it's the simplest monotonic function. Disrupting 10 pods requires 10x the savings of disrupting 1 pod. If production feedback suggests diminishing returns (log) or compounding effects (quadratic), we can revisit.
 
 **Modified algorithm:**
 
