@@ -16,7 +16,7 @@ Savings: $0.006/hr -> CONSOLIDATE
 
 The community has proposed workarounds: disable spot-to-spot consolidation, add extensive PDBs, set multi-hour `consolidateAfter` delays. All feel like band-aids. None address the root cause: Karpenter consolidates for any positive savings, ignoring the cost of disruption.
 
-Karpenter already computes a **disruption cost** for each node to order consolidation candidates. This RFC proposes using this cost as a gate: consolidate only when savings exceed a threshold proportional to disruption cost.
+Karpenter already computes a **disruption cost** for each node to order consolidation candidates. This RFC proposes using this cost as a filter: consolidate only when savings exceed a threshold proportional to disruption cost.
 
 **Guiding principles:**
 
@@ -40,7 +40,7 @@ Where:
 - `pod_deletion_cost` is from the `controller.kubernetes.io/pod-deletion-cost` annotation (default 0). The divisor 2^27 (~134 million) similarly normalizes this value.
 - For most workloads: default-priority pods contribute ~1.0 each to the sum.
 
-The `lifetime_remaining` multiplier ranges from 1.0 (node just launched) to 0.0 (node at expiration). This progressively favors consolidation over stability as nodes age. A node 90% through its lifetime has a 0.1 multiplier, reducing required savings by 10x.
+The `lifetime_remaining` multiplier ranges from 1.0 (node just launched) to 0.0 (node at expiration). This progressively favors consolidation over stability as nodes age. A node 90% through its lifetime has a 0.1 multiplier, reducing savings required to initiate consolidation by 10x.
 
 See `pkg/utils/disruption/disruption.go` for implementation details.
 
@@ -70,11 +70,11 @@ Require savings to exceed a threshold scaled by disruption cost. With 8 pods and
 | 10 pods   | $0.10/hr         | $0.02/hr (m8i.xlarge -> c8i.xlarge) | $0.21/hr (m8i.2xlarge -> m8i.xlarge) |
 | 20 pods   | $0.20/hr         | $0.07/hr (r8i.xlarge -> m8i.xlarge) | $0.42/hr (m8i.2xlarge -> m8i.xlarge) |
 
-Note: r8i -> m8i ($0.07/hr) is allowed for 5 pods but blocked for 20 pods. This is intended: more pods require more savings to justify disruption.
+Note that r8i -> m8i ($0.07/hr) is allowed for 5 pods but blocked for 20 pods. This is intended because more pods means a higher disruption cost, which requires more savings to justify disruption.
 
-This blocks the $0.006/hr-for-5-pods move from issue #7146 while allowing meaningful consolidation. The value is conservative: high enough to prevent marginal-savings churn, low enough that legitimate consolidation proceeds.
+This filter blocks the $0.006/hr-for-5-pods move from issue #7146 while allowing meaningful consolidation. The value is conservative: high enough to prevent marginal-savings churn, low enough that legitimate consolidation proceeds.
 
-**Why linear?** A linear relationship is the simplest monotonic function. Disrupting 10 pods should require 10x the savings of disrupting 1 pod. If production feedback suggests otherwise--diminishing returns (logarithmic) or compounding effects (quadratic)--we can revisit.
+Pod disruption scales linearly with number of pods because we believe that disrupting 10 pods should require 10x the savings of disrupting 1 pod.
 
 **Issue #7146 with proposed algorithm (threshold = 0.01):**
 
@@ -92,7 +92,7 @@ The cascade is blocked at generation 1. For this 5-pod node with threshold 0.01,
 
 **Multi-node consolidation:**
 
-When consolidating multiple nodes to one replacement, sum the disruption costs. Use sum rather than max because all pods are disrupted in a single operation--the total disruption is the sum of individual disruptions, not the worst single node. If max were used, consolidating 10 single-pod nodes would require only $0.01/hr savings, same as consolidating 1 single-pod node, despite disrupting 10x as many pods.
+When consolidating multiple nodes to one replacement, sum the disruption costs. Use sum rather than max across all costs because all pods are disrupted in a single operation. The total disruption is the sum of individual disruptions, not the worst single node. If max were used, consolidating 10 single-pod nodes would require only $0.01/hr savings, same as consolidating 1 single-pod node, despite disrupting 10x as many pods.
 
 ```
 Node A: $0.50/hr, 3 pods -> disruption cost = 3.0
@@ -130,12 +130,11 @@ Candidate pool (50 instance types cheaper than $0.07/hr):
 
 Candidates passing threshold: 50 (all of them)
 ```
-
 The marginal-savings candidates aren't filtered. To exclude candidates saving $0.05/hr, we'd need a 71% threshold, which is absurdly high.
 
 **Pod-count blindness:** An 8-pod node and a 50-pod node at $0.07/hr have identical thresholds. Disrupting 50 pods for $0.02/hr savings is treated the same as disrupting 8 pods.
 
-This approach is intuitive ("require 20% savings") but fixed percentages interact poorly with spot's low prices. Pod count is ignored entirely.
+This approach is intuitive ("require 20% savings") but fixed percentages interact poorly with spot's low prices. Pod count is ignored entirely in this approach, which is another downside.
 
 * 👍👍 Easy to explain: "require 20% savings"
 * 👍 Familiar pattern from other systems
@@ -211,20 +210,18 @@ This prevents bad moves by preventing all moves. A node saving $2/hr is blocked 
 
 ## Recommendation
 
-Option 1 (Disruption-Normalized Threshold) addresses the core problem: savings should justify disruption. Options 2-4 can layer for defense in depth; layering is deferred until production feedback is available.
-
-For example, layering a 10% percentage floor would block consolidation options that pass the disruption threshold but save less than 10% in relative terms. Some users might want this behavior.
+Option 1 (Disruption-Normalized Threshold) addresses the core problem associated with marginal consolidation decisions: savings should justify disruption, otherwise we should not disrupt. Filters are very simple, and if there's user interest, we could add more filters. For example, layering a 10% percentage floor would block consolidation options that pass the disruption threshold but save less than 10% in relative terms. Some users might want this behavior. Options 2-4 and similar ideas can be added later if necessary.
 
 ### Behavioral Change
 
-This RFC changes default consolidation behavior. Today, any positive savings triggers consolidation. With this RFC, savings must exceed a threshold proportional to disruption cost.
+This RFC changes default consolidation behavior. Today, any savings triggers consolidation. With this RFC, savings must exceed a threshold proportional to disruption cost.
 
 This is the right default because:
 1. The current behavior causes real harm (issue #7146: pods restarted 4 times for pennies)
 2. The "any savings" assumption ignores the non-zero cost of disruption
 3. Users who prefer legacy behavior can set threshold to 0
 
-This is a more significant change than spot-consolidation.md's 15-candidate floor. Where that RFC added restrictions, this RFC changes the decision function. Expect questions from users whose consolidation behavior changes.
+This is a more significant change than spot-consolidation.md's 15-candidate floor. Where that RFC added restrictions, this RFC changes the decision function. We expect questions from users whose consolidation behavior changes, and we welcome a discussion about how to get this right. We might need to tweak parameters of this proposal, spot consolidation, or both.
 
 ### API
 
@@ -246,17 +243,17 @@ The threshold is a NodePool-level setting because it governs node-level consolid
 
 ### Lifecycle
 
-Starts as alpha, annotated with `// Note: This field is alpha.` in code. Users who want legacy behavior can set threshold to 0. Graduates to stable after production feedback.
+Starts as alpha, annotated with `// Note: This field is alpha.` in code. Users who want the old behavior can set threshold to 0. We plan to graduate this after user feedback.
 
 ### Spot Interaction
 
 The threshold filter applies before spot's 15-candidate flexibility check (see spot-consolidation.md). If threshold filtering leaves fewer than 15 spot candidates, no spot-to-spot consolidation occurs. Remaining candidates are sent to Price Capacity Optimized (PCO) allocation for selection.
 
 This interaction is intentional. The two mechanisms are complementary:
-- Savings threshold: "don't consolidate unless savings justify disruption"
+- Savings threshold: "don't consider a consolidation decision unless savings justify disruption"
 - 15-candidate minimum: "don't consolidate spot unless there's flexibility to avoid racing to the bottom"
 
-**Edge case:** When threshold filtering leaves fewer than 15 spot candidates:
+However, there is a potentially undesirable case when threshold filtering leaves fewer than 15 spot candidates:
 
 ```
 Source: cheap spot node, 8 pods, threshold 0.01
@@ -267,7 +264,7 @@ Required savings: $0.08/hr
 Result: NO CONSOLIDATE
 ```
 
-Both conditions are doing their job: the threshold filters low-value moves, the 15-candidate minimum ensures sufficient flexibility for spot. If this blocks more consolidation than desired, lower the threshold.
+Both conditions are doing their job: the threshold filters low-value moves, the 15-candidate minimum ensures sufficient flexibility for spot. If this blocks more consolidation than desired, lower the threshold or change how spot consolidation works. For example, it's possible that we want 10 nodes rather than 15 after filtering.
 
 ### Pipeline Position
 
