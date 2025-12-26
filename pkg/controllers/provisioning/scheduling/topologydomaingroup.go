@@ -17,6 +17,8 @@ limitations under the License.
 package scheduling
 
 import (
+	"strings"
+
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -46,6 +48,23 @@ func NewTopologyDomainGroup() TopologyDomainGroup {
 	}
 }
 
+func domainSourceKey(requirements scheduling.Requirements, taints []v1.Taint) string {
+	var b strings.Builder
+	b.WriteString(requirements.String())
+	b.WriteString("|taints=")
+	for i := range taints {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(taints[i].Key)
+		b.WriteString("=")
+		b.WriteString(taints[i].Value)
+		b.WriteString(":")
+		b.WriteString(string(taints[i].Effect))
+	}
+	return b.String()
+}
+
 // Insert adds a domain to the TopologyDomainGroup with its associated NodePool requirements and taints.
 // This tracks which NodePools can provide this domain, allowing us to filter domains based on pod requirements.
 func (t TopologyDomainGroup) Insert(domain string, nodePoolRequirements scheduling.Requirements, taints ...v1.Taint) {
@@ -59,20 +78,15 @@ func (t TopologyDomainGroup) Insert(domain string, nodePoolRequirements scheduli
 		Taints:               taints,
 	}
 
-	// Check if we should override existing sources based on taint optimization
-	// If there are no taints, this NodePool makes the domain available to all pods (regarding taints),
-	// so we can replace all existing sources
-	if len(taints) == 0 {
-		t.domains[domain] = []DomainSource{source}
-		return
+	// NOTE: We must not optimize/override sources based solely on taints.
+	// Even if a NodePool has no taints, it may be incompatible with a pod's nodeSelector/nodeAffinity.
+	// Keeping all sources ensures we can correctly include a domain if *any* NodePool providing it is compatible.
+	key := domainSourceKey(nodePoolRequirements, taints)
+	for _, existing := range t.domains[domain] {
+		if domainSourceKey(existing.NodePoolRequirements, existing.Taints) == key {
+			return
+		}
 	}
-
-	// If we already have a source with no taints, no need to add this one
-	if len(t.domains[domain]) > 0 && len(t.domains[domain][0].Taints) == 0 {
-		return
-	}
-
-	// Add this source to the list
 	t.domains[domain] = append(t.domains[domain], source)
 }
 
