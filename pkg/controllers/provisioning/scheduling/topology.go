@@ -109,18 +109,19 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 	domainGroups := map[string]TopologyDomainGroup{}
 	for npName, its := range instanceTypes {
 		np := nodePoolIndex[npName]
-
-		// Build the base NodePool requirements from user-defined labels and requirements
-		// This represents what a pod needs to match to be scheduled on this NodePool
-		baseNodePoolRequirements := scheduling.NewRequirements()
-		baseNodePoolRequirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
-		baseNodePoolRequirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...).Values()...)
+		// This represents what a pod needs to match to schedule on this NodePool
+		// We exclude instance type requirements here because:
+		// 1. Instance type requirements are specific to individual instance types (capacity-type, instance-family, etc.)
+		// 2. Pod nodeSelector/nodeAffinity typically targets NodePool-level constraints (labels, zones, etc.)
+		// 3. Instance type requirements are evaluated separately during scheduling
+		nodePoolRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
+		nodePoolRequirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.ObjectMeta.Labels).Values()...)
 
 		for _, it := range its {
 			// We need to intersect the instance type requirements with the current nodePool requirements.  This
 			// ensures that something like zones from an instance type don't expand the universe of valid domains.
 			requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-			requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
+			requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.ObjectMeta.Labels).Values()...)
 			requirements.Add(it.Requirements.Values()...)
 
 			for topologyKey, requirement := range requirements {
@@ -128,22 +129,21 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 					domainGroups[topologyKey] = NewTopologyDomainGroup()
 				}
 				for _, domain := range requirement.Values() {
-					// Store the base NodePool requirements with each domain
-					// This allows us to later filter domains based on pod requirements
-					domainGroups[topologyKey].Insert(domain, baseNodePoolRequirements, np.Spec.Template.Spec.Taints...)
+					// Store NodePool-level requirements only (excludes instance type requirements)
+					// This allows filtering based on pod's nodeSelector/nodeAffinity without being
+					// affected by instance type specific constraints like capacity-type
+					domainGroups[topologyKey].Insert(domain, nodePoolRequirements, np.Spec.Template.Spec.Taints...)
 				}
 			}
 		}
 
-		requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-		requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
-		for key, requirement := range requirements {
+		for key, requirement := range nodePoolRequirements {
 			if requirement.Operator() == corev1.NodeSelectorOpIn {
 				if _, ok := domainGroups[key]; !ok {
 					domainGroups[key] = NewTopologyDomainGroup()
 				}
 				for _, value := range requirement.Values() {
-					domainGroups[key].Insert(value, baseNodePoolRequirements, np.Spec.Template.Spec.Taints...)
+					domainGroups[key].Insert(value, nodePoolRequirements, np.Spec.Template.Spec.Taints...)
 				}
 			}
 		}
