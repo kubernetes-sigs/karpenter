@@ -184,7 +184,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 		if err := p.Validate(ctx, po); err != nil {
 			// Mark in memory that this pod is unschedulable
 			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil, nil)
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
+			log.FromContext(ctx).WithValues("Pod", client.ObjectKeyFromObject(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			// Don't create pod events for pods that are specifically avoiding scheduling to Karpenter-managed capacity
 			if !errors.Is(err, KarpenterManagedLabelDoesNotExistError) {
 				p.recorder.Publish(scheduler.PodFailedToScheduleEvent(po, err))
@@ -251,7 +251,7 @@ func (p *Provisioner) NewScheduler(
 			return false
 		}
 		if !np.StatusConditions().IsTrue(status.ConditionReady) {
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring nodepool, not ready")
+			log.FromContext(ctx).WithValues("NodePool", client.ObjectKeyFromObject(np)).Error(err, "ignoring nodepool, not ready")
 			return false
 		}
 		return np.DeletionTimestamp.IsZero()
@@ -270,17 +270,17 @@ func (p *Provisioner) NewScheduler(
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
 			if nodeoverlay.IsUnevaluatedNodePoolError(err) {
-				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).V(1).Info("skipping, awaiting nodeoverlay evaluation")
+				log.FromContext(ctx).WithValues("NodePool", client.ObjectKeyFromObject(np)).V(1).Info("skipping, awaiting nodeoverlay evaluation")
 				continue
 			}
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, fmt.Errorf("getting instance types, %w", err)
 			}
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
+			log.FromContext(ctx).WithValues("NodePool", client.ObjectKeyFromObject(np)).Error(err, "skipping, unable to resolve instance types")
 			continue
 		}
 		if len(its) == 0 {
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, no resolved instance types found")
+			log.FromContext(ctx).WithValues("NodePool", client.ObjectKeyFromObject(np)).Info("skipping, no resolved instance types found")
 			continue
 		}
 		instanceTypes[np.Name] = its
@@ -394,7 +394,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(results.NewNodeClaims) > 0 {
 		log.FromContext(ctx).WithValues(
 			"Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string {
-				return klog.KObj(p).String()
+				return client.ObjectKeyFromObject(p).String()
 			}), 5),
 			"duration", time.Since(start),
 		).Info("found provisionable pod(s)")
@@ -432,7 +432,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		return req.Key == corev1.LabelInstanceTypeStable
 	})
 
-	log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
+	log.FromContext(ctx).WithValues("NodeClaim", client.ObjectKeyFromObject(nodeClaim), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
 		Info("created nodeclaim")
 
 	if val, ok := nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]; ok {
@@ -534,7 +534,7 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
+			log.FromContext(ctx).WithValues("Pod", client.ObjectKeyFromObject(pod)).Error(err, "failed getting volume topology requirements")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}

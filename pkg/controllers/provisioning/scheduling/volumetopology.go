@@ -81,7 +81,7 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 	}
 
 	log.FromContext(ctx).
-		WithValues("Pod", klog.KObj(pod)).
+		WithValues("Pod", client.ObjectKeyFromObject(pod)).
 		V(1).Info(fmt.Sprintf("adding requirements derived from pod volumes, %s", requirements))
 	return nil
 }
@@ -172,15 +172,15 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 		// Handle cases specifically rejected by kube-scheduler
 		// https://github.com/kubernetes/kubernetes/blob/56f6358c11b78e8e3d39e8cd8ff016ff7c70c56b/pkg/scheduler/framework/plugins/volumebinding/volume_binding.go#L333
 		if !pvc.DeletionTimestamp.IsZero() {
-			return serrors.Wrap(fmt.Errorf("persistentvolumeclaim is being deleted"), "PersistentVolumeClaim", klog.KObj(pvc))
+			return serrors.Wrap(fmt.Errorf("persistentvolumeclaim is being deleted"), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc))
 		}
 		if pvc.Status.Phase == v1.ClaimLost {
-			return serrors.Wrap(fmt.Errorf("persistentvolumeclaim bound to non-existent persistentvolume"), "PersistentVolumeClaim", klog.KObj(pvc), "PersistentVolume", klog.KRef("", pvc.Spec.VolumeName))
+			return serrors.Wrap(fmt.Errorf("persistentvolumeclaim bound to non-existent persistentvolume"), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "PersistentVolume", klog.KRef("", pvc.Spec.VolumeName))
 		}
 		storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
 		if pvc.Spec.VolumeName != "" {
 			if err = v.validateVolume(ctx, pvc.Spec.VolumeName); err != nil {
-				return serrors.Wrap(fmt.Errorf("failed to validate pvc, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "PersistentVolume", klog.KRef("", pvc.Spec.VolumeName), "StorageClass", klog.KRef("", storageClassName))
+				return serrors.Wrap(fmt.Errorf("failed to validate pvc, %w", err), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "PersistentVolume", klog.KRef("", pvc.Spec.VolumeName), "StorageClass", klog.KRef("", storageClassName))
 			}
 			// kube-scheduler treats PVCs that have a volumeName as Immediate volumes
 			// Any PVC that does not contain the "pv.kubernetes.io/bind-completed" annotation is not considered bound
@@ -191,24 +191,24 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 		} else {
 			// PVC is unbound, we can't schedule unless the pod defines a valid storage class
 			if storageClassName == "" {
-				return serrors.Wrap(fmt.Errorf("unbound pvc must define a storage class"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+				return serrors.Wrap(fmt.Errorf("unbound pvc must define a storage class"), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "StorageClass", klog.KRef("", storageClassName))
 			}
 			storageClass := &storagev1.StorageClass{}
 			if err = v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
-				return serrors.Wrap(fmt.Errorf("failed to validate pvc, failed to get storage class, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+				return serrors.Wrap(fmt.Errorf("failed to validate pvc, failed to get storage class, %w", err), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "StorageClass", klog.KRef("", storageClassName))
 			}
 			// Ignore pods than have unbound pvc for volumeBindingMode immediate
 			if lo.FromPtr(storageClass.VolumeBindingMode) == storagev1.VolumeBindingImmediate {
-				return serrors.Wrap(fmt.Errorf("failed to validate pvc, pvc with immediate volume binding mode must be bound"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+				return serrors.Wrap(fmt.Errorf("failed to validate pvc, pvc with immediate volume binding mode must be bound"), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "StorageClass", klog.KRef("", storageClassName))
 			}
 		}
 		// Finally, validate that the driver is in the set of supported drivers
 		driver, err := scheduling.ResolveDriver(log.IntoContext(ctx, logging.NopLogger), v.kubeClient, pod, vol.Name, pvc, lo.FromPtr(pvc.Spec.StorageClassName))
 		if err != nil {
-			return serrors.Wrap(fmt.Errorf("failed to validate pvc, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+			return serrors.Wrap(fmt.Errorf("failed to validate pvc, %w", err), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "StorageClass", klog.KRef("", storageClassName))
 		}
 		if UnsupportedProvisioners.Has(driver) {
-			return serrors.Wrap(fmt.Errorf("failed to validate pvc, provisioner is not supported"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName), "Provisioner", driver)
+			return serrors.Wrap(fmt.Errorf("failed to validate pvc, provisioner is not supported"), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "StorageClass", klog.KRef("", storageClassName), "Provisioner", driver)
 		}
 	}
 	return nil

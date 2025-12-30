@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -218,20 +217,20 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	np := &v1.NodePool{}
 	if err := cc.client.Get(ctx, types.NamespacedName{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}, np); err != nil {
 		failed = true
-		return serrors.Wrap(err, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		return serrors.Wrap(err, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", client.ObjectKeyFromObject(nodeClaim))
 	}
 	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
 	}); !found {
 		failed = true
-		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", client.ObjectKeyFromObject(nodeClaim))
 	}
 	cc.Lock()
 	defer cc.Unlock()
 	err := cc.internalAddOffering(ctx, np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone], true)
 	if err != nil {
 		failed = true
-		return serrors.Wrap(err, "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np))
+		return serrors.Wrap(err, "nodeclaim", client.ObjectKeyFromObject(nodeClaim), "nodepool", client.ObjectKeyFromObject(np))
 	}
 	cc.nodeClaimSet.Insert(client.ObjectKeyFromObject(nodeClaim).String())
 	return nil
@@ -269,20 +268,20 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	err := cc.client.Get(ctx, client.ObjectKey{Name: nodePoolName}, np)
 	if err != nil {
 		failed = true
-		return serrors.Wrap(err, "nodepool", nodePoolName, "nodeclaim", klog.KObj(nodeClaim))
+		return serrors.Wrap(err, "nodepool", nodePoolName, "nodeclaim", client.ObjectKeyFromObject(nodeClaim))
 	}
 	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
 	}); !found {
 		failed = true
-		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", client.ObjectKeyFromObject(nodeClaim))
 	}
 	cc.Lock()
 	defer cc.Unlock()
 	err = cc.internalRemoveOffering(np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone])
 	if err != nil {
 		failed = true
-		return serrors.Wrap(err, "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np))
+		return serrors.Wrap(err, "nodeclaim", client.ObjectKeyFromObject(nodeClaim), "nodepool", client.ObjectKeyFromObject(np))
 	}
 	cc.nodeClaimSet.Delete(client.ObjectKeyFromObject(nodeClaim).String())
 	return nil

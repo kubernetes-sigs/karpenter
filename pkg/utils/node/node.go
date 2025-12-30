@@ -27,7 +27,6 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -79,7 +78,7 @@ func NewDuplicateNodeClaimError(providerID string, nodeClaims ...*v1.NodeClaim) 
 		error: serrors.Wrap(
 			fmt.Errorf("found duplicate nodeclaims for provider-id"),
 			"provider-id", providerID,
-			"NodeClaims", lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) klog.ObjectRef { return klog.KObj(nc) }),
+			"NodeClaims", lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) client.ObjectKey { return client.ObjectKeyFromObject(nc) }),
 		),
 	}
 }

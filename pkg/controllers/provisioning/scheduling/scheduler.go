@@ -147,10 +147,10 @@ func NewScheduler(
 		if len(nct.InstanceTypeOptions) == 0 {
 			if instanceTypeFilterErr, ok := lo.ErrorsAs[InstanceTypeFilterError](err); ok && instanceTypeFilterErr.minValuesIncompatibleErr != nil {
 				recorder.Publish(NoCompatibleInstanceTypes(np, true))
-				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, nodepool requirements filtered out all instance types", "minValuesIncompatibleErr", instanceTypeFilterErr.minValuesIncompatibleErr)
+				log.FromContext(ctx).WithValues("NodePool", client.ObjectKeyFromObject(np)).Info("skipping, nodepool requirements filtered out all instance types", "minValuesIncompatibleErr", instanceTypeFilterErr.minValuesIncompatibleErr)
 			} else {
 				recorder.Publish(NoCompatibleInstanceTypes(np, false))
-				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, nodepool requirements filtered out all instance types")
+				log.FromContext(ctx).WithValues("NodePool", client.ObjectKeyFromObject(np)).Info("skipping, nodepool requirements filtered out all instance types")
 			}
 			return nil, false
 		}
@@ -247,10 +247,10 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 		}
 		if IsDRAError(err) {
 			recorder.Publish(PodFailedToScheduleEvent(p, err))
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Info("skipping pod with Dynamic Resource Allocation requirements, not yet supported by Karpenter")
+			log.FromContext(ctx).WithValues("Pod", client.ObjectKeyFromObject(p)).Info("skipping pod with Dynamic Resource Allocation requirements, not yet supported by Karpenter")
 			continue
 		}
-		log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
+		log.FromContext(ctx).WithValues("Pod", client.ObjectKeyFromObject(p)).Error(err, "could not schedule pod")
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {

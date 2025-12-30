@@ -105,7 +105,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			return
 		}
 		log.FromContext(ctx).WithValues(
-			"NodeClaim", klog.KObj(nodeClaims[i]),
+			"NodeClaim", client.ObjectKeyFromObject(nodeClaims[i]),
 			"Node", klog.KRef("", nodeClaims[i].Status.NodeName),
 			"provider-id", nodeClaims[i].Status.ProviderID,
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")

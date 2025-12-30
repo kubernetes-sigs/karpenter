@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -104,7 +103,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, err
 	}
 	if nodeClaim != nil {
-		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", client.ObjectKeyFromObject(nodeClaim)))
 		if nodeClaim.DeletionTimestamp.IsZero() {
 			if err := c.kubeClient.Delete(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
 				return reconcile.Result{}, fmt.Errorf("deleting nodeclaim, %w", err)

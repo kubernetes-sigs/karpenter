@@ -23,7 +23,6 @@ import (
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -68,7 +67,7 @@ func (c *Controller) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.R
 	if !nodeclaimutils.IsManaged(nc, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nc)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", client.ObjectKeyFromObject(nc)))
 
 	stored := n.DeepCopy()
 	n.Labels = lo.Assign(n.Labels, map[string]string{

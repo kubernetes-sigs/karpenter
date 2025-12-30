@@ -184,8 +184,8 @@ func (c Command) LogValues() []any {
 
 	candidateNodes := lo.Map(c.Candidates, func(candidate *Candidate, _ int) interface{} {
 		return map[string]interface{}{
-			"Node":          klog.KObj(candidate.Node),
-			"NodeClaim":     klog.KObj(candidate.NodeClaim),
+			"Node":          client.ObjectKeyFromObject(candidate.Node),
+			"NodeClaim":     client.ObjectKeyFromObject(candidate.NodeClaim),
 			"instance-type": candidate.Labels()[corev1.LabelInstanceTypeStable],
 			"capacity-type": candidate.Labels()[v1.CapacityTypeLabelKey],
 		}

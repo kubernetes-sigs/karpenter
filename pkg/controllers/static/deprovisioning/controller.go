@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -118,7 +117,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 			return
 		}
 
-		log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(candidate)).V(1).Info("deleting nodeclaim")
+		log.FromContext(ctx).WithValues("NodeClaim", client.ObjectKeyFromObject(candidate)).V(1).Info("deleting nodeclaim")
 
 		// Mark the NodeClaim as Deleting in StateNodePool
 		c.cluster.NodePoolState.MarkNodeClaimDeleting(np.Name, candidate.Name)
