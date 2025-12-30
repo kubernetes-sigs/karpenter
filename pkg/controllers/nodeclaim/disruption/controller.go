@@ -26,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -77,7 +76,7 @@ func (c *Controller) Name() string {
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 	if nodeClaim.Status.NodeName != "" {
-		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName)))
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", nodeClaim.Status.NodeName))
 	}
 
 	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) || !nodeClaim.DeletionTimestamp.IsZero() {

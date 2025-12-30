@@ -33,7 +33,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -364,7 +363,7 @@ func (r Results) TruncateInstanceTypes(ctx context.Context, maxInstanceTypes int
 			// Check if the truncated InstanceTypeOptions in each NewNodeClaim from the results still satisfy the minimum requirements
 			// If number of InstanceTypes in the NodeClaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
 			for _, pod := range newNodeClaim.Pods {
-				r.PodErrors[pod] = serrors.Wrap(fmt.Errorf("pod didn’t schedule because NodePool couldn’t meet minValues requirements, %w", err), "NodePool", klog.KRef("", newNodeClaim.NodePoolName))
+				r.PodErrors[pod] = serrors.Wrap(fmt.Errorf("pod didn’t schedule because NodePool couldn’t meet minValues requirements, %w", err), "NodePool", newNodeClaim.NodePoolName)
 			}
 		} else {
 			validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
@@ -600,11 +599,11 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
 			its = filterByRemainingResources(its, remaining)
 			if len(its) == 0 {
-				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", s.nodeClaimTemplates[i].NodePoolName)
 				return true
 			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
-					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
+					"NodePool", s.nodeClaimTemplates[i].NodePoolName,
 				).Info(fmt.Sprintf(
 					"%d out of %d instance types were excluded because they would breach limits",
 					len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),

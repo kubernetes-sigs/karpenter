@@ -28,7 +28,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -106,7 +105,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		}
 		log.FromContext(ctx).WithValues(
 			"NodeClaim", client.ObjectKeyFromObject(nodeClaims[i]),
-			"Node", klog.KRef("", nodeClaims[i].Status.NodeName),
+			"Node", nodeClaims[i].Status.NodeName,
 			"provider-id", nodeClaims[i].Status.ProviderID,
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
 		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{

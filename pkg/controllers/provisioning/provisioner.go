@@ -409,7 +409,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) (string, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.NodePoolName)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", n.NodePoolName))
 	options := option.Resolve(opts...)
 	latest := &v1.NodePool{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {

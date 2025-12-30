@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	csitranslation "k8s.io/csi-translation-lib"
 	"k8s.io/csi-translation-lib/plugins"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -145,7 +144,7 @@ func ResolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, v
 		//  2. The StorageClass never existed and was used to bind the PVC to an existing PV, but that PV was removed
 		// In either of these cases, we should ignore the PVC while computing limits and continue.
 		if errors.IsNotFound(err) {
-			log.FromContext(ctx).WithValues("volume", volumeName, "Pod", client.ObjectKeyFromObject(pod), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "StorageClass", klog.KRef("", storageClassName)).V(1).Info(fmt.Sprintf("failed tracking CSI volume limits for volume with unbound PVC, %s", err))
+			log.FromContext(ctx).WithValues("volume", volumeName, "Pod", client.ObjectKeyFromObject(pod), "PersistentVolumeClaim", client.ObjectKeyFromObject(pvc), "StorageClass", storageClassName).V(1).Info(fmt.Sprintf("failed tracking CSI volume limits for volume with unbound PVC, %s", err))
 			return "", nil
 		}
 		return "", err

@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -216,7 +215,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 		initializedStatus := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
-			waitErrs[i] = serrors.Wrap(fmt.Errorf("nodeclaim not initialized"), "NodeClaim", klog.KRef("", nodeClaim.Name))
+			waitErrs[i] = serrors.Wrap(fmt.Errorf("nodeclaim not initialized"), "NodeClaim", nodeClaim.Name)
 			continue
 		}
 		cmd.Replacements[i].Initialized = true

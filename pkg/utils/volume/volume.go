@@ -23,7 +23,6 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,7 +40,7 @@ func GetPersistentVolumeClaim(ctx context.Context, kubeClient client.Client, pod
 
 	pvc := &v1.PersistentVolumeClaim{}
 	if err := kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: pvcName}, pvc); err != nil {
-		return nil, serrors.Wrap(fmt.Errorf("getting persistent volume claim, %w", err), "PersistentVolumeClaim", klog.KRef("", pvcName))
+		return nil, serrors.Wrap(fmt.Errorf("getting persistent volume claim, %w", err), "PersistentVolumeClaim", pvcName)
 	}
 	return pvc, nil
 }

@@ -22,7 +22,6 @@ import (
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,7 +55,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 func (c *Controller) Reconcile(ctx context.Context, nc *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 	if nc.Status.NodeName != "" {
-		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nc.Status.NodeName)))
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", nc.Status.NodeName))
 	}
 
 	if !nodeclaimutils.IsManaged(nc, c.cloudProvider) {
