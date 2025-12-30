@@ -21,7 +21,6 @@ import (
 
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
@@ -40,7 +39,7 @@ func NodeOverlay(overrides ...v1alpha1.NodeOverlay) *v1alpha1.NodeOverlay {
 		override.Name = RandomName()
 	}
 	if override.Spec.Requirements == nil {
-		override.Spec.Requirements = []corev1.NodeSelectorRequirement{}
+		override.Spec.Requirements = []v1alpha1.NodeSelectorRequirement{}
 	}
 	no := &v1alpha1.NodeOverlay{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
@@ -53,9 +52,9 @@ func NodeOverlay(overrides ...v1alpha1.NodeOverlay) *v1alpha1.NodeOverlay {
 // ReplaceOverlayRequirements any current requirements on the passed through NodeOverlay with the passed in requirements
 // If any of the keys match between the existing requirements and the new requirements, the new requirement with the same
 // key will replace the old requirement with that key
-func ReplaceOverlayRequirements(nodeOverlay *v1alpha1.NodeOverlay, reqs ...corev1.NodeSelectorRequirement) *v1alpha1.NodeOverlay {
-	keys := sets.New[string](lo.Map(reqs, func(r corev1.NodeSelectorRequirement, _ int) string { return r.Key })...)
-	nodeOverlay.Spec.Requirements = lo.Reject(nodeOverlay.Spec.Requirements, func(r corev1.NodeSelectorRequirement, _ int) bool {
+func ReplaceOverlayRequirements(nodeOverlay *v1alpha1.NodeOverlay, reqs ...v1alpha1.NodeSelectorRequirement) *v1alpha1.NodeOverlay {
+	keys := sets.New[string](lo.Map(reqs, func(r v1alpha1.NodeSelectorRequirement, _ int) string { return r.Key })...)
+	nodeOverlay.Spec.Requirements = lo.Reject(nodeOverlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) bool {
 		return keys.Has(r.Key)
 	})
 	nodeOverlay.Spec.Requirements = append(nodeOverlay.Spec.Requirements, reqs...)

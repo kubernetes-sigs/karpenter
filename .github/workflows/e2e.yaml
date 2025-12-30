@@ -48,6 +48,10 @@ jobs:
       uses: ./.github/actions/install-prometheus
     - name: install pyroscope 
       uses: ./.github/actions/install-pyroscope
+    - name: install ko
+      shell: bash
+      run: |
+        go install github.com/google/ko@latest      
     - name: install kwok and controller
       shell: bash
       run: |

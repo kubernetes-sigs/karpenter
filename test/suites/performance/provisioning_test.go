@@ -20,6 +20,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 )
@@ -33,6 +34,10 @@ var _ = Describe("Performance", func() {
 			env.ExpectCreated(deployment)
 			env.ExpectCreated(nodePool, nodeClass)
 			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, replicas)
+			Eventually(func(g Gomega) {
+				costAfterProvisioning := env.GetNodePoolCost(nodePool.Name)
+				g.Expect(costAfterProvisioning).To(BeNumerically(">", 0))
+			}, 2*time.Minute, time.Second*5).Should(Succeed())
 		})
 	})
 })

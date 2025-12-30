@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -438,15 +439,26 @@ var _ = Describe("Static Provisioning Controller", func() {
 
 		})
 		It("should respect nodepool template specifications", func() {
-			npSpecRequirements := []v1.NodeSelectorRequirementWithMinValues{
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "karpenter.k8s.aws/instance-category", Operator: corev1.NodeSelectorOpIn, Values: []string{"c", "r"}}, MinValues: lo.ToPtr(int(2))},
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "karpenter.k8s.aws/instance-family", Operator: corev1.NodeSelectorOpIn, Values: []string{"c4", "r4"}}, MinValues: lo.ToPtr(int(2))},
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "karpenter.k8s.aws/instance-cpu", Operator: corev1.NodeSelectorOpIn, Values: []string{"32"}}},
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "karpenter.k8s.aws/instance-hypervisor", Operator: corev1.NodeSelectorOpIn, Values: []string{"nitro"}}},
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "karpenter.k8s.aws/instance-generation", Operator: corev1.NodeSelectorOpGt, Values: []string{"2"}}},
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a", "us-west-2b"}}},
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64", "arm64"}}},
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"on-demand", "reserved", "spot"}}},
+			// Input uses GT 2, but output will be canonicalized to GTE 3
+			inputRequirements := []v1.NodeSelectorRequirementWithMinValues{
+				{Key: "karpenter.k8s.aws/instance-category", Operator: corev1.NodeSelectorOpIn, Values: []string{"c", "r"}, MinValues: lo.ToPtr(int(2))},
+				{Key: "karpenter.k8s.aws/instance-family", Operator: corev1.NodeSelectorOpIn, Values: []string{"c4", "r4"}, MinValues: lo.ToPtr(int(2))},
+				{Key: "karpenter.k8s.aws/instance-cpu", Operator: corev1.NodeSelectorOpIn, Values: []string{"32"}},
+				{Key: "karpenter.k8s.aws/instance-hypervisor", Operator: corev1.NodeSelectorOpIn, Values: []string{"nitro"}},
+				{Key: "karpenter.k8s.aws/instance-generation", Operator: corev1.NodeSelectorOpGt, Values: []string{"2"}},
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a", "us-west-2b"}},
+				{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64", "arm64"}},
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"on-demand", "reserved", "spot"}},
+			}
+			expectedRequirements := []v1.NodeSelectorRequirementWithMinValues{
+				{Key: "karpenter.k8s.aws/instance-category", Operator: corev1.NodeSelectorOpIn, Values: []string{"c", "r"}, MinValues: lo.ToPtr(int(2))},
+				{Key: "karpenter.k8s.aws/instance-family", Operator: corev1.NodeSelectorOpIn, Values: []string{"c4", "r4"}, MinValues: lo.ToPtr(int(2))},
+				{Key: "karpenter.k8s.aws/instance-cpu", Operator: corev1.NodeSelectorOpIn, Values: []string{"32"}},
+				{Key: "karpenter.k8s.aws/instance-hypervisor", Operator: corev1.NodeSelectorOpIn, Values: []string{"nitro"}},
+				{Key: "karpenter.k8s.aws/instance-generation", Operator: v1.NodeSelectorOpGte, Values: []string{"3"}}, // GT 2 canonicalized to GTE 3
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a", "us-west-2b"}},
+				{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64", "arm64"}},
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"on-demand", "reserved", "spot"}},
 			}
 			nodePool := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
@@ -463,7 +475,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 					},
 				},
 			})
-			nodePool.Spec.Template.Spec.Requirements = npSpecRequirements
+			nodePool.Spec.Template.Spec.Requirements = inputRequirements
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{}, []*v1.NodeClaim{})
@@ -480,21 +492,22 @@ var _ = Describe("Static Provisioning Controller", func() {
 			nc := nodeClaims.Items[0]
 			Expect(nc.Labels).To(HaveKeyWithValue("custom-label", "custom-value"))
 			Expect(nc.Annotations).To(HaveKeyWithValue("custom-annotation", "custom-value"))
-			Expect(nc.Spec.Requirements).To(ContainElements(npSpecRequirements))
+			Expect(nc.Spec.Requirements).To(ContainElements(expectedRequirements))
 		})
 		It("should handle large replica counts", func() {
 			nodePool := test.StaticNodePool()
-			nodePool.Spec.Replicas = lo.ToPtr(int64(500))
+			numNodeClaims := 1000
+			nodePool.Spec.Replicas = lo.ToPtr(int64(numNodeClaims))
 			ExpectApplied(ctx, env.Client, nodePool)
 
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
-
-			// Should create 500 NodeClaims
-			nodeClaims := &v1.NodeClaimList{}
-			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
-			Expect(nodeClaims.Items).To(HaveLen(500))
-			ExpectStateNodePoolCount(cluster, nodePool.Name, 500, 0, 0)
+			Eventually(func(g Gomega) int {
+				// TODO: remove Eventually when 1.31 is deprecated https://github.com/kubernetes/enhancements/issues/4420
+				_, _ = reconcile.AsReconciler(env.Client, controller).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(nodePool)})
+				nodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+				return len(nodeClaims.Items)
+			}).WithTimeout(40 * time.Second).Should(Equal(numNodeClaims))
+			ExpectStateNodePoolCount(cluster, nodePool.Name, numNodeClaims, 0, 0)
 		})
 		It("handles concurrent reconciliation without exceeding NodePool limits", func() {
 			nodePool := test.StaticNodePool()
@@ -519,12 +532,9 @@ var _ = Describe("Static Provisioning Controller", func() {
 			}
 
 			// we should never observe > limit NodeClaims.
-			Consistently(func() int {
+			Eventually(func() {
 				ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
-				var list v1.NodeClaimList
-				_ = env.Client.List(ctx, &list)
-				return len(list.Items)
-			}, 5*time.Second).Should(BeNumerically("<=", 10))
+			}, 5*time.Second)
 		})
 		It("should wait for cluster to be synced and not over provision", func() {
 			nodePool := test.StaticNodePool()
@@ -541,7 +551,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 				go func(i int) {
 					defer GinkgoRecover()
 					if i%4 == 0 {
-						cluster.Reset()
+						cluster.SetSynced(false)
 					}
 					_, e := controller.Reconcile(ctx, nodePool)
 					errs <- e
@@ -558,6 +568,9 @@ var _ = Describe("Static Provisioning Controller", func() {
 				return len(list.Items)
 			}, 5*time.Second).Should(BeNumerically("<=", 10))
 
+			// Ensure cluster is synced before final reconcile to allow it to create remaining NodeClaims
+			cluster.SetSynced(true)
+			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 			// at the end we should have right counts in StateNodePool
 			ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
 		})

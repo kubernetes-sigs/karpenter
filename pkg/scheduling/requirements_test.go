@@ -605,20 +605,20 @@ var _ = Describe("Requirements", func() {
 				lessThan9,
 			)
 			Expect(reqs.NodeSelectorRequirements()).To(ContainElements(
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "exists", Operator: corev1.NodeSelectorOpExists}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "doesNotExist", Operator: corev1.NodeSelectorOpDoesNotExist}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "inA", Operator: corev1.NodeSelectorOpIn, Values: []string{"A"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "inB", Operator: corev1.NodeSelectorOpIn, Values: []string{"B"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "inAB", Operator: corev1.NodeSelectorOpIn, Values: []string{"A", "B"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "notInA", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"A"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "in1", Operator: corev1.NodeSelectorOpIn, Values: []string{"1"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "in9", Operator: corev1.NodeSelectorOpIn, Values: []string{"9"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "in19", Operator: corev1.NodeSelectorOpIn, Values: []string{"1", "9"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "notIn12", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "greaterThan1", Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "greaterThan9", Operator: corev1.NodeSelectorOpGt, Values: []string{"9"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "lessThan1", Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "lessThan9", Operator: corev1.NodeSelectorOpLt, Values: []string{"9"}}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "exists", Operator: corev1.NodeSelectorOpExists},
+				v1.NodeSelectorRequirementWithMinValues{Key: "doesNotExist", Operator: corev1.NodeSelectorOpDoesNotExist},
+				v1.NodeSelectorRequirementWithMinValues{Key: "inA", Operator: corev1.NodeSelectorOpIn, Values: []string{"A"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "inB", Operator: corev1.NodeSelectorOpIn, Values: []string{"B"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "inAB", Operator: corev1.NodeSelectorOpIn, Values: []string{"A", "B"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "notInA", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"A"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "in1", Operator: corev1.NodeSelectorOpIn, Values: []string{"1"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "in9", Operator: corev1.NodeSelectorOpIn, Values: []string{"9"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "in19", Operator: corev1.NodeSelectorOpIn, Values: []string{"1", "9"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "notIn12", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1", "2"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "greaterThan1", Operator: v1.NodeSelectorOpGte, Values: []string{"2"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "greaterThan9", Operator: v1.NodeSelectorOpGte, Values: []string{"10"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "lessThan1", Operator: v1.NodeSelectorOpLte, Values: []string{"0"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "lessThan9", Operator: v1.NodeSelectorOpLte, Values: []string{"8"}},
 			))
 			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
 		})
@@ -655,22 +655,33 @@ var _ = Describe("Requirements", func() {
 				lessThan9,
 			)
 			Expect(reqs.NodeSelectorRequirements()).To(ContainElements(
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "exists", Operator: corev1.NodeSelectorOpExists}, MinValues: lo.ToPtr(3)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "doesNotExist", Operator: corev1.NodeSelectorOpDoesNotExist}, MinValues: lo.ToPtr(2)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "inA", Operator: corev1.NodeSelectorOpIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "inB", Operator: corev1.NodeSelectorOpIn, Values: []string{"B"}}, MinValues: lo.ToPtr(1)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "inAB", Operator: corev1.NodeSelectorOpIn, Values: []string{"A", "B"}}, MinValues: lo.ToPtr(2)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "notInA", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "in1", Operator: corev1.NodeSelectorOpIn, Values: []string{"1"}}, MinValues: lo.ToPtr(1)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "in9", Operator: corev1.NodeSelectorOpIn, Values: []string{"9"}}, MinValues: lo.ToPtr(1)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "in19", Operator: corev1.NodeSelectorOpIn, Values: []string{"1", "9"}}, MinValues: lo.ToPtr(2)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "notIn12", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}, MinValues: lo.ToPtr(2)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "greaterThan1", Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "greaterThan9", Operator: corev1.NodeSelectorOpGt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "lessThan1", Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)},
-				v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "lessThan9", Operator: corev1.NodeSelectorOpLt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "exists", Operator: corev1.NodeSelectorOpExists, MinValues: lo.ToPtr(3)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "doesNotExist", Operator: corev1.NodeSelectorOpDoesNotExist, MinValues: lo.ToPtr(2)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "inA", Operator: corev1.NodeSelectorOpIn, Values: []string{"A"}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "inB", Operator: corev1.NodeSelectorOpIn, Values: []string{"B"}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "inAB", Operator: corev1.NodeSelectorOpIn, Values: []string{"A", "B"}, MinValues: lo.ToPtr(2)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "notInA", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"A"}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "in1", Operator: corev1.NodeSelectorOpIn, Values: []string{"1"}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "in9", Operator: corev1.NodeSelectorOpIn, Values: []string{"9"}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "in19", Operator: corev1.NodeSelectorOpIn, Values: []string{"1", "9"}, MinValues: lo.ToPtr(2)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "notIn12", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1", "2"}, MinValues: lo.ToPtr(2)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "greaterThan1", Operator: v1.NodeSelectorOpGte, Values: []string{"2"}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "greaterThan9", Operator: v1.NodeSelectorOpGte, Values: []string{"10"}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "lessThan1", Operator: v1.NodeSelectorOpLte, Values: []string{"0"}, MinValues: lo.ToPtr(1)},
+				v1.NodeSelectorRequirementWithMinValues{Key: "lessThan9", Operator: v1.NodeSelectorOpLte, Values: []string{"8"}, MinValues: lo.ToPtr(1)},
 			))
 			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
+		})
+		It("should return both Gte and Lte requirements when both bounds exist", func() {
+			reqs := NewRequirements(
+				NewRequirement("cpu", v1.NodeSelectorOpGte, "8"),
+				NewRequirement("cpu", v1.NodeSelectorOpLte, "8"),
+			)
+			Expect(reqs.NodeSelectorRequirements()).To(ContainElements(
+				v1.NodeSelectorRequirementWithMinValues{Key: "cpu", Operator: v1.NodeSelectorOpGte, Values: []string{"8"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "cpu", Operator: v1.NodeSelectorOpLte, Values: []string{"8"}},
+			))
+			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(2))
 		})
 	})
 	Context("Stringify Requirements", func() {
@@ -692,7 +703,7 @@ var _ = Describe("Requirements", func() {
 				NewRequirement("lessThan9", corev1.NodeSelectorOpLt, "9"),
 			)
 
-			Expect(reqs.String()).To(Equal("doesNotExist DoesNotExist, exists Exists, greaterThan1 Exists >1, greaterThan9 Exists >9, in1 In [1], in19 In [1 9], in9 In [9], inA In [A], inAB In [A B], inB In [B], lessThan1 Exists <1, lessThan9 Exists <9, notIn12 NotIn [1 2], notInA NotIn [A]"))
+			Expect(reqs.String()).To(Equal("doesNotExist DoesNotExist, exists Exists, greaterThan1 Exists >=2, greaterThan9 Exists >=10, in1 In [1], in19 In [1 9], in9 In [9], inA In [A], inAB In [A B], inB In [B], lessThan1 Exists <=0, lessThan9 Exists <=8, notIn12 NotIn [1 2], notInA NotIn [A]"))
 		})
 	})
 })

@@ -82,7 +82,7 @@ test: ## Run tests
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
-	ginkgo \
+	go tool -modfile=go.tools.mod ginkgo \
 		--race \
 		--focus="${FOCUS}" \
 		--timeout=20m \
@@ -92,10 +92,10 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		./pkg/...
 
 vulncheck: ## Verify code vulnerabilities
-	@govulncheck ./pkg/...
+	@go tool -modfile=go.tools.mod govulncheck ./pkg/...
 
 licenses: download ## Verifies dependency licenses
-	! go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
+	! go tool -modfile=go.tools.mod go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
 
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
@@ -110,24 +110,21 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
-	hack/boilerplate.sh
+	go tool -modfile=go.tools.mod nwa config -c add
 	go vet ./...
-	golangci-lint-kube-api-linter run
-	cd kwok/charts && helm-docs
+	go tool -modfile=go.tools.mod golangci-lint-kube-api-linter run
+	cd kwok/charts && go tool -modfile=../../go.tools.mod helm-docs
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
 		if [ "${CI}" = true ]; then\
 			exit 1;\
 		fi;}
-	actionlint -oneline
+	go tool -modfile=go.tools.mod actionlint -oneline
 
 download: ## Recursively "go mod download" on all directories where go.mod exists
 	$(foreach dir,$(MOD_DIRS),cd $(dir) && go mod download $(newline))
 
-toolchain: ## Install developer toolchain
-	./hack/toolchain.sh
-
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test deflake vulncheck licenses verify download toolchain gen_instance_types
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test deflake vulncheck licenses verify download gen_instance_types

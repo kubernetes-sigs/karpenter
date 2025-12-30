@@ -91,7 +91,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "metrics.nodepool")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	nodePool := &v1.NodePool{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodePool); err != nil {
@@ -138,9 +138,13 @@ func makeLabels(nodePool *v1.NodePool, resourceTypeName string) prometheus.Label
 	}
 }
 
+func (c *Controller) Name() string {
+	return "metrics.nodepool"
+}
+
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("metrics.nodepool").
+		Named(c.Name()).
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Complete(c)
 }
