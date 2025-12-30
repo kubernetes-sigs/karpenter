@@ -1066,6 +1066,7 @@ var _ = Describe("Consolidation", func() {
 				corev1.LabelTopologyZone:       mostExpSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
+			ExpectSingletonReconciled(ctx, pricingController)
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -1180,6 +1181,7 @@ var _ = Describe("Consolidation", func() {
 				v1.CapacityTypeLabelKey:        spotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 				corev1.LabelTopologyZone:       spotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
+			ExpectSingletonReconciled(ctx, pricingController)
 
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -1714,7 +1716,8 @@ var _ = Describe("Consolidation", func() {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
 				node = lo.Ternary(spotToSpot, spotNode, node)
 				// Add these spot instance with this special condition to cloud provider instancetypes
-				cloudProvider.InstanceTypes = lo.Ternary(spotToSpot, spotInstances, onDemandInstances)
+				cloudProvider.InstanceTypes = append(cloudProvider.InstanceTypes, lo.Ternary(spotToSpot, spotInstances, onDemandInstances)...)
+				ExpectSingletonReconciled(ctx, pricingController)
 
 				rs := test.ReplicaSet()
 				ExpectApplied(ctx, env.Client, rs)
@@ -2229,6 +2232,7 @@ var _ = Describe("Consolidation", func() {
 				currentInstance,
 				replacementInstance,
 			}
+			ExpectSingletonReconciled(ctx, pricingController)
 
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -2317,6 +2321,7 @@ var _ = Describe("Consolidation", func() {
 				currentInstance,
 				replacementInstance,
 			}
+			ExpectSingletonReconciled(ctx, pricingController)
 
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -2917,6 +2922,7 @@ var _ = Describe("Consolidation", func() {
 				defaultInstanceType,
 				smallInstanceType,
 			}
+			ExpectSingletonReconciled(ctx, pricingController)
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -4468,6 +4474,7 @@ var _ = Describe("Consolidation", func() {
 					v1alpha1.LabelReservationID: mostExpensiveReservationID,
 				}),
 			})
+			ExpectSingletonReconciled(ctx, pricingController)
 			reservedNodeClaim, reservedNode = test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

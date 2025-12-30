@@ -65,8 +65,8 @@ var _ = Describe("Emptiness", func() {
 				Labels: map[string]string{
 					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: leastExpensiveSpotInstance.Name,
-					v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-					corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					v1.CapacityTypeLabelKey:        leastExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       leastExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1.NodeClaimStatus{
