@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
@@ -268,9 +267,6 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	for _, nodePool := range nodePools {
 		allowedDisruptions := nodePool.MustGetAllowedDisruptions(clk, numNodes[nodePool.Name], reason)
 		disruptionBudgetMapping[nodePool.Name] = lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
-		NodePoolAllowedDisruptions.Set(float64(allowedDisruptions), map[string]string{
-			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
-		})
 		if numNodes[nodePool.Name] != 0 && allowedDisruptions == 0 {
 			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(nodePool, reason))
 		}
