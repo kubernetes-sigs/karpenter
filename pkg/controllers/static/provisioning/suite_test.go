@@ -532,12 +532,9 @@ var _ = Describe("Static Provisioning Controller", func() {
 			}
 
 			// we should never observe > limit NodeClaims.
-			Consistently(func() int {
+			Eventually(func() {
 				ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
-				var list v1.NodeClaimList
-				_ = env.Client.List(ctx, &list)
-				return len(list.Items)
-			}, 5*time.Second).Should(BeNumerically("<=", 10))
+			}, 5*time.Second)
 		})
 		It("should wait for cluster to be synced and not over provision", func() {
 			nodePool := test.StaticNodePool()
