@@ -106,7 +106,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// skip any candidates where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool not found (NodePool=%s)", nodePoolName))...)
-		return nil, serrors.Wrap(fmt.Errorf("nodepool not found"), "NodePool", nodePoolName)
+		return nil, serrors.Wrap(fmt.Errorf("nodepool not found"), "NodePool", client.ObjectKey{Name: nodePoolName})
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]

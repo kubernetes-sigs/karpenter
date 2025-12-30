@@ -40,7 +40,7 @@ func GetPersistentVolumeClaim(ctx context.Context, kubeClient client.Client, pod
 
 	pvc := &v1.PersistentVolumeClaim{}
 	if err := kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: pvcName}, pvc); err != nil {
-		return nil, serrors.Wrap(fmt.Errorf("getting persistent volume claim, %w", err), "PersistentVolumeClaim", pvcName)
+		return nil, serrors.Wrap(fmt.Errorf("getting persistent volume claim, %w", err), "PersistentVolumeClaim", client.ObjectKey{Name: pvcName})
 	}
 	return pvc, nil
 }

@@ -105,7 +105,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		}
 		log.FromContext(ctx).WithValues(
 			"NodeClaim", client.ObjectKeyFromObject(nodeClaims[i]),
-			"Node", nodeClaims[i].Status.NodeName,
+			"Node", client.ObjectKey{Name: nodeClaims[i].Status.NodeName},
 			"provider-id", nodeClaims[i].Status.ProviderID,
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
 		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{

@@ -55,7 +55,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 func (c *Controller) Reconcile(ctx context.Context, nc *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 	if nc.Status.NodeName != "" {
-		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", nc.Status.NodeName))
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", client.ObjectKey{Name: nc.Status.NodeName}))
 	}
 
 	if !nodeclaimutils.IsManaged(nc, c.cloudProvider) {

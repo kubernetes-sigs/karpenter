@@ -392,7 +392,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 				if errors.IsNotFound(err) {
 					continue
 				}
-				return serrors.Wrap(fmt.Errorf("getting node, %w", err), "Node", p.Spec.NodeName)
+				return serrors.Wrap(fmt.Errorf("getting node, %w", err), "Node", client.ObjectKey{Name: p.Spec.NodeName})
 			}
 			nodeRequirements = scheduling.NewLabelRequirements(node.Labels)
 

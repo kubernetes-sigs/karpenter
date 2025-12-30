@@ -215,7 +215,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 		initializedStatus := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
-			waitErrs[i] = serrors.Wrap(fmt.Errorf("nodeclaim not initialized"), "NodeClaim", nodeClaim.Name)
+			waitErrs[i] = serrors.Wrap(fmt.Errorf("nodeclaim not initialized"), "NodeClaim", client.ObjectKey{Name: nodeClaim.Name})
 			continue
 		}
 		cmd.Replacements[i].Initialized = true

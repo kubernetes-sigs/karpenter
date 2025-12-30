@@ -789,7 +789,7 @@ func (c *Cluster) updateNodePoolResources(oldNode, newNode *StateNode) {
 func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error {
 	var csiNode storagev1.CSINode
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, &csiNode); err != nil {
-		return client.IgnoreNotFound(serrors.Wrap(fmt.Errorf("getting CSINode to determine volume limit, %w", err), "CSINode", n.Node.Name))
+		return client.IgnoreNotFound(serrors.Wrap(fmt.Errorf("getting CSINode to determine volume limit, %w", err), "CSINode", client.ObjectKey{Name: n.Node.Name}))
 	}
 	for _, driver := range csiNode.Spec.Drivers {
 		if driver.Allocatable == nil {

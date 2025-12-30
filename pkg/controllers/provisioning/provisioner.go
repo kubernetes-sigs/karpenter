@@ -36,7 +36,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -380,7 +379,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(reservedOfferingErrors) != 0 {
 		log.FromContext(ctx).V(1).WithValues(
 			"Pods", pretty.Slice(lo.Map(lo.Keys(reservedOfferingErrors), func(p *corev1.Pod, _ int) string {
-				return klog.KRef(p.Namespace, p.Name).String()
+				return client.ObjectKeyFromObject(p).String()
 			}), 5),
 		).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to limited reserved offering capacity")
 	}
@@ -409,7 +408,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) (string, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", n.NodePoolName))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", client.ObjectKey{Name: n.NodePoolName}))
 	options := option.Resolve(opts...)
 	latest := &v1.NodePool{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {

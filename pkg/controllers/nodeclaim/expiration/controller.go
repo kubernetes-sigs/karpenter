@@ -56,7 +56,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 	if nodeClaim.Status.NodeName != "" {
-		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", nodeClaim.Status.NodeName))
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", client.ObjectKey{Name: nodeClaim.Status.NodeName}))
 	}
 
 	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
