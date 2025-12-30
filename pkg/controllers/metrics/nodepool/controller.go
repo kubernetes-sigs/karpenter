@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,6 +36,8 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
@@ -84,16 +87,20 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clusterCost   *cost.ClusterCost
+	cluster       *state.Cluster
+	clock         clock.Clock
 	metricStore   *metrics.Store
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost, cluster *state.Cluster, clk clock.Clock) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-		metricStore:   metrics.NewStore(),
 		clusterCost:   clusterCost,
+		cluster:       cluster,
+		clock:         clk,
+		metricStore:   metrics.NewStore(),
 	}
 }
 
@@ -112,6 +119,10 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 	c.metricStore.Update(req.String(), c.buildMetrics(nodePool))
+
+	// Update disruption budget metrics
+	c.updateDisruptionBudgetMetrics(ctx, nodePool)
+
 	// periodically update our metrics per nodepool even if nothing has changed
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
@@ -161,4 +172,34 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Named(c.Name()).
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Complete(c)
+}
+
+// updateDisruptionBudgetMetrics updates the allowed_disruptions metric for all disruption reasons
+func (c *Controller) updateDisruptionBudgetMetrics(_ context.Context, nodePool *v1.NodePool) {
+	// Count nodes in this NodePool
+	numNodes := 0
+	for node := range c.cluster.Nodes() {
+		if nodePoolName := node.Labels()[v1.NodePoolLabelKey]; nodePoolName == nodePool.Name {
+			// Only count managed and initialized nodes
+			if node.Managed() && node.Initialized() {
+				// Skip nodes that are terminating
+				if !node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+					numNodes++
+				}
+			}
+		}
+	}
+
+	// Update metrics for all disruption reasons
+	for _, reason := range []v1.DisruptionReason{
+		v1.DisruptionReasonDrifted,
+		v1.DisruptionReasonEmpty,
+		v1.DisruptionReasonUnderutilized,
+	} {
+		allowedDisruptions := nodePool.MustGetAllowedDisruptions(c.clock, numNodes, reason)
+		disruption.NodePoolAllowedDisruptions.Set(float64(allowedDisruptions), map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			metrics.ReasonLabel:   string(reason),
+		})
+	}
 }
