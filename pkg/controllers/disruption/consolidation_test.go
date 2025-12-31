@@ -3033,6 +3033,201 @@ var _ = Describe("Consolidation", func() {
 			})
 			Expect(ok).To(BeTrue())
 		})
+		It("should not consolidate pods onto a destination node that is under its consolidateAfter window", func() {
+			// Override consolidateAfter to a nonzero duration.
+			// Both nodes are leastExpensiveInstance (from BeforeEach), so no cheaper replacement
+			// exists — the only consolidation path is to delete nodes[1] and move its pod
+			// to nodes[0]. With consolidateAfter still active on nodes[0], this should be blocked.
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("1m")
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
+
+			// bind pods to node — 2 on nodes[0], 1 on nodes[1]
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			// Initialize both nodes — this sets the Initialized condition timestamp to ~env.Clock.Now()
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+			// Do NOT advance clock — both nodes are within the 1m consolidateAfter window.
+			// The scheduler should refuse to place non-pending pods onto nodes[0] because it's under consolidateAfter,
+			// blocking the delete of nodes[1] (which would need to reschedule pods[2] onto nodes[0]).
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// No consolidation should happen — destination node is under consolidateAfter
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+
+			// Advance clock past the 1m consolidateAfter window
+			env.Clock.Step(2 * time.Minute)
+
+			// Re-sync cluster state and re-mark nodeClaims as consolidatable after state update
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			for _, nc := range nodeClaims {
+				nc = ExpectExists(ctx, env.Client, nc)
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+				ExpectApplied(ctx, env.Client, nc)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+			}
+			// Reset the disruption controller so consolidation methods are not cached as consolidated
+			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue,
+				disruption.WithMethods(NewMethodsWithNopValidator()...))
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Now consolidation should proceed — consolidateAfter window has expired
+			cmds = queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
+
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+		})
+		It("should consolidate pods onto a destination node with consolidateAfter set to Never", func() {
+			// consolidateAfter: Never means the node never becomes a consolidation *candidate* (source),
+			// but it should still be a valid *destination* for pods during consolidation.
+			// Set up two NodePools: source allows consolidation (0s), destination has Never.
+			destinationNodePool := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+						Budgets:             []v1.Budget{{Nodes: "100%"}},
+						ConsolidateAfter:    v1.MustParseNillableDuration("Never"),
+					},
+				},
+			})
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+
+			// destination node belongs to the "Never" NodePool
+			destinationNodeClaim, destinationNode := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            destinationNodePool.Name,
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pod, nodeClaims[0], nodes[0], destinationNodeClaim, destinationNode, nodePool, destinationNodePool)
+			ExpectManualBinding(ctx, env.Client, pod, nodes[0])
+
+			// Initialize both nodes
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{nodes[0], destinationNode}, []*v1.NodeClaim{nodeClaims[0], destinationNodeClaim})
+
+			// Do NOT advance clock — destination node should still be valid because
+			// consolidateAfter: Never means the node is never "under consolidateAfter"
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Consolidation should succeed — destination node accepts pods regardless of time
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
+
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
+		})
+		It("should replace a node with a cheaper one even when consolidateAfter has not expired", func() {
+			// The replace path launches a new NodeClaim rather than scheduling onto an existing node.
+			// consolidateAfter on the destination should not block replacements since there is no
+			// existing destination node to gate — we're creating a brand new one.
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("1m")
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			// Use the most expensive node as the source — consolidation should replace it with a cheaper one
+			ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
+
+			// bind pod to the expensive node
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// Initialize node and advance clock past consolidateAfter so the SOURCE is eligible
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			env.Clock.Step(2 * time.Minute)
+
+			// Re-sync state after clock advance
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Should create a replacement — the replace path is not blocked by consolidateAfter
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// Should have replaced with a cheaper node
+			remainingNodeClaims := ExpectNodeClaims(ctx, env.Client)
+			remainingNodes := ExpectNodes(ctx, env.Client)
+			Expect(remainingNodeClaims).To(HaveLen(1))
+			Expect(remainingNodes).To(HaveLen(1))
+			Expect(remainingNodeClaims[0].Name).ToNot(Equal(nodeClaim.Name))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
 		It("should consider initialized nodes before uninitialized nodes", func() {
 			defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "default-instance-type",

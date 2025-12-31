@@ -674,7 +674,7 @@ var _ = Describe("Initialization", func() {
 		node.Spec.ProviderID = nodeClaim.Status.ProviderID
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 
 		// Shouldn't consider the node initialized while the NRC taint is present
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
