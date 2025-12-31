@@ -28,6 +28,7 @@ const (
 
 	NodePoolLabel         = "nodepool"
 	ReasonLabel           = "reason"
+	ResourceTypeLabel     = "resource_type"
 	CapacityTypeLabel     = "capacity_type"
 	MinValuesRelaxedLabel = "min_values_relaxed"
 

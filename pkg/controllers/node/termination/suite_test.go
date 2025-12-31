@@ -921,7 +921,7 @@ var _ = Describe("Termination", func() {
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // Drain, VolumeDetachment, InstanceTerminationInitation
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationFinalization
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_duration_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_duration_seconds", map[string]string{metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(m.GetSummary().GetSampleCount()).To(BeNumerically("==", 1))
 		})
@@ -930,10 +930,10 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Drain, VolumeDetachment, InstanceTerminationInitiation
-			ExpectMetricCounterValue(termination.NodesDrainedTotal, 1, map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			ExpectMetricCounterValue(termination.NodesDrainedTotal, 1, map[string]string{metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey]})
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationFinalization
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated_total", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated_total", map[string]string{metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
 		})
@@ -944,7 +944,7 @@ var _ = Describe("Termination", func() {
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // Drain, VolumeDetachment, InstanceTerminationInitation
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationFinalization
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_lifetime_duration_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_lifetime_duration_seconds", map[string]string{metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetHistogram().SampleCount)).To(BeNumerically("==", 1))
 		})
