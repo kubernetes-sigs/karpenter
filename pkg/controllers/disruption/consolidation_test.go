@@ -3033,6 +3033,77 @@ var _ = Describe("Consolidation", func() {
 			})
 			Expect(ok).To(BeTrue())
 		})
+		It("should not consolidate pods onto a destination node that is under its consolidateAfter window", func() {
+			// Override consolidateAfter to a nonzero duration.
+			// Both nodes are leastExpensiveInstance (from BeforeEach), so no cheaper replacement
+			// exists — the only consolidation path is to delete nodes[1] and move its pod
+			// to nodes[0]. With consolidateAfter still active on nodes[0], this should be blocked.
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("1m")
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
+
+			// bind pods to node — 2 on nodes[0], 1 on nodes[1]
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			// Initialize both nodes — this sets the Initialized condition timestamp to ~fakeClock.Now()
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+			// Do NOT advance fakeClock — both nodes are within the 1m consolidateAfter window.
+			// The scheduler should refuse to place non-pending pods onto nodes[0] because it's under consolidateAfter,
+			// blocking the delete of nodes[1] (which would need to reschedule pods[2] onto nodes[0]).
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// No consolidation should happen — destination node is under consolidateAfter
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+
+			// Advance clock past the 1m consolidateAfter window
+			fakeClock.Step(2 * time.Minute)
+
+			// Re-sync cluster state and re-mark nodeClaims as consolidatable after state update
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			for _, nc := range nodeClaims {
+				nc = ExpectExists(ctx, env.Client, nc)
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+				ExpectApplied(ctx, env.Client, nc)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+			}
+			// Reset the disruption controller so consolidation methods are not cached as consolidated
+			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
+			disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue,
+				disruption.WithMethods(NewMethodsWithNopValidator()...))
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Now consolidation should proceed — consolidateAfter window has expired
+			cmds = queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
+
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+		})
 		It("should consider initialized nodes before uninitialized nodes", func() {
 			defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "default-instance-type",

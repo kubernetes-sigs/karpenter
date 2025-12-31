@@ -139,6 +139,10 @@ func IsPreempting(pod *corev1.Pod) bool {
 	return pod.Status.NominatedNodeName != ""
 }
 
+func IsPending(pod *corev1.Pod) bool {
+	return pod.Status.Phase == corev1.PodPending
+}
+
 func IsTerminal(pod *corev1.Pod) bool {
 	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }

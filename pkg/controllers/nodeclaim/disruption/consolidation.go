@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/utils/disruption"
 )
 
 // Consolidation is a nodeclaim sub-controller that adds or removes status conditions on empty nodeclaims based on consolidateAfter
@@ -59,8 +60,7 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 	// If the lastPodEvent is zero, use the time that the nodeclaim was initialized, as that's when Karpenter recognizes that pods could have started scheduling
 	timeToCheck := lo.Ternary(!nodeClaim.Status.LastPodEventTime.IsZero(), nodeClaim.Status.LastPodEventTime.Time, initialized.LastTransitionTime.Time)
 
-	// Consider a node consolidatable by looking at the lastPodEvent status field on the nodeclaim.
-	if c.clock.Since(timeToCheck) < lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration) {
+	if disruption.IsUnderConsolidateAfter(nodePool, nodeClaim, c.clock) {
 		if hasConsolidatableCondition {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
 			log.FromContext(ctx).V(1).Info("removing consolidatable status condition")
