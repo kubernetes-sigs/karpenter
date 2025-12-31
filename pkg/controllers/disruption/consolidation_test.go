@@ -374,7 +374,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
@@ -397,7 +397,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 10))
@@ -419,7 +419,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
@@ -572,7 +572,7 @@ var _ = Describe("Consolidation", func() {
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
+					metrics.NodePoolLabel: np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 2))
@@ -637,7 +637,7 @@ var _ = Describe("Consolidation", func() {
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
+					metrics.NodePoolLabel: np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
@@ -700,7 +700,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
+					metrics.NodePoolLabel: np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
