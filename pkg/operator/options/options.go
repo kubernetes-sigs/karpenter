@@ -46,6 +46,7 @@ const (
 
 var (
 	validLogLevels          = []string{"", "debug", "info", "error"}
+	validLogEncodings       = []string{"json", "console"}
 	validPreferencePolicies = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
 
 	Injectables = []Injectable{&Options{}}
@@ -78,6 +79,7 @@ type Options struct {
 	MemoryLimit                      int64
 	CPURequests                      int64
 	LogLevel                         string
+	LogEncoding                      string
 	LogOutputPaths                   string
 	LogErrorOutputPaths              string
 	BatchMaxDuration                 time.Duration
@@ -121,6 +123,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
 	fs.Int64Var(&o.CPURequests, "cpu-requests", env.WithDefaultInt64("CPU_REQUESTS", 1000), "CPU requests in millicores on the container running the controller.")
 	fs.StringVar(&o.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", "info"), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
+	fs.StringVar(&o.LogEncoding, "log-encoding", env.WithDefaultString("LOG_ENCODING", "json"), "Log encoding format. Can be one of 'json' or 'console'")
 	fs.StringVar(&o.LogOutputPaths, "log-output-paths", env.WithDefaultString("LOG_OUTPUT_PATHS", "stdout"), "Optional comma separated paths for directing log output")
 	fs.StringVar(&o.LogErrorOutputPaths, "log-error-output-paths", env.WithDefaultString("LOG_ERROR_OUTPUT_PATHS", "stderr"), "Optional comma separated paths for logging error output")
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
@@ -140,6 +143,9 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	}
 	if !lo.Contains(validLogLevels, o.LogLevel) {
 		return fmt.Errorf("validating cli flags / env vars, invalid LOG_LEVEL %q", o.LogLevel)
+	}
+	if !lo.Contains(validLogEncodings, o.LogEncoding) {
+		return fmt.Errorf("validating cli flags / env vars, invalid LOG_ENCODING %q, should be 'json' or 'console'", o.LogEncoding)
 	}
 	if !lo.Contains(validPreferencePolicies, PreferencePolicy(o.preferencePolicyRaw)) {
 		return fmt.Errorf("validating cli flags / env vars, invalid PREFERENCE_POLICY %q", o.preferencePolicyRaw)
