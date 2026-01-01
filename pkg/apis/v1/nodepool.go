@@ -109,6 +109,16 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+	//nolint:kubeapilinter
+	// NodeRepairUnhealthyThreshold is the maximum percentage or count of unhealthy nodes
+	// in the NodePool before node auto repair is blocked. This prevents cascading failures
+	// while allowing operators to tune the threshold for their use case.
+	// For small NodePools (3-5 nodes), the default 20% may be too restrictive.
+	// This can be specified as a percentage (e.g., "50%") or an absolute count (e.g., "2").
+	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
+	// +kubebuilder:default:="20%"
+	// +optional
+	NodeRepairUnhealthyThreshold string `json:"nodeRepairUnhealthyThreshold,omitempty"`
 }
 
 // Budget defines when Karpenter will restrict the
