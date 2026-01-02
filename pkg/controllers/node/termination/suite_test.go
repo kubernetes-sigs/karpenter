@@ -439,7 +439,8 @@ var _ = Describe("Termination", func() {
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 
-			podGroups := [][]*corev1.Pod{{podEvict}, {podDaemonEvict}, {podNodeCritical, podClusterCritical}, {podDaemonNodeCritical, podDaemonClusterCritical}}
+			// DaemonSet pods are not evicted during disruption, so only non-DaemonSet pods are included in eviction groups
+			podGroups := [][]*corev1.Pod{{podEvict}, {podNodeCritical, podClusterCritical}}
 			for i, podGroup := range podGroups {
 				node = ExpectNodeExists(ctx, env.Client, node.Name)
 				for _, p := range podGroup {
@@ -463,7 +464,60 @@ var _ = Describe("Termination", func() {
 				ExpectDeleted(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
 			}
 
+			// Verify that DaemonSet pods are still present on the node and were not evicted
+			ExpectPodExists(ctx, env.Client, podDaemonEvict.Name, podDaemonEvict.Namespace)
+			ExpectPodExists(ctx, env.Client, podDaemonNodeCritical.Name, podDaemonNodeCritical.Namespace)
+			ExpectPodExists(ctx, env.Client, podDaemonClusterCritical.Name, podDaemonClusterCritical.Namespace)
+
 			// Reconcile to delete node
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // DrainValidation, VolumeDetachment, InstanceTerminationInitiation
+			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationValidation
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should not evict daemonset pods during node disruption", func() {
+			daemonSet := test.DaemonSet()
+			ExpectApplied(ctx, env.Client, daemonSet)
+
+			regularPod := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			daemonSetPod := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               daemonSet.Name,
+				UID:                daemonSet.UID,
+				Controller:         lo.ToPtr(true),
+				BlockOwnerDeletion: lo.ToPtr(true),
+			}}}})
+
+			ExpectApplied(ctx, env.Client, node, nodeClaim, regularPod, daemonSetPod)
+
+			// Add disrupted taint to node to simulate disruption
+			node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, node)
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
+			// Only the regular pod should be added to the eviction queue
+			ExpectObjectReconciled(ctx, env.Client, queue, regularPod)
+
+			// DaemonSet pod should NOT be in the eviction queue
+			Expect(queue.Has(daemonSetPod)).To(BeFalse())
+
+			// Expect node to exist and be draining
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+
+			// Only regular pod should be terminating
+			EventuallyExpectTerminating(ctx, env.Client, regularPod)
+			ExpectDeleted(ctx, env.Client, regularPod)
+
+			// DaemonSet pod should still be running (not terminating)
+			pod := ExpectPodExists(ctx, env.Client, daemonSetPod.Name, daemonSetPod.Namespace)
+			Expect(pod.DeletionTimestamp).To(BeNil())
+
+			// Reconcile to delete node - node should be deleted even with DaemonSet pod still running
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // DrainValidation, VolumeDetachment, InstanceTerminationInitiation
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationValidation
