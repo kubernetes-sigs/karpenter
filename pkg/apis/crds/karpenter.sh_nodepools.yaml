@@ -158,6 +158,25 @@ spec:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
                       type: string
+                    consolidationPriceImprovementPercentage:
+                      description: |-
+                        consolidationPriceImprovementPercentage is the minimum cost savings percentage required for consolidation.
+                        Only consolidate when replacement nodes cost at least this percentage less than current nodes.
+                        If not specified, uses the operator-level consolidation-price-improvement-percentage setting.
+
+                        For multi-node consolidation involving multiple NodePools with different thresholds,
+                        the most conservative (highest percentage) threshold is used.
+
+                        Examples:
+                          0  = Consolidate for any cost savings (legacy behavior)
+                          10 = Require 10% cost savings
+                          20 = Require 20% cost savings
+                          50 = Require 50% cost savings (very conservative)
+                          100 = Disable price-based consolidation
+                      format: int32
+                      maximum: 100
+                      minimum: 0
+                      type: integer
                   required:
                     - consolidateAfter
                   type: object
