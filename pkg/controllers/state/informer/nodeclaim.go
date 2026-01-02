@@ -18,12 +18,14 @@ package informer
 
 import (
 	"context"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -77,7 +79,15 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 	}
 	c.cluster.UpdateNodeClaim(nodeClaim)
 	if err := c.clusterCost.UpdateNodeClaim(ctx, nodeClaim); err != nil {
-		return reconcile.Result{}, err
+		// Handle transient states gracefully:
+		// - NodePool may not be found (NotFound error) due to deletion or informer lag
+		// - NodePool may not be in owner references yet due to timing of NodeClaim creation
+		// These are expected during normal operations and will be resolved on retry
+		if errors.IsNotFound(err) || strings.Contains(err.Error(), "not found in owner references") {
+			log.FromContext(ctx).V(1).Info("skipping cost tracking due to transient state, will retry", "nodeclaim", nodeClaim.Name, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "error", err.Error())
+		} else {
+			log.FromContext(ctx).Error(err, "failed to process nodeclaim for cost tracking")
+		}
 	}
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil

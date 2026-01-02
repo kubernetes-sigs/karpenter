@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -36,6 +37,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/utils/object"
 )
 
 // NecessaryLabels defines the set of required Kubernetes labels that must be present
@@ -218,10 +220,15 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	err := cc.client.Get(ctx, types.NamespacedName{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}, np)
 	if err != nil && !errors.IsNotFound(err) {
 		failed = true
-		return serrors.Wrap(err, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		// Wrap the error to preserve NotFound status
+		return fmt.Errorf("getting nodepool %s for nodeclaim %s: %w", nodeClaim.Labels[v1.NodePoolLabelKey], client.ObjectKeyFromObject(nodeClaim), err)
 	}
-	if errors.IsNotFound(err) {
-		np.UID = types.UID("manual")
+	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
+	}); !found {
+		failed = true
+		// This could be a transient state where the nodeclaim hasn't been updated yet
+		return fmt.Errorf("nodepool %s not found in owner references for nodeclaim %s", nodeClaim.Labels[v1.NodePoolLabelKey], client.ObjectKeyFromObject(nodeClaim))
 	}
 
 	cc.Lock()
