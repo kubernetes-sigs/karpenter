@@ -87,7 +87,7 @@ const (
 	NodeSelectorOpLte v1.NodeSelectorOperator = "Lte"
 )
 
-// A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
+// A node selector requirement is a selector that contains values, a key, an operator that relates the key and values
 // and minValues that represent the requirement to have at least that many values.
 type NodeSelectorRequirementWithMinValues struct {
 	//nolint:kubeapilinter

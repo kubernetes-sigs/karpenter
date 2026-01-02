@@ -24,7 +24,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// NodeSelectorRequirement extends corev1.NodeSelectorRequirement with Gte and Lte operators.
+// A node selector requirement is a selector that contains values, a key, an operator that relates the key and values
+// to have at least that many values.
 type NodeSelectorRequirement struct {
 	//nolint:kubeapilinter
 	// The label key that the selector applies to.
