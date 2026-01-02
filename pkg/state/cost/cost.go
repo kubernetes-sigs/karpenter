@@ -223,8 +223,8 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
 	}); !found {
-		failed = true
-		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		// Technically not an error, as users can create NodeClaims manually without a NodePool.
+		np.UID = types.UID("manual")
 	}
 	cc.Lock()
 	defer cc.Unlock()
@@ -274,8 +274,8 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
 	}); !found {
-		failed = true
-		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		// Technically not an error, as users can create NodeClaims manually without a NodePool.
+		np.UID = types.UID("manual")
 	}
 	cc.Lock()
 	defer cc.Unlock()
@@ -361,6 +361,13 @@ func (cc *ClusterCost) internalRemoveOffering(np *v1.NodePool, instanceName, cap
 		delete(cc.npCostMap, np.UID)
 	}
 	return nil
+}
+
+func (cc *ClusterCost) Reset() {
+	cc.Lock()
+	defer cc.Unlock()
+	cc.npCostMap = make(map[types.UID]*NodePoolCost)
+	cc.nodeClaimSet = make(sets.Set[string])
 }
 
 // GetClusterCost returns the total cost of all compute resources across
