@@ -77,9 +77,15 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 	}
 	var nodeAffinity *v1.VolumeNodeAffinity
 	if len(options.Zones) != 0 {
-		nodeAffinity = &v1.VolumeNodeAffinity{Required: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: []v1.NodeSelectorRequirement{
-			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: options.Zones},
-		}}}}}
+		nodeAffinity = &v1.VolumeNodeAffinity{
+			Required: &v1.NodeSelector{
+				NodeSelectorTerms: lo.Map(options.Zones, func(zone string, _ int) v1.NodeSelectorTerm {
+					return v1.NodeSelectorTerm{
+						MatchExpressions: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{zone}}},
+					}
+				}),
+			},
+		}
 	}
 	return &v1.PersistentVolume{
 		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
@@ -144,7 +150,12 @@ func StorageClass(overrides ...StorageClassOptions) *storagev1.StorageClass {
 
 	var allowedTopologies []v1.TopologySelectorTerm
 	if options.Zones != nil {
-		allowedTopologies = []v1.TopologySelectorTerm{{MatchLabelExpressions: []v1.TopologySelectorLabelRequirement{{Key: v1.LabelTopologyZone, Values: options.Zones}}}}
+		// Each zone gets its own TopologySelectorTerm, which means zones are ORed (pod can be scheduled in any of these zones)
+		allowedTopologies = lo.Map(options.Zones, func(zone string, _ int) v1.TopologySelectorTerm {
+			return v1.TopologySelectorTerm{
+				MatchLabelExpressions: []v1.TopologySelectorLabelRequirement{{Key: v1.LabelTopologyZone, Values: []string{zone}}},
+			}
+		})
 	}
 	if options.Provisioner == nil {
 		options.Provisioner = lo.ToPtr("test-provisioner")
