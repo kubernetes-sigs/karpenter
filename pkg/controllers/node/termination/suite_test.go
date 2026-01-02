@@ -215,7 +215,7 @@ var _ = Describe("Termination", func() {
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
 
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels[corev1.LabelNodeExcludeBalancers]).Should(Equal("karpenter"))
+			Expect(node.Labels[corev1.LabelNodeExcludeBalancers]).Should(Equal("true"))
 		})
 		It("should not evict pods that tolerate karpenter disruption taint with equal operator", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
