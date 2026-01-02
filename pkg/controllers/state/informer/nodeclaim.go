@@ -18,13 +18,13 @@ package informer
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -68,7 +68,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 			// notify cluster state of the node deletion
 			c.cluster.DeleteNodeClaim(req.Name)
 			if deleteErr := c.clusterCost.DeleteNodeClaim(ctx, nodeClaim); deleteErr != nil {
-				log.FromContext(ctx).Error(deleteErr, "failed to remove nodeclaim from cost tracking")
+				return reconcile.Result{}, fmt.Errorf("failed to remove nodeclaim from cost tracking, %w", deleteErr)
 			}
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -77,11 +77,12 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		return reconcile.Result{}, nil
 	}
 	c.cluster.UpdateNodeClaim(nodeClaim)
-	if err := c.clusterCost.UpdateNodeClaim(ctx, nodeClaim); err != nil {
-		log.FromContext(ctx).Error(err, "failed to process nodeclaim for cost tracking")
+	err := c.clusterCost.UpdateNodeClaim(ctx, nodeClaim)
+	if err != nil {
+		err = fmt.Errorf("failed to process nodeclaim for cost tracking, %w", err)
 	}
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
-	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
+	return reconcile.Result{RequeueAfter: stateRetryPeriod}, err
 }
 
 func (c *NodeClaimController) Register(ctx context.Context, m manager.Manager) error {
