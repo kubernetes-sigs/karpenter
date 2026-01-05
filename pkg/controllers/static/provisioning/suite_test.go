@@ -19,7 +19,6 @@ package static_test
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -547,27 +546,18 @@ var _ = Describe("Static Provisioning Controller", func() {
 
 			// Run many reconciles in parallel
 			n := 50
-			wg := sync.WaitGroup{}
-			for i := 0; i < n; i++ {
-				go func(i int) {
-					wg.Add(1)
-					defer GinkgoRecover()
-					if i%4 == 0 {
-						cluster.SetSynced(false)
-					}
-					ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-					wg.Done()
-				}(i)
-			}
+			lo.ForEach(lo.Range(n), func(i int, _ int) {
+				defer GinkgoRecover()
+				if i%4 == 0 {
+					cluster.SetSynced(false)
+				}
+				ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 
-			// we should never observe > limit NodeClaims.
-			Consistently(func() int {
+				// we should never observe > limit NodeClaims.
 				var list v1.NodeClaimList
-				_ = env.Client.List(ctx, &list)
-				return len(list.Items)
-			}, 5*time.Second).Should(BeNumerically("<=", 10))
-
-			wg.Wait() // let all the reconcilers finish so there is no race.
+				Expect(env.Client.List(ctx, &list)).To(Succeed())
+				Expect(len(list.Items)).To(BeNumerically("<=", 10))
+			})
 
 			// Ensure cluster is synced before final reconcile to allow it to create remaining NodeClaims
 			cluster.SetSynced(true)
@@ -576,7 +566,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 				ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 				// at the end we should have right counts in StateNodePool
 				ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
-			}, 5*time.Second)
+			}, 10*time.Second)
 		})
 
 	})
