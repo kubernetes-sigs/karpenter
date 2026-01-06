@@ -18,6 +18,7 @@ package overlay
 
 import (
 	"context"
+	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -42,7 +43,7 @@ func Decorate(cloudProvider cloudprovider.CloudProvider, kubeClient client.Clien
 func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	its, err := d.CloudProvider.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
-		return []*cloudprovider.InstanceType{}, err
+		return []*cloudprovider.InstanceType{}, fmt.Errorf("getting instance types for nodepool %q, %w", nodePool.Name, err)
 	}
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
 		its, err = d.store.ApplyAll(nodePool.Name, its)
