@@ -111,7 +111,7 @@ func NewControllers(
 	if !options.FromContext(ctx).DisableClusterStateObservability {
 		controllers = append(controllers,
 			metricspod.NewController(kubeClient, cluster),
-			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost),
+			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost, cluster, clock),
 			metricsnode.NewController(cluster),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,

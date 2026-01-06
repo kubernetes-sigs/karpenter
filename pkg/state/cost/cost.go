@@ -218,13 +218,15 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	np := &v1.NodePool{}
 	if err := cc.client.Get(ctx, types.NamespacedName{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}, np); err != nil {
 		failed = true
-		return serrors.Wrap(err, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		// Wrap the error to preserve NotFound status
+		return fmt.Errorf("getting nodepool %s for nodeclaim %s: %w", nodeClaim.Labels[v1.NodePoolLabelKey], client.ObjectKeyFromObject(nodeClaim), err)
 	}
 	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
 	}); !found {
 		failed = true
-		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		// This could be a transient state where the nodeclaim hasn't been updated yet
+		return fmt.Errorf("nodepool %s not found in owner references for nodeclaim %s", nodeClaim.Labels[v1.NodePoolLabelKey], client.ObjectKeyFromObject(nodeClaim))
 	}
 	cc.Lock()
 	defer cc.Unlock()
