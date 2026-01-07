@@ -122,9 +122,13 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
+func (q *Queue) Name() string {
+	return "disruption.queue"
+}
+
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("disruption.queue").
+		Named(q.Name()).
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
@@ -137,7 +141,7 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 }
 
 func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "disruption.queue")
+	ctx = injection.WithControllerName(ctx, q.Name())
 	q.RLock()
 	cmd, exists := q.ProviderIDToCommand[nodeClaim.Status.ProviderID]
 	q.RUnlock()

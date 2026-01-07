@@ -42,9 +42,8 @@ import (
 )
 
 const (
-	resourceType = "resource_type"
-	nodeName     = "node_name"
-	nodePhase    = "phase"
+	nodeName  = "node_name"
+	nodePhase = "phase"
 )
 
 var (
@@ -139,14 +138,14 @@ func initializeMetrics() {
 			Name:      "utilization_percent",
 			Help:      "Utilization of allocatable resources by pod requests",
 		},
-		[]string{resourceType},
+		[]string{metrics.ResourceTypeLabel},
 	)
 }
 
 func nodeLabelNamesWithResourceType() []string {
 	return append(
 		nodeLabelNames(),
-		resourceType,
+		metrics.ResourceTypeLabel,
 	)
 }
 
@@ -174,7 +173,7 @@ func NewController(cluster *state.Cluster) *Controller {
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
-	ctx = injection.WithControllerName(ctx, "metrics.node") //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, c.Name()) //nolint:ineffassign,staticcheck
 
 	nodes := lo.Reject(c.cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
@@ -193,9 +192,13 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: time.Second * 5}, nil
 }
 
+func (c *Controller) Name() string {
+	return "metrics.node"
+}
+
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("metrics.node").
+		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
 }
@@ -230,7 +233,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 		res = append(res, &metrics.StoreMetric{
 			GaugeMetric: ClusterUtilization,
 			Value:       utilizationPercentage,
-			Labels:      map[string]string{resourceType: resourceNameToString(resourceName)},
+			Labels:      map[string]string{metrics.ResourceTypeLabel: resourceNameToString(resourceName)},
 		})
 	}
 
@@ -264,7 +267,7 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 
 func getNodeLabelsWithResourceType(node *corev1.Node, resourceTypeName string) prometheus.Labels {
 	metricLabels := getNodeLabels(node)
-	metricLabels[resourceType] = resourceTypeName
+	metricLabels[metrics.ResourceTypeLabel] = resourceTypeName
 	return metricLabels
 }
 

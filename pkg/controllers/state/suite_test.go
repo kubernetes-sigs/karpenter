@@ -948,18 +948,14 @@ var _ = Describe("Node Resource Level", func() {
 			Spec: v1.NodeClaimSpec{
 				Requirements: []v1.NodeSelectorRequirementWithMinValues{
 					{
-						NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-							Key:      corev1.LabelInstanceTypeStable,
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{cloudProvider.InstanceTypes[0].Name},
-						},
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{cloudProvider.InstanceTypes[0].Name},
 					},
 					{
-						NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-							Key:      corev1.LabelTopologyZone,
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"test-zone-1"},
-						},
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1"},
 					},
 				},
 				NodeClassRef: &v1.NodeClassReference{
