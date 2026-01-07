@@ -52,8 +52,12 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 // Reconcile the resource
+func (c *Controller) Name() string {
+	return "nodepool.hash"
+}
+
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "nodepool.hash")
+	ctx = injection.WithControllerName(ctx, c.Name())
 	if !nodepoolutils.IsManaged(np, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
@@ -80,7 +84,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("nodepool.hash").
+		Named(c.Name()).
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

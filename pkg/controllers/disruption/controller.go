@@ -111,15 +111,19 @@ func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Clien
 	}
 }
 
+func (c *Controller) Name() string {
+	return "disruption"
+}
+
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("disruption").
+		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
-	ctx = injection.WithControllerName(ctx, "disruption")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	// this won't catch if the reconciler loop hangs forever, but it will catch other issues
 	c.logAbnormalRuns(ctx)

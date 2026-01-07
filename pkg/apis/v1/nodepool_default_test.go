@@ -47,10 +47,8 @@ var _ = Describe("CEL/Default", func() {
 						},
 						Requirements: []NodeSelectorRequirementWithMinValues{
 							{
-								NodeSelectorRequirement: v1.NodeSelectorRequirement{
-									Key:      CapacityTypeLabelKey,
-									Operator: v1.NodeSelectorOpExists,
-								},
+								Key:      CapacityTypeLabelKey,
+								Operator: v1.NodeSelectorOpExists,
 							},
 						},
 					},

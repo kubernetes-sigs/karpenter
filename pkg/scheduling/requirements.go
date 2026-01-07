@@ -70,6 +70,15 @@ func NewLabelRequirements(labels map[string]string) Requirements {
 	return requirements
 }
 
+// Clone returns a deep copy of the requirements set.
+func (r Requirements) Clone() Requirements {
+	clone := NewRequirements()
+	for key, requirement := range r {
+		clone[key] = requirement.DeepCopy()
+	}
+	return clone
+}
+
 // NewPodRequirements constructs requirements from a pod and treats any preferred requirements as required.
 func NewPodRequirements(pod *corev1.Pod) Requirements {
 	return newPodRequirements(pod, podRequirementTypeAll)
@@ -118,9 +127,15 @@ func HasPreferredNodeAffinity(p *corev1.Pod) bool {
 }
 
 func (r Requirements) NodeSelectorRequirements() []v1.NodeSelectorRequirementWithMinValues {
-	return lo.Map(lo.Values(r), func(req *Requirement, _ int) v1.NodeSelectorRequirementWithMinValues {
-		return req.NodeSelectorRequirement()
-	})
+	result := make([]v1.NodeSelectorRequirementWithMinValues, 0, len(r))
+	for _, req := range r {
+		if req.gte != nil && req.lte != nil {
+			result = append(result, req.BoundedNodeSelectorRequirements()...)
+		} else {
+			result = append(result, req.NodeSelectorRequirement())
+		}
+	}
+	return result
 }
 
 // Add requirements to provided requirements. Mutates existing requirements

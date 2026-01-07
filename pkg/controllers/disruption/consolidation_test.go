@@ -374,7 +374,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
@@ -397,7 +397,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 10))
@@ -419,7 +419,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
@@ -572,7 +572,7 @@ var _ = Describe("Consolidation", func() {
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
+					metrics.NodePoolLabel: np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 2))
@@ -637,7 +637,7 @@ var _ = Describe("Consolidation", func() {
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
+					metrics.NodePoolLabel: np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
@@ -700,7 +700,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
+					metrics.NodePoolLabel: np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
@@ -1327,10 +1327,9 @@ var _ = Describe("Consolidation", func() {
 		It("spot to spot consolidation should consider the max of default and minimum number of instanceTypeOptions from minValues in requirement for truncation if minimum number of instanceTypeOptions from minValues in requirement is greater than 15.", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpExists,
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpExists,
+
 					MinValues: lo.ToPtr(16),
 				},
 			}
@@ -1448,18 +1447,15 @@ var _ = Describe("Consolidation", func() {
 			// Create a NodePool that has minValues in requirement
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpExists,
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpExists,
+
 					MinValues: lo.ToPtr(2),
 				},
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      v1.CapacityTypeLabelKey,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{v1.CapacityTypeOnDemand},
-					},
+					Key:      v1.CapacityTypeLabelKey,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{v1.CapacityTypeOnDemand},
 				},
 			}
 			currentInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -1548,10 +1544,9 @@ var _ = Describe("Consolidation", func() {
 		It("spot to spot consolidation should consider the default for truncation if minimum number of instanceTypeOptions from minValues in requirement is less than 15.", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpExists,
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpExists,
+
 					MinValues: lo.ToPtr(10),
 				},
 			}
@@ -1670,10 +1665,9 @@ var _ = Describe("Consolidation", func() {
 				// Create a NodePool that has minValues in requirement
 				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 					{
-						NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-							Key:      corev1.LabelInstanceTypeStable,
-							Operator: corev1.NodeSelectorOpExists,
-						},
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpExists,
+
 						MinValues: lo.ToPtr(16),
 					},
 				}
@@ -2345,11 +2339,9 @@ var _ = Describe("Consolidation", func() {
 			// nodePool should require on-demand instance for this test case
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      v1.CapacityTypeLabelKey,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{v1.CapacityTypeOnDemand},
-					},
+					Key:      v1.CapacityTypeLabelKey,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{v1.CapacityTypeOnDemand},
 				},
 			}
 			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
@@ -4750,13 +4742,11 @@ var _ = Describe("Consolidation", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      corev1.LabelInstanceTypeStable,
-										Operator: corev1.NodeSelectorOpIn,
-										Values: lo.Map(cloudProvider.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) string {
-											return it.Name
-										}),
-									},
+									Key:      corev1.LabelInstanceTypeStable,
+									Operator: corev1.NodeSelectorOpIn,
+									Values: lo.Map(cloudProvider.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) string {
+										return it.Name
+									}),
 									MinValues: lo.ToPtr(3),
 								},
 							},

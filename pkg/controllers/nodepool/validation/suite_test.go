@@ -70,11 +70,10 @@ var _ = Describe("Counter", func() {
 	})
 	It("should fail validation with only invalid capacity types", func() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-				Key:      v1.CapacityTypeLabelKey,
-				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{"xspot"}, // Invalid value
-			},
+			Key:      v1.CapacityTypeLabelKey,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{"xspot"}, // Invalid value
+
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
@@ -84,11 +83,10 @@ var _ = Describe("Counter", func() {
 	})
 	It("should pass validation with valid capacity types", func() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-				Key:      v1.CapacityTypeLabelKey,
-				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{v1.CapacityTypeOnDemand}, // Valid value
-			},
+			Key:      v1.CapacityTypeLabelKey,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{v1.CapacityTypeOnDemand}, // Valid value
+
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
@@ -99,11 +97,10 @@ var _ = Describe("Counter", func() {
 	})
 	It("should fail open if invalid and valid capacity types are present", func() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-				Key:      v1.CapacityTypeLabelKey,
-				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{v1.CapacityTypeOnDemand, "xspot"}, // Valid and invalid value
-			},
+			Key:      v1.CapacityTypeLabelKey,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{v1.CapacityTypeOnDemand, "xspot"}, // Valid and invalid value
+
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)

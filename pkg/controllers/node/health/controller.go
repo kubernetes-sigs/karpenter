@@ -70,9 +70,13 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 	}
 }
 
+func (c *Controller) Name() string {
+	return "node.health"
+}
+
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("node.health").
+		Named(c.Name()).
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
 			UpdateFunc: func(e event.UpdateEvent) bool {
 				oldNode := e.ObjectOld.(*corev1.Node)
@@ -104,7 +108,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "node.health")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	// Validate that the node is owned by us
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)

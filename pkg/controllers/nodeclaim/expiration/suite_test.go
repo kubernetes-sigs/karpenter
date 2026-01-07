@@ -99,8 +99,8 @@ var _ = Describe("Expiration", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel: metrics.ExpiredReason,
-				"nodepool":          nodePool.Name,
+				metrics.ReasonLabel:   metrics.ExpiredReason,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 		})
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
@@ -113,8 +113,8 @@ var _ = Describe("Expiration", func() {
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel: metrics.ExpiredReason,
-				"nodepool":          nodePool.Name,
+				metrics.ReasonLabel:   metrics.ExpiredReason,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 		})
 	})
@@ -187,13 +187,13 @@ var _ = Describe("Expiration", func() {
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-			metrics.ReasonLabel: metrics.ExpiredReason,
-			"nodepool":          nodePool.Name,
+			metrics.ReasonLabel:   metrics.ExpiredReason,
+			metrics.NodePoolLabel: nodePool.Name,
 		})
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-			metrics.ReasonLabel: metrics.ExpiredReason,
-			"nodepool":          nodePool.Name,
+			metrics.ReasonLabel:   metrics.ExpiredReason,
+			metrics.NodePoolLabel: nodePool.Name,
 		})
 	})
 })

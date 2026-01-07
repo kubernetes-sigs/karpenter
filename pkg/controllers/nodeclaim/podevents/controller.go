@@ -97,9 +97,13 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	return reconcile.Result{}, nil
 }
 
+func (c *Controller) Name() string {
+	return "nodeclaim.podevents"
+}
+
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("nodeclaim.podevents").
+		Named(c.Name()).
 		For(&corev1.Pod{}).
 		WithEventFilter(predicate.TypedFuncs[client.Object]{
 			// If a pod is bound to a node or goes terminal

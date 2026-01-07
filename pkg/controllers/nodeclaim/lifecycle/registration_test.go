@@ -598,10 +598,11 @@ var _ = Describe("Registration", func() {
 		})
 	})
 	It("should not update NodeRegistrationHealthy status condition if nodePool owning the nodeClaim is deleted", func() {
+		nodePoolName := test.RandomName()
 		nodePool = test.NodePool(
 			v1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-nodepool",
+					Name: nodePoolName,
 				},
 			},
 		)
@@ -631,7 +632,7 @@ var _ = Describe("Registration", func() {
 		nodePool = test.NodePool(
 			v1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-nodepool",
+					Name: nodePoolName,
 				},
 			},
 		)

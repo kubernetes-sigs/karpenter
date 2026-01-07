@@ -55,9 +55,13 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 	}
 }
 
+func (c *Controller) Name() string {
+	return "nodepool.registrationhealth"
+}
+
 //nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "nodepool.registrationhealth")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	nodeClass, err := nodepoolutils.GetNodeClass(ctx, c.kubeClient, nodePool, c.cloudProvider)
 	if err != nil {
@@ -105,7 +109,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	b := controllerruntime.NewControllerManagedBy(m).
-		Named("nodepool.registrationhealth").
+		Named(c.Name()).
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)})
 	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {

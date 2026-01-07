@@ -391,11 +391,15 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 	return &expirationTime, nil
 }
 
+func (c *Controller) Name() string {
+	return "node.termination"
+}
+
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
 	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("node.termination").
+		Named(c.Name()).
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(
 			controller.Options{

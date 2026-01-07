@@ -109,15 +109,19 @@ func (p *Provisioner) Trigger(uid types.UID) {
 	p.batcher.Trigger(uid)
 }
 
+func (p *Provisioner) Name() string {
+	return "provisioner"
+}
+
 func (p *Provisioner) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("provisioner").
+		Named(p.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(p))
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, err error) {
-	ctx = injection.WithControllerName(ctx, "provisioner")
+	ctx = injection.WithControllerName(ctx, p.Name())
 
 	// Batch pods
 	if triggered := p.batcher.Wait(ctx); !triggered {
@@ -578,7 +582,9 @@ func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm)
 		for _, requirement := range term.MatchExpressions {
 			errs = multierr.Append(errs, v1.ValidateRequirement(ctx,
 				v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: requirement,
+					Key:      requirement.Key,
+					Operator: requirement.Operator,
+					Values:   requirement.Values,
 				}))
 		}
 	}

@@ -127,7 +127,7 @@ var _ = Describe("Validation", func() {
 	It("should pass with a single overlay", func() {
 		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
 					{
 						Key:      corev1.LabelInstanceTypeStable,
 						Operator: corev1.NodeSelectorOpIn,
@@ -148,7 +148,7 @@ var _ = Describe("Validation", func() {
 		It("should fail validation for invalid requirements values", func() {
 			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							// Key will fail runtime validation when applying the node overlay.
 							// This will be due to the length of the key
@@ -171,7 +171,7 @@ var _ = Describe("Validation", func() {
 			v1.WellKnownResources.Insert(corev1.ResourceName("testResource"))
 			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -202,7 +202,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelArchStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -218,7 +218,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.CapacityTypeLabelKey,
 								Operator: corev1.NodeSelectorOpExists,
@@ -258,7 +258,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelArchStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -274,7 +274,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelOSStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -346,7 +346,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelTopologyZone,
 								Operator: corev1.NodeSelectorOpIn,
@@ -362,7 +362,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.CapacityTypeLabelKey,
 								Operator: corev1.NodeSelectorOpExists,
@@ -391,7 +391,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.CapacityTypeLabelKey,
 								Operator: corev1.NodeSelectorOpExists,
@@ -406,7 +406,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.CapacityTypeLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
@@ -436,7 +436,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelTopologyZone,
 								Operator: corev1.NodeSelectorOpIn,
@@ -452,7 +452,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.CapacityTypeLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
@@ -481,7 +481,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelTopologyZone,
 								Operator: corev1.NodeSelectorOpIn,
@@ -497,7 +497,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.CapacityTypeLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
@@ -531,7 +531,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -547,7 +547,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -581,7 +581,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -597,7 +597,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -631,7 +631,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -647,7 +647,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpNotIn,
@@ -680,7 +680,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -696,7 +696,7 @@ var _ = Describe("Validation", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -730,7 +730,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-a",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -748,7 +748,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-b",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -780,7 +780,7 @@ var _ = Describe("Validation", func() {
 					Name: "conflicting-overlay-1",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -798,7 +798,7 @@ var _ = Describe("Validation", func() {
 					Name: "good-overlay-1",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -816,7 +816,7 @@ var _ = Describe("Validation", func() {
 					Name: "conflicting-overlay-2",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -851,7 +851,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-a",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -869,7 +869,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-b",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -901,7 +901,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-a",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -919,7 +919,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-b",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpNotIn,
@@ -951,7 +951,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-a",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -969,7 +969,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-b",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -1001,7 +1001,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-a",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -1019,7 +1019,7 @@ var _ = Describe("Validation", func() {
 					Name: "overlay-b",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -1055,7 +1055,7 @@ var _ = Describe("Instance Type Controller", func() {
 				func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
 					overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 						Spec: v1alpha1.NodeOverlaySpec{
-							Requirements: []corev1.NodeSelectorRequirement{
+							Requirements: []v1alpha1.NodeSelectorRequirement{
 								{
 									Key:      v1.NodePoolLabelKey,
 									Operator: corev1.NodeSelectorOpIn,
@@ -1095,7 +1095,7 @@ var _ = Describe("Instance Type Controller", func() {
 				func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay, expectedValueOne float64, expectedValueTwo float64) {
 					overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 						Spec: v1alpha1.NodeOverlaySpec{
-							Requirements: []corev1.NodeSelectorRequirement{
+							Requirements: []v1alpha1.NodeSelectorRequirement{
 								{
 									Key:      v1.NodePoolLabelKey,
 									Operator: corev1.NodeSelectorOpIn,
@@ -1108,7 +1108,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
 					overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 						Spec: v1alpha1.NodeOverlaySpec{
-							Requirements: []corev1.NodeSelectorRequirement{
+							Requirements: []v1alpha1.NodeSelectorRequirement{
 								{
 									Key:      v1.NodePoolLabelKey,
 									Operator: corev1.NodeSelectorOpIn,
@@ -1162,7 +1162,7 @@ var _ = Describe("Instance Type Controller", func() {
 					})
 					overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 						Spec: v1alpha1.NodeOverlaySpec{
-							Requirements: []corev1.NodeSelectorRequirement{
+							Requirements: []v1alpha1.NodeSelectorRequirement{
 								{
 									Key:      "test-label",
 									Operator: corev1.NodeSelectorOpIn,
@@ -1202,7 +1202,7 @@ var _ = Describe("Instance Type Controller", func() {
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								// Key will fail runtime validation when applying the node overlay.
 								// This will be due to the length of the key
@@ -1237,7 +1237,7 @@ var _ = Describe("Instance Type Controller", func() {
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1267,7 +1267,7 @@ var _ = Describe("Instance Type Controller", func() {
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1320,7 +1320,7 @@ var _ = Describe("Instance Type Controller", func() {
 				}
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.CapacityTypeLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1386,7 +1386,7 @@ var _ = Describe("Instance Type Controller", func() {
 				}
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelTopologyZone,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1460,7 +1460,7 @@ var _ = Describe("Instance Type Controller", func() {
 				}
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelTopologyZone,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1473,7 +1473,7 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.CapacityTypeLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1570,7 +1570,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Name: "a-test-100",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelTopologyZone,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1587,7 +1587,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Name: "b-test-100",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelTopologyZone,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1645,7 +1645,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1661,7 +1661,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1716,23 +1716,21 @@ var _ = Describe("Instance Type Controller", func() {
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay) {
 				cloudProvider.InstanceTypes = nil
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"default-instance-type", "gpu-vendor-instance-type", "gpu-vendor-b-instance-type"},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"default-instance-type", "gpu-vendor-instance-type", "gpu-vendor-b-instance-type"},
+				})
 				nodePoolTwo = test.ReplaceRequirements(test.NodePool(), v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"gpu-vendor-b-instance-type"},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"gpu-vendor-b-instance-type"},
+				})
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "overlay-a",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1749,7 +1747,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Name: "overlay-b",
 					},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      corev1.LabelInstanceTypeStable,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1825,7 +1823,7 @@ var _ = Describe("Instance Type Controller", func() {
 			It("should only apply override for nodepool that defined in the overlay requirements", func() {
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.NodePoolLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1861,7 +1859,7 @@ var _ = Describe("Instance Type Controller", func() {
 			It("should pass with conflicting capcaity update overlays for all nodepools", func() {
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.NodePoolLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1876,7 +1874,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      v1.NodePoolLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
@@ -1920,7 +1918,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      "test-label",
 								Operator: corev1.NodeSelectorOpIn,
@@ -1960,7 +1958,7 @@ var _ = Describe("Instance Type Controller", func() {
 		It("should not apply capacity adjustments for invalid overlay", func() {
 			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							// Key will fail runtime validation when applying the node overlay.
 							// This will be due to the length of the key
@@ -1989,7 +1987,7 @@ var _ = Describe("Instance Type Controller", func() {
 		It("should not apply capacity adjustments for instances types that do not overlap", func() {
 			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2017,7 +2015,7 @@ var _ = Describe("Instance Type Controller", func() {
 		It("should apply capacity adjustments for instances types", func() {
 			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2088,7 +2086,7 @@ var _ = Describe("Instance Type Controller", func() {
 			}
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelTopologyZone,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2103,7 +2101,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      v1.CapacityTypeLabelKey,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2166,7 +2164,7 @@ var _ = Describe("Instance Type Controller", func() {
 			}
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2181,7 +2179,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2259,7 +2257,7 @@ var _ = Describe("Instance Type Controller", func() {
 			}
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelTopologyZone,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2274,7 +2272,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelTopologyZone,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2320,7 +2318,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Name: "overlay-a",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2338,7 +2336,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Name: "overlay-b",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2385,23 +2383,21 @@ var _ = Describe("Instance Type Controller", func() {
 		It("should that there is not a partial application for nodepools", func() {
 			cloudProvider.InstanceTypes = nil
 			nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"default-instance-type", "gpu-vendor-instance-type", "gpu-vendor-b-instance-type"},
-				}})
+				Key:      corev1.LabelInstanceTypeStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"default-instance-type", "gpu-vendor-instance-type", "gpu-vendor-b-instance-type"},
+			})
 			nodePoolTwo := test.ReplaceRequirements(test.NodePool(), v1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"gpu-vendor-b-instance-type"},
-				}})
+				Key:      corev1.LabelInstanceTypeStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"gpu-vendor-b-instance-type"},
+			})
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "overlay-a",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2419,7 +2415,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Name: "overlay-b",
 				},
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []corev1.NodeSelectorRequirement{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
@@ -2487,7 +2483,7 @@ var _ = Describe("Instance Type Controller", func() {
 	It("should apply pricing and capacity adjustment from two overlays on the same instance type", func() {
 		overlayPrice := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
 					{
 						Key:      corev1.LabelInstanceTypeStable,
 						Operator: corev1.NodeSelectorOpIn,
@@ -2500,7 +2496,7 @@ var _ = Describe("Instance Type Controller", func() {
 		})
 		overlayCapacity := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
 					{
 						Key:      corev1.LabelInstanceTypeStable,
 						Operator: corev1.NodeSelectorOpIn,
@@ -2532,7 +2528,7 @@ var _ = Describe("Instance Type Controller", func() {
 		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{}
 		overlayPrice := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
 					{
 						Key:      corev1.LabelInstanceTypeStable,
 						Operator: corev1.NodeSelectorOpIn,
@@ -2559,7 +2555,7 @@ var _ = Describe("Instance Type Controller", func() {
 		cloudProvider.ErrorsForNodePool = map[string]error{nodePool.Name: fmt.Errorf("test error")}
 		overlayPrice := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
 					{
 						Key:      corev1.LabelInstanceTypeStable,
 						Operator: corev1.NodeSelectorOpIn,
@@ -2587,7 +2583,7 @@ var _ = Describe("Instance Type Controller", func() {
 		})
 		overlayPrice := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
 					{
 						Key:      corev1.LabelInstanceTypeStable,
 						Operator: corev1.NodeSelectorOpIn,

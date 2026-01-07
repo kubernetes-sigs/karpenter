@@ -66,8 +66,12 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, recorder ev
 
 // Reconcile the resource
 // Requeue after computing Static NodePool to ensure we don't miss any events
+func (c *Controller) Name() string {
+	return "static.provisioning"
+}
+
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "static.provisioning")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	if !nodepoolutils.IsManaged(np, c.cloudProvider) || !np.StatusConditions().Root().IsTrue() || np.Spec.Replicas == nil {
 		return reconcile.Result{}, nil
@@ -118,7 +122,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("static.provisioning").
+		Named(c.Name()).
 		// Reoncile on NodePool Create and Update (when replicas change or when NodePool status moves from NotReady to Ready)
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), nodepoolutils.IsStaticPredicateFuncs(),
 			predicate.Funcs{
