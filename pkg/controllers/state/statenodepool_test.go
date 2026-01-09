@@ -51,31 +51,31 @@ var _ = Describe("NodePoolState", func() {
 
 	Context("ReserveNodeCount", func() {
 		It("should reserve requested capacity when available", func() {
-			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 3)
+			granted := cluster.ReserveNodeCount(nodePool.Name, 5, 3)
 			Expect(granted).To(Equal(int64(3)))
 
 			// Should be able to reserve remaining capacity
-			granted = cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 2)
+			granted = cluster.ReserveNodeCount(nodePool.Name, 5, 2)
 			Expect(granted).To(Equal(int64(2)))
 		})
 
 		It("should grant partial capacity when requested exceeds available", func() {
 			// Reserve most capacity first
-			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 4)
+			granted := cluster.ReserveNodeCount(nodePool.Name, 5, 4)
 			Expect(granted).To(Equal(int64(4)))
 
 			// Request more than available, should get only what's left
-			granted = cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 5)
+			granted = cluster.ReserveNodeCount(nodePool.Name, 5, 5)
 			Expect(granted).To(Equal(int64(1)))
 		})
 
 		It("should return zero when no capacity available", func() {
 			// Reserve all capacity
-			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 5)
+			granted := cluster.ReserveNodeCount(nodePool.Name, 5, 5)
 			Expect(granted).To(Equal(int64(5)))
 
 			// No more capacity available
-			granted = cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 1)
+			granted = cluster.ReserveNodeCount(nodePool.Name, 5, 1)
 			Expect(granted).To(Equal(int64(0)))
 		})
 
@@ -85,11 +85,11 @@ var _ = Describe("NodePoolState", func() {
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 			// Should have 4 slots available (5 limit - 1 running)
-			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 4)
+			granted := cluster.ReserveNodeCount(nodePool.Name, 5, 4)
 			Expect(granted).To(Equal(int64(4)))
 
 			// No more capacity
-			granted = cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 1)
+			granted = cluster.ReserveNodeCount(nodePool.Name, 5, 1)
 			Expect(granted).To(Equal(int64(0)))
 		})
 
@@ -100,7 +100,7 @@ var _ = Describe("NodePoolState", func() {
 			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
 
 			// Should have 4 slots available (5 limit - 1 deleting)
-			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 4)
+			granted := cluster.ReserveNodeCount(nodePool.Name, 5, 4)
 			Expect(granted).To(Equal(int64(4)))
 		})
 
@@ -115,7 +115,7 @@ var _ = Describe("NodePoolState", func() {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, limit, requestPerGoroutine)
+					granted := cluster.ReserveNodeCount(nodePool.Name, limit, requestPerGoroutine)
 					atomic.AddInt64(&totalGranted, granted)
 				}()
 			}
@@ -130,37 +130,37 @@ var _ = Describe("NodePoolState", func() {
 	Context("ReleaseNodeCount", func() {
 		It("should release reserved capacity", func() {
 			// Reserve some capacity
-			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 3)
+			granted := cluster.ReserveNodeCount(nodePool.Name, 5, 3)
 			Expect(granted).To(Equal(int64(3)))
 
 			// Should have 2 slots available
-			granted = cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 3)
+			granted = cluster.ReserveNodeCount(nodePool.Name, 5, 3)
 			Expect(granted).To(Equal(int64(2)))
 
 			// Release 1 slot
-			cluster.NodePoolState.ReleaseNodeCount(nodePool.Name, 4)
+			cluster.ReleaseNodeCount(nodePool.Name, 4)
 
 			// Should now have 4 slots available
-			granted = cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 4)
+			granted = cluster.ReserveNodeCount(nodePool.Name, 5, 4)
 			Expect(granted).To(Equal(int64(4)))
 		})
 
 		It("should handle releasing more than reserved", func() {
 			// Reserve some capacity
-			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 2)
+			granted := cluster.ReserveNodeCount(nodePool.Name, 5, 2)
 			Expect(granted).To(Equal(int64(2)))
 
 			// Release more than reserved - should not go negative
-			cluster.NodePoolState.ReleaseNodeCount(nodePool.Name, 5)
+			cluster.ReleaseNodeCount(nodePool.Name, 5)
 
 			// Should have full capacity available
-			granted = cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 5)
+			granted = cluster.ReserveNodeCount(nodePool.Name, 5, 5)
 			Expect(granted).To(Equal(int64(5)))
 		})
 
 		It("should be thread-safe with concurrent releases", func() {
 			// Reserve capacity first
-			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 10, 10)
+			granted := cluster.ReserveNodeCount(nodePool.Name, 10, 10)
 			Expect(granted).To(Equal(int64(10)))
 
 			var wg sync.WaitGroup
@@ -171,14 +171,14 @@ var _ = Describe("NodePoolState", func() {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					cluster.NodePoolState.ReleaseNodeCount(nodePool.Name, releasePerGoroutine)
+					cluster.ReleaseNodeCount(nodePool.Name, releasePerGoroutine)
 				}()
 			}
 
 			wg.Wait()
 
 			// Should have full capacity available after releases
-			granted = cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 10, 100)
+			granted = cluster.ReserveNodeCount(nodePool.Name, 10, 100)
 			Expect(granted).To(Equal(int64(10)))
 		})
 	})

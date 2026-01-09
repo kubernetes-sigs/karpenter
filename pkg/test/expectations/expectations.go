@@ -771,7 +771,7 @@ func ExpectParallelized(fs ...func()) {
 func ExpectStateNodePoolCount(cluster *state.Cluster, npName string, r, d, pd int) {
 	GinkgoHelper()
 
-	running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(npName)
+	running, deleting, pendingdisruption := cluster.GetNodeCount(npName)
 	Expect(running).To(Equal(r))
 	Expect(deleting).To(Equal(d))
 	Expect(pendingdisruption).To(Equal(pd))

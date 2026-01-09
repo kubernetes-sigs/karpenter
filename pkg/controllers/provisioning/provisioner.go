@@ -167,7 +167,7 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 		// the reservation and allow the provisioner to create new NodeClaims in a subsequent attempt.
 		// NOTE: Only applies to static NodePools since node limits are not supported for dynamic NodePools
 		if nodeClaims[i].IsStaticNodeClaim {
-			p.cluster.NodePoolState.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
+			p.cluster.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
 		}
 	})
 	return nodeClaimNames, multierr.Combine(errs...)

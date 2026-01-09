@@ -87,7 +87,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 	// We dont have to wait for cluster sync as we cannot really have internal state representing more NodeClaims than actual
 	// During controller crashes we gradually populate our cluster/NodePoolState, as and when we populate we delete NC if we are over-provisioned
-	runningNodeClaims, _, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
+	runningNodeClaims, _, _ := c.cluster.GetNodeCount(np.Name)
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
 	// To avoid race conditions between deprovisioning and the disruption controller,
 	// we only include running NodeClaims when counting for deprovisioning purposes.
@@ -121,7 +121,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(candidate)).V(1).Info("deleting nodeclaim")
 
 		// Mark the NodeClaim as Deleting in StateNodePool
-		c.cluster.NodePoolState.MarkNodeClaimDeleting(np.Name, candidate.Name)
+		c.cluster.MarkNodeClaimDeleting(np.Name, candidate.Name)
 	})
 
 	if scaleDownErr := multierr.Combine(scaleDownErrs...); scaleDownErr != nil {

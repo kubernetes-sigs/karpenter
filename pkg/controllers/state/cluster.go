@@ -52,6 +52,9 @@ import (
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
+	PodResources
+	NodePoolState
+
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clock         clock.Clock
@@ -64,8 +67,6 @@ type Cluster struct {
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	nodePoolResources         map[string]corev1.ResourceList  // node pool name -> resource list
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
-
-	NodePoolState *NodePoolState
 
 	podAcks                         sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
 	podsSchedulingAttempted         sync.Map // pod namespaced name -> time when Karpenter tried to schedule a pod
@@ -89,18 +90,17 @@ type Cluster struct {
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
-		clock:                     clk,
-		kubeClient:                client,
-		cloudProvider:             cloudProvider,
-		nodes:                     map[string]*StateNode{},
-		bindings:                  map[types.NamespacedName]string{},
-		daemonSetPods:             sync.Map{},
-		nodeNameToProviderID:      map[string]string{},
-		nodeClaimNameToProviderID: map[string]string{},
-		nodePoolResources:         map[string]corev1.ResourceList{},
-
-		NodePoolState: NewNodePoolState(),
-
+		PodResources:                    NewPodResources(),
+		NodePoolState:                   NewNodePoolState(),
+		clock:                           clk,
+		kubeClient:                      client,
+		cloudProvider:                   cloudProvider,
+		nodes:                           map[string]*StateNode{},
+		bindings:                        map[types.NamespacedName]string{},
+		daemonSetPods:                   sync.Map{},
+		nodeNameToProviderID:            map[string]string{},
+		nodeClaimNameToProviderID:       map[string]string{},
+		nodePoolResources:               map[string]corev1.ResourceList{},
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
 		podsSchedulingAttempted:         sync.Map{},
@@ -288,7 +288,7 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 			n.markedForDeletion = false
 			c.updateNodePoolResources(oldNode, n)
 			if n.NodeClaim != nil && n.NodeClaim.DeletionTimestamp.IsZero() {
-				c.NodePoolState.MarkNodeClaimActive(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+				c.MarkNodeClaimActive(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
 			}
 		}
 	}
@@ -305,7 +305,7 @@ func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 			n.markedForDeletion = true
 			c.updateNodePoolResources(oldNode, n)
 			if n.NodeClaim != nil {
-				c.NodePoolState.MarkNodeClaimDeleting(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+				c.MarkNodeClaimDeleting(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
 			}
 		}
 	}
@@ -380,6 +380,9 @@ func (c *Cluster) DeleteNode(name string) {
 }
 
 func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
+	// Update pod resources without the lock as it has its own lock
+	c.PodResources.UpdatePod(pod)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -389,6 +392,7 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	} else {
 		err = c.updateNodeUsageFromPod(ctx, pod)
 	}
+
 	c.updatePodAntiAffinities(pod)
 	return err
 }
@@ -514,9 +518,11 @@ func (c *Cluster) PodSchedulingSuccessTimeRegistrationHealthyCheck(podKey types.
 }
 
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
+	// Update pod resources without the lock as it has its own lock
+	c.PodResources.DeletePod(podKey)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
 	c.ClearPodSchedulingMappings(podKey)
@@ -582,6 +588,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
+	c.PodResources = NewPodResources()
 	c.NodePoolState.Reset()
 	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}
@@ -684,7 +691,7 @@ func (c *Cluster) cleanupNodeClaim(name string) {
 	delete(c.nodeClaimNameToProviderID, name)
 
 	// Delete the NodeClaim that is tracked in NodePoolState
-	c.NodePoolState.Cleanup(name)
+	c.Cleanup(name)
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNode *StateNode) (*StateNode, error) {

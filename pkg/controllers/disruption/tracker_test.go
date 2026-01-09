@@ -29,7 +29,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	"sigs.k8s.io/karpenter/pkg/state/podresources"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -56,24 +55,6 @@ var _ = Describe("Tracker", func() {
 					{LowerBound: 1000, Size: "l"},
 				},
 			},
-			disruption.TotalCPURequestsLabel: {
-				BiggestName: "xl",
-				Thresholds: []disruption.BucketThreshold{
-					{LowerBound: 0, Size: "xs"},
-					{LowerBound: 1000, Size: "s"},
-					{LowerBound: 5000, Size: "m"},
-					{LowerBound: 10000, Size: "l"},
-				},
-			},
-			disruption.TotalMemoryRequestsLabel: {
-				BiggestName: "xl",
-				Thresholds: []disruption.BucketThreshold{
-					{LowerBound: 0, Size: "xs"},
-					{LowerBound: 1000000000, Size: "s"},  // 1GB
-					{LowerBound: 5000000000, Size: "m"},  // 5GB
-					{LowerBound: 10000000000, Size: "l"}, // 10GB
-				},
-			},
 			disruption.TotalNodeCountLabel: {
 				BiggestName: "xl",
 				Thresholds: []disruption.BucketThreshold{
@@ -92,24 +73,27 @@ var _ = Describe("Tracker", func() {
 					{LowerBound: 1000, Size: "l"},
 				},
 			},
-			disruption.PodCPURequestChangeRatioLabel: {
-				BiggestName: "increase",
+		}
+
+		for n := range v1.WellKnownResources {
+			testBucketsThresholdMap[disruption.GenerateChangeRatioResourceLabel(n)] = &disruption.BucketThresholds{
+				BiggestName: "large_increase",
 				Thresholds: []disruption.BucketThreshold{
 					{LowerBound: 0, Size: "large_decrease"},
 					{LowerBound: 0.8, Size: "small_decrease"},
 					{LowerBound: 0.95, Size: "no_change"},
 					{LowerBound: 1.05, Size: "small_increase"},
 				},
-			},
-			disruption.PodMemRequestChangeRatioLabel: {
-				BiggestName: "increase",
+			}
+			testBucketsThresholdMap[disruption.GenerateChangeRatioResourceLabel(n)] = &disruption.BucketThresholds{
+				BiggestName: "xl",
 				Thresholds: []disruption.BucketThreshold{
-					{LowerBound: 0, Size: "large_decrease"},
-					{LowerBound: 0.8, Size: "small_decrease"},
-					{LowerBound: 0.95, Size: "no_change"},
-					{LowerBound: 1.05, Size: "small_increase"},
+					{LowerBound: 0, Size: "xs"},
+					{LowerBound: 100, Size: "s"},
+					{LowerBound: 500, Size: "m"},
+					{LowerBound: 1000, Size: "l"},
 				},
-			},
+			}
 		}
 
 		// Setup test objects
@@ -135,8 +119,8 @@ var _ = Describe("Tracker", func() {
 
 	Describe("GatherClusterState", func() {
 		BeforeEach(func() {
-			podResources = podresources.NewPodResources()
-			tracker = disruption.NewTracker(cluster, clusterCost, podResources, fakeClock, testCache, testBucketsThresholdMap, true)
+			cluster.Reset()
+			tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, testCache, testBucketsThresholdMap, true)
 		})
 
 		Context("when gathering cluster state", func() {
@@ -178,12 +162,10 @@ var _ = Describe("Tracker", func() {
 						},
 					}),
 				}
-				ExpectApplied(ctx, env.Client, pods[0])
-				podResources.UpdatePod(pods[0])
-				ExpectApplied(ctx, env.Client, pods[1])
-				podResources.UpdatePod(pods[1])
-				ExpectApplied(ctx, env.Client, pods[2])
-				podResources.UpdatePod(pods[2])
+				for i := range pods {
+					ExpectApplied(ctx, env.Client, pods[i])
+					Expect(cluster.UpdatePod(ctx, pods[i])).To(Succeed())
+				}
 
 				clusterState, err := tracker.GatherClusterState(ctx)
 
@@ -261,7 +243,7 @@ var _ = Describe("Tracker", func() {
 
 				for _, pod := range pods {
 					ExpectApplied(ctx, env.Client, pod)
-					podResources.UpdatePod(pod)
+					Expect(cluster.UpdatePod(ctx, pod)).To(Succeed())
 				}
 
 				clusterState, err := tracker.GatherClusterState(ctx)
@@ -300,8 +282,8 @@ var _ = Describe("Tracker", func() {
 
 	Describe("AddCommand", func() {
 		BeforeEach(func() {
-			podResources = podresources.NewPodResources()
-			tracker = disruption.NewTracker(cluster, clusterCost, podResources, fakeClock, testCache, testBucketsThresholdMap, true)
+			cluster.Reset()
+			tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, testCache, testBucketsThresholdMap, true)
 		})
 
 		Context("when tracker is enabled", func() {
@@ -427,8 +409,8 @@ var _ = Describe("Tracker", func() {
 
 		Context("when tracker is disabled", func() {
 			BeforeEach(func() {
-				podResources = podresources.NewPodResources()
-				tracker = disruption.NewTracker(cluster, clusterCost, podResources, fakeClock, testCache, testBucketsThresholdMap, false)
+				cluster.Reset()
+				tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, testCache, testBucketsThresholdMap, false)
 			})
 
 			It("should not add command when disabled", func() {
@@ -460,8 +442,8 @@ var _ = Describe("Tracker", func() {
 
 	Describe("FinishCommand", func() {
 		BeforeEach(func() {
-			podResources = podresources.NewPodResources()
-			tracker = disruption.NewTracker(cluster, clusterCost, podResources, fakeClock, testCache, testBucketsThresholdMap, true)
+			cluster.Reset()
+			tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, testCache, testBucketsThresholdMap, true)
 		})
 
 		Context("when tracker is enabled", func() {
@@ -828,8 +810,8 @@ var _ = Describe("Tracker", func() {
 
 	Describe("Integration Tests", func() {
 		BeforeEach(func() {
-			podResources = podresources.NewPodResources()
-			tracker = disruption.NewTracker(cluster, clusterCost, podResources, fakeClock, testCache, testBucketsThresholdMap, true)
+			cluster.Reset()
+			tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, testCache, testBucketsThresholdMap, true)
 		})
 
 		Context("when processing a complete disruption workflow", func() {
@@ -997,7 +979,7 @@ var _ = Describe("Tracker", func() {
 
 				for _, pod := range initialPods {
 					ExpectApplied(ctx, env.Client, pod)
-					podResources.UpdatePod(pod)
+					Expect(cluster.UpdatePod(ctx, pod)).To(Succeed())
 				}
 
 				driftMethod := disruption.NewDrift(env.Client, cluster, prov, recorder)
@@ -1049,7 +1031,7 @@ var _ = Describe("Tracker", func() {
 
 				for _, pod := range additionalPods {
 					ExpectApplied(ctx, env.Client, pod)
-					podResources.UpdatePod(pod)
+					Expect(cluster.UpdatePod(ctx, pod)).To(Succeed())
 				}
 
 				// Finish command - captures final state and calculates ratios
@@ -1126,7 +1108,7 @@ var _ = Describe("Tracker", func() {
 
 		Context("when tracker is disabled", func() {
 			BeforeEach(func() {
-				tracker = disruption.NewTracker(cluster, clusterCost, podResources, fakeClock, testCache, testBucketsThresholdMap, false)
+				tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, testCache, testBucketsThresholdMap, false)
 			})
 
 			It("should not process workflow when disabled", func() {
@@ -1191,7 +1173,7 @@ var _ = Describe("Tracker", func() {
 				}
 				for _, pod := range initialPods {
 					ExpectApplied(ctx, env.Client, pod)
-					podResources.UpdatePod(pod)
+					Expect(cluster.UpdatePod(ctx, pod)).To(Succeed())
 				}
 
 				// Verify initial cluster state
@@ -1247,7 +1229,7 @@ var _ = Describe("Tracker", func() {
 
 				for _, pod := range additionalPods {
 					ExpectApplied(ctx, env.Client, pod)
-					podResources.UpdatePod(pod)
+					Expect(cluster.UpdatePod(ctx, pod)).To(Succeed())
 				}
 
 				// Verify final cluster state
@@ -1267,8 +1249,8 @@ var _ = Describe("Tracker", func() {
 
 	Describe("Concurrency", func() {
 		BeforeEach(func() {
-			podResources = podresources.NewPodResources()
-			tracker = disruption.NewTracker(cluster, clusterCost, podResources, fakeClock, testCache, testBucketsThresholdMap, true)
+			cluster.Reset()
+			tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, testCache, testBucketsThresholdMap, true)
 		})
 
 		Context("when handling concurrent operations", func() {

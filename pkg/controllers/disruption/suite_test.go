@@ -29,7 +29,6 @@ import (
 
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
-	"sigs.k8s.io/karpenter/pkg/state/podresources"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
@@ -68,7 +67,6 @@ var ctx context.Context
 var env *test.Environment
 var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
-var podResources *podresources.PodResources
 var disruptionController *disruption.Controller
 var prov *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
@@ -104,8 +102,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
-	podResources = podresources.NewPodResources()
-	tracker = disruption.NewTracker(cluster, clusterCost, podResources, fakeClock, cache.New(30*time.Minute, time.Minute), nil, false)
+	tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, cache.New(30*time.Minute, time.Minute), nil, false)
 	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov, tracker)
 })
 
