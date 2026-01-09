@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package podresources
+package state
 
 import (
 	"sync"
@@ -22,25 +22,23 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // This class is primarily used to track the overall resource requests for pods in the cluster
-// it is a proxy for the overall desired size of the cluster. It is flawed, and should be replaced
-// with a superior desired resource count mechanism that handles the following cases:
-//  1. Pod manager objects (replicasets, jobs) and their replacement workflows.
-//  2. Standalone pods
-//  3. In Place Pod Autoscaling
+// it is a proxy for the overall desired size of the cluster.
 
 type PodResources struct {
 	sync.RWMutex
-	podMap map[types.UID]corev1.ResourceList
+	podMap map[types.NamespacedName]corev1.ResourceList
 	total  corev1.ResourceList
 }
 
-func NewPodResources() *PodResources {
-	return &PodResources{
-		podMap: make(map[types.UID]corev1.ResourceList),
+func NewPodResources() PodResources {
+	return PodResources{
+		podMap: make(map[types.NamespacedName]corev1.ResourceList),
 		total:  corev1.ResourceList{},
 	}
 }
@@ -49,7 +47,7 @@ func (pr *PodResources) UpdatePod(p *corev1.Pod) {
 	pr.Lock()
 	defer pr.Unlock()
 
-	podKey := p.UID
+	podKey := client.ObjectKeyFromObject(p)
 	rl, exists := pr.podMap[podKey]
 
 	totalResources := resources.RequestsForPods(p)
@@ -64,18 +62,17 @@ func (pr *PodResources) UpdatePod(p *corev1.Pod) {
 	}
 }
 
-func (pr *PodResources) DeletePod(p *corev1.Pod) {
+func (pr *PodResources) DeletePod(p types.NamespacedName) {
 	pr.Lock()
 	defer pr.Unlock()
 
-	podKey := p.UID
-	rl, exists := pr.podMap[podKey]
+	rl, exists := pr.podMap[p]
 
 	if !exists {
 		return
 	}
 	resources.SubtractFrom(pr.total, rl)
-	delete(pr.podMap, podKey)
+	delete(pr.podMap, p)
 }
 
 func (pr *PodResources) GetTotalPodResourceRequests() corev1.ResourceList {

@@ -52,6 +52,8 @@ import (
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
+	PodResources
+
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clock         clock.Clock
@@ -89,6 +91,7 @@ type Cluster struct {
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
+		PodResources:              NewPodResources(),
 		clock:                     clk,
 		kubeClient:                client,
 		cloudProvider:             cloudProvider,
@@ -98,8 +101,7 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
 		nodePoolResources:         map[string]corev1.ResourceList{},
-
-		NodePoolState: NewNodePoolState(),
+		NodePoolState:             NewNodePoolState(),
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -380,6 +382,9 @@ func (c *Cluster) DeleteNode(name string) {
 }
 
 func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
+	// Update pod resources without the lock as it has its own lock
+	c.PodResources.UpdatePod(pod)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -389,6 +394,7 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	} else {
 		err = c.updateNodeUsageFromPod(ctx, pod)
 	}
+
 	c.updatePodAntiAffinities(pod)
 	return err
 }
@@ -514,9 +520,11 @@ func (c *Cluster) PodSchedulingSuccessTimeRegistrationHealthyCheck(podKey types.
 }
 
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
+	// Update pod resources without the lock as it has its own lock
+	c.PodResources.DeletePod(podKey)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
 	c.ClearPodSchedulingMappings(podKey)
@@ -582,6 +590,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
+	c.PodResources = NewPodResources()
 	c.NodePoolState.Reset()
 	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}

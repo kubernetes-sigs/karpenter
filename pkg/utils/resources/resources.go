@@ -17,6 +17,8 @@ limitations under the License.
 package resources
 
 import (
+	"strings"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	resourcehelper "k8s.io/component-helpers/resource"
@@ -187,4 +189,8 @@ func String(list v1.ResourceList) string {
 		return "{}"
 	}
 	return pretty.Concise(list)
+}
+
+func ResourceNameToString(resourceName v1.ResourceName) string {
+	return strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_")
 }

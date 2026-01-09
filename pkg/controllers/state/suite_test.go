@@ -47,7 +47,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
-	"sigs.k8s.io/karpenter/pkg/state/podresources"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -59,7 +58,6 @@ var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var clusterCost *cost.ClusterCost
-var podResources *podresources.PodResources
 var nodeClaimController *informer.NodeClaimController
 var nodeController *informer.NodeController
 var podController *informer.PodController
@@ -88,10 +86,9 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
-	podResources = podresources.NewPodResources()
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	podController = informer.NewPodController(env.Client, cluster, podResources)
+	podController = informer.NewPodController(env.Client, cluster)
 	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
 	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
 	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
