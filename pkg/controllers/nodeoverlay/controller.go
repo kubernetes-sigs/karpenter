@@ -217,9 +217,10 @@ func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, 
 	instanceTypeRequirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.ObjectMeta.Labels).Values()...)
 
 	for _, req := range nodePool.Spec.Template.Spec.Requirements {
-		if !v1.WellKnownLabels.Has(req.Key) {
-			instanceTypeRequirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(req).Values()...)
+		if v1.WellKnownLabels.Has(req.Key) {
+			continue // Skip well-known labels
 		}
+		instanceTypeRequirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(req).Values()...)
 	}
 
 	instanceTypeRequirements.Add(it.Requirements.Values()...)
