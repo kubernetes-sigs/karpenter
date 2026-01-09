@@ -1685,6 +1685,103 @@ var _ = Describe("Topology", func() {
 			// should schedule there
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(5))
 		})
+
+		It("should ignore domains from incompatible NodePools when honoring node affinity", func() {
+			const spreadLabel = "capacity-spread"
+			const workloadLabel = "workload-group"
+			const workloadMatch = "isolated-app"
+			const spreadDomain = "1"
+
+			matchingNodePool := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								workloadLabel: workloadMatch,
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{{
+								Key:    workloadLabel,
+								Value:  workloadMatch,
+								Effect: corev1.TaintEffectNoSchedule,
+							}},
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      v1.CapacityTypeLabelKey,
+										Operator: corev1.NodeSelectorOpExists,
+									},
+								},
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      spreadLabel,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{spreadDomain},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+
+			incompatibleNodePool := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								workloadLabel: "shared-app",
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      v1.CapacityTypeLabelKey,
+										Operator: corev1.NodeSelectorOpExists,
+									},
+								},
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      spreadLabel,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{spreadDomain, "2", "3"},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:        spreadLabel,
+				WhenUnsatisfiable:  corev1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            1,
+				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+				NodeTaintsPolicy:   lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+			}}
+
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector: map[string]string{
+					workloadLabel: workloadMatch,
+				},
+				Tolerations: []corev1.Toleration{{
+					Key:    workloadLabel,
+					Value:  workloadMatch,
+					Effect: corev1.TaintEffectNoSchedule,
+				}},
+			}, 4)
+
+			ExpectApplied(ctx, env.Client, matchingNodePool, incompatibleNodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4))
+		})
 	})
 	Context("Combined Zonal and Capacity Type Topology", func() {
 		It("should spread pods while respecting both constraints", func() {
