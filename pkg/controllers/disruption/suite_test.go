@@ -118,7 +118,7 @@ var _ = BeforeEach(func() {
 	recorder.Reset() // Reset the events that we captured during the run
 
 	// Ensure that we reset the disruption controller's methods after each test run
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithNopValidator()...))
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
 	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
@@ -434,7 +434,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 		// disruption won't delete the old node until the new node is ready
 		Expect(queue.GetCommands()).To(HaveLen(1))
@@ -632,7 +632,7 @@ var _ = Describe("Disruption Taints", func() {
 		// inform cluster state about nodes and nodeClaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 		// Process the item so that the nodes can be deleted.
 		cmds := queue.GetCommands()
@@ -1938,7 +1938,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
 			metrics.ReasonLabel: "empty",
@@ -1997,7 +1997,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
 			metrics.ReasonLabel:  "empty",
@@ -2032,7 +2032,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
 			metrics.ReasonLabel:  "underutilized",
@@ -2087,7 +2087,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "replace",
 			metrics.ReasonLabel:  "underutilized",
@@ -2264,4 +2264,18 @@ func (h *hangCreateClient) Create(_ context.Context, _ client.Object, _ ...clien
 	<-h.stop
 	h.hasWaiter.Store(false)
 	return nil
+}
+
+// use this helper function to reconcile the disruption controllers if you expect to wait for consolidationTTL before validation
+func ExpectDisruptionControllerReconciled(ctx context.Context, disruptionController *disruption.Controller) {
+	ExpectParallelized(
+		func() {
+			ExpectSingletonReconciled(ctx, disruptionController)
+		},
+		func() {
+			// wait until disruption controller waits to validate until consolidationTTL and step forward
+			Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+			fakeClock.Step(5 * time.Second)
+		},
+	)
 }

@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -40,7 +41,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -107,7 +107,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(0))
 		})
@@ -200,20 +200,20 @@ var _ = Describe("Consolidation", func() {
 			pod.SetAnnotations(map[string]string{})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "underutilized",
 			})
 		})
-		DescribeTable("should correctly report invalidated commands for emptiness disruption", func(validatorOpt TestEmptinessValidatorOption) {
+		It("should correctly report invalidated commands for emptiness disruption", func() {
 			nodes := []*corev1.Node{node}
 			nodeClaims := []*v1.NodeClaim{nodeClaim}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-			emptyConsolidation := disruption.NewEmptiness(c, disruption.WithValidator(NewTestEmptinessValidator(nodes, nodeClaims, nodePool, validatorOpt)))
+			emptyConsolidation := disruption.NewEmptiness(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -222,16 +222,43 @@ var _ = Describe("Consolidation", func() {
 
 			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).ToNot(HaveOccurred())
+			for i := range cmds {
+				cmds[i].Method = emptyConsolidation
+				cmds[i].ID = uuid.New()
+				cmds[i].CreationTimestamp = fakeClock.Now()
+			}
+			// add pod with do-not-disrupt annotation to node to invalidate command
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
+				},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, nodes[0])
+
+			ExpectParallelized(
+				func() {
+					cmds, _, err = disruptionController.ValidateCommands(ctx, emptyConsolidation, cmds)
+				},
+				func() {
+					// wait until disruption controller waits to validate until consolidationTTL and step forward
+					Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+					fakeClock.Step(5 * time.Second)
+				},
+			)
+
+			Expect(err).ToNot(HaveOccurred())
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType()})
-		},
-			Entry("when a candidate is blocked by budgets", WithEmptinessBlockingBudget()),
-			Entry("when candidates are filtered out due to pod churn", WithEmptinessChurn()),
-			Entry("when candidates are filtered out due to candidate being nominated", WithEmptinessNodeNomination()),
-		)
-		DescribeTable("should correctly report invalidated commands for multi node disruption", func(validatorOpt TestConsolidationValidatorOption) {
+		})
+		It("should correctly report invalidated commands for multi node disruption", func() {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -271,7 +298,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-			multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c, disruption.WithValidator(NewTestMultiConsolidationValidator(nodePool, validatorOpt)))
+			multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiNodeConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -279,17 +306,44 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).To(Succeed())
 
 			cmds, err := multiNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			Expect(err).ToNot(HaveOccurred())
+			for i := range cmds {
+				cmds[i].Method = multiNodeConsolidation
+				cmds[i].ID = uuid.New()
+				cmds[i].CreationTimestamp = fakeClock.Now()
+			}
+			// add pod with do-not-disrupt annotation to node to invalidate command
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
+				},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectParallelized(
+				func() {
+					cmds, _, err = disruptionController.ValidateCommands(ctx, multiNodeConsolidation, cmds)
+				},
+				func() {
+					// wait until disruption controller waits to validate until consolidationTTL and step forward
+					Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+					fakeClock.Step(5 * time.Second)
+				},
+			)
+
 			Expect(err).To(Succeed())
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(multiNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType()})
-		},
-			Entry("when candidates are blocked by budgets", WithUnderutilizedBlockingBudget()),
-			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
-			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination()),
-		)
-		DescribeTable("should correctly report invalidated commands for single node disruption", func(validatorOpt TestConsolidationValidatorOption) {
+		})
+		It("should correctly report invalidated commands for single node disruption", func() {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -314,7 +368,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-			singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NewTestSingleConsolidationValidator(nodePool, validatorOpt)))
+			singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, singleNodeConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -322,16 +376,43 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).To(Succeed())
 
 			cmds, err := singleNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			Expect(err).ToNot(HaveOccurred())
+			for i := range cmds {
+				cmds[i].Method = singleNodeConsolidation
+				cmds[i].ID = uuid.New()
+				cmds[i].CreationTimestamp = fakeClock.Now()
+			}
+			// add pod with do-not-disrupt annotation to node to invalidate command
+			pod = test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
+				},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectParallelized(
+				func() {
+					cmds, _, err = disruptionController.ValidateCommands(ctx, singleNodeConsolidation, cmds)
+				},
+				func() {
+					// wait until disruption controller waits to validate until consolidationTTL and step forward
+					Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+					fakeClock.Step(5 * time.Second)
+				},
+			)
+
 			Expect(err).To(Succeed())
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(singleNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType()})
-		},
-			Entry("when a candidate is blocked by budgets", WithUnderutilizedBlockingBudget()),
-			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
-			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination()),
-		)
+		})
 	})
 	Context("Budgets", func() {
 		var numNodes = 10
@@ -371,7 +452,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				metrics.NodePoolLabel: nodePool.Name,
@@ -394,7 +475,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				metrics.NodePoolLabel: nodePool.Name,
@@ -465,7 +546,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Execute command, thus deleting 3 nodes
 			cmds := queue.GetCommands()
@@ -509,7 +590,9 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			// Reconcile 5 times, enqueuing 3 commands total.
-			for i := 0; i < 5; i++ {
+			// The first reconcile must include stepping fake clock for consolidationTTL.
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
+			for i := 0; i < 4; i++ {
 				ExpectSingletonReconciled(ctx, disruptionController)
 			}
 			// Execute all commands in the queue, only deleting 3 nodes
@@ -568,7 +651,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -633,7 +716,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -729,7 +812,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			cmds, err := computeAndValidateCommands(emptyConsolidation, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
@@ -792,7 +875,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			cmds, err := computeAndValidateCommands(emptyConsolidation, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(cmds).To(HaveLen(0))
 			Expect(cmds).To(Equal([]disruption.Command{}))
@@ -817,7 +900,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			cmds, err := computeAndValidateCommands(multiConsolidation, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
@@ -880,7 +963,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			cmds, err := computeAndValidateCommands(multiConsolidation, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
@@ -904,7 +987,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmds, err := singleConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			cmds, err := computeAndValidateCommands(singleConsolidation, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
@@ -967,7 +1050,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmds, err := singleConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			cmds, err := computeAndValidateCommands(singleConsolidation, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
@@ -1003,7 +1086,7 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeClaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-				ExpectSingletonReconciled(ctx, disruptionController)
+				ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
@@ -1290,7 +1373,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -1408,7 +1491,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -1532,7 +1615,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 			ExpectManualBinding(ctx, env.Client, pods[3], nodes[2])
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
@@ -1625,7 +1708,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -1786,7 +1869,7 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeclaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-				ExpectSingletonReconciled(ctx, disruptionController)
+				ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
@@ -1930,7 +2013,7 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeclaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-				ExpectSingletonReconciled(ctx, disruptionController)
+				ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
@@ -1999,7 +2082,7 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeclaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-				ExpectSingletonReconciled(ctx, disruptionController)
+				ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
@@ -2090,7 +2173,7 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeClaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, annotatedNode}, []*v1.NodeClaim{nodeClaim, annotatedNodeClaim})
-				ExpectSingletonReconciled(ctx, disruptionController)
+				ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
@@ -2178,7 +2261,7 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeClaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
-				ExpectSingletonReconciled(ctx, disruptionController)
+				ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
@@ -2429,7 +2512,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -2444,40 +2527,6 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
-		})
-		It("does not delete nodes with pod churn, deletes nodes without pod churn", func() {
-			// create our RS so we can link a pod to it
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range 2 {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			sort.Slice(nodes, func(i, j int) bool {
-				return nodes[i].Name < nodes[j].Name
-			})
-
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-			emptyConsolidation := disruption.NewEmptiness(c, disruption.WithValidator(NewTestEmptinessValidator(nodes, nodeClaims, nodePool, WithEmptinessChurn())))
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
-			Expect(err).To(Succeed())
-
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
-			Expect(err).To(Succeed())
-
-			// this test validator invalidates the command because it creates pod churn during validaiton
-			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
-			Expect(err).To(Succeed())
-			Expect(len(cmds)).To(Equal(1))
-			for _, cmd := range cmds {
-				Expect(cmd.Results).To(Equal(pscheduling.Results{}))
-				Expect(cmd.Candidates).To(HaveLen(1))
-				// the test validator manually binds a pod to nodes[0], causing it to no longer be eligible
-				Expect(cmd.Candidates[0].StateNode.Node.Name).To(Equal(nodes[1].Name))
-				Expect(cmd.Decision()).To(Equal(disruption.DeleteDecision))
-			}
-
-			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
 		It("can delete nodes if another nodePool has no node template", func() {
 			// create our RS so we can link a pod to it
@@ -2506,7 +2555,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -2556,7 +2605,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], unmanagedNode}, []*v1.NodeClaim{nodeClaims[0]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
@@ -2612,7 +2661,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
@@ -2658,7 +2707,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
 			// Cascade any deletion of the nodeClaim to the node
@@ -2700,7 +2749,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
 
@@ -2838,7 +2887,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -3028,7 +3077,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, consolidatableNodeClaim, consolidatableNode, consolidatablePod)
 			ExpectManualBinding(ctx, env.Client, consolidatablePod, consolidatableNode)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{consolidatableNode}, []*v1.NodeClaim{consolidatableNodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -3080,7 +3129,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -3185,7 +3234,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -3207,7 +3256,7 @@ var _ = Describe("Consolidation", func() {
 		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+			disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -3315,7 +3364,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
-		It("should not consolidate if the action picks different instance types after the node TTL wait", func() {
+		It("should not consolidate if a pod with do-not-disrupt annotation to node after tainting", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -3363,7 +3412,7 @@ var _ = Describe("Consolidation", func() {
 					// and the node should not be deleted yet
 					ExpectExists(ctx, env.Client, nodes[0])
 
-					// add an additional pod to the node to change the consolidation decision
+					// add an additional pod with do-not-disrupt to the node to invalidate the consolidation decision
 					pod2 := test.Pod(test.PodOptions{
 						ObjectMeta: metav1.ObjectMeta{Labels: labels,
 							OwnerReferences: []metav1.OwnerReference{
@@ -3375,6 +3424,9 @@ var _ = Describe("Consolidation", func() {
 									Controller:         lo.ToPtr(true),
 									BlockOwnerDeletion: lo.ToPtr(true),
 								},
+							},
+							Annotations: map[string]string{
+								v1.DoNotDisruptAnnotationKey: "true",
 							},
 						},
 						ResourceRequirements: corev1.ResourceRequirements{
@@ -3394,7 +3446,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			)
 
-			// nothing should be removed since the node is no longer empty
+			// nothing should be removed since the node is undisruptable
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodes[0])
@@ -3669,7 +3721,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -3729,7 +3781,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -3798,7 +3850,7 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeclaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-				ExpectSingletonReconciled(ctx, disruptionController)
+				ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
@@ -3826,7 +3878,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should wait for the node TTL for non-empty nodes before consolidating (multi-node)",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -3898,7 +3950,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should continue to multi-nodeclaim consolidation when emptiness fails validation after the node ttl",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -3976,7 +4028,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should continue to single nodeclaim consolidation when multi-nodeclaim consolidation fails validation after the node ttl",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -4027,20 +4079,22 @@ var _ = Describe("Consolidation", func() {
 						var extraPods []*corev1.Pod
 						for i := 0; i < 2; i++ {
 							extraPods = append(extraPods, test.Pod(test.PodOptions{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										v1.DoNotDisruptAnnotationKey: "true",
+									},
+								},
 								ResourceRequirements: corev1.ResourceRequirements{
 									Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
 								},
 							}))
 						}
 						ExpectApplied(ctx, env.Client, extraPods[0], extraPods[1])
-						// bind the extra pods to node1 and node 2 to make the consolidation decision invalid
-						// we bind to 2 nodes so we can deterministically expect that node3 is consolidated in
-						// single nodeclaim consolidation
+						// bind the extra pods with do-not disrupt annotation to node 1 and node 2 to make
+						// the consolidation decision invalid we bind to 2 nodes so we can deterministically expect
+						// that node3 is consolidated in single nodeclaim consolidation
 						ExpectManualBinding(ctx, env.Client, extraPods[0], nodes[0])
 						ExpectManualBinding(ctx, env.Client, extraPods[1], nodes[1])
-
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[1]))
 
 						// advance the clock so that the timeout expires for multi-nodeclaim consolidation
 						fakeClock.Step(31 * time.Second)
@@ -4058,6 +4112,7 @@ var _ = Describe("Consolidation", func() {
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
 				Expect(cmds).To(HaveLen(1))
+				// ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
 				ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 				// Cascade any deletion of the nodeclaim to the node
@@ -4134,7 +4189,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			fakeClock.SetTime(time.Now())
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
@@ -4239,7 +4294,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
 			ExpectSkew(ctx, env.Client, "default", &tsc).To(ConsistOf(1, 1, 1))
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -4365,7 +4420,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
@@ -4533,7 +4588,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{reservedNode}, []*v1.NodeClaim{reservedNodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -4593,7 +4648,7 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeClaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-				ExpectSingletonReconciled(ctx, disruptionController)
+				ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
@@ -4674,7 +4729,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -4711,7 +4766,7 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
@@ -4859,3 +4914,26 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 })
+
+func computeAndValidateCommands(method disruption.Method, budgets map[string]int, candidates ...*disruption.Candidate) ([]disruption.Command, error) {
+	cmds, err := method.ComputeCommands(ctx, budgets, candidates...)
+	if err != nil {
+		return nil, err
+	}
+	for i := range cmds {
+		cmds[i].Method = method
+		cmds[i].ID = uuid.New()
+		cmds[i].CreationTimestamp = fakeClock.Now()
+	}
+	ExpectParallelized(
+		func() {
+			cmds, _, err = disruptionController.ValidateCommands(ctx, method, cmds)
+		},
+		func() {
+			// wait until disruption controller waits to validate until consolidationTTL and step forward
+			Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+			fakeClock.Step(5 * time.Second)
+		},
+	)
+	return cmds, err
+}
