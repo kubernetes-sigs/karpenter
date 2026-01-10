@@ -171,8 +171,13 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 		}
 	} else {
 		for resource, quantity := range nodeOverlay.Spec.Capacity {
+			if _, foundCapacityUpdate := i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource]; foundCapacityUpdate {
+				continue
+			}
+
 			i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource] = quantity
 		}
+
 		i.updates[nodePoolName][instanceTypeName].Capacity.lowestWeightCapacityResources = nodeOverlay.Spec.Capacity
 		i.updates[nodePoolName][instanceTypeName].Capacity.lowestWeight = nodeOverlay.Spec.Weight
 	}
