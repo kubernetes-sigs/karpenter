@@ -172,37 +172,56 @@ jobs:
 
 The Karpenter core test framework includes the following test suites that will be executed against your provider implementation:
 
-### Integration Tests (`test/suites/integration`)
+### Regression (`test/suites/regression`)
 
-1. **Basic Integration Tests**
-   - DaemonSet compatibility
-   - Pod scheduling with various constraints
-   - Resource allocation and limits
-   - Node startup and registration
+1. **Integration**
+   - DaemonSet overhead with LimitRange defaults/defaultRequests for capacity accounting
+   - Utilization and scheduling constraints: one-pod-per-node, do-not-disrupt, pod anti-affinity
+   - NodePool validation rules for restricted labels and requirement operators/values
+   - NodePool hash annotations: `nodepool-hash` and `nodepool-hash-version` propagation to NodeClaims
+   - Repair policy behavior that ignores budgets, do-not-disrupt, and `terminationGracePeriodSeconds`
+2. **NodeClaim**
+   - Creation and spec propagation: labels, taints, resources, NodeClass references
+   - Deletion and finalizer behavior for missing or NotReady NodeClass
+   - Registration timeout cleanup and orphan instance GC
+3. **Drift**
+   - Budget windows for empty vs. non-empty drift
+   - Replacement flow and `nodepool-hash-version` updates
+   - Failure cases: replacement never registers/initializes or PDBs are unhealthy
+4. **Termination**
+   - Emptiness budgets and blocking windows
+   - Pod drain ordering and `terminationGracePeriodSeconds` handling
+   - Node and instance termination on delete
+5. **Expiration**
+   - Expiration timing and replacement scheduling for active workloads
+6. **Chaos**
+   - Runaway scale-up guardrails with consolidation and emptiness enabled
+7. **StaticCapacity**
+   - Static NodeClaim provisioning and NodePool spec propagation
+   - Node limits, scale-down ordering, and do-not-disrupt handling
+   - Drift flows and dynamic NodeClaim fallback
+8. **Performance**
+   - Simple and complex provisioning scenarios at scale
+   - Simple and complex drift flows
 
-2. **NodeClaim Tests**
-   - Standalone NodeClaim creation and management
-   - NodeClaim status conditions
-   - NodeClaim resource allocation
-   - NodeClaim template validation
+### Performance (`test/suites/performance`)
 
-3. **Expiration Tests**
-   - Node expiration based on TTL settings
-   - Graceful node termination
-   - Pod rescheduling during node expiration
-   - Expiration with active workloads
-
-4. **Chaos Tests**
-   - Runaway scale-up prevention
-   - System stability under load
-   - Recovery from disruptions
-   - Concurrent operations handling
-
-5. **Performance Tests**
-   - Provisioning at scale (100+ pods)
-   - Resource utilization efficiency
-   - Scheduling latency measurements
-   - Consolidation effectiveness
+1. **Basic deployment**
+   - Two deployments with different resource profiles
+2. **Provisioning**
+   - Pending-pod provisioning and NodePool cost tracking
+3. **Host name spreading**
+   - Two deployments with hostname topology spread
+4. **Host name spreading XL**
+   - XL-scale hostname topology spread
+5. **Wide deployments**
+   - Thirty deployments with varied resources and topology constraints
+6. **Do-not-disrupt**
+   - Scale-out and consolidation with protected workloads
+7. **Drift performance**
+   - Drift replacement with topology constraints
+8. **Interference**
+   - Self anti-affinity interference scenarios
 
 These test suites validate that your provider implementation correctly integrates with Karpenter's core functionality and can handle various operational scenarios.
 
