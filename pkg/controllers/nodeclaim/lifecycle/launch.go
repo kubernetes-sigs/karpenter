@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -28,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -71,7 +73,10 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 		return reconcile.Result{}, err
 	}
 	l.cache.SetDefault(string(nodeClaim.UID), created)
-	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
+	nodeClaim, err = PopulateNodeClaimDetails(nodeClaim, created)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 	return reconcile.Result{}, nil
 }
@@ -123,20 +128,29 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	return created, nil
 }
 
-func PopulateNodeClaimDetails(nodeClaim, retrieved *v1.NodeClaim) *v1.NodeClaim {
+func PopulateNodeClaimDetails(nodeClaim, retrieved *v1.NodeClaim) (*v1.NodeClaim, error) {
 	// These are ordered in priority order so that user-defined nodeClaim labels and requirements trump retrieved labels
 	// or the static nodeClaim labels
 	nodeClaim.Labels = lo.Assign(
 		retrieved.Labels, // CloudProvider-resolved labels
-		scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Labels(), // Single-value requirement resolved labels
+		scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Labels(), // Single-value requirement resolved labels that are synced to the Node object centrally by Karpenter.
 		nodeClaim.Labels, // User-defined labels
 	)
-	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, retrieved.Annotations)
+
+	// We store labels compliant with the node restriction admission as an annotation on the NodeClaim
+	// so that bootstrap provider implementation can use them for kubelet labels.
+	kubeletLabels := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).KubeletLabels()
+	json, err := json.Marshal(kubeletLabels)
+	if err != nil {
+		return nil, err
+	}
+	kubeletLabelsAnnotation := map[string]string{apis.Group + "/node-restricted-labels": string(json)}
+	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, retrieved.Annotations, kubeletLabelsAnnotation)
 	nodeClaim.Status.ProviderID = retrieved.Status.ProviderID
 	nodeClaim.Status.ImageID = retrieved.Status.ImageID
 	nodeClaim.Status.Allocatable = retrieved.Status.Allocatable
 	nodeClaim.Status.Capacity = retrieved.Status.Capacity
-	return nodeClaim
+	return nodeClaim, nil
 }
 
 func truncateMessage(msg string) string {
