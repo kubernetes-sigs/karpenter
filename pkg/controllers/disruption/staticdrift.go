@@ -68,7 +68,7 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		limit, ok := np.Spec.Limits[resources.Node]
 		nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
 		// Current nodes (includes in‑flight per your cluster state)
-		runningNodes, _, nodesPendingDisruptionCount := d.cluster.NodePoolState.GetNodeCount(npName)
+		runningNodes, _, nodesPendingDisruptionCount := d.cluster.GetNodeCount(npName)
 
 		// We dont want to disrupt nodes until scale down is complete
 		if int64(runningNodes+nodesPendingDisruptionCount) > lo.FromPtr(np.Spec.Replicas) {
@@ -81,7 +81,7 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		})
 
 		// Acquire limits from cluster state without bursting over
-		maxAllowedDrifts := d.cluster.NodePoolState.ReserveNodeCount(npName, nodeLimit, maxDrifts)
+		maxAllowedDrifts := d.cluster.ReserveNodeCount(npName, nodeLimit, maxDrifts)
 
 		// We will not get a negative value here
 		if maxAllowedDrifts == 0 {

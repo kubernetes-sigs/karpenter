@@ -84,7 +84,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
-	runningNodeClaims, _, nodesPendingDisruptionCount := c.cluster.NodePoolState.GetNodeCount(np.Name)
+	runningNodeClaims, _, nodesPendingDisruptionCount := c.cluster.GetNodeCount(np.Name)
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
 	// Size down of replicas will be handled in deprovisioning controller to drain nodes and delete NodeClaims
 	// If there are drifting NodeClaims we need to count them as Active as disruption controller is in the process of creating replacements
@@ -94,7 +94,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 	limit, ok := np.Spec.Limits[resources.Node]
 	nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
-	countNodeClaimsToProvision := c.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, desiredReplicas-int64(runningNodeClaims))
+	countNodeClaimsToProvision := c.cluster.ReserveNodeCount(np.Name, nodeLimit, desiredReplicas-int64(runningNodeClaims))
 
 	if countNodeClaimsToProvision <= 0 {
 		log.FromContext(ctx).Info("nodepool node limit reached")

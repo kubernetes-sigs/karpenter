@@ -45,8 +45,8 @@ type NodePoolState struct {
 	nodePoolNameToNodePoolLimit  map[string]*atomic.Int64  // node pool -> nodepool limit
 }
 
-func NewNodePoolState() *NodePoolState {
-	return &NodePoolState{
+func NewNodePoolState() NodePoolState {
+	return NodePoolState{
 		nodePoolNameToNodeClaimState: map[string]NodeClaimState{},
 		nodeClaimNameToNodePoolName:  map[string]string{},
 		nodePoolNameToNodePoolLimit:  map[string]*atomic.Int64{},

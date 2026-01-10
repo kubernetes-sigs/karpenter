@@ -29,6 +29,14 @@ const (
 	decisionLabel                = "decision"
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
+
+	// Label constants
+	ClusterCostLabel              = "cluster_cost"
+	TotalNodeCountLabel           = "total_node_count"
+	TotalDesiredPodCountLabel     = "total_desired_pod_count"
+	InvolvesPodAntiAffinityLabel  = "involves_pod_anti_affinity"
+	NodePoolNameLabel             = "nodepool_name"
+	RequestChangeRatioLabelSuffix = "request_change_ratio"
 )
 
 func init() {
@@ -108,4 +116,9 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
+
+	DecisionDimensions = append([]string{
+		ConsolidationTypeLabel,
+		NodePoolNameLabel,
+	}, DecisionBucketDimensions...)
 )

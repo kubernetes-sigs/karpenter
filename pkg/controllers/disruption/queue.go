@@ -100,11 +100,12 @@ type Queue struct {
 	cluster             *state.Cluster
 	clock               clock.Clock
 	provisioner         *provisioning.Provisioner
+	tracker             *Tracker
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
 func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner,
+	provisioner *provisioning.Provisioner, tracker *Tracker,
 ) *Queue {
 	queue := &Queue{
 		// nolint:staticcheck
@@ -116,6 +117,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		cluster:             cluster,
 		clock:               clock,
 		provisioner:         provisioner,
+		tracker:             tracker,
 	}
 	return queue
 }
@@ -281,7 +283,7 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 
 		// Mark all StaticNodeClaims as pendingdisruption in nodepoolstate
 		if cmd.Candidates[i].OwnedByStaticNodePool() {
-			q.cluster.NodePoolState.MarkNodeClaimPendingDisruption(cmd.Candidates[i].NodePool.Name, cmd.Candidates[i].NodeClaim.Name)
+			q.cluster.MarkNodeClaimPendingDisruption(cmd.Candidates[i].NodePool.Name, cmd.Candidates[i].NodeClaim.Name)
 		}
 	}
 	return markedCandidates, multierr.Combine(errs...)
@@ -325,6 +327,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	if markDisruptedErr != nil && (len(cmd.Replacements) > 0 || len(markedCandidates) == 0) {
 		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", markDisruptedErr), "command-id", cmd.ID)
 	}
+	_ = q.tracker.AddCommand(ctx, cmd)
 
 	// Update the command to only consider the successfully MarkDisrupted candidates
 	cmd.Candidates = markedCandidates
