@@ -163,6 +163,9 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 		LeaderElectionReleaseOnCancel: true,
 		LeaderElectionConfig:          leaderConfig,
 		LeaderElectionLabels:          opts.LeaderElectionLabels,
+		LeaseDuration:                 &options.FromContext(ctx).LeaderElectionLeaseDuration,
+		RenewDeadline:                 &options.FromContext(ctx).LeaderElectionRenewDeadline,
+		RetryPeriod:                   &options.FromContext(ctx).LeaderElectionRetryPeriod,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},
