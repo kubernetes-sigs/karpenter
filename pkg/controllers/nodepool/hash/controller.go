@@ -74,7 +74,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 	})
 
-	if !equality.Semantic.DeepEqual(stored, np) {
+	if !equality.Semantic.DeepEqual(stored.Annotations, np.Annotations) {
 		if err := c.kubeClient.Patch(ctx, np, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
