@@ -78,45 +78,8 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
-	// Inject instanceType requirements for NodeClaims belonging to dynamic NodePool
-	// For static we let cloudprovider.Create()
 	if !i.IsStaticNodeClaim {
-		// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
-		instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
-		i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
-			return i.Name
-		})...))
-
-		// Collect available capacity types from the selected instance types
-		availableCapacityTypes := sets.New[string]()
-		for _, instanceType := range instanceTypes {
-			for _, offering := range instanceType.Offerings {
-				// Only include available offerings that are compatible with current requirements
-				if offering.Available && i.Requirements.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-					availableCapacityTypes.Insert(offering.CapacityType())
-				}
-			}
-		}
-
-		// Add capacity type requirement if we have available types
-		if capacityTypeList := availableCapacityTypes.UnsortedList(); len(capacityTypeList) > 0 {
-			i.Requirements.Add(scheduling.NewRequirement(
-				v1.CapacityTypeLabelKey,
-				corev1.NodeSelectorOpIn,
-				capacityTypeList...,
-			))
-		}
-
-		if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {
-			i.Annotations = lo.Assign(i.Annotations, map[string]string{
-				v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
-			})
-		}
-		if foundCapacityOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); foundCapacityOverlay {
-			i.Annotations = lo.Assign(i.Annotations, map[string]string{
-				v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
-			})
-		}
+		i.applyDynamicSettings()
 	}
 
 	nc := &v1.NodeClaim{
@@ -142,4 +105,54 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	}
 
 	return nc
+}
+
+func (i *NodeClaimTemplate) applyDynamicSettings() {
+	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
+	i.addInstanceTypeRequirement(instanceTypes)
+	i.addCapacityTypeRequirement(instanceTypes)
+	i.addOverlayAnnotations(instanceTypes)
+}
+
+func (i *NodeClaimTemplate) addInstanceTypeRequirement(instanceTypes []*cloudprovider.InstanceType) {
+	i.Requirements.Add(scheduling.NewRequirementWithFlexibility(
+		corev1.LabelInstanceTypeStable,
+		corev1.NodeSelectorOpIn,
+		i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues,
+		lo.Map(instanceTypes, func(it *cloudprovider.InstanceType, _ int) string {
+			return it.Name
+		})...,
+	))
+}
+
+func (i *NodeClaimTemplate) addCapacityTypeRequirement(instanceTypes []*cloudprovider.InstanceType) {
+	availableCapacityTypes := sets.New[string]()
+	for _, instanceType := range instanceTypes {
+		for _, offering := range instanceType.Offerings {
+			if offering.Available && i.Requirements.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+				availableCapacityTypes.Insert(offering.CapacityType())
+			}
+		}
+	}
+
+	if capacityTypeList := availableCapacityTypes.UnsortedList(); len(capacityTypeList) > 0 {
+		i.Requirements.Add(scheduling.NewRequirement(
+			v1.CapacityTypeLabelKey,
+			corev1.NodeSelectorOpIn,
+			capacityTypeList...,
+		))
+	}
+}
+
+func (i *NodeClaimTemplate) addOverlayAnnotations(instanceTypes []*cloudprovider.InstanceType) {
+	if lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }) {
+		i.Annotations = lo.Assign(i.Annotations, map[string]string{
+			v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
+		})
+	}
+	if lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }) {
+		i.Annotations = lo.Assign(i.Annotations, map[string]string{
+			v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
+		})
+	}
 }
