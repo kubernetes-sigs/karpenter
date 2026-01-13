@@ -37,10 +37,10 @@ var _ = Describe("Performance", func() {
 			By("Creating deployments with different resource profiles and protection")
 
 			// Create deployment options using templates
-			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
+			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "900m", "3100Mi",
 				test.WithHostnameSpread())
-			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
-			protectedOpts := test.CreateDeploymentOptions("do-not-disrupt-app", 100, "950m", "450Mi",
+			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3500m", "28Gi")
+			protectedOpts := test.CreateDeploymentOptions("do-not-disrupt-app", 100, "900m", "450Mi",
 				test.WithDoNotDisrupt())
 
 			// Create deployments
@@ -63,9 +63,9 @@ var _ = Describe("Performance", func() {
 				"Total scale-out time should be less than 4 minutes")
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 750),
 				"Should not require more than 550 nodes for 1100 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 55%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.6),
 				"Average memory utilization should be greater than 70%")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========

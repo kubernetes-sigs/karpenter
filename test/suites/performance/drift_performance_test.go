@@ -37,9 +37,9 @@ var _ = Describe("Performance", func() {
 			By("Creating initial deployments for drift testing")
 
 			// Create deployment options using templates
-			hostnameSpreadOpts := test.CreateDeploymentOptions("hostname-spread-app", 300, "950m", "3900Mi",
+			hostnameSpreadOpts := test.CreateDeploymentOptions("hostname-spread-app", 300, "900m", "3100Mi",
 				test.WithHostnameSpread())
-			standardOpts := test.CreateDeploymentOptions("standard-app", 300, "3800m", "31Gi")
+			standardOpts := test.CreateDeploymentOptions("standard-app", 300, "3500m", "28Gi")
 
 			// Create deployments
 			hostnameSpreadDeployment := test.Deployment(hostnameSpreadOpts)
