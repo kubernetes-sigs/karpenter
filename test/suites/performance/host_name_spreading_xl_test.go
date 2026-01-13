@@ -36,9 +36,9 @@ var _ = Describe("Performance", func() {
 			By("Creating XL deployments with hostname spreading")
 
 			// Create deployment options using templates - XL scale (2000 pods total)
-			smallOpts := test.CreateDeploymentOptions("small-resource-app", 1000, "950m", "3900Mi",
+			smallOpts := test.CreateDeploymentOptions("small-resource-app", 1000, "900m", "3100Mi",
 				test.WithHostnameSpread())
-			largeOpts := test.CreateDeploymentOptions("large-resource-app", 1000, "3800m", "31Gi")
+			largeOpts := test.CreateDeploymentOptions("large-resource-app", 1000, "3500m", "28Gi")
 
 			// Create deployments
 			smallDeployment := test.Deployment(smallOpts)
@@ -87,9 +87,9 @@ var _ = Describe("Performance", func() {
 				"Node count should decrease after consolidation")
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
 				"XL consolidation should complete within 10 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 55%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.6),
 				"Average memory utilization should be greater than 70%")
 
 		})

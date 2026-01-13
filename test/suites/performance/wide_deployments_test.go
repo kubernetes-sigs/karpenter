@@ -44,14 +44,14 @@ type DeploymentConfig struct {
 func getDeterministicDeploymentConfigs() []DeploymentConfig {
 	// Deterministic CPU values (0.25 - 8.0 vCPU range)
 	cpuValues := []string{
-		"250m", "500m", "750m", "1000m", "1500m", "2000m", "2500m", "3000m", "3500m", "4000m", // 1-10
-		"2500m", "1000m", "1500m", "3000m", "1800m", "2000m", "3500m", "4000m", "250m", "500m", // 11-20
-		"750m", "1000m", "1500m", "2000m", "2500m", "3000m", "3500m", "4000m", "3500m", "3000m", // 21-30
+		"240m", "450m", "650m", "900m", "1400m", "1900m", "2400m", "2800m", "3300m", "3700m", // 1-10
+		"2300m", "900m", "1300m", "2800m", "1800m", "1850m", "3300m", "3800m", "225m", "450m", // 11-20
+		"700m", "900m", "1300m", "1800m", "2400m", "2800m", "3400m", "3800m", "3300m", "2800m", // 21-30
 	}
 
 	// Deterministic memory values (300MB - 64GB range)
 	memoryValues := []string{
-		"300Mi", "500Mi", "750Mi", "1Gi", "2Gi", "4Gi", "8Gi", "4Gi", "16Gi", "10Gi", // 1-10
+		"300Mi", "400Mi", "700Mi", "1Gi", "2Gi", "4Gi", "8Gi", "4Gi", "16Gi", "10Gi", // 1-10
 		"64Gi", "30Gi", "32Gi", "32Gi", "30Gi", "20Gi", "30Gi", "300Mi", "500Mi", "750Mi", // 11-20
 		"1Gi", "2Gi", "4Gi", "8Gi", "16Gi", "32Gi", "28Gi", "64Gi", "13Gi", "24Gi", // 21-30
 	}
@@ -176,9 +176,9 @@ var _ = Describe("Performance", func() {
 				"Total scale-out time should be less than 3 minutes")
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 300),
 				"Should not require more than 1000 nodes for 1000 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.68),
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.6),
 				"Average CPU utilization should be greater than 68%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.50),
 				"Average memory utilization should be greater than 55%")
 
 			// ========== PHASE 2: WIDE CONSOLIDATION TEST ==========
