@@ -2666,4 +2666,83 @@ var _ = Describe("Instance Type Controller", func() {
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind())))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElements(lo.Keys(nodePool.Spec.Template.Labels)))
 	})
+	It("should work with NodePool using Exists operator and NodeOverlay using In operator (issue #2765)", func() {
+		// This test verifies the fix for issue #2765 where NodePool with Exists operator
+		// and NodeOverlay with In operator should be compatible
+		customLabel := "nvidia.com/device-plugin.config"
+		nodePool = test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Template: v1.NodeClaimTemplate{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{
+							customLabel: "gpu-timesliced-3", // Add custom label to NodePool
+						},
+					},
+					Spec: v1.NodeClaimTemplateSpec{
+						Requirements: []v1.NodeSelectorRequirementWithMinValues{
+							{
+								Key:      customLabel,
+								Operator: corev1.NodeSelectorOpExists, // NodePool uses Exists operator
+							},
+						},
+						NodeClassRef: &v1.NodeClassReference{
+							Group: "karpenter.test.sh",
+							Kind:  "TestNodeClaim",
+							Name:  "default",
+						},
+					},
+				},
+			},
+		})
+
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "gpu-instance-type",
+				Resources: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:    resource.MustParse("4"),
+					corev1.ResourceMemory: resource.MustParse("16Gi"),
+				},
+			}),
+		}
+
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      customLabel,
+						Operator: corev1.NodeSelectorOpIn, // NodeOverlay uses In operator with specific value
+						Values:   []string{"gpu-timesliced-3"},
+					},
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"gpu-instance-type"},
+					},
+				},
+				Capacity: corev1.ResourceList{
+					corev1.ResourceName("nvidia.com/gpu.shared"): resource.MustParse("3"),
+				},
+				Weight: lo.ToPtr(int32(10)),
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, nodePool, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		// Check that the overlay was successfully applied
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+		// Verify that instance types have the extended resource capacity
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+
+		// Verify the capacity was added
+		gpuSharedResource, exists := instanceTypeList[0].Capacity.Name(corev1.ResourceName("nvidia.com/gpu.shared"), resource.DecimalSI).AsInt64()
+		Expect(exists).To(BeTrue())
+		Expect(gpuSharedResource).To(BeNumerically("==", 3))
+	})
 })

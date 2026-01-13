@@ -195,6 +195,10 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
 		if opts.AllowUndefined.Has(key) {
 			continue
 		}
+		// If the base requirements have Exists operator for this key, any specific value in overlay is compatible
+		if r.Has(key) && r.Get(key).Operator() == corev1.NodeSelectorOpExists {
+			continue
+		}
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
 			continue
 		}
