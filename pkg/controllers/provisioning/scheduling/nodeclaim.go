@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -133,9 +134,8 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
 	// This ensures NodeClaim is created in the correct zone for volumes,
 	// while TSC counting uses pod's original affinity (no volume pollution).
-	if len(podData.VolumeRequirements) > 0 {
-		volumeReqs := scheduling.NewNodeSelectorRequirements(podData.VolumeRequirements...)
-		nodeClaimRequirements.Add(volumeReqs.Values()...)
+	if err := addVolumeRequirements(nodeClaimRequirements, podData.VolumeRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
+		return nil, nil, nil, err
 	}
 
 	// Check Topology Requirements
@@ -456,4 +456,18 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 
 func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList) bool {
 	return resources.Fits(requests, instanceType.Allocatable())
+}
+
+// addVolumeRequirements adds volume topology requirements to nodeRequirements after checking compatibility.
+// This catches cases like a PV with hostname affinity to a specific node that conflicts with the NodeClaim.
+func addVolumeRequirements(nodeRequirements scheduling.Requirements, volumeRequirements []corev1.NodeSelectorRequirement, opts ...option.Function[scheduling.CompatibilityOptions]) error {
+	if len(volumeRequirements) == 0 {
+		return nil
+	}
+	volumeReqs := scheduling.NewNodeSelectorRequirements(volumeRequirements...)
+	if err := nodeRequirements.Compatible(volumeReqs, opts...); err != nil {
+		return fmt.Errorf("incompatible volume requirements, %w", err)
+	}
+	nodeRequirements.Add(volumeReqs.Values()...)
+	return nil
 }
