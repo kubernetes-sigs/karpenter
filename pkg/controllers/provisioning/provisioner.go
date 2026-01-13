@@ -286,13 +286,15 @@ func (p *Provisioner) NewScheduler(
 		instanceTypes[np.Name] = its
 	}
 
-	// inject topology constraints
-	pods, err = p.injectVolumeTopologyRequirements(ctx, pods)
+	// Get volume topology requirements WITHOUT modifying pods.
+	// This ensures TSC counting uses pod's original affinity (matching K8s scheduler).
+	// Volume requirements are passed separately and added to nodeRequirements only.
+	pods, volumeReqs, err := p.getVolumeTopologyRequirements(ctx, pods)
 	if err != nil {
-		return nil, fmt.Errorf("injecting volume topology requirements, %w", err)
+		return nil, fmt.Errorf("getting volume topology requirements, %w", err)
 	}
 
-	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
+	// Calculate cluster topology - pods are NOT modified, so TSC counting is correct
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
@@ -301,7 +303,8 @@ func (p *Provisioner) NewScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, opts...), nil
+	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -527,19 +530,27 @@ func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 	return nil
 }
 
-func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, error) {
+// getVolumeTopologyRequirements collects volume topology requirements for each pod
+// WITHOUT modifying the pods. These requirements will be added to nodeRequirements
+// (for NodeClaim zone selection) but NOT to pod affinities (for correct TSC counting).
+func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, map[types.UID][]corev1.NodeSelectorRequirement, error) {
 	var schedulablePods []*corev1.Pod
+	volumeReqs := make(map[types.UID][]corev1.NodeSelectorRequirement)
 	for _, pod := range pods {
-		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
+		reqs, err := p.volumeTopology.GetRequirements(ctx, pod)
+		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
+				return nil, nil, err
 			}
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
-		} else {
-			schedulablePods = append(schedulablePods, pod)
+			continue
 		}
+		if len(reqs) > 0 {
+			volumeReqs[pod.UID] = reqs
+		}
+		schedulablePods = append(schedulablePods, pod)
 	}
-	return schedulablePods, nil
+	return schedulablePods, volumeReqs, nil
 }
 
 func validateNodeSelector(ctx context.Context, p *corev1.Pod) (errs error) {

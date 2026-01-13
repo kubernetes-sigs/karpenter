@@ -130,7 +130,17 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	}
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
+	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
+	// This ensures NodeClaim is created in the correct zone for volumes,
+	// while TSC counting uses pod's original affinity (no volume pollution).
+	if len(podData.VolumeRequirements) > 0 {
+		volumeReqs := scheduling.NewNodeSelectorRequirements(podData.VolumeRequirements...)
+		nodeClaimRequirements.Add(volumeReqs.Values()...)
+	}
+
 	// Check Topology Requirements
+	// NOTE: podData.StrictRequirements does NOT include volume requirements,
+	// ensuring TSC counting uses pod's original affinity.
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
 		return nil, nil, nil, err

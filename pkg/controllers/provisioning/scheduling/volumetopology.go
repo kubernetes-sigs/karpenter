@@ -48,42 +48,27 @@ type VolumeTopology struct {
 	kubeClient client.Client
 }
 
-func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
+// GetRequirements returns the volume topology requirements for the pod WITHOUT
+// modifying the pod. These requirements should be added to nodeRequirements
+// (for NodeClaim zone selection) but NOT to the pod's NodeAffinity (for TSC counting).
+// This separation ensures TSC calculations use the pod's original affinity,
+// matching Kubernetes scheduler behavior.
+func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]v1.NodeSelectorRequirement, error) {
 	var requirements []v1.NodeSelectorRequirement
 	for _, volume := range pod.Spec.Volumes {
 		req, err := v.getRequirements(ctx, pod, volume)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		requirements = append(requirements, req...)
 	}
 	if len(requirements) == 0 {
-		return nil
+		return nil, nil
 	}
-	if pod.Spec.Affinity == nil {
-		pod.Spec.Affinity = &v1.Affinity{}
-	}
-	if pod.Spec.Affinity.NodeAffinity == nil {
-		pod.Spec.Affinity.NodeAffinity = &v1.NodeAffinity{}
-	}
-	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &v1.NodeSelector{}
-	}
-	if len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = []v1.NodeSelectorTerm{{}}
-	}
-
-	// We add our volume topology zonal requirement to every node selector term.  This causes it to be AND'd with every existing
-	// requirement so that relaxation won't remove our volume requirement.
-	for i := 0; i < len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms); i++ {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions = append(
-			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions, requirements...)
-	}
-
 	log.FromContext(ctx).
 		WithValues("Pod", klog.KObj(pod)).
-		V(1).Info(fmt.Sprintf("adding requirements derived from pod volumes, %s", requirements))
-	return nil
+		V(1).Info(fmt.Sprintf("volume topology requirements (not injected): %s", requirements))
+	return requirements, nil
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {

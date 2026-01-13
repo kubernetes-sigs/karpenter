@@ -94,7 +94,17 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
 	nodeRequirements.Add(podData.Requirements.Values()...)
 
+	// Add volume requirements to nodeRequirements ONLY (not to pod's affinity).
+	// This ensures existing node must be in the correct zone for volumes,
+	// while TSC counting uses pod's original affinity (no volume pollution).
+	if len(podData.VolumeRequirements) > 0 {
+		volumeReqs := scheduling.NewNodeSelectorRequirements(podData.VolumeRequirements...)
+		nodeRequirements.Add(volumeReqs.Values()...)
+	}
+
 	// Check Topology Requirements
+	// NOTE: podData.StrictRequirements does NOT include volume requirements,
+	// ensuring TSC counting uses pod's original affinity.
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
 	if err != nil {
 		return nil, err
