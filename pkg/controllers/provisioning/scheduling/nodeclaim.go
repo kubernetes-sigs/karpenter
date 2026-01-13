@@ -133,7 +133,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 
 	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
 	// This ensures NodeClaim is created in the correct zone for volumes,
-	// while TSC counting uses pod's original affinity (no volume pollution).
+	// while TSC counting uses pod's original affinity.
 	if err := addVolumeRequirements(nodeClaimRequirements, podData.VolumeRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
 		return nil, nil, nil, err
 	}

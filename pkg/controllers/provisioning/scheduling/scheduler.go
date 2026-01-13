@@ -124,7 +124,7 @@ func NewScheduler(
 	daemonSetPods []*corev1.Pod,
 	recorder events.Recorder,
 	clock clock.Clock,
-	volumeReqsByPod map[types.UID][]corev1.NodeSelectorRequirement, // Volume requirements per pod (not in pod's affinity)
+	volumeReqsByPod map[types.UID][]corev1.NodeSelectorRequirement,
 	opts ...Options,
 ) *Scheduler {
 	minValuesPolicy := option.Resolve(opts...).minValuesPolicy
@@ -166,7 +166,7 @@ func NewScheduler(
 		daemonOverhead:      getDaemonOverhead(ctx, templates, daemonSetPods),
 		daemonHostPortUsage: getDaemonHostPortUsage(ctx, templates, daemonSetPods),
 		cachedPodData:       map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
-		volumeReqsByPod:     volumeReqsByPod,          // Volume requirements per pod (NOT in pod's affinity)
+		volumeReqsByPod:     volumeReqsByPod,          // Volume requirements per pod
 		recorder:            recorder,
 		preferences:         &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
@@ -188,7 +188,7 @@ type PodData struct {
 	Requirements             scheduling.Requirements
 	StrictRequirements       scheduling.Requirements
 	HasResourceClaimRequests bool
-	VolumeRequirements       []corev1.NodeSelectorRequirement // Volume topology requirements (NOT in pod's affinity)
+	VolumeRequirements       []corev1.NodeSelectorRequirement // Volume topology requirements
 }
 
 type Scheduler struct {
@@ -199,7 +199,7 @@ type Scheduler struct {
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead          map[*NodeClaimTemplate]corev1.ResourceList
 	daemonHostPortUsage     map[*NodeClaimTemplate]*scheduling.HostPortUsage
-	cachedPodData           map[types.UID]*PodData                         // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
+	cachedPodData           map[types.UID]*PodData
 	volumeReqsByPod         map[types.UID][]corev1.NodeSelectorRequirement // Volume topology requirements per pod
 	preferences             *Preferences
 	topology                *Topology
@@ -486,7 +486,7 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 		Requirements:             requirements,
 		StrictRequirements:       strictRequirements,
 		HasResourceClaimRequests: pod.HasDRARequirements(p),
-		VolumeRequirements:       s.volumeReqsByPod[p.UID], // Volume requirements (NOT in pod's affinity)
+		VolumeRequirements:       s.volumeReqsByPod[p.UID], // Volume requirements
 	}
 }
 

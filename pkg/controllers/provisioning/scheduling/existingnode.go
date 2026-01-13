@@ -96,7 +96,7 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 
 	// Add volume requirements to nodeRequirements ONLY (not to pod's affinity).
 	// This ensures existing node must be in the correct zone for volumes,
-	// while TSC counting uses pod's original affinity (no volume pollution).
+	// while TSC counting uses pod's original affinity.
 	if err := addVolumeRequirements(nodeRequirements, podData.VolumeRequirements); err != nil {
 		return nil, err
 	}

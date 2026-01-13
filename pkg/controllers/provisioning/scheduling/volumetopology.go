@@ -48,11 +48,11 @@ type VolumeTopology struct {
 	kubeClient client.Client
 }
 
-// GetRequirements returns the volume topology requirements for the pod WITHOUT
-// modifying the pod. These requirements should be added to nodeRequirements
-// (for NodeClaim zone selection) but NOT to the pod's NodeAffinity (for TSC counting).
-// This separation ensures TSC calculations use the pod's original affinity,
-// matching Kubernetes scheduler behavior.
+// GetRequirements returns the volume topology requirements for the pod.
+//
+// These requirements should be:
+//   - Added to nodeRequirements (for NodeClaim zone selection)
+//   - NOT added to pod's NodeAffinity (to preserve correct TSC counting)
 func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]v1.NodeSelectorRequirement, error) {
 	var requirements []v1.NodeSelectorRequirement
 	for _, volume := range pod.Spec.Volumes {
@@ -67,7 +67,7 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]v1
 	}
 	log.FromContext(ctx).
 		WithValues("Pod", klog.KObj(pod)).
-		V(1).Info(fmt.Sprintf("volume topology requirements (not injected): %s", requirements))
+		V(1).Info(fmt.Sprintf("volume topology requirements: %s", requirements))
 	return requirements, nil
 }
 

@@ -287,14 +287,13 @@ func (p *Provisioner) NewScheduler(
 	}
 
 	// Get volume topology requirements WITHOUT modifying pods.
-	// This ensures TSC counting uses pod's original affinity (matching K8s scheduler).
 	// Volume requirements are passed separately and added to nodeRequirements only.
 	pods, volumeReqs, err := p.getVolumeTopologyRequirements(ctx, pods)
 	if err != nil {
 		return nil, fmt.Errorf("getting volume topology requirements, %w", err)
 	}
 
-	// Calculate cluster topology - pods are NOT modified, so TSC counting is correct
+	// Calculate cluster topology
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
