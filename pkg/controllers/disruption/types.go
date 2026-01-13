@@ -93,7 +93,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	if queue.HasAny(node.ProviderID()) {
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
-	if err = node.ValidateNodeDisruptable(); err != nil {
+	if err = node.ValidateNodeDisruptable(clk); err != nil {
 		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
