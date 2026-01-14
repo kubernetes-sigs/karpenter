@@ -47,10 +47,8 @@ const (
 	podNamespace        = "namespace"
 	ownerSelfLink       = "owner"
 	podHostName         = "node"
-	podNodePool         = "nodepool"
 	podHostZone         = "zone"
 	podHostArchitecture = "arch"
-	podHostCapacityType = "capacity_type"
 	podHostInstanceType = "instance_type"
 	podPhase            = "phase"
 	podScheduled        = "scheduled"
@@ -186,10 +184,10 @@ func labelNames() []string {
 		ownerSelfLink,
 		podHostName,
 		podScheduled,
-		podNodePool,
+		metrics.NodePoolLabel,
 		podHostZone,
 		podHostArchitecture,
-		podHostCapacityType,
+		metrics.CapacityTypeLabel,
 		podHostInstanceType,
 		podPhase,
 		podReady,
@@ -441,9 +439,9 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	}
 	metricLabels[podHostZone] = node.Labels[corev1.LabelTopologyZone]
 	metricLabels[podHostArchitecture] = node.Labels[corev1.LabelArchStable]
-	metricLabels[podHostCapacityType] = node.Labels[v1.CapacityTypeLabelKey]
+	metricLabels[metrics.CapacityTypeLabel] = node.Labels[v1.CapacityTypeLabelKey]
 	metricLabels[podHostInstanceType] = node.Labels[corev1.LabelInstanceTypeStable]
-	metricLabels[podNodePool] = node.Labels[v1.NodePoolLabelKey]
+	metricLabels[metrics.NodePoolLabel] = node.Labels[v1.NodePoolLabelKey]
 	return metricLabels, nil
 }
 
