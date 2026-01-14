@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -37,26 +38,23 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/utils/object"
 )
 
 // NecessaryLabels defines the set of required Kubernetes labels that must be present
 // on NodeClaim objects for cost tracking to function properly.
 var NecessaryLabels = []string{corev1.LabelInstanceTypeStable, v1.CapacityTypeLabelKey, corev1.LabelTopologyZone, v1.NodePoolLabelKey}
 
-var (
-	CostTrackingErrorsTotal = opmetrics.NewPrometheusCounter(
-		crmetrics.Registry,
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodePoolSubsystem,
-			Name:      "cost_tracker_errors_total",
-			Help:      "Number of errors encountered during cost tracking operations. Labeled by nodepool and nodeclaim.",
-		},
-		[]string{
-			metrics.NodePoolLabel,
-		},
-	)
+var CostTrackingErrorsTotal = opmetrics.NewPrometheusCounter(
+	crmetrics.Registry,
+	prometheus.CounterOpts{
+		Namespace: metrics.Namespace,
+		Subsystem: metrics.NodePoolSubsystem,
+		Name:      "cost_tracker_errors_total",
+		Help:      "Number of errors encountered during cost tracking operations. Labeled by nodepool and nodeclaim.",
+	},
+	[]string{
+		metrics.NodePoolLabel,
+	},
 )
 
 // ClusterCost tracks the cost of compute resources across all NodePools in a cluster.
