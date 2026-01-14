@@ -19,6 +19,9 @@ package disruption
 import (
 	"errors"
 	"testing"
+
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 )
 
 func TestGetValidationFailureReason(t *testing.T) {
@@ -79,16 +82,55 @@ func TestGetValidationFailureReason(t *testing.T) {
 	}
 }
 
-func TestGetCommandEstimatedSavings(t *testing.T) {
-	// This is a basic test to ensure the function doesn't panic
-	// Full testing would require setting up candidates with instance types
+func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
+	// This test verifies that getCommandEstimatedSavings correctly sums
+	// costs from multiple replacement NodeClaims, future-proofing for
+	// potential N->M consolidation scenarios.
+	//
+	// We can't easily test with real Candidates (requires StateNode setup),
+	// so we test the destination cost summing logic in isolation.
+	//
+	// Scenario: 2 replacement nodes with different costs
+	// Expected: Both costs should be summed
+	
 	cmd := Command{
-		Candidates:   []*Candidate{},
-		Replacements: []*Replacement{},
+		Replacements: []*Replacement{{}, {}}, // 2 replacements to avoid delete path
+	}
+	cmd.Results.NewNodeClaims = []*scheduling.NodeClaim{
+		{
+			NodeClaimTemplate: scheduling.NodeClaimTemplate{
+				InstanceTypeOptions: []*cloudprovider.InstanceType{
+					{
+						Name: "instance-type-1",
+						Offerings: cloudprovider.Offerings{
+							{Price: 0.30},
+						},
+					},
+				},
+			},
+		},
+		{
+			NodeClaimTemplate: scheduling.NodeClaimTemplate{
+				InstanceTypeOptions: []*cloudprovider.InstanceType{
+					{
+						Name: "instance-type-2",
+						Offerings: cloudprovider.Offerings{
+							{Price: 0.40},
+						},
+					},
+				},
+			},
+		},
 	}
 	
+	// With no candidates (sourcePrice = 0), we're testing the destination summing:
+	// savings = 0 - (0.30 + 0.40) = -0.70
+	// Negative savings means cost increase, which wouldn't happen in real consolidation,
+	// but this test verifies the summing logic works for multiple NodeClaims.
 	savings := getCommandEstimatedSavings(cmd)
-	if savings < 0 {
-		t.Errorf("getCommandEstimatedSavings() returned negative value: %v", savings)
+	expectedSavings := -0.70
+	
+	if savings != expectedSavings {
+		t.Errorf("getCommandEstimatedSavings() = %v, want %v (verifying multi-NodeClaim summing)", savings, expectedSavings)
 	}
 }
