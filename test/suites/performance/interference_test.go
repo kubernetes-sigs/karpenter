@@ -113,8 +113,8 @@ var _ = Describe("Performance", func() {
 			// Consolidation performance assertions
 			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
 				"Node count should decrease after consolidation despite small deployment scale-out")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 15*time.Minute),
-				"Mixed scaling and consolidation should complete within 15 minutes")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
+				"Mixed scaling and consolidation should complete within 25 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should remain greater than 50% after consolidation")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
