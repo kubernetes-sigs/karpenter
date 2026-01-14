@@ -384,7 +384,10 @@ func getCommandEstimatedSavings(cmd Command) float64 {
 	destPrice := 0.0
 	for _, nodeClaim := range cmd.Results.NewNodeClaims {
 		if len(nodeClaim.InstanceTypeOptions) > 0 {
-			destPrice += nodeClaim.InstanceTypeOptions[0].Offerings.Cheapest().Price
+			offerings := nodeClaim.InstanceTypeOptions[0].Offerings
+			if len(offerings) > 0 {
+				destPrice += offerings.Cheapest().Price
+			}
 		}
 	}
 	

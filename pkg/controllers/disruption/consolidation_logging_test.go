@@ -134,3 +134,72 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 		t.Errorf("getCommandEstimatedSavings() = %v, want %v (verifying multi-NodeClaim summing)", savings, expectedSavings)
 	}
 }
+
+func TestGetCommandEstimatedSavings_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name            string
+		cmd             Command
+		expectedSavings float64
+	}{
+		{
+			name: "empty NodeClaim list",
+			cmd: Command{
+				Replacements: []*Replacement{{}},
+			},
+			expectedSavings: 0.0,
+		},
+		{
+			name: "NodeClaim with no InstanceTypeOptions",
+			cmd: Command{
+				Replacements: []*Replacement{{}},
+				Results: scheduling.Results{
+					NewNodeClaims: []*scheduling.NodeClaim{
+						{
+							NodeClaimTemplate: scheduling.NodeClaimTemplate{
+								InstanceTypeOptions: []*cloudprovider.InstanceType{},
+							},
+						},
+					},
+				},
+			},
+			expectedSavings: 0.0,
+		},
+		{
+			name: "NodeClaim with empty Offerings",
+			cmd: Command{
+				Replacements: []*Replacement{{}},
+				Results: scheduling.Results{
+					NewNodeClaims: []*scheduling.NodeClaim{
+						{
+							NodeClaimTemplate: scheduling.NodeClaimTemplate{
+								InstanceTypeOptions: []*cloudprovider.InstanceType{
+									{
+										Name:      "instance-type",
+										Offerings: cloudprovider.Offerings{},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedSavings: 0.0,
+		},
+		{
+			name: "delete consolidation - no replacements",
+			cmd: Command{
+				Replacements: []*Replacement{},
+			},
+			expectedSavings: 0.0, // No candidates, so sourcePrice = 0
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			savings := getCommandEstimatedSavings(tt.cmd)
+			if savings != tt.expectedSavings {
+				t.Errorf("getCommandEstimatedSavings() = %v, want %v", savings, tt.expectedSavings)
+			}
+		})
+	}
+}
