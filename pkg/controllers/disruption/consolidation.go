@@ -357,13 +357,3 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 // getCommandEstimatedSavings calculates the estimated savings for a command
 
 // getDestinationRequirements returns a string representation of destination node requirements
-func getDestinationRequirements(cmd Command) []string {
-	return lo.Map(cmd.Replacements, func(r *Replacement, _ int) string {
-		ct := r.Requirements.Get(v1.CapacityTypeLabelKey)
-		values := ct.Values()
-		if len(values) > 0 {
-			return fmt.Sprintf("nodeclaim[capacity-type=%s]", values[0])
-		}
-		return "nodeclaim[unknown]"
-	})
-}
