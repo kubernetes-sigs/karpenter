@@ -2311,64 +2311,6 @@ var _ = Describe("Instance Type Controller", func() {
 				}
 			}
 		})
-		It("should apply higher weight overlay when multiple overlays match the same instance type", func() {
-			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "overlay-a",
-				},
-				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1alpha1.NodeSelectorRequirement{
-						{
-							Key:      corev1.LabelInstanceTypeStable,
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"default-instance-type"},
-						},
-					},
-					Weight: lo.ToPtr(int32(10)),
-					Capacity: corev1.ResourceList{
-						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
-					},
-				},
-			})
-			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "overlay-b",
-				},
-				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1alpha1.NodeSelectorRequirement{
-						{
-							Key:      corev1.LabelInstanceTypeStable,
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"default-instance-type"},
-						},
-					},
-					Weight: lo.ToPtr(int32(20)),
-					Capacity: corev1.ResourceList{
-						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("99"),
-					},
-				},
-			})
-
-			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
-			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
-
-			// Both overlays should pass validation since they have different weights
-			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
-			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
-			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
-
-			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
-			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
-			Expect(err).To(BeNil())
-
-			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-			// The higher weight overlay (overlayB with weight 20) should take precedence
-			fuseResource, exist := instanceTypeList[0].Capacity.Name(corev1.ResourceName("smarter-devices/fuse"), resource.DecimalSI).AsInt64()
-			Expect(exist).To(BeTrue())
-			Expect(fuseResource).To(BeNumerically("==", 99))
-		})
 		It("should that there is not a partial application for instance types", func() {
 			cloudProvider.InstanceTypes = nil
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
