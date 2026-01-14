@@ -72,6 +72,7 @@ var (
 	cloudProvider             *fake.CloudProvider
 	nodeStateController       *informer.NodeController
 	nodeClaimStateController  *informer.NodeClaimController
+	pricingController         *informer.PricingController
 	fakeClock                 *clock.FakeClock
 	recorder                  *test.EventRecorder
 	queue                     *disruption.Queue
