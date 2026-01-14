@@ -380,10 +380,12 @@ func getCommandEstimatedSavings(cmd Command) float64 {
 		return sourcePrice
 	}
 	
-	// For replace consolidation, calculate destination cost
+	// For replace consolidation, sum destination costs from all replacement NodeClaims
 	destPrice := 0.0
-	if len(cmd.Results.NewNodeClaims) > 0 && len(cmd.Results.NewNodeClaims[0].InstanceTypeOptions) > 0 {
-		destPrice = cmd.Results.NewNodeClaims[0].InstanceTypeOptions[0].Offerings.Cheapest().Price
+	for _, nodeClaim := range cmd.Results.NewNodeClaims {
+		if len(nodeClaim.InstanceTypeOptions) > 0 {
+			destPrice += nodeClaim.InstanceTypeOptions[0].Offerings.Cheapest().Price
+		}
 	}
 	
 	return sourcePrice - destPrice
