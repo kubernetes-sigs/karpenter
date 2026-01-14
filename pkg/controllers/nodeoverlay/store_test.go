@@ -17,6 +17,8 @@ limitations under the License.
 package nodeoverlay
 
 import (
+	"testing"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -29,6 +31,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
+
+func TestStore(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Store Internal")
+}
 
 var _ = Describe("Store", func() {
 	Describe("Apply Selective Copy", func() {
