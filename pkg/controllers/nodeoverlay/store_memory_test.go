@@ -19,8 +19,8 @@ package nodeoverlay
 import (
 	"fmt"
 	"runtime"
-	"testing"
 
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -112,208 +112,193 @@ func (ms *memStats) String() string {
 	)
 }
 
-// TestMemoryUsage_OverlayScenarios tests memory usage for different overlay configurations
-// This test validates the selective copy-on-write optimization reduces memory consumption.
-// Tests will FAIL if memory allocations exceed the defined limits, providing automatic
-// guardrails for contributors who may inadvertently increase memory usage.
-//
-//nolint:gocyclo
-func TestMemoryUsage_OverlayScenarios(t *testing.T) {
-	instanceTypes := createRealisticInstanceTypes(200)
-	nodePools := []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}
+var _ = Describe("Memory Usage", func() {
+	var instanceTypes []*cloudprovider.InstanceType
+	var nodePools []string
 
-	t.Run("no_overlays", func(t *testing.T) {
-		g := NewWithT(t)
-		store := newInternalInstanceTypeStore()
-		for _, np := range nodePools {
-			store.evaluatedNodePools.Insert(np)
-		}
-
-		ms := captureMemStats()
-
-		for i := 0; i < 100; i++ {
-			for _, np := range nodePools {
-				for _, it := range instanceTypes {
-					_, _ = store.apply(np, it)
-				}
-			}
-		}
-
-		ms.finalize()
-		t.Logf("No overlays - %s", ms.String())
-
-		// Verify allocations are within acceptable limits
-		g.Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsNoOverlays),
-			"memory allocations exceeded limit for no overlays scenario: got %d, max %d", ms.totalAllocs, MaxAllocsNoOverlays)
+	BeforeEach(func() {
+		instanceTypes = createRealisticInstanceTypes(200)
+		nodePools = []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}
 	})
 
-	t.Run("price_overlays_only", func(t *testing.T) {
-		g := NewWithT(t)
-		store := newInternalInstanceTypeStore()
-		store.evaluatedNodePools.Insert("default")
-		store.updates["default"] = make(map[string]*instanceTypeUpdate)
+	Describe("Overlay Scenarios", func() {
+		It("should use minimal allocations with no overlays", func() {
+			store := newInternalInstanceTypeStore()
+			for _, np := range nodePools {
+				store.evaluatedNodePools.Insert(np)
+			}
 
-		for _, it := range instanceTypes {
-			priceUpdates := make(map[string]*priceUpdate)
-			for _, offering := range it.Offerings {
-				if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
-					priceUpdates[offering.Requirements.String()] = &priceUpdate{
-						OverlayUpdate: lo.ToPtr("-10%"),
-						lowestWeight:  lo.ToPtr(int32(10)),
+			ms := captureMemStats()
+
+			for i := 0; i < 100; i++ {
+				for _, np := range nodePools {
+					for _, it := range instanceTypes {
+						_, _ = store.apply(np, it)
 					}
 				}
 			}
-			if len(priceUpdates) > 0 {
+
+			ms.finalize()
+			GinkgoWriter.Printf("No overlays - %s\n", ms.String())
+
+			Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsNoOverlays),
+				"memory allocations exceeded limit for no overlays scenario: got %d, max %d", ms.totalAllocs, MaxAllocsNoOverlays)
+		})
+
+		It("should use acceptable allocations with price overlays only", func() {
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
+			store.updates["default"] = make(map[string]*instanceTypeUpdate)
+
+			for _, it := range instanceTypes {
+				priceUpdates := make(map[string]*priceUpdate)
+				for _, offering := range it.Offerings {
+					if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
+						priceUpdates[offering.Requirements.String()] = &priceUpdate{
+							OverlayUpdate: lo.ToPtr("-10%"),
+							lowestWeight:  lo.ToPtr(int32(10)),
+						}
+					}
+				}
+				if len(priceUpdates) > 0 {
+					store.updates["default"][it.Name] = &instanceTypeUpdate{
+						Price:    priceUpdates,
+						Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
+					}
+				}
+			}
+
+			ms := captureMemStats()
+
+			for i := 0; i < 100; i++ {
+				for _, it := range instanceTypes {
+					_, _ = store.apply("default", it)
+				}
+			}
+
+			ms.finalize()
+			GinkgoWriter.Printf("Price overlays only - %s\n", ms.String())
+
+			Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsPriceOverlaysOnly),
+				"memory allocations exceeded limit for price overlays only scenario: got %d, max %d", ms.totalAllocs, MaxAllocsPriceOverlaysOnly)
+		})
+
+		It("should use acceptable allocations with capacity overlays only", func() {
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
+			store.updates["default"] = make(map[string]*instanceTypeUpdate)
+
+			for _, it := range instanceTypes {
 				store.updates["default"][it.Name] = &instanceTypeUpdate{
-					Price:    priceUpdates,
-					Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
-				}
-			}
-		}
-
-		ms := captureMemStats()
-
-		for i := 0; i < 100; i++ {
-			for _, it := range instanceTypes {
-				_, _ = store.apply("default", it)
-			}
-		}
-
-		ms.finalize()
-		t.Logf("Price overlays only - %s", ms.String())
-
-		// Verify allocations are within acceptable limits
-		g.Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsPriceOverlaysOnly),
-			"memory allocations exceeded limit for price overlays only scenario: got %d, max %d", ms.totalAllocs, MaxAllocsPriceOverlaysOnly)
-	})
-
-	t.Run("capacity_overlays_only", func(t *testing.T) {
-		g := NewWithT(t)
-		store := newInternalInstanceTypeStore()
-		store.evaluatedNodePools.Insert("default")
-		store.updates["default"] = make(map[string]*instanceTypeUpdate)
-
-		for _, it := range instanceTypes {
-			store.updates["default"][it.Name] = &instanceTypeUpdate{
-				Price: nil,
-				Capacity: &capacityUpdate{
-					OverlayUpdate: corev1.ResourceList{
-						"hugepages-2Mi": resource.MustParse("100Mi"),
+					Price: nil,
+					Capacity: &capacityUpdate{
+						OverlayUpdate: corev1.ResourceList{
+							"hugepages-2Mi": resource.MustParse("100Mi"),
+						},
 					},
-				},
+				}
 			}
-		}
 
-		ms := captureMemStats()
+			ms := captureMemStats()
 
-		for i := 0; i < 100; i++ {
-			for _, it := range instanceTypes {
-				_, _ = store.apply("default", it)
-			}
-		}
-
-		ms.finalize()
-		t.Logf("Capacity overlays only - %s", ms.String())
-
-		// Verify allocations are within acceptable limits
-		g.Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsCapacityOverlaysOnly),
-			"memory allocations exceeded limit for capacity overlays only scenario: got %d, max %d", ms.totalAllocs, MaxAllocsCapacityOverlaysOnly)
-	})
-
-	t.Run("mixed_overlays", func(t *testing.T) {
-		g := NewWithT(t)
-		store := createStoreWithOverlays(instanceTypes, nodePools)
-
-		ms := captureMemStats()
-
-		for i := 0; i < 100; i++ {
-			for _, np := range nodePools {
+			for i := 0; i < 100; i++ {
 				for _, it := range instanceTypes {
-					_, _ = store.apply(np, it)
+					_, _ = store.apply("default", it)
 				}
 			}
-		}
 
-		ms.finalize()
-		t.Logf("Mixed overlays (price + capacity) - %s", ms.String())
+			ms.finalize()
+			GinkgoWriter.Printf("Capacity overlays only - %s\n", ms.String())
 
-		// Verify allocations are within acceptable limits
-		g.Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsMixedOverlays),
-			"memory allocations exceeded limit for mixed overlays scenario: got %d, max %d", ms.totalAllocs, MaxAllocsMixedOverlays)
+			Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsCapacityOverlaysOnly),
+				"memory allocations exceeded limit for capacity overlays only scenario: got %d, max %d", ms.totalAllocs, MaxAllocsCapacityOverlaysOnly)
+		})
+
+		It("should use acceptable allocations with mixed overlays", func() {
+			store := createStoreWithOverlays(instanceTypes, nodePools)
+
+			ms := captureMemStats()
+
+			for i := 0; i < 100; i++ {
+				for _, np := range nodePools {
+					for _, it := range instanceTypes {
+						_, _ = store.apply(np, it)
+					}
+				}
+			}
+
+			ms.finalize()
+			GinkgoWriter.Printf("Mixed overlays (price + capacity) - %s\n", ms.String())
+
+			Expect(ms.totalAllocs).To(BeNumerically("<=", MaxAllocsMixedOverlays),
+				"memory allocations exceeded limit for mixed overlays scenario: got %d, max %d", ms.totalAllocs, MaxAllocsMixedOverlays)
+		})
 	})
-}
 
-// TestMemoryUsage_ScaleWithNodePools measures memory growth as number of node pools increases.
-// Tests will FAIL if memory does not scale linearly (within acceptable bounds) with node pool count.
-func TestMemoryUsage_ScaleWithNodePools(t *testing.T) {
-	instanceTypes := createRealisticInstanceTypes(200)
-	nodePoolCounts := []int{1, 5, 10, 20, 50}
+	Describe("Scale with Node Pools", func() {
+		nodePoolCounts := []int{1, 5, 10, 20, 50}
 
-	for _, count := range nodePoolCounts {
-		t.Run(fmt.Sprintf("nodepools_%d", count), func(t *testing.T) {
-			g := NewWithT(t)
-			nodePools := make([]string, count)
-			for i := 0; i < count; i++ {
-				nodePools[i] = fmt.Sprintf("nodepool-%d", i)
-			}
+		for _, count := range nodePoolCounts {
+			count := count // capture range variable
+			It(fmt.Sprintf("should scale linearly with %d node pools", count), func() {
+				nps := make([]string, count)
+				for i := 0; i < count; i++ {
+					nps[i] = fmt.Sprintf("nodepool-%d", i)
+				}
 
-			store := createStoreWithOverlays(instanceTypes, nodePools)
+				store := createStoreWithOverlays(instanceTypes, nps)
 
-			ms := captureMemStats()
+				ms := captureMemStats()
 
-			for i := 0; i < 100; i++ {
-				for _, np := range nodePools {
-					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+				for i := 0; i < 100; i++ {
+					for _, np := range nps {
+						for _, it := range instanceTypes {
+							_, _ = store.apply(np, it)
+						}
 					}
 				}
-			}
 
-			ms.finalize()
-			t.Logf("NodePools=%d - %s", count, ms.String())
+				ms.finalize()
+				GinkgoWriter.Printf("NodePools=%d - %s\n", count, ms.String())
 
-			// Verify memory scales linearly with node pool count
-			// Allow for some overhead, but allocations should be roughly proportional
-			maxExpectedAllocs := uint64(count) * MaxAllocsPerNodePool //#nosec G115 -- count is always positive from nodePoolCounts slice
-			g.Expect(ms.totalAllocs).To(BeNumerically("<=", maxExpectedAllocs),
-				"memory allocations exceeded limit for %d node pools: got %d, max %d", count, ms.totalAllocs, maxExpectedAllocs)
-		})
-	}
-}
+				// Verify memory scales linearly with node pool count
+				maxExpectedAllocs := uint64(count) * MaxAllocsPerNodePool //#nosec G115 -- count is always positive from nodePoolCounts slice
+				Expect(ms.totalAllocs).To(BeNumerically("<=", maxExpectedAllocs),
+					"memory allocations exceeded limit for %d node pools: got %d, max %d", count, ms.totalAllocs, maxExpectedAllocs)
+			})
+		}
+	})
 
-// TestMemoryUsage_ScaleWithInstanceTypes measures memory growth as number of instance types increases.
-// Tests will FAIL if memory does not scale linearly (within acceptable bounds) with instance type count.
-func TestMemoryUsage_ScaleWithInstanceTypes(t *testing.T) {
-	instanceTypeCounts := []int{50, 100, 200, 500}
-	nodePools := []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}
+	Describe("Scale with Instance Types", func() {
+		instanceTypeCounts := []int{50, 100, 200, 500}
 
-	for _, count := range instanceTypeCounts {
-		t.Run(fmt.Sprintf("instances_%d", count), func(t *testing.T) {
-			g := NewWithT(t)
-			instanceTypes := createRealisticInstanceTypes(count)
-			store := createStoreWithOverlays(instanceTypes, nodePools)
+		for _, count := range instanceTypeCounts {
+			count := count // capture range variable
+			It(fmt.Sprintf("should scale linearly with %d instance types", count), func() {
+				its := createRealisticInstanceTypes(count)
+				store := createStoreWithOverlays(its, nodePools)
 
-			ms := captureMemStats()
+				ms := captureMemStats()
 
-			for i := 0; i < 100; i++ {
-				for _, np := range nodePools {
-					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+				for i := 0; i < 100; i++ {
+					for _, np := range nodePools {
+						for _, it := range its {
+							_, _ = store.apply(np, it)
+						}
 					}
 				}
-			}
 
-			ms.finalize()
-			t.Logf("InstanceTypes=%d - %s", count, ms.String())
+				ms.finalize()
+				GinkgoWriter.Printf("InstanceTypes=%d - %s\n", count, ms.String())
 
-			// Verify memory scales linearly with instance type count
-			// Factor in the number of node pools and iterations
-			maxExpectedAllocs := uint64(count) * uint64(len(nodePools)) * MaxAllocsPerInstanceType //#nosec G115 -- count and len(nodePools) are always positive
-			g.Expect(ms.totalAllocs).To(BeNumerically("<=", maxExpectedAllocs),
-				"memory allocations exceeded limit for %d instance types: got %d, max %d", count, ms.totalAllocs, maxExpectedAllocs)
-		})
-	}
-}
+				// Verify memory scales linearly with instance type count
+				maxExpectedAllocs := uint64(count) * uint64(len(nodePools)) * MaxAllocsPerInstanceType //#nosec G115 -- count and len(nodePools) are always positive
+				Expect(ms.totalAllocs).To(BeNumerically("<=", maxExpectedAllocs),
+					"memory allocations exceeded limit for %d instance types: got %d, max %d", count, ms.totalAllocs, maxExpectedAllocs)
+			})
+		}
+	})
+})
 
 // Helper functions
 
