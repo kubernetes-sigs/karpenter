@@ -105,7 +105,7 @@ func NewTopologyGroup(
 
 	domains := map[string]int32{}
 	emptyDomains := sets.New[string]()
-	domainGroup.ForEachDomain(pod, nodeFilter, func(domain string) {
+	domainGroup.ForEachDomain(pod, nodeFilter.TaintPolicy, func(domain string) {
 		domains[domain] = 0
 		emptyDomains.Insert(domain)
 	})
