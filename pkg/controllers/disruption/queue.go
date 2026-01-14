@@ -326,10 +326,10 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		}
 		return "nodeclaim[unknown]"
 	})
-	
+
 	log.FromContext(ctx).WithValues(append([]any{
-		"command-id", cmd.ID, 
-		"reason", strings.ToLower(string(cmd.Reason())), 
+		"command-id", cmd.ID,
+		"reason", strings.ToLower(string(cmd.Reason())),
 		"action", cmd.DecisionType(),
 		"source_nodes", cmd.SourceNodeNames(),
 		"destination_nodes", destRequirements,
@@ -384,7 +384,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
 		metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
-		ConsolidationTypeLabel: cmd.Method.ConsolidationType(),
+		ConsolidationTypeLabel: cmd.ConsolidationType(),
 	})
 	return nil
 }

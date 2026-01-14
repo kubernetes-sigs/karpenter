@@ -359,11 +359,11 @@ func getValidationFailureReason(err error) string {
 	if err == nil {
 		return "unknown"
 	}
-	
+
 	var budgetErr *BudgetValidationError
 	var schedErr *SchedulingValidationError
 	var churnErr *ChurnValidationError
-	
+
 	switch {
 	case errors.As(err, &budgetErr):
 		return "budget"

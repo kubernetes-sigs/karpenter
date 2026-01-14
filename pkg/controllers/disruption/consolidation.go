@@ -169,14 +169,14 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 			Candidates: candidates,
 			Results:    results,
 		}
-		
+
 		log.FromContext(ctx).Info("consolidation move generated",
 			"action", cmd.DecisionType(),
 			"source_nodes", cmd.SourceNodeNames(),
 			"destination_nodes", []string{},
 			"estimated_savings", candidatePrice,
 		)
-		
+
 		return cmd, nil
 	}
 
@@ -237,14 +237,14 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	
+
 	log.FromContext(ctx).Info("consolidation move generated",
 		"action", cmd.DecisionType(),
 		"source_nodes", cmd.SourceNodeNames(),
 		"destination_nodes", getDestinationRequirements(cmd),
 		"estimated_savings", getCommandEstimatedSavings(cmd),
 	)
-	
+
 	return cmd, nil
 }
 
@@ -292,14 +292,14 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 			Results:      results,
 		}
-		
+
 		log.FromContext(ctx).Info("consolidation move generated",
 			"action", cmd.DecisionType(),
 			"source_nodes", cmd.SourceNodeNames(),
 			"destination_nodes", getDestinationRequirements(cmd),
 			"estimated_savings", getCommandEstimatedSavings(cmd),
 		)
-		
+
 		return cmd, nil
 	}
 
@@ -336,14 +336,14 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	
+
 	log.FromContext(ctx).Info("consolidation move generated",
 		"action", cmd.DecisionType(),
 		"source_nodes", cmd.SourceNodeNames(),
 		"destination_nodes", getDestinationRequirements(cmd),
 		"estimated_savings", getCommandEstimatedSavings(cmd),
 	)
-	
+
 	return cmd, nil
 }
 
@@ -374,12 +374,12 @@ func getCommandEstimatedSavings(cmd Command) float64 {
 	if err != nil {
 		return 0.0
 	}
-	
+
 	// For delete consolidation, all source cost is savings
 	if len(cmd.Replacements) == 0 {
 		return sourcePrice
 	}
-	
+
 	// For replace consolidation, sum destination costs from all replacement NodeClaims
 	destPrice := 0.0
 	for _, nodeClaim := range cmd.Results.NewNodeClaims {
@@ -390,7 +390,7 @@ func getCommandEstimatedSavings(cmd Command) float64 {
 			}
 		}
 	}
-	
+
 	return sourcePrice - destPrice
 }
 

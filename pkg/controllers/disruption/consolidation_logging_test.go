@@ -92,7 +92,7 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 	//
 	// Scenario: 2 replacement nodes with different costs
 	// Expected: Both costs should be summed
-	
+
 	cmd := Command{
 		Replacements: []*Replacement{{}, {}}, // 2 replacements to avoid delete path
 	}
@@ -122,14 +122,14 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 			},
 		},
 	}
-	
+
 	// With no candidates (sourcePrice = 0), we're testing the destination summing:
 	// savings = 0 - (0.30 + 0.40) = -0.70
 	// Negative savings means cost increase, which wouldn't happen in real consolidation,
 	// but this test verifies the summing logic works for multiple NodeClaims.
 	savings := getCommandEstimatedSavings(cmd)
 	expectedSavings := -0.70
-	
+
 	if savings != expectedSavings {
 		t.Errorf("getCommandEstimatedSavings() = %v, want %v (verifying multi-NodeClaim summing)", savings, expectedSavings)
 	}
