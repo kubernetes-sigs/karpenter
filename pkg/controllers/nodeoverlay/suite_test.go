@@ -1047,9 +1047,9 @@ var _ = Describe("NodeOverlay Controller", func() {
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
 	})
-})
+	})
 
-var _ = Describe("Instance Type Controller", func() {
+	Describe("Instance Type Controller", func() {
 	Context("Price Updates", func() {
 		Context("Requirements", func() {
 			DescribeTable("should pass with conflicting pricing update overlays with mutually exclusive weights",
