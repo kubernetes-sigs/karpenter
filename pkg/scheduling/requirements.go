@@ -70,15 +70,6 @@ func NewLabelRequirements(labels map[string]string) Requirements {
 	return requirements
 }
 
-// Clone returns a deep copy of the requirements set.
-func (r Requirements) Clone() Requirements {
-	clone := NewRequirements()
-	for key, requirement := range r {
-		clone[key] = requirement.DeepCopy()
-	}
-	return clone
-}
-
 // NewPodRequirements constructs requirements from a pod and treats any preferred requirements as required.
 func NewPodRequirements(pod *corev1.Pod) Requirements {
 	return newPodRequirements(pod, podRequirementTypeAll)
