@@ -164,7 +164,7 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
 			decisionLabel:          string(cmd.Decision()),
 			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.Reason())),
-			ConsolidationTypeLabel: cmd.ConsolidationType(),
+			ConsolidationTypeLabel: cmd.DecisionType(),
 		})
 		stateNodes := lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, stateNodes...))
@@ -316,7 +316,24 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		return fmt.Errorf("candidate is being disrupted")
 	}
 
-	log.FromContext(ctx).WithValues(append([]any{"command-id", cmd.ID, "reason", strings.ToLower(string(cmd.Reason()))}, cmd.LogValues()...)...).Info("disrupting node(s)")
+	// Extract destination instance type requirements for logging
+	destRequirements := lo.Map(cmd.Replacements, func(r *Replacement, _ int) string {
+		// Log the capacity type requirement as a representative of the replacement
+		ct := r.Requirements.Get(v1.CapacityTypeLabelKey)
+		values := ct.Values()
+		if len(values) > 0 {
+			return fmt.Sprintf("nodeclaim[capacity-type=%s]", values[0])
+		}
+		return "nodeclaim[unknown]"
+	})
+	
+	log.FromContext(ctx).WithValues(append([]any{
+		"command-id", cmd.ID, 
+		"reason", strings.ToLower(string(cmd.Reason())), 
+		"action", cmd.DecisionType(),
+		"source_nodes", cmd.SourceNodeNames(),
+		"destination_nodes", destRequirements,
+	}, cmd.LogValues()...)...).Info("disrupting node(s)")
 
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
 	markedCandidates, markDisruptedErr := q.markDisrupted(ctx, cmd)
@@ -367,7 +384,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
 		metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
-		ConsolidationTypeLabel: cmd.ConsolidationType(),
+		ConsolidationTypeLabel: cmd.Method.ConsolidationType(),
 	})
 	return nil
 }

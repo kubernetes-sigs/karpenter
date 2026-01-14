@@ -179,6 +179,22 @@ func (c Command) Decision() Decision {
 	}
 }
 
+// DecisionType returns "delete" or "replace" based on whether replacements exist
+// This is different from Decision() which returns the Decision enum
+func (c Command) DecisionType() string {
+	if len(c.Replacements) > 0 {
+		return "replace"
+	}
+	return "delete"
+}
+
+// SourceNodeNames returns the names of all candidate nodes
+func (c Command) SourceNodeNames() []string {
+	return lo.Map(c.Candidates, func(candidate *Candidate, _ int) string {
+		return candidate.Name()
+	})
+}
+
 func (c Command) LogValues() []any {
 	podCount := lo.Reduce(c.Candidates, func(_ int, cd *Candidate, _ int) int { return len(cd.reschedulablePods) }, 0)
 

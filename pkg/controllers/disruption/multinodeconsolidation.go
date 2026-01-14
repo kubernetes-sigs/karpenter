@@ -102,6 +102,12 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 
 	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
+			log.FromContext(ctx).Info("consolidation move rejected",
+				"action", cmd.DecisionType(),
+				"source_nodes", cmd.SourceNodeNames(),
+				"reason", getValidationFailureReason(err),
+				"estimated_savings", getCommandEstimatedSavings(cmd),
+			)
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
 			return []Command{}, nil
 		}
