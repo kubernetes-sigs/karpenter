@@ -78,39 +78,40 @@ var _ = BeforeSuite(func() {
 	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store, cluster)
 })
 
-var _ = BeforeEach(func() {
-	nodePool = test.NodePool()
-	nodePoolTwo = test.NodePool()
-	cloudProvider.Reset()
-	store.Reset()
-
-	cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-		fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "default-instance-type",
-			Offerings: []*cloudprovider.Offering{
-				{
-					Available: true,
-					Requirements: scheduling.NewLabelRequirements(map[string]string{
-						v1.CapacityTypeLabelKey:  "spot",
-						corev1.LabelTopologyZone: "test-zone-1",
-					}),
-					Price: 1.020,
-				},
-			},
-		}),
-	}
-	ExpectApplied(ctx, env.Client, nodePool)
-})
-
-var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
-})
-
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
-var _ = Describe("Validation", func() {
+var _ = Describe("NodeOverlay Controller", func() {
+	BeforeEach(func() {
+		nodePool = test.NodePool()
+		nodePoolTwo = test.NodePool()
+		cloudProvider.Reset()
+		store.Reset()
+
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "default-instance-type",
+				Offerings: []*cloudprovider.Offering{
+					{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  "spot",
+							corev1.LabelTopologyZone: "test-zone-1",
+						}),
+						Price: 1.020,
+					},
+				},
+			}),
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+	})
+
+	AfterEach(func() {
+		ExpectCleanedUp(ctx, env.Client)
+	})
+
+	Describe("Validation", func() {
 	It("should return the same instance type when zero overlay are applied", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
@@ -2608,4 +2609,5 @@ var _ = Describe("Instance Type Controller", func() {
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind())))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElements(lo.Keys(nodePool.Spec.Template.Labels)))
 	})
+})
 })
