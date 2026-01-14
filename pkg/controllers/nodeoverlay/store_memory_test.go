@@ -239,7 +239,7 @@ var _ = Describe("Memory Usage", func() {
 		nodePoolCounts := []int{1, 5, 10, 20, 50}
 
 		for _, count := range nodePoolCounts {
-			count := count // capture range variable
+			// capture range variable
 			It(fmt.Sprintf("should scale linearly with %d node pools", count), func() {
 				nps := make([]string, count)
 				for i := 0; i < count; i++ {
@@ -273,7 +273,7 @@ var _ = Describe("Memory Usage", func() {
 		instanceTypeCounts := []int{50, 100, 200, 500}
 
 		for _, count := range instanceTypeCounts {
-			count := count // capture range variable
+			// capture range variable
 			It(fmt.Sprintf("should scale linearly with %d instance types", count), func() {
 				its := createRealisticInstanceTypes(count)
 				store := createStoreWithOverlays(its, nodePools)
