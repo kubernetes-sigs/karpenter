@@ -102,13 +102,11 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		}
 		if _, err = s.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
-				log.FromContext(ctx).Info("consolidation move rejected",
-					"action", cmd.DecisionType(),
-					"source_nodes", cmd.SourceNodeNames(),
+				log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("consolidation move rejected, abandoning single-node consolidation attempt due to pod churn",
+					"command", cmd.String(),
 					"reason", getValidationFailureReason(err),
-					"estimated_savings", getCommandEstimatedSavings(cmd),
+					"estimated_savings", cmd.EstimatedSavings(),
 				)
-				log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
 				return []Command{}, nil
 			}
 			return []Command{}, fmt.Errorf("validating consolidation, %w", err)

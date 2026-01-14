@@ -164,7 +164,7 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
 			decisionLabel:          string(cmd.Decision()),
 			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.Reason())),
-			ConsolidationTypeLabel: cmd.DecisionType(),
+			ConsolidationTypeLabel: cmd.Decision().String(),
 		})
 		stateNodes := lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, stateNodes...))
@@ -330,7 +330,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	log.FromContext(ctx).WithValues(append([]any{
 		"command-id", cmd.ID,
 		"reason", strings.ToLower(string(cmd.Reason())),
-		"action", cmd.DecisionType(),
+		"action", cmd.Decision().String(),
 		"source_nodes", cmd.SourceNodeNames(),
 		"destination_nodes", destRequirements,
 	}, cmd.LogValues()...)...).Info("disrupting node(s)")

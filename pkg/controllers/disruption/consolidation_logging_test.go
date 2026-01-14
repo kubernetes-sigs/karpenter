@@ -127,7 +127,7 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 	// savings = 0 - (0.30 + 0.40) = -0.70
 	// Negative savings means cost increase, which wouldn't happen in real consolidation,
 	// but this test verifies the summing logic works for multiple NodeClaims.
-	savings := getCommandEstimatedSavings(cmd)
+	savings := cmd.EstimatedSavings()
 	expectedSavings := -0.70
 
 	if savings != expectedSavings {
@@ -196,7 +196,7 @@ func TestGetCommandEstimatedSavings_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			savings := getCommandEstimatedSavings(tt.cmd)
+			savings := tt.cmd.EstimatedSavings()
 			if savings != tt.expectedSavings {
 				t.Errorf("getCommandEstimatedSavings() = %v, want %v", savings, tt.expectedSavings)
 			}

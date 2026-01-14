@@ -169,14 +169,6 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 			Candidates: candidates,
 			Results:    results,
 		}
-
-		log.FromContext(ctx).Info("consolidation move generated",
-			"action", cmd.DecisionType(),
-			"source_nodes", cmd.SourceNodeNames(),
-			"destination_nodes", []string{},
-			"estimated_savings", candidatePrice,
-		)
-
 		return cmd, nil
 	}
 
@@ -239,10 +231,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	log.FromContext(ctx).Info("consolidation move generated",
-		"action", cmd.DecisionType(),
-		"source_nodes", cmd.SourceNodeNames(),
-		"destination_nodes", getDestinationRequirements(cmd),
-		"estimated_savings", getCommandEstimatedSavings(cmd),
+		"command", cmd.String(),
+		"estimated_savings", cmd.EstimatedSavings(),
 	)
 
 	return cmd, nil
@@ -294,10 +284,8 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		}
 
 		log.FromContext(ctx).Info("consolidation move generated",
-			"action", cmd.DecisionType(),
-			"source_nodes", cmd.SourceNodeNames(),
-			"destination_nodes", getDestinationRequirements(cmd),
-			"estimated_savings", getCommandEstimatedSavings(cmd),
+			"command", cmd.String(),
+			"estimated_savings", cmd.EstimatedSavings(),
 		)
 
 		return cmd, nil
@@ -338,10 +326,8 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	}
 
 	log.FromContext(ctx).Info("consolidation move generated",
-		"action", cmd.DecisionType(),
-		"source_nodes", cmd.SourceNodeNames(),
-		"destination_nodes", getDestinationRequirements(cmd),
-		"estimated_savings", getCommandEstimatedSavings(cmd),
+		"command", cmd.String(),
+		"estimated_savings", cmd.EstimatedSavings(),
 	)
 
 	return cmd, nil
@@ -369,30 +355,6 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 }
 
 // getCommandEstimatedSavings calculates the estimated savings for a command
-func getCommandEstimatedSavings(cmd Command) float64 {
-	sourcePrice, err := getCandidatePrices(cmd.Candidates)
-	if err != nil {
-		return 0.0
-	}
-
-	// For delete consolidation, all source cost is savings
-	if len(cmd.Replacements) == 0 {
-		return sourcePrice
-	}
-
-	// For replace consolidation, sum destination costs from all replacement NodeClaims
-	destPrice := 0.0
-	for _, nodeClaim := range cmd.Results.NewNodeClaims {
-		if len(nodeClaim.InstanceTypeOptions) > 0 {
-			offerings := nodeClaim.InstanceTypeOptions[0].Offerings
-			if len(offerings) > 0 {
-				destPrice += offerings.Cheapest().Price
-			}
-		}
-	}
-
-	return sourcePrice - destPrice
-}
 
 // getDestinationRequirements returns a string representation of destination node requirements
 func getDestinationRequirements(cmd Command) []string {

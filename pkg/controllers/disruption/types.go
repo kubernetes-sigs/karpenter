@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
@@ -168,6 +169,10 @@ var (
 	DeleteDecision  Decision = "delete"
 )
 
+func (d Decision) String() string {
+	return string(d)
+}
+
 func (c Command) Decision() Decision {
 	switch {
 	case len(c.Candidates) > 0 && len(c.Replacements) > 0:
@@ -179,20 +184,46 @@ func (c Command) Decision() Decision {
 	}
 }
 
-// DecisionType returns "delete" or "replace" based on whether replacements exist
-// This is different from Decision() which returns the Decision enum
-func (c Command) DecisionType() string {
-	if len(c.Replacements) > 0 {
-		return "replace"
-	}
-	return "delete"
-}
-
 // SourceNodeNames returns the names of all candidate nodes
 func (c Command) SourceNodeNames() []string {
 	return lo.Map(c.Candidates, func(candidate *Candidate, _ int) string {
 		return candidate.Name()
 	})
+}
+
+// String returns a human-readable representation of the command
+func (c Command) String() string {
+	sources := strings.Join(c.SourceNodeNames(), ", ")
+	if len(c.Replacements) > 0 {
+		return fmt.Sprintf("%s: [%s] -> [%d replacements]", c.Decision(), sources, len(c.Replacements))
+	}
+	return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
+}
+
+// EstimatedSavings returns the estimated cost savings from this consolidation
+func (c Command) EstimatedSavings() float64 {
+	sourcePrice, err := getCandidatePrices(c.Candidates)
+	if err != nil {
+		return 0.0
+	}
+
+	// For delete consolidation, all source cost is savings
+	if len(c.Replacements) == 0 {
+		return sourcePrice
+	}
+
+	// For replace consolidation, sum destination costs from all replacement NodeClaims
+	destPrice := 0.0
+	for _, nodeClaim := range c.Results.NewNodeClaims {
+		if len(nodeClaim.InstanceTypeOptions) > 0 {
+			offerings := nodeClaim.InstanceTypeOptions[0].Offerings
+			if len(offerings) > 0 {
+				destPrice += offerings.Cheapest().Price
+			}
+		}
+	}
+
+	return sourcePrice - destPrice
 }
 
 func (c Command) LogValues() []any {
