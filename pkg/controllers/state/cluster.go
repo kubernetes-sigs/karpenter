@@ -262,7 +262,7 @@ func (c *Cluster) IsNodeNominated(providerID string) bool {
 	defer c.mu.RUnlock()
 
 	if n, ok := c.nodes[providerID]; ok {
-		return n.Nominated(c.clock)
+		return n.Nominated()
 	}
 	return false
 }
@@ -273,7 +273,7 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	defer c.mu.Unlock()
 
 	if n, ok := c.nodes[providerID]; ok {
-		n.Nominate(ctx, c.clock) // extends nomination window if already nominated
+		n.Nominate(ctx) // extends nomination window if already nominated
 	}
 }
 

@@ -22,11 +22,12 @@ import (
 	"sync"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -215,18 +216,19 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	}
 
 	np := &v1.NodePool{}
-	err := cc.client.Get(ctx, types.NamespacedName{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}, np)
-	if err != nil && !errors.IsNotFound(err) {
+	if err := cc.client.Get(ctx, types.NamespacedName{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}, np); err != nil {
 		failed = true
 		return serrors.Wrap(err, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
 	}
-	if errors.IsNotFound(err) {
-		np.UID = types.UID("manual")
+	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
+	}); !found {
+		failed = true
+		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
 	}
-
 	cc.Lock()
 	defer cc.Unlock()
-	err = cc.internalAddOffering(ctx, np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone], true)
+	err := cc.internalAddOffering(ctx, np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone], true)
 	if err != nil {
 		failed = true
 		return serrors.Wrap(err, "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np))
@@ -265,13 +267,15 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	nodePoolName := nodeClaim.Labels[v1.NodePoolLabelKey]
 	np := &v1.NodePool{}
 	err := cc.client.Get(ctx, client.ObjectKey{Name: nodePoolName}, np)
-	if err != nil && !errors.IsNotFound(err) {
+	if err != nil {
 		failed = true
 		return serrors.Wrap(err, "nodepool", nodePoolName, "nodeclaim", klog.KObj(nodeClaim))
 	}
-	if errors.IsNotFound(err) {
-		// Technically not an error, as users can create NodeClaims manually without a NodePool.
-		np.UID = types.UID("manual")
+	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
+	}); !found {
+		failed = true
+		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
 	}
 	cc.Lock()
 	defer cc.Unlock()
@@ -357,13 +361,6 @@ func (cc *ClusterCost) internalRemoveOffering(np *v1.NodePool, instanceName, cap
 		delete(cc.npCostMap, np.UID)
 	}
 	return nil
-}
-
-func (cc *ClusterCost) Reset() {
-	cc.Lock()
-	defer cc.Unlock()
-	cc.npCostMap = make(map[types.UID]*NodePoolCost)
-	cc.nodeClaimSet = make(sets.Set[string])
 }
 
 // GetClusterCost returns the total cost of all compute resources across

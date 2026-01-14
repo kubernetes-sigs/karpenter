@@ -26,8 +26,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -63,9 +61,6 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		return reconciler.Result{}, err
 	}
 
-	// Add a fake wide open nodepool to capture manually created nodeclaims
-	npl.Items = append(npl.Items, v1.NodePool{ObjectMeta: metav1.ObjectMeta{UID: types.UID("manual")}})
-
 	newNpItMap := make(map[string]map[string]*cloudprovider.InstanceType)
 	var errs error
 	for _, np := range npl.Items {
@@ -88,7 +83,7 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		})
 	}
 	if errs != nil {
-		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", errs)
+		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", err)
 	}
 	c.npItMap = newNpItMap
 

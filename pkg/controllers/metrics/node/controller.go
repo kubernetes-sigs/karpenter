@@ -42,8 +42,9 @@ import (
 )
 
 const (
-	nodeName  = "node_name"
-	nodePhase = "phase"
+	resourceType = "resource_type"
+	nodeName     = "node_name"
+	nodePhase    = "phase"
 )
 
 var (
@@ -138,14 +139,14 @@ func initializeMetrics() {
 			Name:      "utilization_percent",
 			Help:      "Utilization of allocatable resources by pod requests",
 		},
-		[]string{metrics.ResourceTypeLabel},
+		[]string{resourceType},
 	)
 }
 
 func nodeLabelNamesWithResourceType() []string {
 	return append(
 		nodeLabelNames(),
-		metrics.ResourceTypeLabel,
+		resourceType,
 	)
 }
 
@@ -233,7 +234,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 		res = append(res, &metrics.StoreMetric{
 			GaugeMetric: ClusterUtilization,
 			Value:       utilizationPercentage,
-			Labels:      map[string]string{metrics.ResourceTypeLabel: resourceNameToString(resourceName)},
+			Labels:      map[string]string{resourceType: resourceNameToString(resourceName)},
 		})
 	}
 
@@ -267,7 +268,7 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 
 func getNodeLabelsWithResourceType(node *corev1.Node, resourceTypeName string) prometheus.Labels {
 	metricLabels := getNodeLabels(node)
-	metricLabels[metrics.ResourceTypeLabel] = resourceTypeName
+	metricLabels[resourceType] = resourceTypeName
 	return metricLabels
 }
 

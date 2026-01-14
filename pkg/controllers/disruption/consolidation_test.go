@@ -374,7 +374,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				metrics.NodePoolLabel: nodePool.Name,
+				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
@@ -397,7 +397,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				metrics.NodePoolLabel: nodePool.Name,
+				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 10))
@@ -419,7 +419,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				metrics.NodePoolLabel: nodePool.Name,
+				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
@@ -572,7 +572,7 @@ var _ = Describe("Consolidation", func() {
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					metrics.NodePoolLabel: np.Name,
+					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 2))
@@ -637,7 +637,7 @@ var _ = Describe("Consolidation", func() {
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					metrics.NodePoolLabel: np.Name,
+					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
@@ -700,7 +700,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					metrics.NodePoolLabel: np.Name,
+					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
@@ -1066,7 +1066,6 @@ var _ = Describe("Consolidation", func() {
 				corev1.LabelTopologyZone:       mostExpSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
-			ExpectSingletonReconciled(ctx, pricingController)
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -1181,7 +1180,6 @@ var _ = Describe("Consolidation", func() {
 				v1.CapacityTypeLabelKey:        spotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 				corev1.LabelTopologyZone:       spotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
-			ExpectSingletonReconciled(ctx, pricingController)
 
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -1716,8 +1714,7 @@ var _ = Describe("Consolidation", func() {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
 				node = lo.Ternary(spotToSpot, spotNode, node)
 				// Add these spot instance with this special condition to cloud provider instancetypes
-				cloudProvider.InstanceTypes = append(cloudProvider.InstanceTypes, lo.Ternary(spotToSpot, spotInstances, onDemandInstances)...)
-				ExpectSingletonReconciled(ctx, pricingController)
+				cloudProvider.InstanceTypes = lo.Ternary(spotToSpot, spotInstances, onDemandInstances)
 
 				rs := test.ReplicaSet()
 				ExpectApplied(ctx, env.Client, rs)
@@ -2232,7 +2229,6 @@ var _ = Describe("Consolidation", func() {
 				currentInstance,
 				replacementInstance,
 			}
-			ExpectSingletonReconciled(ctx, pricingController)
 
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -2321,7 +2317,6 @@ var _ = Describe("Consolidation", func() {
 				currentInstance,
 				replacementInstance,
 			}
-			ExpectSingletonReconciled(ctx, pricingController)
 
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -2922,7 +2917,6 @@ var _ = Describe("Consolidation", func() {
 				defaultInstanceType,
 				smallInstanceType,
 			}
-			ExpectSingletonReconciled(ctx, pricingController)
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -4474,7 +4468,6 @@ var _ = Describe("Consolidation", func() {
 					v1alpha1.LabelReservationID: mostExpensiveReservationID,
 				}),
 			})
-			ExpectSingletonReconciled(ctx, pricingController)
 			reservedNodeClaim, reservedNode = test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

@@ -37,8 +37,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/state/cost"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+)
+
+const (
+	resourceTypeLabel = "resource_type"
+	nodePoolNameLabel = "nodepool"
 )
 
 var (
@@ -51,8 +55,8 @@ var (
 			Help:      "Limits specified on the nodepool that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
 		},
 		[]string{
-			metrics.ResourceTypeLabel,
-			metrics.NodePoolLabel,
+			resourceTypeLabel,
+			nodePoolNameLabel,
 		},
 	)
 	Usage = opmetrics.NewPrometheusGauge(
@@ -64,36 +68,24 @@ var (
 			Help:      "The amount of resources that have been provisioned for a nodepool. Labeled by nodepool name and resource type.",
 		},
 		[]string{
-			metrics.ResourceTypeLabel,
-			metrics.NodePoolLabel,
+			resourceTypeLabel,
+			nodePoolNameLabel,
 		},
-	)
-	ClusterCost = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodePoolSubsystem,
-			Name:      "cost_total",
-			Help:      "ALPHA METRIC. Total cost of the nodepool from Karpenter's perspective. Units are determined by the cloud provider. Not an authoritative source for billing. Includes modifications due to NodeOverlays",
-		},
-		[]string{metrics.NodePoolLabel},
 	)
 )
 
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	clusterCost   *cost.ClusterCost
 	metricStore   *metrics.Store
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		metricStore:   metrics.NewStore(),
-		clusterCost:   clusterCost,
 	}
 }
 
@@ -111,18 +103,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if !nodepoolutils.IsManaged(nodePool, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
-	c.metricStore.Update(req.String(), c.buildMetrics(nodePool))
+	c.metricStore.Update(req.String(), buildMetrics(nodePool))
 	// periodically update our metrics per nodepool even if nothing has changed
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (c *Controller) buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
-	res = append(res, &metrics.StoreMetric{
-		GaugeMetric: ClusterCost,
-		Labels:      map[string]string{metrics.NodePoolLabel: nodePool.Name},
-		Value:       c.clusterCost.GetNodepoolCost(nodePool),
-	})
-
+func buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		Usage: nodePool.Status.Resources,
 		Limit: getLimits(nodePool),
@@ -147,8 +133,8 @@ func getLimits(nodePool *v1.NodePool) corev1.ResourceList {
 
 func makeLabels(nodePool *v1.NodePool, resourceTypeName string) prometheus.Labels {
 	return map[string]string{
-		metrics.ResourceTypeLabel: resourceTypeName,
-		metrics.NodePoolLabel:     nodePool.Name,
+		resourceTypeLabel: resourceTypeName,
+		nodePoolNameLabel: nodePool.Name,
 	}
 }
 

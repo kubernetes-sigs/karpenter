@@ -24,7 +24,6 @@ import (
 
 // topologyDomainAttributes stores attributes associated with a topology domain (the map key), such as the taints and
 // requirements that yield that domain.
-// NOTE the requirements field is shared across topologyDomainAttributes and should not be mutated
 type topologyDomainAttributes struct {
 	taints       [][]v1.Taint
 	requirements []scheduling.Requirements
@@ -59,7 +58,7 @@ func (t TopologyDomainGroup) Insert(domain string, requirements scheduling.Requi
 		entry.taints = append(entry.taints, taints)
 	}
 
-	entry.requirements = append(entry.requirements, requirements)
+	entry.requirements = append(entry.requirements, requirements.Clone())
 }
 
 // ForEachDomain calls f on each domain tracked by the topology group. The provided filter determines which domains

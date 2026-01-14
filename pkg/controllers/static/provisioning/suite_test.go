@@ -532,9 +532,12 @@ var _ = Describe("Static Provisioning Controller", func() {
 			}
 
 			// we should never observe > limit NodeClaims.
-			Eventually(func() {
+			Consistently(func() int {
 				ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
-			}, 5*time.Second)
+				var list v1.NodeClaimList
+				_ = env.Client.List(ctx, &list)
+				return len(list.Items)
+			}, 5*time.Second).Should(BeNumerically("<=", 10))
 		})
 		It("should wait for cluster to be synced and not over provision", func() {
 			nodePool := test.StaticNodePool()
@@ -546,27 +549,33 @@ var _ = Describe("Static Provisioning Controller", func() {
 
 			// Run many reconciles in parallel
 			n := 50
-			lo.ForEach(lo.Range(n), func(i int, _ int) {
-				defer GinkgoRecover()
-				if i%4 == 0 {
-					cluster.SetSynced(false)
-				}
-				ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			errs := make(chan error, n)
+			for i := 0; i < n; i++ {
+				go func(i int) {
+					defer GinkgoRecover()
+					if i%4 == 0 {
+						cluster.SetSynced(false)
+					}
+					_, e := controller.Reconcile(ctx, nodePool)
+					errs <- e
+				}(i)
+			}
+			for i := 0; i < n; i++ {
+				Expect(<-errs).ToNot(HaveOccurred())
+			}
 
-				// we should never observe > limit NodeClaims.
+			// we should never observe > limit NodeClaims.
+			Consistently(func() int {
 				var list v1.NodeClaimList
-				Expect(env.Client.List(ctx, &list)).To(Succeed())
-				Expect(len(list.Items)).To(BeNumerically("<=", 10))
-			})
+				_ = env.Client.List(ctx, &list)
+				return len(list.Items)
+			}, 5*time.Second).Should(BeNumerically("<=", 10))
 
 			// Ensure cluster is synced before final reconcile to allow it to create remaining NodeClaims
 			cluster.SetSynced(true)
-
-			Eventually(func() {
-				ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-				// at the end we should have right counts in StateNodePool
-				ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
-			}, 10*time.Second)
+			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			// at the end we should have right counts in StateNodePool
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
 		})
 
 	})

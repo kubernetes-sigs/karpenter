@@ -25,7 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 
-	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -56,7 +55,7 @@ func (ts Taints) Tolerates(tolerations []corev1.Toleration) (errs error) {
 		taint := ts[i]
 		tolerates := false
 		for _, t := range tolerations {
-			tolerates = tolerates || t.ToleratesTaint(logging.NopLogger, &taint, true)
+			tolerates = tolerates || t.ToleratesTaint(&taint)
 		}
 		if !tolerates {
 			errs = multierr.Append(errs, serrors.Wrap(fmt.Errorf("did not tolerate taint"), "taint", pretty.Taint(taint)))

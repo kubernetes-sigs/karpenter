@@ -67,7 +67,6 @@ var env *test.Environment
 var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
 var disruptionController *disruption.Controller
-var pricingController *informer.PricingController
 var prov *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
@@ -96,7 +95,6 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
-	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
@@ -112,8 +110,6 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	cloudProvider.Reset()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-	clusterCost.Reset()
-	ExpectSingletonReconciled(ctx, pricingController)
 
 	recorder.Reset() // Reset the events that we captured during the run
 
@@ -584,7 +580,6 @@ var _ = Describe("Disruption Taints", func() {
 			currentInstance,
 			replacementInstance,
 		}
-		ExpectSingletonReconciled(ctx, pricingController)
 		nodePool.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(time.Duration(0))
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		ExpectApplied(ctx, env.Client, nodeClaim, nodePool)
@@ -1783,7 +1778,8 @@ var _ = Describe("Candidate Filtering", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		// Don't apply the NodePool
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		// Mock the NodePool not existing by removing it from the nodePool and nodePoolInstanceTypes maps
