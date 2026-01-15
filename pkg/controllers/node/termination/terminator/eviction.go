@@ -182,7 +182,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		if errors.As(err, &apiStatus) {
 			code := apiStatus.Status().Code
 			message = apiStatus.Status().Message
-			NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: fmt.Sprint(code)})
+			PodsEvictionRequestsTotal.Inc(map[string]string{CodeLabel: fmt.Sprint(code)})
 		}
 		// status codes for the eviction API are defined here:
 		// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#how-api-initiated-eviction-works
@@ -209,7 +209,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		// Its not a PDB, we should requeue
 		return reconcile.Result{}, err
 	}
-	NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
+	PodsEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
 	reason := evictionReason(ctx, pod, q.kubeClient)
 	q.recorder.Publish(terminatorevents.EvictPod(pod, reason))
 	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: reason})

@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -90,8 +91,8 @@ var _ = Describe("Node Metrics", func() {
 
 		for k, v := range resources {
 			metric, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
-				"node_name":     node.GetName(),
-				"resource_type": k.String(),
+				"node_name":               node.GetName(),
+				metrics.ResourceTypeLabel: k.String(),
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
@@ -111,7 +112,7 @@ var _ = Describe("Node Metrics", func() {
 
 		for resourceName := range resources {
 			metric, found := FindMetricWithLabelValues("karpenter_cluster_utilization_percent", map[string]string{
-				"resource_type": resourceName.String(),
+				metrics.ResourceTypeLabel: resourceName.String(),
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
