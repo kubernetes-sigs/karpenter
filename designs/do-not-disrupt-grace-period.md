@@ -377,21 +377,6 @@ Push this responsibility to Job controllers, CI/CD systems, or PodDisruptionBudg
 
 While ideally this would be a Kubernetes-native PDB feature, the immediate problem space (platform teams managing node lifecycle with reasonable bounds on user-controlled blocking) makes Karpenter a suitable implementation point.
 
-## Testing
-
-### Unit Tests
-
-- Test `HasDoNotDisruptWithGracePeriod` with various grace period values
-- Test grace period expiration calculation
-- Test invalid grace period handling
-- Test backward compatibility (no grace period annotation)
-
-### Integration Tests
-
-- Test node disruption with expired grace periods
-- Test interaction with eventual vs graceful disruption modes
-- Test multiple pods with different grace periods on the same node
-
 ## Backward Compatibility
 
 This feature is fully backward compatible:
