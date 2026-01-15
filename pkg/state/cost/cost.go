@@ -109,6 +109,24 @@ func NewClusterCost(ctx context.Context, cloudProvider cloudprovider.CloudProvid
 	}
 }
 
+// CheckForDeletedNodePools garbage collects deleted nodepools in the NodePool Cost Mapping
+func (cc *ClusterCost) CheckForDeletedNodePools(npl *v1.NodePoolList) {
+	cc.Lock()
+	defer cc.Unlock()
+
+	// Gets a list of NodePool UIDs that are present in the cost map but not in the cluster
+	deletedNodePools := lo.FilterKeys(cc.npCostMap, func(costMapNPUID types.UID, _ *NodePoolCost) bool {
+		_, found := lo.Find(npl.Items, func(np v1.NodePool) bool {
+			return np.UID == costMapNPUID
+		})
+		return !found
+	})
+
+	for _, deletedNPUID := range deletedNodePools {
+		delete(cc.npCostMap, deletedNPUID)
+	}
+}
+
 // UpdateOfferings updates the available instance types and their pricing information
 // for a specific NodePool. This method is typically called when NodePool configurations
 // change or when cloud provider pricing information is refreshed.

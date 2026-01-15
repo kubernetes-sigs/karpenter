@@ -63,6 +63,9 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		return reconciler.Result{}, err
 	}
 
+	// Remove Deleted NodePools from Cluster Cost Mapping
+	c.clusterCost.CheckForDeletedNodePools(npl)
+
 	// Add a fake wide open nodepool to capture manually created nodeclaims
 	npl.Items = append(npl.Items, v1.NodePool{ObjectMeta: metav1.ObjectMeta{UID: types.UID("manual")}})
 
