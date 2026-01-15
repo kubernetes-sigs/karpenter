@@ -200,13 +200,17 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 
 	if i.updates[nodePoolName][instanceTypeName].Capacity == nil {
 		i.updates[nodePoolName][instanceTypeName].Capacity = &capacityUpdate{
-			OverlayUpdate:                 nodeOverlay.Spec.Capacity,
+			OverlayUpdate:                 nodeOverlay.Spec.Capacity.DeepCopy(),
 			lowestWeightCapacityResources: nodeOverlay.Spec.Capacity,
 			lowestWeight:                  nodeOverlay.Spec.Weight,
 		}
 	} else {
+		// Only add resources that haven't been set by a higher-weight overlay
+		// (overlays are processed in descending weight order)
 		for resource, quantity := range nodeOverlay.Spec.Capacity {
-			i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource] = quantity
+			if _, exists := i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource]; !exists {
+				i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource] = quantity
+			}
 		}
 		i.updates[nodePoolName][instanceTypeName].Capacity.lowestWeightCapacityResources = nodeOverlay.Spec.Capacity
 		i.updates[nodePoolName][instanceTypeName].Capacity.lowestWeight = nodeOverlay.Spec.Weight
