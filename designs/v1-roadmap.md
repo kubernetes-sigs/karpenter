@@ -55,7 +55,7 @@ Karpenter currently uses the `karpenter.sh/disruption` key with the `disrupting`
 
 **Category:** Breaking
 
-Karpenter currently adds taints, labels, and annotations to nodes from the NodeClaim when nodes register with the cluster. This is done without restricting pods from scheduling to the node which means that for any labels or taints that aren't present on the node on startup, this process or registration can break scheduling compatability.
+Karpenter currently adds taints, labels, and annotations to nodes from the NodeClaim when nodes register with the cluster. This is done without restricting pods from scheduling to the node which means that for any labels or taints that aren't present on the node on startup, this process or registration can break scheduling compatibility.
 
 For instance, a pod may not tolerate a specific taint that was configured in the NodeClaim template, but the taint did not appear on the node immediately on startup, meaning that the pod was able to successfully schedule when it shouldn't have been able to.
 
