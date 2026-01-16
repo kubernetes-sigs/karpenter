@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -65,29 +66,31 @@ type FeatureGates struct {
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
-	ServiceName                      string
-	MetricsPort                      int
-	HealthProbePort                  int
-	KubeClientQPS                    int
-	KubeClientBurst                  int
-	EnableProfiling                  bool
-	DisableLeaderElection            bool
-	DisableClusterStateObservability bool
-	LeaderElectionName               string
-	LeaderElectionNamespace          string
-	MemoryLimit                      int64
-	CPURequests                      int64
-	LogLevel                         string
-	LogOutputPaths                   string
-	LogErrorOutputPaths              string
-	BatchMaxDuration                 time.Duration
-	BatchIdleDuration                time.Duration
-	preferencePolicyRaw              string
-	PreferencePolicy                 PreferencePolicy
-	minValuesPolicyRaw               string
-	MinValuesPolicy                  MinValuesPolicy
-	IgnoreDRARequests                bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
-	FeatureGates                     FeatureGates
+	ServiceName                       string
+	MetricsPort                       int
+	HealthProbePort                   int
+	KubeClientQPS                     int
+	KubeClientBurst                   int
+	EnableProfiling                   bool
+	DisableLeaderElection             bool
+	DisableClusterStateObservability  bool
+	LeaderElectionName                string
+	LeaderElectionNamespace           string
+	MemoryLimit                       int64
+	CPURequests                       int64
+	LogLevel                          string
+	LogOutputPaths                    string
+	LogErrorOutputPaths               string
+	BatchMaxDuration                  time.Duration
+	BatchIdleDuration                 time.Duration
+	preferencePolicyRaw               string
+	PreferencePolicy                  PreferencePolicy
+	minValuesPolicyRaw                string
+	MinValuesPolicy                   MinValuesPolicy
+	IgnoreDRARequests                 bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
+	FeatureGates                      FeatureGates
+	rawAdditionalNodePoolMetricLabels string
+	AdditionalNodePoolMetricLabels    []string
 }
 
 type FlagSet struct {
@@ -129,6 +132,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, and StaticCapacity.")
+	fs.StringVar(&o.rawAdditionalNodePoolMetricLabels, "additional-nodepool-metric-labels", env.WithDefaultString("ADDITIONAL_NODEPOOL_METRIC_LABELS", ""), "Comma-separated list of additional labels to include in NodePool metrics (karpenter_nodepools_limit and karpenter_nodepools_usage)")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -157,6 +161,16 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	o.FeatureGates = gates
 	o.PreferencePolicy = PreferencePolicy(o.preferencePolicyRaw)
 	o.MinValuesPolicy = MinValuesPolicy(o.minValuesPolicyRaw)
+
+	// Parse comma-separated additional nodepool metric labels
+	o.AdditionalNodePoolMetricLabels = lo.FilterMap(
+		strings.Split(o.rawAdditionalNodePoolMetricLabels, ","),
+		func(s string, _ int) (string, bool) {
+			trimmed := strings.TrimSpace(s)
+			return trimmed, trimmed != ""
+		},
+	)
+
 	return nil
 }
 
