@@ -67,7 +67,7 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]v1
 	}
 	log.FromContext(ctx).
 		WithValues("Pod", klog.KObj(pod)).
-		V(1).Info(fmt.Sprintf("volume topology requirements: %s", requirements))
+		V(1).Info(fmt.Sprintf("getting requirements derived from pod volumes, %s", requirements))
 	return requirements, nil
 }
 
