@@ -99,8 +99,8 @@ func IgnoreDuplicateNodeClaimError(err error) error {
 	return nil
 }
 
-// GetPods grabs all pods that are currently bound to the passed nodes
-func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
+// Pods grabs all pods that are currently bound to the passed nodes
+func Pods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
 	for _, node := range nodes {
 		var podList corev1.PodList
@@ -114,8 +114,8 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Nod
 	return pods, nil
 }
 
-// GetNodeClaims grabs all NodeClaims with a providerID that matches the provided Node
-func GetNodeClaims(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*v1.NodeClaim, error) {
+// NodeClaims grabs all NodeClaims with a providerID that matches the provided Node
+func NodeClaims(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*v1.NodeClaim, error) {
 	// Nodes without providerID should not match any NodeClaims to prevent false positives
 	// with NodeClaims that also have empty providerIDs (e.g., during NodeClaim creation)
 	if node.Spec.ProviderID == "" {
@@ -133,7 +133,7 @@ func GetNodeClaims(ctx context.Context, kubeClient client.Client, node *corev1.N
 //  1. No v1.NodeClaims match the corev1.Node's providerID
 //  2. Multiple v1.NodeClaims match the corev1.Node's providerID
 func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (*v1.NodeClaim, error) {
-	nodeClaims, err := GetNodeClaims(ctx, c, node)
+	nodeClaims, err := NodeClaims(ctx, c, node)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +146,9 @@ func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (
 	return nodeClaims[0], nil
 }
 
-// GetCurrentlyReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
-func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
-	pods, err := GetPods(ctx, kubeClient, nodes...)
+// CurrentlyReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
+func CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
+	pods, err := Pods(ctx, kubeClient, nodes...)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
@@ -163,8 +163,8 @@ func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client
 	}), nil
 }
 
-// GetProvisionablePods grabs all the pods from the passed nodes that satisfy the IsProvisionable criteria
-func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+// ProvisionablePods grabs all the pods from the passed nodes that satisfy the IsProvisionable criteria
+func ProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
 	var podList corev1.PodList
 	if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": ""}); err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
@@ -174,8 +174,8 @@ func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*cor
 	}), nil
 }
 
-// GetVolumeAttachments grabs all volumeAttachments associated with the passed node
-func GetVolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
+// VolumeAttachments grabs all volumeAttachments associated with the passed node
+func VolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
 	var volumeAttachmentList storagev1.VolumeAttachmentList
 	if err := kubeClient.List(ctx, &volumeAttachmentList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
 		return nil, fmt.Errorf("listing volumeAttachments, %w", err)
@@ -183,7 +183,7 @@ func GetVolumeAttachments(ctx context.Context, kubeClient client.Client, node *c
 	return lo.ToSlicePtr(volumeAttachmentList.Items), nil
 }
 
-func GetCondition(n *corev1.Node, match corev1.NodeConditionType) corev1.NodeCondition {
+func Condition(n *corev1.Node, match corev1.NodeConditionType) corev1.NodeCondition {
 	for _, condition := range n.Status.Conditions {
 		if condition.Type == match {
 			return condition

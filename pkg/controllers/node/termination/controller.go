@@ -116,7 +116,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	// associated node. We do a check on the Ready condition of the node since, even though the CloudProvider says the
 	// instance is not around, we know that the kubelet process is still running if the Node Ready condition is true.
 	// Similar logic to: https://github.com/kubernetes/kubernetes/blob/3a75a8c8d9e6a1ebd98d8572132e675d4980f184/staging/src/k8s.io/cloud-provider/controllers/nodelifecycle/node_lifecycle_controller.go#L144
-	if nodeutils.GetCondition(node, corev1.NodeReady).Status != corev1.ConditionTrue {
+	if nodeutils.Condition(node, corev1.NodeReady).Status != corev1.ConditionTrue {
 		if _, err = c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {
 				return reconcile.Result{}, c.removeFinalizer(ctx, node)
@@ -294,7 +294,7 @@ func (c *Controller) hasTerminationGracePeriodElapsed(nodeTerminationTime *time.
 }
 
 func (c *Controller) pendingVolumeAttachments(ctx context.Context, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
-	volumeAttachments, err := nodeutils.GetVolumeAttachments(ctx, c.kubeClient, node)
+	volumeAttachments, err := nodeutils.VolumeAttachments(ctx, c.kubeClient, node)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 		return volumeAttachments, nil
 	}
 	// Create list of non-drain-able Pods associated with Node
-	pods, err := nodeutils.GetPods(ctx, kubeClient, node)
+	pods, err := nodeutils.Pods(ctx, kubeClient, node)
 	if err != nil {
 		return nil, err
 	}

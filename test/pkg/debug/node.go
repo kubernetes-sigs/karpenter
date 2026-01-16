@@ -59,8 +59,8 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 }
 
 func (c *NodeController) GetInfo(ctx context.Context, n *corev1.Node) string {
-	pods, _ := nodeutils.GetPods(ctx, c.kubeClient, n)
-	return fmt.Sprintf("ready=%s schedulable=%t initialized=%s pods=%d taints=%v", nodeutils.GetCondition(n, corev1.NodeReady).Status, !n.Spec.Unschedulable, n.Labels[v1.NodeInitializedLabelKey], len(pods), n.Spec.Taints)
+	pods, _ := nodeutils.Pods(ctx, c.kubeClient, n)
+	return fmt.Sprintf("ready=%s schedulable=%t initialized=%s pods=%d taints=%v", nodeutils.Condition(n, corev1.NodeReady).Status, !n.Spec.Unschedulable, n.Labels[v1.NodeInitializedLabelKey], len(pods), n.Spec.Taints)
 }
 
 func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {

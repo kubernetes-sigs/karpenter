@@ -257,7 +257,7 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
 		// 1. Has a NotReady conditiion
 		// 2. Is marked as disrupting
-		if cond := nodeutils.GetCondition(node.Node, corev1.NodeReady); cond.Status != corev1.ConditionTrue || node.MarkedForDeletion() {
+		if cond := nodeutils.Condition(node.Node, corev1.NodeReady); cond.Status != corev1.ConditionTrue || node.MarkedForDeletion() {
 			disrupting[nodePool]++
 		}
 	}

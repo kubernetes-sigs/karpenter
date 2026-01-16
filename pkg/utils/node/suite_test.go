@@ -66,7 +66,7 @@ var _ = Describe("NodeUtils", func() {
 		testNode = test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
-		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
+		nodeClaims, err := nodeutils.NodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(1))
 		for _, nc := range nodeClaims {
@@ -79,7 +79,7 @@ var _ = Describe("NodeUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
-		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
+		nodeClaims, err := nodeutils.NodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
 	})
@@ -89,7 +89,7 @@ var _ = Describe("NodeUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
-		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
+		nodeClaims, err := nodeutils.NodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
 	})

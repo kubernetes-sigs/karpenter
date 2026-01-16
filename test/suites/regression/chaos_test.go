@@ -179,7 +179,7 @@ func startNodeCountMonitor(ctx context.Context, kubeClient client.Client) {
 			list := &corev1.NodeList{}
 			if err := kubeClient.List(ctx, list, client.HasLabels{test.DiscoveryLabel}); err == nil {
 				readyCount := lo.CountBy(list.Items, func(n corev1.Node) bool {
-					return nodeutils.GetCondition(&n, corev1.NodeReady).Status == corev1.ConditionTrue
+					return nodeutils.Condition(&n, corev1.NodeReady).Status == corev1.ConditionTrue
 				})
 				fmt.Printf("[NODE COUNT] CURRENT: %d | READY: %d | CREATED: %d | DELETED: %d\n", len(list.Items), readyCount, createdNodes.Load(), deletedNodes.Load())
 			}

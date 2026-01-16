@@ -86,7 +86,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 				}
 
 				for _, oldCond := range oldNode.Status.Conditions {
-					newCond := nodeutils.GetCondition(newNode, oldCond.Type)
+					newCond := nodeutils.Condition(newNode, oldCond.Type)
 					// Return true if any of these conditions are met:
 					// 1. Condition type no longer exists in new node
 					// 2. Transition time has changed
@@ -191,7 +191,7 @@ func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.Node
 	requeueTime := time.Time{}
 	for _, policy := range c.cloudProvider.RepairPolicies() {
 		// check the status and the type on the condition
-		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
+		nodeCondition := nodeutils.Condition(node, policy.ConditionType)
 		if nodeCondition.Status == policy.ConditionStatus {
 			terminationTime := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration)
 			// Determine requeue time
@@ -245,7 +245,7 @@ func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOpt
 	}
 	unhealthyNodeCount := lo.CountBy(nodeList.Items, func(node corev1.Node) bool {
 		_, found := lo.Find(c.cloudProvider.RepairPolicies(), func(policy cloudprovider.RepairPolicy) bool {
-			nodeCondition := nodeutils.GetCondition(lo.ToPtr(node), policy.ConditionType)
+			nodeCondition := nodeutils.Condition(lo.ToPtr(node), policy.ConditionType)
 			return nodeCondition.Status == policy.ConditionStatus
 		})
 		return found

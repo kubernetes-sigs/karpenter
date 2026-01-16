@@ -192,7 +192,7 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*cor
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetPods(ctx, kubeClient, in.Node)
+	return nodeutils.Pods(ctx, kubeClient, in.Node)
 }
 
 // ValidateNodeDisruptable returns an error if the StateNode cannot be disrupted
@@ -259,7 +259,7 @@ func (in *StateNode) CurrentlyReschedulablePods(ctx context.Context, kubeClient 
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetCurrentlyReschedulablePods(ctx, kubeClient, in.Node)
+	return nodeutils.CurrentlyReschedulablePods(ctx, kubeClient, in.Node)
 }
 
 func (in *StateNode) HostName() string {
@@ -555,7 +555,6 @@ func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, con
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-
 	})
 	return multierr.Combine(errs...)
 }
