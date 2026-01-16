@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -60,6 +61,7 @@ var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
 var recorder *test.EventRecorder
 var queue *terminator.Queue
+var tracker *MockDisruptionTracker
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -78,7 +80,8 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewQueue(env.Client, recorder)
-	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
+	tracker = &MockDisruptionTracker{}
+	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder, tracker)
 })
 
 var _ = AfterSuite(func() {
@@ -970,4 +973,14 @@ func ExpectRequeued(result reconcile.Result) {
 	GinkgoHelper()
 	//nolint:staticcheck
 	Expect(result.Requeue || result.RequeueAfter != time.Duration(0)).To(BeTrue())
+}
+
+type MockDisruptionTracker struct {
+}
+
+func (m *MockDisruptionTracker) AddCommand(ctx context.Context, cmd *disruption.Command) error {
+	return nil
+}
+func (c *MockDisruptionTracker) FinishCommand(ctx context.Context, nc *v1.NodeClaim) error {
+	return nil
 }

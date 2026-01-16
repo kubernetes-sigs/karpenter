@@ -27,6 +27,7 @@ const (
 	NodeClaimSubsystem = "nodeclaims"
 	NodePoolSubsystem  = "nodepools"
 	PodSubsystem       = "pods"
+	ClusterSubsystem   = "cluster"
 )
 
 var (

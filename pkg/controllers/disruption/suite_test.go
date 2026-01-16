@@ -36,6 +36,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	cache "github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -75,6 +76,7 @@ var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
 var queue *disruption.Queue
+var tracker *disruption.Tracker
 var allKnownDisruptionReasons []v1.DisruptionReason
 
 var onDemandInstances []*cloudprovider.InstanceType
@@ -102,7 +104,8 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
-	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
+	tracker = disruption.NewTracker(cluster, clusterCost, fakeClock, cache.New(30*time.Minute, time.Minute), nil, false)
+	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov, tracker)
 })
 
 var _ = AfterSuite(func() {
@@ -121,7 +124,7 @@ var _ = BeforeEach(func() {
 	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov, tracker))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -463,7 +466,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		defer hangCreateClient.Stop()
 
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
-		q := disruption.NewQueue(hangCreateClient, recorder, cluster, fakeClock, p)
+		q := disruption.NewQueue(hangCreateClient, recorder, cluster, fakeClock, p, tracker)
 		dc := disruption.NewController(fakeClock, hangCreateClient, p, cloudProvider, recorder, cluster, q)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
