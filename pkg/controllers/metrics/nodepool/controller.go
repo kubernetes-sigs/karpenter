@@ -108,12 +108,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if !nodepoolutils.IsManaged(nodePool, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
-	c.metricStore.Update(req.String(), c.buildMetrics(nodePool))
+	c.metricStore.Update(req.String(), buildMetrics(nodePool))
 	// periodically update our metrics per nodepool even if nothing has changed
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (_ *Controller) buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
+func buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		Usage: nodePool.Status.Resources,
 		Limit: getLimits(nodePool),
