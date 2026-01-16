@@ -218,7 +218,7 @@ func filterOutSameInstanceType(replacement *Replacement, consolidate []*Candidat
 	var err error
 	replacement.NodeClaim, err = replacement.RemoveInstanceTypeOptionsByPriceAndMinValues(replacement.Requirements, maxPrice)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("filtering instance types by price, %w", err)
 	}
 	return replacement, nil
 }

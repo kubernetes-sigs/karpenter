@@ -235,7 +235,7 @@ func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits) ([]*corev1.Pod, error) {
 	pods, err := in.Pods(ctx, kubeClient)
 	if err != nil {
-		return nil, fmt.Errorf("getting pods from node, %w", err)
+		return nil, err
 	}
 	for _, po := range pods {
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
@@ -555,7 +555,6 @@ func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, con
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-
 	})
 	return multierr.Combine(errs...)
 }

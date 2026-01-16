@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/awslabs/operatorpkg/object"
@@ -160,7 +161,7 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 
 func (l *Liveness) deleteNodeClaimForTimeout(ctx context.Context, timeout NodeClaimTimeout, nodeClaim *v1.NodeClaim) error {
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
-		return err
+		return fmt.Errorf("deleting nodeclaim %q for timeout, %w", nodeClaim.Name, err)
 	}
 	log.FromContext(ctx).V(1).WithValues("timeout", timeout.duration, "reason", timeout.reason).Info("terminating due to timeout")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
