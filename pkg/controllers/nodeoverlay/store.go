@@ -17,8 +17,6 @@ limitations under the License.
 package nodeoverlay
 
 import (
-	"errors"
-	"fmt"
 	"sync/atomic"
 
 	"github.com/samber/lo"
@@ -64,7 +62,7 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 	internalStore := lo.FromPtr(s.store.Load())
 
 	if !lo.Contains(internalStore.evaluatedNodePools.UnsortedList(), nodePoolName) {
-		return []*cloudprovider.InstanceType{}, NewUnevaluatedNodePoolError(nodePoolName)
+		return []*cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
 	}
 
 	result := make([]*cloudprovider.InstanceType, 0, len(its))
@@ -120,7 +118,7 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 // - Selective copy: Capacity (only deep copied if capacity overlay applied)
 func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
-		return &cloudprovider.InstanceType{}, NewUnevaluatedNodePoolError(nodePoolName)
+		return &cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
 	}
 
 	instanceTypeList, ok := s.updates[nodePoolName]
@@ -296,28 +294,4 @@ func (i *internalInstanceTypeStore) isOfferingUpdateConflicting(nodePoolName str
 
 func (s *InstanceTypeStore) Reset() {
 	s.store.Swap(NewInstanceTypeStore().store.Load())
-}
-
-// UnevaluatedNodePoolError is an error when the node overlay controller has not updated the instance
-// store based on the overlay in the cluster.
-type UnevaluatedNodePoolError struct {
-	nodePoolName string
-}
-
-func NewUnevaluatedNodePoolError(nodePoolName string) *UnevaluatedNodePoolError {
-	return &UnevaluatedNodePoolError{
-		nodePoolName: nodePoolName,
-	}
-}
-
-func (e *UnevaluatedNodePoolError) Error() string {
-	return fmt.Sprintf("awaiting nodeoverlay evaluation, nodepool %s", e.nodePoolName)
-}
-
-func IsUnevaluatedNodePoolError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var onatnpErr *UnevaluatedNodePoolError
-	return errors.As(err, &onatnpErr)
 }

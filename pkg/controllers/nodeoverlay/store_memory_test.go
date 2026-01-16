@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodeoverlay_test
+package nodeoverlay
 
 import (
 	"fmt"
@@ -29,7 +29,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 )
 
 // Memory limits for overlay scenarios (in number of allocations)
@@ -124,9 +123,9 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 	Context("no overlays", func() {
 		It("should have minimal allocations when no overlays are applied", func() {
-			store := nodeoverlay.NewInternalInstanceTypeStore()
+			store := newInternalInstanceTypeStore()
 			for _, np := range nodePools {
-				store.InsertEvaluatedNodePools(np)
+				store.evaluatedNodePools.Insert(np)
 			}
 
 			ms := captureMemStats()
@@ -134,7 +133,7 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.Apply(np, it)
+						_, _ = store.apply(np, it)
 					}
 				}
 			}
@@ -150,30 +149,36 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 	Context("price overlays only", func() {
 		It("should have controlled allocations with price-only overlays", func() {
-			store := nodeoverlay.NewInternalInstanceTypeStore()
-			store.InsertEvaluatedNodePools("default")
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
 
-			updates := make(map[string]map[string]*nodeoverlay.InstanceTypeUpdate)
-			updates["default"] = make(map[string]*nodeoverlay.InstanceTypeUpdate)
+			updates := make(map[string]map[string]*instanceTypeUpdate)
+			updates["default"] = make(map[string]*instanceTypeUpdate)
 
 			for _, it := range instanceTypes {
-				priceUpdates := make(map[string]*nodeoverlay.PriceUpdate)
+				priceUpdates := make(map[string]*priceUpdate)
 				for _, offering := range it.Offerings {
 					if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
-						priceUpdates[offering.Requirements.String()] = nodeoverlay.NewPriceUpdate(lo.ToPtr("-10%"), lo.ToPtr(int32(10)))
+						priceUpdates[offering.Requirements.String()] = &priceUpdate{
+							OverlayUpdate: lo.ToPtr("-10%"),
+							lowestWeight:  lo.ToPtr(int32(10)),
+						}
 					}
 				}
 				if len(priceUpdates) > 0 {
-					updates["default"][it.Name] = nodeoverlay.NewInstanceTypeUpdate(priceUpdates, nodeoverlay.NewCapacityUpdate(corev1.ResourceList{}))
+					updates["default"][it.Name] = &instanceTypeUpdate{
+						Price:    priceUpdates,
+						Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
+					}
 				}
 			}
-			store.SetUpdates(updates)
+			store.updates = updates
 
 			ms := captureMemStats()
 
 			for i := 0; i < 100; i++ {
 				for _, it := range instanceTypes {
-					_, _ = store.Apply("default", it)
+					_, _ = store.apply("default", it)
 				}
 			}
 
@@ -188,27 +193,29 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 	Context("capacity overlays only", func() {
 		It("should have controlled allocations with capacity-only overlays", func() {
-			store := nodeoverlay.NewInternalInstanceTypeStore()
-			store.InsertEvaluatedNodePools("default")
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
 
-			updates := make(map[string]map[string]*nodeoverlay.InstanceTypeUpdate)
-			updates["default"] = make(map[string]*nodeoverlay.InstanceTypeUpdate)
+			updates := make(map[string]map[string]*instanceTypeUpdate)
+			updates["default"] = make(map[string]*instanceTypeUpdate)
 
 			for _, it := range instanceTypes {
-				updates["default"][it.Name] = nodeoverlay.NewInstanceTypeUpdate(
-					nil,
-					nodeoverlay.NewCapacityUpdate(corev1.ResourceList{
-						"hugepages-2Mi": resource.MustParse("100Mi"),
-					}),
-				)
+				updates["default"][it.Name] = &instanceTypeUpdate{
+					Price: nil,
+					Capacity: &capacityUpdate{
+						OverlayUpdate: corev1.ResourceList{
+							"hugepages-2Mi": resource.MustParse("100Mi"),
+						},
+					},
+				}
 			}
-			store.SetUpdates(updates)
+			store.updates = updates
 
 			ms := captureMemStats()
 
 			for i := 0; i < 100; i++ {
 				for _, it := range instanceTypes {
-					_, _ = store.Apply("default", it)
+					_, _ = store.apply("default", it)
 				}
 			}
 
@@ -230,7 +237,7 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.Apply(np, it)
+						_, _ = store.apply(np, it)
 					}
 				}
 			}
@@ -266,7 +273,7 @@ var _ = Describe("Memory Usage Scale With NodePools", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.Apply(np, it)
+						_, _ = store.apply(np, it)
 					}
 				}
 			}
@@ -305,7 +312,7 @@ var _ = Describe("Memory Usage Scale With InstanceTypes", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.Apply(np, it)
+						_, _ = store.apply(np, it)
 					}
 				}
 			}
@@ -365,34 +372,39 @@ func createRealisticInstanceTypes(count int) []*cloudprovider.InstanceType {
 }
 
 // createStoreWithOverlays creates an instance type store with realistic overlays applied
-func createStoreWithOverlays(instanceTypes []*cloudprovider.InstanceType, nodePools []string) *nodeoverlay.InternalInstanceTypeStore {
-	store := nodeoverlay.NewInternalInstanceTypeStore()
+func createStoreWithOverlays(instanceTypes []*cloudprovider.InstanceType, nodePools []string) *internalInstanceTypeStore {
+	store := newInternalInstanceTypeStore()
 
-	updates := make(map[string]map[string]*nodeoverlay.InstanceTypeUpdate)
+	updates := make(map[string]map[string]*instanceTypeUpdate)
 
 	for _, np := range nodePools {
-		store.InsertEvaluatedNodePools(np)
-		updates[np] = make(map[string]*nodeoverlay.InstanceTypeUpdate)
+		store.evaluatedNodePools.Insert(np)
+		updates[np] = make(map[string]*instanceTypeUpdate)
 
 		for _, it := range instanceTypes {
 			// Apply price overlays to spot offerings
-			priceUpdates := make(map[string]*nodeoverlay.PriceUpdate)
+			priceUpdates := make(map[string]*priceUpdate)
 			for _, offering := range it.Offerings {
 				if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
-					priceUpdates[offering.Requirements.String()] = nodeoverlay.NewPriceUpdate(lo.ToPtr("-10%"), lo.ToPtr(int32(10)))
+					priceUpdates[offering.Requirements.String()] = &priceUpdate{
+						OverlayUpdate: lo.ToPtr("-10%"),
+						lowestWeight:  lo.ToPtr(int32(10)),
+					}
 				}
 			}
 
 			// Add capacity overlay for hugepages
-			updates[np][it.Name] = nodeoverlay.NewInstanceTypeUpdate(
-				priceUpdates,
-				nodeoverlay.NewCapacityUpdate(corev1.ResourceList{
-					"hugepages-2Mi": resource.MustParse("100Mi"),
-				}),
-			)
+			updates[np][it.Name] = &instanceTypeUpdate{
+				Price: priceUpdates,
+				Capacity: &capacityUpdate{
+					OverlayUpdate: corev1.ResourceList{
+						"hugepages-2Mi": resource.MustParse("100Mi"),
+					},
+				},
+			}
 		}
 	}
 
-	store.SetUpdates(updates)
+	store.updates = updates
 	return store
 }
