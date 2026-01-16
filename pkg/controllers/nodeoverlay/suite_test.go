@@ -144,6 +144,69 @@ var _ = Describe("Validation", func() {
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
 		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 	})
+	It("should match instance types when NodePool uses Exists operator in requirements", func() {
+		testNodePool := test.NodePool(v1.NodePool{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-nodepool-with-requirements",
+			},
+			Spec: v1.NodePoolSpec{
+				Template: v1.NodeClaimTemplate{
+					Spec: v1.NodeClaimTemplateSpec{
+						Requirements: []v1.NodeSelectorRequirementWithMinValues{
+							{
+								Key:      "company.com/team",
+								Operator: corev1.NodeSelectorOpExists,
+							},
+						},
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, testNodePool)
+
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, testNodePool)
+		Expect(err).To(BeNil())
+		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
+
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      "company.com/team",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"team-a"},
+					},
+					{
+						// Also match the nodepool name to ensure it applies to our test pool
+						Key:      v1.NodePoolLabelKey,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-nodepool-with-requirements"},
+					},
+				},
+				PriceAdjustment: lo.ToPtr("+100"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+		instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, testNodePool)
+		Expect(err).To(BeNil())
+
+		instanceTypeList, err = store.ApplyAll(testNodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+		Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
+
+		priceAfterStore := instanceTypeList[0].Offerings[0].Price
+
+		Expect(priceAfterStore).To(BeNumerically("==", 101.020),
+			fmt.Sprintf("Expected price to be 101.020 (overlay applied), but got %f.", priceAfterStore))
+	})
 	Context("Runtime Validation", func() {
 		It("should fail validation for invalid requirements values", func() {
 			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
