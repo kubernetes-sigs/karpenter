@@ -67,16 +67,6 @@ var (
 			metrics.NodePoolLabel,
 		},
 	)
-	ClusterCost = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodePoolSubsystem,
-			Name:      "cost_total",
-			Help:      "ALPHA METRIC. Total cost of the nodepool from Karpenter's perspective. Units are determined by the cloud provider. Not an authoritative source for billing. Includes modifications due to NodeOverlays",
-		},
-		[]string{metrics.NodePoolLabel},
-	)
 )
 
 type Controller struct {
