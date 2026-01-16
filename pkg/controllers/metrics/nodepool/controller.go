@@ -37,7 +37,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/state/cost"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
@@ -83,17 +82,15 @@ var (
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	clusterCost   *cost.ClusterCost
 	metricStore   *metrics.Store
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		metricStore:   metrics.NewStore(),
-		clusterCost:   clusterCost,
 	}
 }
 
@@ -116,13 +113,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (c *Controller) buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
-	res = append(res, &metrics.StoreMetric{
-		GaugeMetric: ClusterCost,
-		Labels:      map[string]string{metrics.NodePoolLabel: nodePool.Name},
-		Value:       c.clusterCost.GetNodepoolCost(nodePool),
-	})
-
+func (_ *Controller) buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		Usage: nodePool.Status.Resources,
 		Limit: getLimits(nodePool),
