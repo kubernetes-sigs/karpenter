@@ -288,7 +288,8 @@ func (p *Provisioner) NewScheduler(
 
 	// Get volume topology requirements WITHOUT modifying pods.
 	// Volume requirements are passed separately and added to nodeRequirements only.
-	volumeReqs, err := p.getVolumeTopologyRequirements(ctx, pods)
+	// Pods that fail volume topology lookup are excluded from scheduling.
+	pods, volumeReqs, err := p.getVolumeTopologyRequirements(ctx, pods)
 	if err != nil {
 		return nil, fmt.Errorf("getting volume topology requirements, %w", err)
 	}
@@ -532,13 +533,14 @@ func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 // getVolumeTopologyRequirements collects volume topology requirements for each pod
 // WITHOUT modifying the pods. These requirements will be added to nodeRequirements
 // (for NodeClaim zone selection) but NOT to pod affinities (for correct TSC counting).
-func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) (map[types.UID][]corev1.NodeSelectorRequirement, error) {
+func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, map[types.UID][]corev1.NodeSelectorRequirement, error) {
+	var schedulablePods []*corev1.Pod
 	volumeReqs := make(map[types.UID][]corev1.NodeSelectorRequirement)
 	for _, pod := range pods {
 		reqs, err := p.volumeTopology.GetRequirements(ctx, pod)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
+				return nil, nil, err
 			}
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
 			continue
@@ -546,8 +548,9 @@ func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []
 		if len(reqs) > 0 {
 			volumeReqs[pod.UID] = reqs
 		}
+		schedulablePods = append(schedulablePods, pod)
 	}
-	return volumeReqs, nil
+	return schedulablePods, volumeReqs, nil
 }
 
 func validateNodeSelector(ctx context.Context, p *corev1.Pod) (errs error) {
