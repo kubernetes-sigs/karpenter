@@ -3146,10 +3146,9 @@ var _ = Describe("Topology with Volume Requirements", func() {
 	})
 
 	It("should schedule pod with PVC and TSC minDomains=3 when pods are spread across 3 zones", func() {
-		// This test reproduces the bug where a pod with:
-		// 1. A PVC bound to zone-1
-		// 2. TSC with minDomains=3, maxSkew=1
-		// Would fail to schedule because volume zone requirement polluted TSC calculations
+		// A pod with a PVC bound to zone-1 and TSC minDomains=3 should schedule successfully
+		// when pods are already spread across all 3 zones. The volume zone requirement should
+		// only affect NodeClaim placement, not TSC domain counting.
 
 		// Create a PV bound to test-zone-1
 		pv := test.PersistentVolume(test.PersistentVolumeOptions{
@@ -3188,9 +3187,6 @@ var _ = Describe("Topology with Volume Requirements", func() {
 		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1))
 
 		// Now create a pod with PVC + same TSC
-		// BUG: This fails because volume zone (test-zone-1) pollutes podDomains,
-		// causing minDomains check to think only 1 zone is valid.
-		// FIX: Volume requirements should NOT affect TSC counting.
 		podWithPVC := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 			TopologySpreadConstraints: topology,

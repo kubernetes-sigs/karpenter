@@ -199,7 +199,7 @@ type Scheduler struct {
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead          map[*NodeClaimTemplate]corev1.ResourceList
 	daemonHostPortUsage     map[*NodeClaimTemplate]*scheduling.HostPortUsage
-	cachedPodData           map[types.UID]*PodData
+	cachedPodData           map[types.UID]*PodData                         // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
 	volumeReqsByPod         map[types.UID][]corev1.NodeSelectorRequirement // Volume topology requirements per pod
 	preferences             *Preferences
 	topology                *Topology
