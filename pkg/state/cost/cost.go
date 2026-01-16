@@ -22,11 +22,13 @@ import (
 	"sync"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -42,19 +44,17 @@ import (
 // on NodeClaim objects for cost tracking to function properly.
 var NecessaryLabels = []string{corev1.LabelInstanceTypeStable, v1.CapacityTypeLabelKey, corev1.LabelTopologyZone, v1.NodePoolLabelKey}
 
-var (
-	CostTrackingErrorsTotal = opmetrics.NewPrometheusCounter(
-		crmetrics.Registry,
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodePoolSubsystem,
-			Name:      "cost_tracker_errors_total",
-			Help:      "Number of errors encountered during cost tracking operations. Labeled by nodepool and nodeclaim.",
-		},
-		[]string{
-			metrics.NodePoolLabel,
-		},
-	)
+var CostTrackingErrorsTotal = opmetrics.NewPrometheusCounter(
+	crmetrics.Registry,
+	prometheus.CounterOpts{
+		Namespace: metrics.Namespace,
+		Subsystem: metrics.NodePoolSubsystem,
+		Name:      "cost_tracker_errors_total",
+		Help:      "Number of errors encountered during cost tracking operations. Labeled by nodepool and nodeclaim.",
+	},
+	[]string{
+		metrics.NodePoolLabel,
+	},
 )
 
 // ClusterCost tracks the cost of compute resources across all NodePools in a cluster.
@@ -218,10 +218,15 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	err := cc.client.Get(ctx, types.NamespacedName{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}, np)
 	if err != nil && !errors.IsNotFound(err) {
 		failed = true
-		return serrors.Wrap(err, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
+		// Wrap the error to preserve NotFound status
+		return fmt.Errorf("getting nodepool %s for nodeclaim %s: %w", nodeClaim.Labels[v1.NodePoolLabelKey], client.ObjectKeyFromObject(nodeClaim), err)
 	}
-	if errors.IsNotFound(err) {
-		np.UID = types.UID("manual")
+	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
+	}); !found {
+		failed = true
+		// This could be a transient state where the nodeclaim hasn't been updated yet
+		return fmt.Errorf("nodepool %s not found in owner references for nodeclaim %s", nodeClaim.Labels[v1.NodePoolLabelKey], client.ObjectKeyFromObject(nodeClaim))
 	}
 
 	cc.Lock()

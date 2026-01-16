@@ -20,17 +20,20 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -44,6 +47,8 @@ var ctx context.Context
 var env *test.Environment
 var cp *fake.CloudProvider
 var cc *cost.ClusterCost
+var cluster *state.Cluster
+var fakeClock *clock.FakeClock
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -55,7 +60,9 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cp = fake.NewCloudProvider()
 	cc = cost.NewClusterCost(ctx, cp, env.Client)
-	nodePoolController = nodepool.NewController(env.Client, cp, cc)
+	fakeClock = clock.NewFakeClock(time.Now())
+	cluster = state.NewCluster(fakeClock, env.Client, cp)
+	nodePoolController = nodepool.NewController(env.Client, cp, cc, cluster, fakeClock)
 })
 
 var _ = AfterSuite(func() {
