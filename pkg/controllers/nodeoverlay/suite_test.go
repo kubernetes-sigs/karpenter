@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodeoverlay_test
+package nodeoverlay
 
 import (
 	"context"
@@ -42,7 +42,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -59,8 +58,8 @@ var (
 	nodePoolTwo           *v1.NodePool
 	cluster               *state.Cluster
 	fakeClock             *clock.FakeClock
-	nodeOverlayController *nodeoverlay.Controller
-	store                 *nodeoverlay.InstanceTypeStore
+	nodeOverlayController *Controller
+	store                 *InstanceTypeStore
 )
 
 func TestNodeOverlay(t *testing.T) {
@@ -72,10 +71,10 @@ func TestNodeOverlay(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
-	store = nodeoverlay.NewInstanceTypeStore()
+	store = NewInstanceTypeStore()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store, cluster)
+	nodeOverlayController = NewController(env.Client, cloudProvider, store, cluster)
 })
 
 var _ = BeforeEach(func() {
