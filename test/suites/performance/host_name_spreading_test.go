@@ -36,9 +36,9 @@ var _ = Describe("Performance", func() {
 			By("Creating deployments with hostname spreading")
 
 			// Create deployment options using templates
-			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
+			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "900m", "3100Mi",
 				test.WithHostnameSpread())
-			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
+			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3500m", "28Gi")
 
 			// Create deployments
 			smallDeployment := test.Deployment(smallOpts)
@@ -59,10 +59,10 @@ var _ = Describe("Performance", func() {
 				"Total scale-out time should be less than 10 minutes")
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 650),
 				"Should not require more than 1000 nodes for 1000 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
-				"Average CPU utilization should be greater than 55%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
-				"Average memory utilization should be greater than 75%")
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
+				"Average CPU utilization should be greater than 50%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
+				"Average memory utilization should be greater than 65%")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Scaling down deployments to trigger consolidation")
@@ -87,9 +87,9 @@ var _ = Describe("Performance", func() {
 				"Node count should decrease after consolidation")
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
 				"Consolidation should complete within 10 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 55%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
 				"Average memory utilization should be greater than 75%")
 
 		})

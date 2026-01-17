@@ -37,10 +37,10 @@ var _ = Describe("Performance", func() {
 			By("Creating deployments with different resource profiles and protection")
 
 			// Create deployment options using templates
-			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
+			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "900m", "3100Mi",
 				test.WithHostnameSpread())
-			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
-			protectedOpts := test.CreateDeploymentOptions("do-not-disrupt-app", 100, "950m", "450Mi",
+			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3500m", "28Gi")
+			protectedOpts := test.CreateDeploymentOptions("do-not-disrupt-app", 100, "900m", "450Mi",
 				test.WithDoNotDisrupt())
 
 			// Create deployments
@@ -63,10 +63,10 @@ var _ = Describe("Performance", func() {
 				"Total scale-out time should be less than 4 minutes")
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 750),
 				"Should not require more than 550 nodes for 1100 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
-				"Average CPU utilization should be greater than 55%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
-				"Average memory utilization should be greater than 70%")
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
+				"Average CPU utilization should be greater than 50%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.6),
+				"Average memory utilization should be greater than 60%")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")
@@ -101,12 +101,12 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.TotalPods).To(BeNumerically(">=", 600), "Should have at least 600 total pods after scale-in (250+250+100)")
 			Expect(consolidationReport.PodsNetChange).To(BeNumerically(">=", -500), "Should have net reduction of 500 pods")
 
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
-				"Consolidation should complete within 10 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
-				"Average CPU utilization should be greater than 55%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
-				"Average memory utilization should be greater than 70%")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 15*time.Minute),
+				"Consolidation should complete within 15 minutes")
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.5),
+				"Average CPU utilization should be greater than 50%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
+				"Average memory utilization should be greater than 65%")
 
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()

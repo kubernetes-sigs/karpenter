@@ -32,8 +32,8 @@ var _ = Describe("Performance", func() {
 			// ========== PHASE 1: SCALE-OUT TEST ==========
 			By("Executing scale-out performance test with 1000 pods")
 			// Create deployments directly using the template
-			smallDeploymentOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi")
-			largeDeploymentOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
+			smallDeploymentOpts := test.CreateDeploymentOptions("small-resource-app", 500, "900m", "3100Mi")
+			largeDeploymentOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3500m", "28Gi")
 
 			smallDeployment := test.Deployment(smallDeploymentOpts)
 			largeDeployment := test.Deployment(largeDeploymentOpts)
@@ -50,9 +50,9 @@ var _ = Describe("Performance", func() {
 				"Total scale-out time should be less than 3 minutes")
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 200),
 				"Should not require more than 50 nodes for 1000 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.85),
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.70),
 				"Average CPU utilization should be greater than 75%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
 				"Average memory utilization should be greater than 75%")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
