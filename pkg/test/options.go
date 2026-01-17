@@ -38,6 +38,9 @@ type OptionsFields struct {
 	DisableClusterStateObservability *bool
 	LeaderElectionName               *string
 	LeaderElectionNamespace          *string
+	LeaderElectionLeaseDuration      *time.Duration
+	LeaderElectionRenewDeadline      *time.Duration
+	LeaderElectionRetryPeriod        *time.Duration
 	MemoryLimit                      *int64
 	CPURequests                      *int64
 	LogLevel                         *string
@@ -76,6 +79,9 @@ func Options(overrides ...OptionsFields) *options.Options {
 		EnableProfiling:                  lo.FromPtrOr(opts.EnableProfiling, false),
 		DisableLeaderElection:            lo.FromPtrOr(opts.DisableLeaderElection, false),
 		DisableClusterStateObservability: lo.FromPtrOr(opts.DisableClusterStateObservability, false),
+		LeaderElectionLeaseDuration:      lo.FromPtrOr(opts.LeaderElectionLeaseDuration, 15*time.Second),
+		LeaderElectionRenewDeadline:      lo.FromPtrOr(opts.LeaderElectionRenewDeadline, 10*time.Second),
+		LeaderElectionRetryPeriod:        lo.FromPtrOr(opts.LeaderElectionRetryPeriod, 2*time.Second),
 		MemoryLimit:                      lo.FromPtrOr(opts.MemoryLimit, -1),
 		CPURequests:                      lo.FromPtrOr(opts.CPURequests, 5000), // use 5 threads to enforce parallelism
 		LogLevel:                         lo.FromPtrOr(opts.LogLevel, ""),
