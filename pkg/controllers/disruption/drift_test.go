@@ -755,7 +755,7 @@ var _ = Describe("Drift", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
