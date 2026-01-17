@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -155,12 +156,20 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		return Command{}, nil
 	}
 
+	// get the current node price based on the offering
+	// fallback if we can't find the specific zonal pricing data
+	candidatePrice, err := getCandidatePrices(candidates)
+	if err != nil {
+		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
+	}
+
 	// were we able to schedule all the pods on the inflight candidates?
 	if len(results.NewNodeClaims) == 0 {
-		return Command{
+		cmd := Command{
 			Candidates: candidates,
 			Results:    results,
-		}, nil
+		}
+		return cmd, nil
 	}
 
 	// we're not going to turn a single node into multiple candidates
@@ -169,13 +178,6 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Can't remove without creating %d candidates", len(results.NewNodeClaims)))...)
 		}
 		return Command{}, nil
-	}
-
-	// get the current node price based on the offering
-	// fallback if we can't find the specific zonal pricing data
-	candidatePrice, err := getCandidatePrices(candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
 
 	allExistingAreSpot := true
@@ -222,11 +224,18 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
 	}
 
-	return Command{
+	cmd := Command{
 		Candidates:   candidates,
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
-	}, nil
+	}
+
+	log.FromContext(ctx).Info("consolidation move generated",
+		"command", cmd.String(),
+		"estimated_savings", cmd.EstimatedSavings(),
+	)
+
+	return cmd, nil
 }
 
 // Compute command to execute spot-to-spot consolidation if:
@@ -268,11 +277,18 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	// For multi-node consolidation:
 	// We don't have any requirement to check the remaining instance type flexibility, so exit early in this case.
 	if len(candidates) > 1 {
-		return Command{
+		cmd := Command{
 			Candidates:   candidates,
 			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 			Results:      results,
-		}, nil
+		}
+
+		log.FromContext(ctx).Info("consolidation move generated",
+			"command", cmd.String(),
+			"estimated_savings", cmd.EstimatedSavings(),
+		)
+
+		return cmd, nil
 	}
 
 	// For single-node consolidation:
@@ -303,11 +319,18 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		results.NewNodeClaims[0].InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].InstanceTypeOptions, 0, MinInstanceTypesForSpotToSpotConsolidation)
 	}
 
-	return Command{
+	cmd := Command{
 		Candidates:   candidates,
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
-	}, nil
+	}
+
+	log.FromContext(ctx).Info("consolidation move generated",
+		"command", cmd.String(),
+		"estimated_savings", cmd.EstimatedSavings(),
+	)
+
+	return cmd, nil
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates
@@ -330,3 +353,7 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	}
 	return price, nil
 }
+
+// getCommandEstimatedSavings calculates the estimated savings for a command
+
+// getDestinationRequirements returns a string representation of destination node requirements
