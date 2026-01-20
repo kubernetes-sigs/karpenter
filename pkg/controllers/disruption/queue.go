@@ -316,23 +316,10 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		return fmt.Errorf("candidate is being disrupted")
 	}
 
-	// Extract destination instance type requirements for logging
-	destRequirements := lo.Map(cmd.Replacements, func(r *Replacement, _ int) string {
-		// Log the capacity type requirement as a representative of the replacement
-		ct := r.Requirements.Get(v1.CapacityTypeLabelKey)
-		values := ct.Values()
-		if len(values) > 0 {
-			return fmt.Sprintf("nodeclaim[capacity-type=%s]", values[0])
-		}
-		return "nodeclaim[unknown]"
-	})
-
 	log.FromContext(ctx).WithValues(append([]any{
 		"command-id", cmd.ID,
 		"reason", strings.ToLower(string(cmd.Reason())),
-		"action", cmd.Decision().String(),
-		"source_nodes", cmd.SourceNodeNames(),
-		"destination_nodes", destRequirements,
+		"command", cmd.String(),
 	}, cmd.LogValues()...)...).Info("disrupting node(s)")
 
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes

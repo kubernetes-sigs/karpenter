@@ -354,6 +354,3 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	return price, nil
 }
 
-// getCommandEstimatedSavings calculates the estimated savings for a command
-
-// getDestinationRequirements returns a string representation of destination node requirements

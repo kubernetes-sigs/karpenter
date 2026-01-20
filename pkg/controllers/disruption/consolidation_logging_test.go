@@ -20,8 +20,12 @@ import (
 	"errors"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
 func TestGetValidationFailureReason(t *testing.T) {
@@ -131,7 +135,7 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 	expectedSavings := -0.70
 
 	if savings != expectedSavings {
-		t.Errorf("getCommandEstimatedSavings() = %v, want %v (verifying multi-NodeClaim summing)", savings, expectedSavings)
+		t.Errorf("Command.EstimatedSavings() = %v, want %v (verifying multi-NodeClaim summing)", savings, expectedSavings)
 	}
 }
 
@@ -198,8 +202,78 @@ func TestGetCommandEstimatedSavings_EdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			savings := tt.cmd.EstimatedSavings()
 			if savings != tt.expectedSavings {
-				t.Errorf("getCommandEstimatedSavings() = %v, want %v", savings, tt.expectedSavings)
+				t.Errorf("Command.EstimatedSavings() = %v, want %v", savings, tt.expectedSavings)
 			}
 		})
+	}
+}
+
+func TestCommand_String(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      Command
+		expected string
+	}{
+		{
+			name: "delete single node",
+			cmd: Command{
+				Candidates:   []*Candidate{mockCandidate("node-1")},
+				Replacements: []*Replacement{},
+			},
+			expected: "delete: [node-1]",
+		},
+		{
+			name: "delete multiple nodes",
+			cmd: Command{
+				Candidates:   []*Candidate{mockCandidate("node-1"), mockCandidate("node-2")},
+				Replacements: []*Replacement{},
+			},
+			expected: "delete: [node-1, node-2]",
+		},
+		{
+			name: "replace with single replacement",
+			cmd: Command{
+				Candidates:   []*Candidate{mockCandidate("node-1")},
+				Replacements: []*Replacement{{}},
+			},
+			expected: "replace: [node-1] -> [1 replacement]",
+		},
+		{
+			name: "replace with multiple replacements",
+			cmd: Command{
+				Candidates:   []*Candidate{mockCandidate("node-1")},
+				Replacements: []*Replacement{{}, {}},
+			},
+			expected: "replace: [node-1] -> [2 replacements]",
+		},
+		{
+			name: "empty command",
+			cmd: Command{
+				Candidates:   []*Candidate{},
+				Replacements: []*Replacement{},
+			},
+			expected: "no-op: []",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.cmd.String()
+			if result != tt.expected {
+				t.Errorf("Command.String() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func mockCandidate(name string) *Candidate {
+	return &Candidate{
+		StateNode: &state.StateNode{
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name,
+				},
+			},
+		},
 	}
 }

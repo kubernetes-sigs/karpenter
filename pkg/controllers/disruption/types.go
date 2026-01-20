@@ -195,12 +195,18 @@ func (c Command) SourceNodeNames() []string {
 func (c Command) String() string {
 	sources := strings.Join(c.SourceNodeNames(), ", ")
 	if len(c.Replacements) > 0 {
-		return fmt.Sprintf("%s: [%s] -> [%d replacements]", c.Decision(), sources, len(c.Replacements))
+		plural := "replacements"
+		if len(c.Replacements) == 1 {
+			plural = "replacement"
+		}
+		return fmt.Sprintf("%s: [%s] -> [%d %s]", c.Decision(), sources, len(c.Replacements), plural)
 	}
 	return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
 }
 
-// EstimatedSavings returns the estimated cost savings from this consolidation
+// EstimatedSavings returns the estimated cost savings from this consolidation.
+// Returns 0.0 when pricing cannot be determined (e.g., offerings no longer exist).
+// This prevents consolidation from proceeding, which is the intended behavior.
 func (c Command) EstimatedSavings() float64 {
 	sourcePrice, err := getCandidatePrices(c.Candidates)
 	if err != nil {
