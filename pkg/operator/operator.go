@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -178,6 +179,12 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
 				},
 			},
+		},
+		Controller: ctrlconfig.Controller{
+			// EnableWarmup allows controllers to start their sources (watches/informers) before leader election
+			// is won. This pre-populates caches and improves leader failover time. Only effective when leader
+			// election is enabled, so we only set it when both conditions are true.
+			EnableWarmup: lo.ToPtr(!options.FromContext(ctx).DisableLeaderElection && !options.FromContext(ctx).DisableControllerWarmup),
 		},
 	}
 	if options.FromContext(ctx).EnableProfiling {

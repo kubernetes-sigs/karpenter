@@ -34,6 +34,7 @@ type OptionsFields struct {
 	KubeClientQPS                    *int
 	KubeClientBurst                  *int
 	EnableProfiling                  *bool
+	DisableControllerWarmup          *bool
 	DisableLeaderElection            *bool
 	DisableClusterStateObservability *bool
 	LeaderElectionName               *string
@@ -74,6 +75,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		KubeClientQPS:                    lo.FromPtrOr(opts.KubeClientQPS, 200),
 		KubeClientBurst:                  lo.FromPtrOr(opts.KubeClientBurst, 300),
 		EnableProfiling:                  lo.FromPtrOr(opts.EnableProfiling, false),
+		DisableControllerWarmup:          lo.FromPtrOr(opts.DisableControllerWarmup, true),
 		DisableLeaderElection:            lo.FromPtrOr(opts.DisableLeaderElection, false),
 		DisableClusterStateObservability: lo.FromPtrOr(opts.DisableClusterStateObservability, false),
 		MemoryLimit:                      lo.FromPtrOr(opts.MemoryLimit, -1),
