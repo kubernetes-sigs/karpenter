@@ -109,6 +109,24 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+	// consolidationPriceImprovementPercentage is the minimum cost savings percentage required for consolidation.
+	// Only consolidate when replacement nodes cost at least this percentage less than current nodes.
+	// If not specified, uses the operator-level consolidation-price-improvement-percentage setting.
+	//
+	// For multi-node consolidation involving multiple NodePools with different thresholds,
+	// the most conservative (highest percentage) threshold is used.
+	//
+	// Examples:
+	//   0  = Consolidate for any cost savings (legacy behavior)
+	//   10 = Require 10% cost savings
+	//   20 = Require 20% cost savings
+	//   50 = Require 50% cost savings (very conservative)
+	//   100 = Disable price-based consolidation
+	//
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	ConsolidationPriceImprovementPercentage *int32 `json:"consolidationPriceImprovementPercentage,omitempty"`
 }
 
 // Budget defines when Karpenter will restrict the

@@ -108,4 +108,46 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
+	ConsolidationPriceFactorBlocksTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "consolidation_price_factor_blocks_total",
+			Help:      "Number of times consolidation was blocked by price improvement factor threshold. Labeled by reason, factor source (nodepool/operator), and nodepool name.",
+		},
+		[]string{metrics.ReasonLabel, "factor_source", metrics.NodePoolLabel},
+	)
+	ConsolidationPriceSavingsActual = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "consolidation_price_savings_actual",
+			Help:      "Actual cost savings percentage when consolidation is evaluated. Labeled by blocked status and factor source.",
+			Buckets:   []float64{0.0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.75, 1.0},
+		},
+		[]string{"blocked", "factor_source"},
+	)
+	ConsolidationPriceSavingsRequired = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "consolidation_price_savings_required",
+			Help:      "Required cost savings percentage (threshold) when consolidation is evaluated. Labeled by blocked status and factor source.",
+			Buckets:   []float64{0.0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.75, 1.0},
+		},
+		[]string{"blocked", "factor_source"},
+	)
+	ConsolidationPriceFactorUsed = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "consolidation_price_factor_used",
+			Help:      "Price improvement factor value currently being used for consolidation decisions. Labeled by factor source and nodepool name.",
+		},
+		[]string{"factor_source", metrics.NodePoolLabel},
+	)
 )

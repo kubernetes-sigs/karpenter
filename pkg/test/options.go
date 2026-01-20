@@ -28,27 +28,28 @@ import (
 
 type OptionsFields struct {
 	// Vendor Neutral
-	ServiceName                      *string
-	MetricsPort                      *int
-	HealthProbePort                  *int
-	KubeClientQPS                    *int
-	KubeClientBurst                  *int
-	EnableProfiling                  *bool
-	DisableLeaderElection            *bool
-	DisableClusterStateObservability *bool
-	LeaderElectionName               *string
-	LeaderElectionNamespace          *string
-	MemoryLimit                      *int64
-	CPURequests                      *int64
-	LogLevel                         *string
-	LogOutputPaths                   *string
-	LogErrorOutputPaths              *string
-	PreferencePolicy                 *options.PreferencePolicy
-	MinValuesPolicy                  *options.MinValuesPolicy
-	BatchMaxDuration                 *time.Duration
-	BatchIdleDuration                *time.Duration
-	IgnoreDRARequests                *bool
-	FeatureGates                     FeatureGates
+	ServiceName                             *string
+	MetricsPort                             *int
+	HealthProbePort                         *int
+	KubeClientQPS                           *int
+	KubeClientBurst                         *int
+	EnableProfiling                         *bool
+	DisableLeaderElection                   *bool
+	DisableClusterStateObservability        *bool
+	LeaderElectionName                      *string
+	LeaderElectionNamespace                 *string
+	MemoryLimit                             *int64
+	CPURequests                             *int64
+	LogLevel                                *string
+	LogOutputPaths                          *string
+	LogErrorOutputPaths                     *string
+	PreferencePolicy                        *options.PreferencePolicy
+	MinValuesPolicy                         *options.MinValuesPolicy
+	BatchMaxDuration                        *time.Duration
+	BatchIdleDuration                       *time.Duration
+	IgnoreDRARequests                       *bool
+	ConsolidationPriceImprovementPercentage *int
+	FeatureGates                            FeatureGates
 }
 
 type FeatureGates struct {
@@ -68,24 +69,25 @@ func Options(overrides ...OptionsFields) *options.Options {
 	}
 
 	return &options.Options{
-		ServiceName:                      lo.FromPtrOr(opts.ServiceName, ""),
-		MetricsPort:                      lo.FromPtrOr(opts.MetricsPort, 8080),
-		HealthProbePort:                  lo.FromPtrOr(opts.HealthProbePort, 8081),
-		KubeClientQPS:                    lo.FromPtrOr(opts.KubeClientQPS, 200),
-		KubeClientBurst:                  lo.FromPtrOr(opts.KubeClientBurst, 300),
-		EnableProfiling:                  lo.FromPtrOr(opts.EnableProfiling, false),
-		DisableLeaderElection:            lo.FromPtrOr(opts.DisableLeaderElection, false),
-		DisableClusterStateObservability: lo.FromPtrOr(opts.DisableClusterStateObservability, false),
-		MemoryLimit:                      lo.FromPtrOr(opts.MemoryLimit, -1),
-		CPURequests:                      lo.FromPtrOr(opts.CPURequests, 5000), // use 5 threads to enforce parallelism
-		LogLevel:                         lo.FromPtrOr(opts.LogLevel, ""),
-		LogOutputPaths:                   lo.FromPtrOr(opts.LogOutputPaths, "stdout"),
-		LogErrorOutputPaths:              lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
-		BatchMaxDuration:                 lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
-		BatchIdleDuration:                lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
-		PreferencePolicy:                 lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
-		MinValuesPolicy:                  lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
-		IgnoreDRARequests:                lo.FromPtrOr(opts.IgnoreDRARequests, true),
+		ServiceName:                             lo.FromPtrOr(opts.ServiceName, ""),
+		MetricsPort:                             lo.FromPtrOr(opts.MetricsPort, 8080),
+		HealthProbePort:                         lo.FromPtrOr(opts.HealthProbePort, 8081),
+		KubeClientQPS:                           lo.FromPtrOr(opts.KubeClientQPS, 200),
+		KubeClientBurst:                         lo.FromPtrOr(opts.KubeClientBurst, 300),
+		EnableProfiling:                         lo.FromPtrOr(opts.EnableProfiling, false),
+		DisableLeaderElection:                   lo.FromPtrOr(opts.DisableLeaderElection, false),
+		DisableClusterStateObservability:        lo.FromPtrOr(opts.DisableClusterStateObservability, false),
+		MemoryLimit:                             lo.FromPtrOr(opts.MemoryLimit, -1),
+		CPURequests:                             lo.FromPtrOr(opts.CPURequests, 5000), // use 5 threads to enforce parallelism
+		LogLevel:                                lo.FromPtrOr(opts.LogLevel, ""),
+		LogOutputPaths:                          lo.FromPtrOr(opts.LogOutputPaths, "stdout"),
+		LogErrorOutputPaths:                     lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
+		BatchMaxDuration:                        lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
+		BatchIdleDuration:                       lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
+		PreferencePolicy:                        lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
+		MinValuesPolicy:                         lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
+		IgnoreDRARequests:                       lo.FromPtrOr(opts.IgnoreDRARequests, true),
+		ConsolidationPriceImprovementPercentage: lo.FromPtrOr(opts.ConsolidationPriceImprovementPercentage, 0),
 		FeatureGates: options.FeatureGates{
 			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
 			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
