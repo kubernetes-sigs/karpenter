@@ -353,4 +353,3 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	}
 	return price, nil
 }
-
