@@ -379,16 +379,32 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 	if nodeClaim == nil {
 		return nil, nil
 	}
-	expirationTimeString, exists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
-	if !exists {
+
+	// Prefer the annotation if it exists (set by the lifecycle controller)
+	if expirationTimeString, exists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
+		c.recorder.Publish(terminatorevents.NodeTerminationGracePeriodExpiring(node, expirationTimeString))
+		expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
+		if err != nil {
+			return nil, serrors.Wrap(fmt.Errorf("parsing annotation, %w", err), "annotation", v1.NodeClaimTerminationTimestampAnnotationKey)
+		}
+		return &expirationTime, nil
+	}
+
+	// If there's no annotation, check if we can calculate the termination time
+	// This requires both TerminationGracePeriod and DeletionTimestamp to be set
+	if nodeClaim.Spec.TerminationGracePeriod == nil {
 		return nil, nil
 	}
-	c.recorder.Publish(terminatorevents.NodeTerminationGracePeriodExpiring(node, expirationTimeString))
-	expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
-	if err != nil {
-		return nil, serrors.Wrap(fmt.Errorf("parsing annotation, %w", err), "annotation", v1.NodeClaimTerminationTimestampAnnotationKey)
+	if nodeClaim.DeletionTimestamp.IsZero() {
+		return nil, nil
 	}
-	return &expirationTime, nil
+
+	// Fallback: compute the termination time from the NodeClaim's DeletionTimestamp and TerminationGracePeriod
+	// This ensures the terminationGracePeriod enforcement works even if the annotation is not yet set
+	terminationTime := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
+	terminationTimeString := terminationTime.Format(time.RFC3339)
+	c.recorder.Publish(terminatorevents.NodeTerminationGracePeriodExpiring(node, terminationTimeString))
+	return &terminationTime, nil
 }
 
 func (c *Controller) Name() string {

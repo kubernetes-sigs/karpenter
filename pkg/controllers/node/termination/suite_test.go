@@ -52,14 +52,16 @@ func init() {
 	log.SetLogger(logging.NopLogger)
 }
 
-var ctx context.Context
-var terminationController *termination.Controller
-var env *test.Environment
-var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
-var fakeClock *clock.FakeClock
-var cloudProvider *fake.CloudProvider
-var recorder *test.EventRecorder
-var queue *terminator.Queue
+var (
+	ctx                   context.Context
+	terminationController *termination.Controller
+	env                   *test.Environment
+	defaultOwnerRefs      = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
+	fakeClock             *clock.FakeClock
+	cloudProvider         *fake.CloudProvider
+	recorder              *test.EventRecorder
+	queue                 *terminator.Queue
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -754,6 +756,38 @@ var _ = Describe("Termination", func() {
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 		})
+		It("should preemptively delete pods even without termination timestamp annotation (fallback calculation)", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			// Note: No annotation is set, the controller should calculate from DeletionTimestamp + TerminationGracePeriod
+			pod := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+					OwnerReferences: defaultOwnerRefs,
+				},
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(300)),
+			})
+			fakeClock.SetTime(time.Now())
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
+
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+			// Initially, pod should not be deleted (within grace period)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
+			ExpectNodeExists(ctx, env.Client, node.Name)
+			pod = ExpectExists(ctx, env.Client, pod)
+			Expect(pod.DeletionTimestamp.IsZero()).To(BeTrue())
+
+			// After grace period expires, pod should be deleted
+			fakeClock.Step(301 * time.Second)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+
+			pod = ExpectExists(ctx, env.Client, pod)
+			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
+		})
 		It("should only delete pods when their terminationGracePeriodSeconds is less than the the node's remaining terminationGracePeriod", func() {
 			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 			nodeClaim.Annotations = map[string]string{
@@ -786,7 +820,6 @@ var _ = Describe("Termination", func() {
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
-
 		})
 		It("should update deletion timestamp for terminating pods when it is after node deletion timestamp", func() {
 			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
