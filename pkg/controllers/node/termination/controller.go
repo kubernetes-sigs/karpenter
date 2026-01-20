@@ -401,7 +401,7 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 
 	// Fallback: compute the termination time from the NodeClaim's DeletionTimestamp and TerminationGracePeriod
 	// This ensures the terminationGracePeriod enforcement works even if the annotation is not yet set
-	terminationTime := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
+	terminationTime := nodeClaim.DeletionTimestamp.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
 	terminationTimeString := terminationTime.Format(time.RFC3339)
 	c.recorder.Publish(terminatorevents.NodeTerminationGracePeriodExpiring(node, terminationTimeString))
 	return &terminationTime, nil
