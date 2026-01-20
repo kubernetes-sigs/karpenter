@@ -1936,11 +1936,9 @@ var _ = Describe("Topology", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      corev1.LabelTopologyZone,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"test-zone-1", "test-zone-2"},
-									},
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-1", "test-zone-2"},
 								},
 							},
 						},
@@ -1958,11 +1956,9 @@ var _ = Describe("Topology", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      corev1.LabelTopologyZone,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"test-zone-3"},
-									},
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-3"},
 								},
 							},
 						},
