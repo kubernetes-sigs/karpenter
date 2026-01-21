@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -43,7 +42,6 @@ var nodePoolController *nodepool.Controller
 var ctx context.Context
 var env *test.Environment
 var cp *fake.CloudProvider
-var cc *cost.ClusterCost
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -54,8 +52,7 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cp = fake.NewCloudProvider()
-	cc = cost.NewClusterCost(ctx, cp, env.Client)
-	nodePoolController = nodepool.NewController(env.Client, cp, cc)
+	nodePoolController = nodepool.NewController(env.Client, cp)
 })
 
 var _ = AfterSuite(func() {

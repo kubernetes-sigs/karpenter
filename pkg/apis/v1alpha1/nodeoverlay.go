@@ -71,7 +71,7 @@ type NodeOverlaySpec struct {
 	//nolint:kubeapilinter
 	// PriceAdjustment specifies the price change for matching instance types. Accepts either:
 	// - A fixed price modifier (e.g., -0.5, 1.2)
-	// - A percentage modifier (e.g., +10% for increase, -15% for decrees)
+	// - A percentage modifier (e.g., +10% for increase, -15% for decrease)
 	// +kubebuilder:validation:Pattern=`^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$`
 	// +optional
 	PriceAdjustment *string `json:"priceAdjustment,omitempty"`
