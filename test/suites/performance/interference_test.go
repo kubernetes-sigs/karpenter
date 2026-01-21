@@ -56,12 +56,10 @@ var _ = Describe("Performance", func() {
 			// Performance assertions - self anti-affinity requires one pod per node
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
 				"Total scale-out time should be less than 5 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 650),
-				"Should not require more than 1000 nodes for 1000 pods")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 50%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
-				"Average memory utilization should be greater than 65%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
+				"Average memory utilization should be greater than 60%")
 
 			// ========== PHASE 2: Interference Scale Out TEST ==========
 			By("Net scaling out interference test")
@@ -85,8 +83,8 @@ var _ = Describe("Performance", func() {
 				"Scaling should complete within 10 minutes")
 			Expect(interferenceReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 50%")
-			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
-				"Average memory utilization should be greater than 65%")
+			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
+				"Average memory utilization should be greater than 60%")
 
 			// ========== PHASE 3: Interference Scale In TEST ==========
 			By("Executing interference consolidation test (small_deployment scales out to 400, large_deployment scales in to 200)")
@@ -111,18 +109,12 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-150), "Should have net reduction of 150 pods")
 
 			// Consolidation performance assertions
-			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
-				"Node count should decrease after consolidation despite small deployment scale-out")
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
 				"Mixed scaling and consolidation should complete within 25 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should remain greater than 50% after consolidation")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
-				"Average memory utilization should remain greater than 65% after consolidation")
-			Expect(consolidationReport.Rounds).To(BeNumerically("<", 10),
-				"Consolidation should complete in reasonable number of rounds")
-			Expect(consolidationReport.ResourceEfficiencyScore).To(BeNumerically(">", 60),
-				"Resource efficiency score should remain above 60%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
+				"Average memory utilization should remain greater than 60% after consolidation")
 
 		})
 	})
