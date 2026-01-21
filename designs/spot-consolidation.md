@@ -14,7 +14,7 @@ All consolidation actions contain an inherent tradeoff between price and availab
 
 Karpenter will replace a spot node with a cheaper spot node for both single and multi-node consolidation. Cheaper spot instance types are selected with the `price-capacity-optimized` strategy and often the cheapest spot instance type is not launched due to the likelihood of interruption. Karpenter would replace spot node for single-node consolidation only if there are more than 15 potential replacement spot instance types. Also, Karpenter would have to limit its flexibility to this threshold while launching replacements with consolidation to avoid repeat interruptions, e.g. "walking down the ladder". Since on-demand capacity uses the lowest price strategy, its behavior is unaffected if these rules are applied equally to both spot and on-demand launches.
 
-Minimum flexibility of 15 spot instance types is decided after an analysis done on the flexiblity of AWS customers request in the launch path. Karpenter does not have the same instance type flexibility requirement for multi-node spot-to-spot consolidations (many nodes to 1 node) since doing so without requiring flexibility won't lead to "race to the bottom" scenarios. It is also to prevent inconsistent behavior between consolidation of mixed capacity type [od,spot] to [spot] and spot capacity type [spot,spot] to [spot] since we already support mixed capacity type multi-node consolidation to spot today without any additional conditions.
+Minimum flexibility of 15 spot instance types is decided after an analysis done on the flexibility of AWS customers request in the launch path. Karpenter does not have the same instance type flexibility requirement for multi-node spot-to-spot consolidations (many nodes to 1 node) since doing so without requiring flexibility won't lead to "race to the bottom" scenarios. It is also to prevent inconsistent behavior between consolidation of mixed capacity type [od,spot] to [spot] and spot capacity type [spot,spot] to [spot] since we already support mixed capacity type multi-node consolidation to spot today without any additional conditions.
 
 Finally, a limit for the number of instance types in the launch path is placed only on consolidation instead of the entire launch path in the provisioning loop in order to unblock scenarios where a user doesn't have enough flexibility with spot specified in their NodePool. As a result, their initial launch would succeed but would get no consolidations after their initial launch.
 
@@ -45,7 +45,7 @@ See appendix for examples.
 * 👍 Extensible to new methods of capacity allocation, since Karpenter core is now completely agnostic to spot
 * 👍 Prevents consolidation from interrupting workloads for marginal improvement
 * 👎 During a spot capacity crunch, if many capacity pools within a price range are unhealthy, the customer may get interrupted soon after the consolidation. This is exacerbated if the customer cannot tolerate instance type diversity. 
-* 👎 Tuning this value to migitage both marginal-improvement-churn and lowest-price-regression is challenging, and desired values may conflict.
+* 👎 Tuning this value to mitigate both marginal-improvement-churn and lowest-price-regression is challenging, and desired values may conflict.
 
 Note: Regardless of the decision made to solve the spot consolidation problem, we’d likely want to implement a price improvement in the future to prevent consolidation from interrupting nodes to make marginal improvements.
 

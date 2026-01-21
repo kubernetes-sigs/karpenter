@@ -23,7 +23,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
@@ -173,10 +172,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
-	candidatePrice, err := getCandidatePrices(candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
-	}
+	candidatePrice := getCandidatePrices(candidates)
 
 	allExistingAreSpot := true
 	for _, cn := range candidates {
@@ -311,22 +307,18 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates
-func getCandidatePrices(candidates []*Candidate) (float64, error) {
+func getCandidatePrices(candidates []*Candidate) float64 {
 	var price float64
 	for _, c := range candidates {
 		reqs := scheduling.NewLabelRequirements(c.Labels())
 		compatibleOfferings := c.instanceType.Offerings.Compatible(reqs)
 		if len(compatibleOfferings) == 0 {
-			// It's expected that offerings may no longer exist for capacity reservations once a NodeClass stops selecting on
-			// them (or they are no longer considered for some other reason on by the cloudprovider). By definition though,
-			// reserved capacity is free. By modeling it as free, consolidation won't be able to succeed, but the node should be
-			// disrupted via drift regardless.
-			if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeReserved) {
-				return 0.0, nil
-			}
-			return 0.0, serrors.Wrap(fmt.Errorf("unable to determine offering"), "instance-type", c.instanceType.Name, "capacity-type", c.capacityType, "zone", c.zone)
+			// Offerings may no longer exist due to cloud provider changes, deprecated instance types,
+			// or capacity reservations that are no longer selected. Model as free so consolidation
+			// skips this candidate; drift should handle nodes with mismatched offerings.
+			return 0.0
 		}
 		price += compatibleOfferings.Cheapest().Price
 	}
-	return price, nil
+	return price
 }

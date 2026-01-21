@@ -41,12 +41,10 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -57,15 +55,11 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
-var clusterCost *cost.ClusterCost
 var nodeClaimController *informer.NodeClaimController
 var nodeController *informer.NodeController
 var podController *informer.PodController
 var nodePoolController *informer.NodePoolController
 var daemonsetController *informer.DaemonSetController
-var nodeOverlayStore *nodeoverlay.InstanceTypeStore
-var nodeOverlayController *nodeoverlay.Controller
-var pricingController *informer.PricingController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1.NodePool
 
@@ -85,15 +79,11 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
-	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
+	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
 	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
-	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
-	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
-	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 })
 
 var _ = AfterSuite(func() {
@@ -1008,11 +998,11 @@ var _ = Describe("Node Resource Level", func() {
 		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
 		// Expect that the node is now nominated
-		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeTrue())
-		time.Sleep(time.Second * 10) // nomination window is 20s so it should still be nominated
-		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeTrue())
-		time.Sleep(time.Second * 11) // past 20s, node should no longer be nominated
-		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeFalse())
+		Expect(ExpectStateNodeExists(cluster, node).Nominated(fakeClock)).To(BeTrue())
+		fakeClock.Step(time.Second * 10) // nomination window is 20s so it should still be nominated
+		Expect(ExpectStateNodeExists(cluster, node).Nominated(fakeClock)).To(BeTrue())
+		fakeClock.Step(time.Second * 11) // past 20s, node should no longer be nominated
+		Expect(ExpectStateNodeExists(cluster, node).Nominated(fakeClock)).To(BeFalse())
 	})
 	It("should handle a node changing from no providerID to registering a providerID", func() {
 		node := test.Node()
