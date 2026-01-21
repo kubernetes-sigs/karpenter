@@ -584,8 +584,7 @@ func (e *CreateError) Unwrap() error {
 	return e.error
 }
 
-// UnevaluatedNodePoolError is an error when the node overlay controller has not updated the instance
-// store based on the overlay in the cluster.
+// UnevaluatedNodePoolError is an error when the NodePool isn't ready for evaluation
 type UnevaluatedNodePoolError struct {
 	nodePoolName string
 }
@@ -597,7 +596,7 @@ func NewUnevaluatedNodePoolError(nodePoolName string) *UnevaluatedNodePoolError 
 }
 
 func (e *UnevaluatedNodePoolError) Error() string {
-	return fmt.Sprintf("awaiting nodeoverlay evaluation, nodepool %s", e.nodePoolName)
+	return fmt.Sprintf("nodepool %q is awaiting evaluation", e.nodePoolName)
 }
 
 func IsUnevaluatedNodePoolError(err error) bool {
