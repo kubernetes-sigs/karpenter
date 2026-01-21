@@ -486,6 +486,43 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
+	// Timing and metrics block
+	start := time.Now()
+	numNodesInCluster := -1
+	numPodsInCluster := -1
+	numTopologyGroups := -1
+	numInverseTopologyGroups := -1
+	numTopologyKeys := -1
+
+	defer func() {
+		log.FromContext(ctx).Info(
+			"karpenter-timing: scheduler.add complete",
+			"function", "scheduling.scheduler.add()",
+			"timestamp", start.Format(time.RFC3339),
+			"num_nodes", numNodesInCluster,
+			"num_pods", numPodsInCluster,
+			"num_topology_groups", numTopologyGroups,
+			"num_inverse_topology_groups", numInverseTopologyGroups,
+			"num_topology_keys", numTopologyKeys,
+			"duration_ms", float64(time.Since(start).Microseconds())/1000.0,
+		)
+	}()
+
+	// Capture cluster state before main logic
+	numNodesInCluster = len(s.existingNodes)
+
+	// Count pods across all existing nodes
+	podCount := 0
+	for _, node := range s.existingNodes {
+		podCount += len(node.Pods)
+	}
+	numPodsInCluster = podCount
+
+	// Capture topology metrics
+	numTopologyGroups = len(s.topology.topologyGroups)
+	numInverseTopologyGroups = len(s.topology.inverseTopologyGroups)
+	numTopologyKeys = len(s.topology.domainGroups)
+
 	// Check if pod has DRA requirements - if so, return DRA error when IgnoreDRARequests is enabled
 	if s.cachedPodData[pod.UID].HasResourceClaimRequests && karpopts.FromContext(ctx).IgnoreDRARequests {
 		return NewDRAError(fmt.Errorf("pod has Dynamic Resource Allocation requirements that are not yet supported by Karpenter"))
