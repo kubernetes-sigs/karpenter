@@ -28,7 +28,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -229,11 +228,6 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-
-	log.FromContext(ctx).Info("consolidation move generated",
-		"command", cmd.String(),
-		"estimated_savings", cmd.EstimatedSavings(),
-	)
 	c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 	return cmd, nil
@@ -283,11 +277,6 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 			Results:      results,
 		}
-
-		log.FromContext(ctx).Info("consolidation move generated",
-			"command", cmd.String(),
-			"estimated_savings", cmd.EstimatedSavings(),
-		)
 		c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 		return cmd, nil
@@ -326,11 +315,6 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-
-	log.FromContext(ctx).Info("consolidation move generated",
-		"command", cmd.String(),
-		"estimated_savings", cmd.EstimatedSavings(),
-	)
 	c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 	return cmd, nil
