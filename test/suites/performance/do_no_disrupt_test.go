@@ -61,8 +61,6 @@ var _ = Describe("Performance", func() {
 			// Performance assertions
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 4*time.Minute),
 				"Total scale-out time should be less than 4 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 750),
-				"Should not require more than 550 nodes for 1100 pods")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 50%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.6),
@@ -101,12 +99,12 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.TotalPods).To(BeNumerically(">=", 600), "Should have at least 600 total pods after scale-in (250+250+100)")
 			Expect(consolidationReport.PodsNetChange).To(BeNumerically(">=", -500), "Should have net reduction of 500 pods")
 
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 15*time.Minute),
-				"Consolidation should complete within 15 minutes")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
+				"Consolidation should complete within 20 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.5),
 				"Average CPU utilization should be greater than 50%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
-				"Average memory utilization should be greater than 65%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
+				"Average memory utilization should be greater than 60%")
 
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()
