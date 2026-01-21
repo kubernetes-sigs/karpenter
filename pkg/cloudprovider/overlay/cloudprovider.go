@@ -18,6 +18,7 @@ package overlay
 
 import (
 	"context"
+	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,7 +48,7 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool)
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
 		its, err = d.store.ApplyAll(nodePool.Name, its)
 		if err != nil {
-			return []*cloudprovider.InstanceType{}, err
+			return []*cloudprovider.InstanceType{}, fmt.Errorf("applying nodeoverlays, %w", err)
 		}
 	}
 	return its, nil
