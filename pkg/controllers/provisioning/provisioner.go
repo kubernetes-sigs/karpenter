@@ -357,9 +357,9 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	)
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
-			log.FromContext(ctx).Info("no nodepools found")
+			log.FromContext(ctx).Info("no dynamic nodepools found")
 			p.cluster.MarkPodSchedulingDecisions(ctx, lo.SliceToMap(pods, func(p *corev1.Pod) (*corev1.Pod, error) {
-				return p, fmt.Errorf("no nodepools found")
+				return p, fmt.Errorf("no dynamic nodepools found")
 			}), nil, nil)
 			return scheduler.Results{}, nil
 		}
