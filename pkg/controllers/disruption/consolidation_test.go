@@ -4405,7 +4405,8 @@ var _ = Describe("Consolidation", func() {
 				pods = append(pods, pod)
 			}
 			ExpectApplied(ctx, env.Client, rs, nodePool)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *corev1.Pod, _ int) *corev1.Pod { return p.DeepCopy() })...)
+			_, err := ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *corev1.Pod, _ int) *corev1.Pod { return p.DeepCopy() })...)
+			Expect(err).ToNot(HaveOccurred())
 
 			nodeClaims := ExpectNodeClaims(ctx, env.Client)
 			Expect(nodeClaims).To(HaveLen(1))
@@ -4418,7 +4419,8 @@ var _ = Describe("Consolidation", func() {
 			// Mark the node for deletion and re-trigger reconciliation
 			oldNodeName := nodes[0].Name
 			cluster.MarkForDeletion(nodes[0].Spec.ProviderID)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *corev1.Pod, _ int) *corev1.Pod { return p.DeepCopy() })...)
+			_, err = ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *corev1.Pod, _ int) *corev1.Pod { return p.DeepCopy() })...)
+			Expect(err).ToNot(HaveOccurred())
 
 			// Make sure that the cluster state is aware of the current node state
 			nodes = ExpectNodes(ctx, env.Client)

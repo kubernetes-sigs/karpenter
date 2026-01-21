@@ -2417,7 +2417,8 @@ var _ = Context("Scheduling", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(opts)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			_, err := ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(err).ToNot(HaveOccurred())
 			var nodes corev1.NodeList
 			Expect(env.Client.List(ctx, &nodes)).To(Succeed())
 			Expect(nodes.Items).To(HaveLen(1))
@@ -2425,7 +2426,8 @@ var _ = Context("Scheduling", func() {
 
 			pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse}}
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			_, err = ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(err).ToNot(HaveOccurred())
 			Expect(env.Client.List(ctx, &nodes)).To(Succeed())
 			// shouldn't create a second node
 			Expect(nodes.Items).To(HaveLen(1))
@@ -2668,7 +2670,8 @@ var _ = Context("Scheduling", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			initialPod := test.UnschedulablePod(opts)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+			_, err := ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+			Expect(err).ToNot(HaveOccurred())
 			ExpectNotScheduled(ctx, env.Client, initialPod)
 
 			// should launch a single node
@@ -2678,7 +2681,8 @@ var _ = Context("Scheduling", func() {
 
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 			secondPod := test.UnschedulablePod(opts)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
+			_, err = ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
+			Expect(err).ToNot(HaveOccurred())
 			ExpectNotScheduled(ctx, env.Client, secondPod)
 			// shouldn't create a second node as it can bind to the existingNodes node
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
@@ -2700,7 +2704,8 @@ var _ = Context("Scheduling", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			initialPod := test.UnschedulablePod(opts)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+			_, err := ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+			Expect(err).ToNot(HaveOccurred())
 			ExpectNotScheduled(ctx, env.Client, initialPod)
 
 			// should launch a single node
@@ -2720,7 +2725,8 @@ var _ = Context("Scheduling", func() {
 
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 			secondPod := test.UnschedulablePod(opts)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
+			_, err = ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
+			Expect(err).ToNot(HaveOccurred())
 			ExpectNotScheduled(ctx, env.Client, secondPod)
 			// shouldn't create a second node as it can bind to the existingNodes node
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
@@ -2742,7 +2748,8 @@ var _ = Context("Scheduling", func() {
 				}},
 			}, 2)
 			ExpectApplied(ctx, env.Client, nodePool)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pods[0])
+			_, err := ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pods[0])
+			Expect(err).ToNot(HaveOccurred())
 			var nodeList corev1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			for i := range nodeList.Items {
@@ -2751,7 +2758,8 @@ var _ = Context("Scheduling", func() {
 			// the second pod can schedule against the in-flight node, but for that to work we need to be careful
 			// in how we fulfill the self-affinity by taking the existing node's domain as a preference over any
 			// random viable domain
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pods[1])
+			_, err = ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pods[1])
+			Expect(err).ToNot(HaveOccurred())
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			Expect(nodeList.Items).To(HaveLen(1))
 		})
