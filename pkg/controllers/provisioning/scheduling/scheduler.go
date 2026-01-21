@@ -488,7 +488,8 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// Timing and metrics block
 	start := time.Now()
-	numNodesInCluster := -1
+	numNodesInBatch := -1
+	numPodsInBatch := -1
 	numPodsInCluster := -1
 	numTopologyGroups := -1
 	numInverseTopologyGroups := -1
@@ -499,8 +500,9 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 			"karpenter-timing: scheduler.add complete",
 			"function", "scheduling.scheduler.add()",
 			"timestamp", start.Format(time.RFC3339),
-			"num_nodes", numNodesInCluster,
-			"num_pods", numPodsInCluster,
+			"num_nodes_in_batch", numNodesInBatch,
+			"num_pods_in_batch", numPodsInBatch,
+			"num_pods_in_cluster", numPodsInCluster,
 			"num_topology_groups", numTopologyGroups,
 			"num_inverse_topology_groups", numInverseTopologyGroups,
 			"num_topology_keys", numTopologyKeys,
@@ -508,15 +510,17 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 		)
 	}()
 
-	// Capture cluster state before main logic
-	numNodesInCluster = len(s.existingNodes)
+	// Capture scheduling batch metrics
+	numNodesInBatch = len(s.existingNodes)
 
-	// Count pods across all existing nodes
-	podCount := 0
+	// Count pods in current scheduling batch
+	numPodsInBatch = 0
 	for _, node := range s.existingNodes {
-		podCount += len(node.Pods)
+		numPodsInBatch += len(node.Pods)
 	}
-	numPodsInCluster = podCount
+
+	// Get total pods in cluster using PodCount() method
+	numPodsInCluster = s.cluster.PodCount()
 
 	// Capture topology metrics
 	numTopologyGroups = len(s.topology.topologyGroups)
