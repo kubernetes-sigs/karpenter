@@ -533,9 +533,9 @@ func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 // getVolumeTopologyRequirements collects volume topology requirements for each pod
 // WITHOUT modifying the pods. These requirements will be added to nodeRequirements
 // (for NodeClaim zone selection) but NOT to pod affinities (for correct TSC counting).
-func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, map[types.UID][]corev1.NodeSelectorRequirement, error) {
+func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, map[types.UID]scheduling.Requirements, error) {
 	var schedulablePods []*corev1.Pod
-	volumeReqs := make(map[types.UID][]corev1.NodeSelectorRequirement)
+	volumeReqs := make(map[types.UID]scheduling.Requirements)
 	for _, pod := range pods {
 		reqs, err := p.volumeTopology.GetRequirements(ctx, pod)
 		if err != nil {

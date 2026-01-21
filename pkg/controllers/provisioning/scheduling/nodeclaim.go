@@ -460,14 +460,13 @@ func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList
 
 // addVolumeRequirements adds volume topology requirements to nodeRequirements after checking compatibility.
 // This catches cases like a PV with hostname affinity to a specific node that conflicts with the NodeClaim.
-func addVolumeRequirements(nodeRequirements scheduling.Requirements, volumeRequirements []corev1.NodeSelectorRequirement, opts ...option.Function[scheduling.CompatibilityOptions]) error {
+func addVolumeRequirements(nodeRequirements scheduling.Requirements, volumeRequirements scheduling.Requirements, opts ...option.Function[scheduling.CompatibilityOptions]) error {
 	if len(volumeRequirements) == 0 {
 		return nil
 	}
-	volumeReqs := scheduling.NewNodeSelectorRequirements(volumeRequirements...)
-	if err := nodeRequirements.Compatible(volumeReqs, opts...); err != nil {
+	if err := nodeRequirements.Compatible(volumeRequirements, opts...); err != nil {
 		return fmt.Errorf("incompatible volume requirements, %w", err)
 	}
-	nodeRequirements.Add(volumeReqs.Values()...)
+	nodeRequirements.Add(volumeRequirements.Values()...)
 	return nil
 }

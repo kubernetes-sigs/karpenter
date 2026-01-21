@@ -53,7 +53,7 @@ type VolumeTopology struct {
 // These requirements should be:
 //   - Added to nodeRequirements (for NodeClaim zone selection)
 //   - NOT added to pod's NodeAffinity (to preserve correct TSC counting)
-func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) (scheduling.Requirements, error) {
 	var requirements []v1.NodeSelectorRequirement
 	for _, volume := range pod.Spec.Volumes {
 		req, err := v.getRequirements(ctx, pod, volume)
@@ -66,9 +66,9 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]v1
 		return nil, nil
 	}
 	log.FromContext(ctx).
-		WithValues("Pod", klog.KObj(pod)).
-		V(1).Info(fmt.Sprintf("getting requirements derived from pod volumes, %s", requirements))
-	return requirements, nil
+		WithValues("Pod", klog.KObj(pod), "requirements", requirements).
+		V(1).Info("getting requirements from pod volumes")
+	return scheduling.NewNodeSelectorRequirements(requirements...), nil
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {

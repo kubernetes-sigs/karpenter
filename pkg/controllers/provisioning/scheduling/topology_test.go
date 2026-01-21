@@ -3123,6 +3123,7 @@ var _ = Describe("Taints", func() {
 
 // Test for TSC + Volume bug: Pod with PVC bound to a specific zone and TSC with minDomains
 // should schedule correctly. Previously, volume zone requirements polluted TSC calculations.
+// See issues 1239 and 2777 for more context.
 var _ = Describe("Topology with Volume Requirements", func() {
 	var nodePool *v1.NodePool
 	labels := map[string]string{"app": "test"}
