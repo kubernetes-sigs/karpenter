@@ -23,9 +23,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 func TestGetValidationFailureReason(t *testing.T) {
@@ -275,5 +279,47 @@ func mockCandidate(name string) *Candidate {
 				},
 			},
 		},
+	}
+}
+
+func TestConsolidationMoveGeneratedEvent(t *testing.T) {
+	recorder := test.NewEventRecorder()
+
+	// Create a mock candidate with Node and NodeClaim
+	candidate := &Candidate{
+		StateNode: &state.StateNode{
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+					UID:  "test-node-uid",
+				},
+			},
+			NodeClaim: &v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-nodeclaim",
+					UID:  "test-nodeclaim-uid",
+				},
+			},
+		},
+	}
+
+	// Create a command with candidates but no replacements (delete consolidation)
+	cmd := Command{
+		Candidates:   []*Candidate{candidate},
+		Replacements: []*Replacement{}, // Empty for delete consolidation
+	}
+
+	// Publish the event
+	recorder.Publish(disruptionevents.ConsolidationMoveGenerated(
+		candidate.Node,
+		candidate.NodeClaim,
+		cmd.String(),
+		0.0, // Use fixed savings to avoid EstimatedSavings calculation
+	)...)
+
+	// Verify the event was published
+	if recorder.Calls(events.ConsolidationMoveGenerated) != 2 {
+		t.Errorf("Expected 2 ConsolidationMoveGenerated events (Node + NodeClaim), got %d",
+			recorder.Calls(events.ConsolidationMoveGenerated))
 	}
 }

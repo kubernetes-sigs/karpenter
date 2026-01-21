@@ -234,6 +234,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		"command", cmd.String(),
 		"estimated_savings", cmd.EstimatedSavings(),
 	)
+	c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 	return cmd, nil
 }
@@ -287,6 +288,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 			"command", cmd.String(),
 			"estimated_savings", cmd.EstimatedSavings(),
 		)
+		c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 		return cmd, nil
 	}
@@ -329,6 +331,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		"command", cmd.String(),
 		"estimated_savings", cmd.EstimatedSavings(),
 	)
+	c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 	return cmd, nil
 }

@@ -136,3 +136,25 @@ func NodePoolBlocked(nodePool *v1.NodePool) events.Event {
 		DedupeTimeout: 1 * time.Minute,
 	}
 }
+
+// ConsolidationMoveGenerated is an event that informs the user that a consolidation move has been generated
+func ConsolidationMoveGenerated(node *corev1.Node, nodeClaim *v1.NodeClaim, command string, savings float64) []events.Event {
+	message := fmt.Sprintf("Consolidation move generated: %s (savings: $%.2f)", command, savings)
+
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           corev1.EventTypeNormal,
+			Reason:         events.ConsolidationMoveGenerated,
+			Message:        message,
+			DedupeValues:   []string{string(node.UID), command},
+		},
+		{
+			InvolvedObject: nodeClaim,
+			Type:           corev1.EventTypeNormal,
+			Reason:         events.ConsolidationMoveGenerated,
+			Message:        message,
+			DedupeValues:   []string{string(nodeClaim.UID), command},
+		},
+	}
+}
