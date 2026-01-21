@@ -41,9 +41,11 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-var nodeClaim1, nodeClaim2 *v1.NodeClaim
-var nodePool *v1.NodePool
-var node1, node2 *corev1.Node
+var (
+	nodeClaim1, nodeClaim2 *v1.NodeClaim
+	nodePool               *v1.NodePool
+	node1, node2           *corev1.Node
+)
 
 var _ = Describe("Queue", func() {
 	BeforeEach(func() {
@@ -334,7 +336,7 @@ var _ = Describe("Queue", func() {
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
 		})
-		It("should finish two commands in order as replacements are intialized", func() {
+		It("should finish two commands in order as replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)

@@ -19,7 +19,7 @@ Karpenter will **not** be changing its API group or resource kind as part of the
 3. Users update their `v1beta1` manifests that they are applying through IaC or GitOps to use the new `v1` version.
    1. Users that are using multiple NodePools with different kubeletConfigurations that reference the same NodeClasses will need to perform migration from a single NodeClass to multiple NodeClasses. Karpenter v1 [shifts the kubeletConfiguration into the NodeClass API](#moving-spectemplatespeckubelet-into-the-nodeclass) which does not make it possible to represent this many-to-one relationship anymore.
 4. Users remove any conversion annotations from their v1 resources.
-   1. When Karpenter converts from v1beta1 to v1, it maintains round-trippability between the old resource version and the new resource version. To maintain this with schema changes like the `kubeletConfiguration` move, it leverages annotations on the NodePool (e.g. `compatability.karpenter.sh/v1beta1-kubelet-conversion`) to maintain the v1beta1 data. It will be a strict requirement to remove these annotations from the NodePool before upgrading to v1.1.x+.
+   1. When Karpenter converts from v1beta1 to v1, it maintains round-trippability between the old resource version and the new resource version. To maintain this with schema changes like the `kubeletConfiguration` move, it leverages annotations on the NodePool (e.g. `compatibility.karpenter.sh/v1beta1-kubelet-conversion`) to maintain the v1beta1 data. It will be a strict requirement to remove these annotations from the NodePool before upgrading to v1.1.x+.
 5. Karpenter drops the `v1beta1` version from the `CustomResourceDefinition` and the conversion webhooks on the next minor version release of Karpenter, leaving no webhooks and only the `v1` version still present
 
 ## NodePool API
@@ -220,7 +220,7 @@ Given this, we should update our `apiVersion` field in the `nodeClassRef` to be 
 
 **Category:** Stability
 
-`spec.resource.requests` is part of the NodeClaim API and is set by the Karpenter controller when creating new NodeClaim resources from the scheduling loop. This field describes the required resource requests cacluated from the summation of pod resource requests needed to run against a new instance that we launch. This field is also used to establish Karpenter initialization, where we rely on the presence of requested resources in the newly created Node before we will allow the Karpenter disruption controller to disrupt the node.
+`spec.resource.requests` is part of the NodeClaim API and is set by the Karpenter controller when creating new NodeClaim resources from the scheduling loop. This field describes the required resource requests calculated from the summation of pod resource requests needed to run against a new instance that we launch. This field is also used to establish Karpenter initialization, where we rely on the presence of requested resources in the newly created Node before we will allow the Karpenter disruption controller to disrupt the node.
 
 We are currently templating every field from the NodeClaim API onto the NodePool `spec.template` (in the same way that a Deployment templates every field from Pod). Validation currently blocks users from setting resource requests in the NodePool, since the field does not make any sense in that context.
 
