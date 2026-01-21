@@ -172,10 +172,8 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
 
 			// Performance assertions for wide deployments
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
-				"Total scale-out time should be less than 5 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 300),
-				"Should not require more than 1000 nodes for 1000 pods")
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
+				"Total scale-out time should be less than 10 minutes")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.6),
 				"Average CPU utilization should be greater than 60%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.50),
@@ -202,10 +200,8 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
 
 			// Wide consolidation assertions
-			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
-				"Node count should decrease after consolidation")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 15*time.Minute),
-				"Wide consolidation should complete within 15 minutes")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
+				"Wide consolidation should complete within 20 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 50%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),

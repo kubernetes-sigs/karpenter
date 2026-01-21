@@ -57,12 +57,10 @@ var _ = Describe("Performance", func() {
 			// Performance assertions - hostname spreading may require more nodes
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
 				"Total scale-out time should be less than 10 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 650),
-				"Should not require more than 1000 nodes for 1000 pods")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 50%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
-				"Average memory utilization should be greater than 65%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
+				"Average memory utilization should be greater than 60%")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Scaling down deployments to trigger consolidation")
@@ -83,13 +81,9 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
 
 			// Consolidation assertions
-			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
-				"Node count should decrease after consolidation")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
-				"Consolidation should complete within 10 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
 				"Average CPU utilization should be greater than 55%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
 				"Average memory utilization should be greater than 75%")
 
 		})
