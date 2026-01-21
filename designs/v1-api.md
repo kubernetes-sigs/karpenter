@@ -220,7 +220,7 @@ Given this, we should update our `apiVersion` field in the `nodeClassRef` to be 
 
 **Category:** Stability
 
-`spec.resource.requests` is part of the NodeClaim API and is set by the Karpenter controller when creating new NodeClaim resources from the scheduling loop. This field describes the required resource requests cacluated from the summation of pod resource requests needed to run against a new instance that we launch. This field is also used to establish Karpenter initialization, where we rely on the presence of requested resources in the newly created Node before we will allow the Karpenter disruption controller to disrupt the node.
+`spec.resource.requests` is part of the NodeClaim API and is set by the Karpenter controller when creating new NodeClaim resources from the scheduling loop. This field describes the required resource requests calculated from the summation of pod resource requests needed to run against a new instance that we launch. This field is also used to establish Karpenter initialization, where we rely on the presence of requested resources in the newly created Node before we will allow the Karpenter disruption controller to disrupt the node.
 
 We are currently templating every field from the NodeClaim API onto the NodePool `spec.template` (in the same way that a Deployment templates every field from Pod). Validation currently blocks users from setting resource requests in the NodePool, since the field does not make any sense in that context.
 
