@@ -32,6 +32,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
+const (
+	// floatComparisonDelta is the tolerance for floating point comparisons in tests
+	floatComparisonDelta = 0.001
+)
+
 func TestGetValidationFailureReason(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -142,7 +147,7 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 	expectedSavings := 0.15
 
 	// Use tolerance for floating point comparison
-	if diff := savings - expectedSavings; diff < -0.001 || diff > 0.001 {
+	if diff := savings - expectedSavings; diff < -floatComparisonDelta || diff > floatComparisonDelta {
 		t.Errorf("Command.EstimatedSavings() = %v, want %v (verifying multi-NodeClaim cost summing)", savings, expectedSavings)
 	}
 }
