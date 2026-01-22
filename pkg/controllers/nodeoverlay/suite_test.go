@@ -2438,6 +2438,7 @@ var _ = Describe("Instance Type Controller", func() {
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
+			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			// The higher weight overlay (overlayB with weight 20) should take precedence
 			fuseResource, exist := instanceTypeList[0].Capacity.Name(corev1.ResourceName("smarter-devices/fuse"), resource.DecimalSI).AsInt64()
