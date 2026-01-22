@@ -48,10 +48,10 @@ var _ = Describe("Performance", func() {
 			// Performance assertions
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 2*time.Minute),
 				"Total scale-out time should be less than 2 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
-				"Average CPU utilization should be greater than 50%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
-				"Average memory utilization should be greater than 60%")
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.53),
+				"Average CPU utilization should be greater than 53%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
+				"Average memory utilization should be greater than 65%")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Executing consolidation performance test (scaling down to 700 pods)")
