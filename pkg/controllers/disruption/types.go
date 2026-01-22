@@ -220,8 +220,8 @@ func (c Command) String() string {
 }
 
 // EstimatedSavings returns the estimated cost savings from this consolidation.
-// Returns 0.0 when pricing cannot be determined (e.g., offerings no longer exist).
-// This prevents consolidation from proceeding, which is the intended behavior.
+// Returns 0.0 when pricing cannot be determined. getCandidatePrices handles missing
+// offerings by returning 0.0, which causes consolidation to skip the candidate.
 func (c Command) EstimatedSavings() float64 {
 	sourcePrice := getCandidatePrices(c.Candidates)
 

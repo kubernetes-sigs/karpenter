@@ -91,39 +91,45 @@ func TestGetValidationFailureReason(t *testing.T) {
 }
 
 func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
-	// This test verifies that getCommandEstimatedSavings correctly sums
-	// costs from multiple replacement NodeClaims, future-proofing for
-	// potential N->M consolidation scenarios.
-	//
-	// We can't easily test with real Candidates (requires StateNode setup),
-	// so we test the destination cost summing logic in isolation.
-	//
-	// Scenario: 2 replacement nodes with different costs
-	// Expected: Both costs should be summed
+	// This test verifies that EstimatedSavings correctly sums costs from multiple
+	// replacement NodeClaims. While current consolidation is 1->1, this future-proofs
+	// for potential N->M consolidation scenarios.
+
+	// Create mock candidates with pricing
+	candidate1 := mockCandidate("node-1")
+	candidate1.instanceType = &cloudprovider.InstanceType{
+		Name: "source-type",
+		Offerings: cloudprovider.Offerings{
+			{Price: 0.50},
+		},
+	}
 
 	cmd := Command{
-		Replacements: []*Replacement{{}, {}}, // 2 replacements to avoid delete path
-	}
-	cmd.Results.NewNodeClaims = []*scheduling.NodeClaim{
-		{
-			NodeClaimTemplate: scheduling.NodeClaimTemplate{
-				InstanceTypeOptions: []*cloudprovider.InstanceType{
-					{
-						Name: "instance-type-1",
-						Offerings: cloudprovider.Offerings{
-							{Price: 0.30},
+		Candidates:   []*Candidate{candidate1},
+		Replacements: []*Replacement{{}, {}}, // 2 replacements
+		Results: scheduling.Results{
+			NewNodeClaims: []*scheduling.NodeClaim{
+				{
+					NodeClaimTemplate: scheduling.NodeClaimTemplate{
+						InstanceTypeOptions: []*cloudprovider.InstanceType{
+							{
+								Name: "dest-type-1",
+								Offerings: cloudprovider.Offerings{
+									{Price: 0.20},
+								},
+							},
 						},
 					},
 				},
-			},
-		},
-		{
-			NodeClaimTemplate: scheduling.NodeClaimTemplate{
-				InstanceTypeOptions: []*cloudprovider.InstanceType{
-					{
-						Name: "instance-type-2",
-						Offerings: cloudprovider.Offerings{
-							{Price: 0.40},
+				{
+					NodeClaimTemplate: scheduling.NodeClaimTemplate{
+						InstanceTypeOptions: []*cloudprovider.InstanceType{
+							{
+								Name: "dest-type-2",
+								Offerings: cloudprovider.Offerings{
+									{Price: 0.15},
+								},
+							},
 						},
 					},
 				},
@@ -131,15 +137,13 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 		},
 	}
 
-	// With no candidates (sourcePrice = 0), we're testing the destination summing:
-	// savings = 0 - (0.30 + 0.40) = -0.70
-	// Negative savings means cost increase, which wouldn't happen in real consolidation,
-	// but this test verifies the summing logic works for multiple NodeClaims.
+	// Expected: sourcePrice (0.50) - (destPrice1 (0.20) + destPrice2 (0.15)) = 0.15
 	savings := cmd.EstimatedSavings()
-	expectedSavings := -0.70
+	expectedSavings := 0.15
 
-	if savings != expectedSavings {
-		t.Errorf("Command.EstimatedSavings() = %v, want %v (verifying multi-NodeClaim summing)", savings, expectedSavings)
+	// Use tolerance for floating point comparison
+	if diff := savings - expectedSavings; diff < -0.001 || diff > 0.001 {
+		t.Errorf("Command.EstimatedSavings() = %v, want %v (verifying multi-NodeClaim cost summing)", savings, expectedSavings)
 	}
 }
 
