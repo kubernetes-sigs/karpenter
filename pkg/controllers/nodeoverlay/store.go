@@ -25,8 +25,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 type priceUpdate struct {
@@ -41,8 +43,9 @@ type capacityUpdate struct {
 }
 
 type instanceTypeUpdate struct {
-	Price    map[string]*priceUpdate
-	Capacity *capacityUpdate
+	Price               map[string]*priceUpdate
+	Capacity            *capacityUpdate
+	OverlayRequirements scheduling.Requirements
 }
 type InstanceTypeStore struct {
 	store atomic.Pointer[internalInstanceTypeStore]
@@ -60,7 +63,7 @@ func (s *InstanceTypeStore) UpdateStore(updatedStore *internalInstanceTypeStore)
 	s.store.Swap(updatedStore)
 }
 
-func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType, error) {
+func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.InstanceType, nodeRequirements scheduling.Requirements) ([]*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
 
 	if !lo.Contains(internalStore.evaluatedNodePools.UnsortedList(), nodePoolName) {
@@ -75,17 +78,17 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 	}
 
 	for _, it := range its {
-		if updatedIt, err := internalStore.apply(nodePoolName, it); err == nil {
+		if updatedIt, err := internalStore.apply(nodePoolName, it, nodeRequirements); err == nil {
 			result = append(result, updatedIt)
 		}
 	}
 	return result, nil
 }
 
-func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
+func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType, nodeRequirements scheduling.Requirements) (*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
 
-	updatedIt, err := internalStore.apply(nodePoolName, it)
+	updatedIt, err := internalStore.apply(nodePoolName, it, nodeRequirements)
 	if err != nil {
 		return &cloudprovider.InstanceType{}, err
 	}
@@ -113,12 +116,13 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 	}
 }
 
-// Apply takes a node pool name and instance type, and returns a modified copy of the instance type
-// with any stored updates applied. It checks for price and capacity updates specific to the given
-// node pool and instance type, creating a deep copy of the original instance type before applying
-// any overrides. If no updates exist for the node pool or instance type, returns the original
-// instance type unchanged.
-func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
+// Apply takes a node pool name, instance type, and node requirements, and returns a modified copy
+// of the instance type with any stored updates applied. It checks for price and capacity updates
+// specific to the given node pool and instance type, and only applies overlays if the node requirements
+// are compatible with the overlay requirements. This ensures overlays with specific label values
+// only apply to nodes with matching labels. If no updates exist for the node pool or instance type
+// it returns the original instance type unchanged.
+func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType, nodeRequirements scheduling.Requirements) (*cloudprovider.InstanceType, error) {
 	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
 		return &cloudprovider.InstanceType{}, NewUnevaluatedNodePoolError(nodePoolName)
 	}
@@ -130,6 +134,21 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 	instanceTypeUpdate, ok := instanceTypeList[it.Name]
 	if !ok {
 		return it, nil
+	}
+
+	// Check if node requirements are compatible with overlay requirements for custom labels
+	// This filters out overlays that don't match the nodes custom labels
+	if len(instanceTypeUpdate.OverlayRequirements) > 0 {
+		customOverlayReqs := scheduling.NewRequirements()
+		for _, req := range instanceTypeUpdate.OverlayRequirements.Values() {
+			if v1.WellKnownLabels.Has(req.Key) {
+				continue
+			}
+			customOverlayReqs.Add(req)
+		}
+		if len(customOverlayReqs) > 0 && !customOverlayReqs.IsCompatible(nodeRequirements) {
+			return it, nil
+		}
 	}
 
 	overriddenInstanceType := it.DeepCopy()
@@ -149,7 +168,7 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 
 // updateInstanceTypeCapacity add a new Capacity overlay update to the associated instance type.
 // NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
-func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay) {
+func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, overlayRequirements scheduling.Requirements) {
 	if nodeOverlay.Spec.Capacity == nil {
 		return
 	}
@@ -160,7 +179,7 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 	}
 	_, ok = i.updates[nodePoolName][instanceTypeName]
 	if !ok {
-		i.updates[nodePoolName][instanceTypeName] = &instanceTypeUpdate{Price: map[string]*priceUpdate{}, Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}}}
+		i.updates[nodePoolName][instanceTypeName] = &instanceTypeUpdate{Price: map[string]*priceUpdate{}, Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}}, OverlayRequirements: overlayRequirements}
 	}
 
 	if i.updates[nodePoolName][instanceTypeName].Capacity == nil {
@@ -206,7 +225,7 @@ func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName str
 
 // updateInstanceTypeOffering add a new Price overlay update to the associated instance type.
 // NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
-func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings) {
+func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings, overlayRequirements scheduling.Requirements) {
 	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
 	if price == nil {
 		return
@@ -218,7 +237,7 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 	}
 	_, ok = i.updates[nodePoolName][instanceTypeName]
 	if !ok {
-		i.updates[nodePoolName][instanceTypeName] = &instanceTypeUpdate{Price: map[string]*priceUpdate{}, Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}}}
+		i.updates[nodePoolName][instanceTypeName] = &instanceTypeUpdate{Price: map[string]*priceUpdate{}, Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}}, OverlayRequirements: overlayRequirements}
 	}
 
 	for _, of := range offerings {

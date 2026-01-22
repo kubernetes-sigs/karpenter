@@ -117,7 +117,7 @@ var _ = Describe("Validation", func() {
 
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).To(BeNil())
-		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 		Expect(err).To(BeNil())
 
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -176,12 +176,6 @@ var _ = Describe("Validation", func() {
 						Operator: corev1.NodeSelectorOpIn,
 						Values:   []string{"team-a"},
 					},
-					{
-						// Also match the nodepool name to ensure it applies to our test pool
-						Key:      v1.NodePoolLabelKey,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"test-nodepool-with-requirements"},
-					},
 				},
 				PriceAdjustment: lo.ToPtr("+100"),
 				Weight:          lo.ToPtr(int32(10)),
@@ -196,16 +190,37 @@ var _ = Describe("Validation", func() {
 		instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, testNodePool)
 		Expect(err).To(BeNil())
 
-		instanceTypeList, err = store.ApplyAll(testNodePool.Name, instanceTypeList)
+		// Test with team-a requirements - overlay should apply
+		teamARequirements := scheduling.NewNodeSelectorRequirements(
+			corev1.NodeSelectorRequirement{
+				Key:      "company.com/team",
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"team-a"},
+			},
+		)
+		instanceTypeListTeamA, err := store.ApplyAll(testNodePool.Name, instanceTypeList, teamARequirements)
 		Expect(err).To(BeNil())
+		Expect(len(instanceTypeListTeamA)).To(BeNumerically("==", 1))
+		Expect(len(instanceTypeListTeamA[0].Offerings)).To(BeNumerically("==", 1))
+		priceTeamA := instanceTypeListTeamA[0].Offerings[0].Price
+		Expect(priceTeamA).To(BeNumerically("==", 101.020),
+			fmt.Sprintf("Expected price to be 101.020 (overlay applied) for team-a, but got %f.", priceTeamA))
 
-		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-		Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-
-		priceAfterStore := instanceTypeList[0].Offerings[0].Price
-
-		Expect(priceAfterStore).To(BeNumerically("==", 101.020),
-			fmt.Sprintf("Expected price to be 101.020 (overlay applied), but got %f.", priceAfterStore))
+		// Test with team-b requirements - overlay should NOT apply
+		teamBRequirements := scheduling.NewNodeSelectorRequirements(
+			corev1.NodeSelectorRequirement{
+				Key:      "company.com/team",
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"team-b"},
+			},
+		)
+		instanceTypeListTeamB, err := store.ApplyAll(testNodePool.Name, instanceTypeList, teamBRequirements)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeListTeamB)).To(BeNumerically("==", 1))
+		Expect(len(instanceTypeListTeamB[0].Offerings)).To(BeNumerically("==", 1))
+		priceTeamB := instanceTypeListTeamB[0].Offerings[0].Price
+		Expect(priceTeamB).To(BeNumerically("==", 1.020),
+			fmt.Sprintf("Expected price to be 1.020 (overlay NOT applied) for team-b, but got %f.", priceTeamB))
 	})
 	Context("Runtime Validation", func() {
 		It("should fail validation for invalid requirements values", func() {
@@ -1135,7 +1150,7 @@ var _ = Describe("Instance Type Controller", func() {
 					instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 					Expect(err).To(BeNil())
-					instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+					instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 					Expect(err).To(BeNil())
 
 					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1144,7 +1159,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 					instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 					Expect(err).To(BeNil())
-					instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
+					instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePoolTwo.Spec.Template.Spec.Requirements...))
 					Expect(err).To(BeNil())
 
 					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1189,7 +1204,7 @@ var _ = Describe("Instance Type Controller", func() {
 					instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 					Expect(err).To(BeNil())
-					instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+					instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 					Expect(err).To(BeNil())
 
 					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1198,7 +1213,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 					instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 					Expect(err).To(BeNil())
-					instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
+					instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePoolTwo.Spec.Template.Spec.Requirements...))
 					Expect(err).To(BeNil())
 
 					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1241,7 +1256,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 					instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 					Expect(err).To(BeNil())
-					instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+					instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 					Expect(err).To(BeNil())
 
 					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1250,7 +1265,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 					instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 					Expect(err).To(BeNil())
-					instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
+					instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePoolTwo.Spec.Template.Spec.Requirements...))
 					Expect(err).To(BeNil())
 
 					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1286,7 +1301,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1316,7 +1331,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1346,7 +1361,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1399,7 +1414,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1465,7 +1480,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1553,7 +1568,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1667,7 +1682,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1749,7 +1764,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 6))
@@ -1835,7 +1850,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 6))
@@ -1854,7 +1869,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePoolTwo.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 6))
@@ -1904,7 +1919,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1955,7 +1970,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1966,7 +1981,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePoolTwo.Spec.Template.Spec.Requirements...))
 				Expect(err).To(BeNil())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1999,7 +2014,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -2008,7 +2023,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
+				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePoolTwo.Spec.Template.Spec.Requirements...))
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -2040,7 +2055,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -2068,7 +2083,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -2096,7 +2111,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -2182,7 +2197,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 3))
 
@@ -2260,7 +2275,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 
@@ -2354,7 +2369,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 3))
 
@@ -2426,7 +2441,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).To(BeNil())
 
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 6))
@@ -2506,7 +2521,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).To(BeNil())
 
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 6))
@@ -2525,7 +2540,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 			Expect(err).To(BeNil())
-			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 			Expect(err).To(BeNil())
 
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 6))
@@ -2577,7 +2592,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).To(BeNil())
-		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 		Expect(err).To(BeNil())
 
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -2610,7 +2625,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).To(BeNil())
-		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 		Expect(err).To(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 0))
 	})
@@ -2636,7 +2651,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).ToNot(BeNil())
-		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 		Expect(err).ToNot(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 0))
 	})
@@ -2664,7 +2679,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).To(BeNil())
-		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
 		Expect(err).To(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodePoolLabelKey))

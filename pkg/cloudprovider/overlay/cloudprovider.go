@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 type decorator struct {
@@ -45,7 +46,8 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool)
 		return []*cloudprovider.InstanceType{}, err
 	}
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
-		its, err = d.store.ApplyAll(nodePool.Name, its)
+		nodeRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...)
+		its, err = d.store.ApplyAll(nodePool.Name, its, nodeRequirements)
 		if err != nil {
 			return []*cloudprovider.InstanceType{}, err
 		}

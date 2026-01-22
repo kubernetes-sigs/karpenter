@@ -320,7 +320,7 @@ var _ = Describe("ClusterCost", func() {
 			ExpectApplied(ctx, env.Client, overlay)
 			ExpectReconcileSucceeded(ctx, nodeOverlayController, client.ObjectKeyFromObject(overlay))
 			var err error
-			cloudProvider.InstanceTypes, err = nodeOverlayStore.ApplyAll(testNodePool.Name, cloudProvider.InstanceTypes)
+			cloudProvider.InstanceTypes, err = nodeOverlayStore.ApplyAll(testNodePool.Name, cloudProvider.InstanceTypes, scheduling.Requirements{})
 			Expect(err).To(Succeed())
 			err = clusterCost.UpdateOfferings(ctx, testNodePool, cloudProvider.InstanceTypes)
 			Expect(err).To(Succeed())

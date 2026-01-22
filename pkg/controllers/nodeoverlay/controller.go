@@ -197,8 +197,8 @@ func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstance
 			continue
 		}
 
-		store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings)
-		store.updateInstanceTypeCapacity(nodePool.Name, it.Name, overlay)
+		store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings, overlayRequirements)
+		store.updateInstanceTypeCapacity(nodePool.Name, it.Name, overlay, overlayRequirements)
 	}
 }
 
@@ -218,7 +218,7 @@ func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, 
 
 	for _, req := range nodePool.Spec.Template.Spec.Requirements {
 		if v1.WellKnownLabels.Has(req.Key) {
-			continue // Skip well-known labels
+			continue
 		}
 		instanceTypeRequirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(req).Values()...)
 	}
