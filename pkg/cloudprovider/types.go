@@ -583,3 +583,26 @@ func (e *CreateError) Error() string {
 func (e *CreateError) Unwrap() error {
 	return e.error
 }
+
+// UnevaluatedNodePoolError is an error when the NodePool isn't ready for evaluation
+type UnevaluatedNodePoolError struct {
+	nodePoolName string
+}
+
+func NewUnevaluatedNodePoolError(nodePoolName string) *UnevaluatedNodePoolError {
+	return &UnevaluatedNodePoolError{
+		nodePoolName: nodePoolName,
+	}
+}
+
+func (e *UnevaluatedNodePoolError) Error() string {
+	return fmt.Sprintf("nodepool %q is awaiting evaluation", e.nodePoolName)
+}
+
+func IsUnevaluatedNodePoolError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var onatnpErr *UnevaluatedNodePoolError
+	return errors.As(err, &onatnpErr)
+}

@@ -99,6 +99,7 @@ require (
 )
 
 retract (
+	v1.8.1 // has a bug that prevents Karpenter from scheduling pods with specific topologySpreadConstraint configurations - https://github.com/kubernetes-sigs/karpenter/issues/2785
 	v0.100.101-test // accidentally published testing version
 	v0.35.3 // accidentally published incomplete patch release
 	v0.34.4 // accidentally published incomplete patch release

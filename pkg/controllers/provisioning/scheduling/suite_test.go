@@ -59,7 +59,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -70,7 +69,6 @@ var ctx context.Context
 var prov *provisioning.Provisioner
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
@@ -97,10 +95,9 @@ var _ = BeforeSuite(func() {
 	// set these on the cloud provider, so we can manipulate them if needed
 	cloudProvider.InstanceTypes = instanceTypes
 	fakeClock = clock.NewFakeClock(time.Now())
-	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
@@ -4916,7 +4913,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler1 := scheduling.NewScheduler(ctx1, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology1,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil)
 			results1, err := scheduler1.Solve(ctx1, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results1.NewNodeClaims).To(HaveLen(1))
@@ -4929,7 +4926,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler2 := scheduling.NewScheduler(ctx2, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology2,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil)
 			results2, err := scheduler2.Solve(ctx2, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results2.NewNodeClaims).To(HaveLen(1))
