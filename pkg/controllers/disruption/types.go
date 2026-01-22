@@ -195,7 +195,7 @@ func (c Command) SourceNodeNames() []string {
 // String returns a human-readable representation of the command
 func (c Command) String() string {
 	sources := strings.Join(c.SourceNodeNames(), ", ")
-	
+
 	// For test commands without Method/ID set, use simple format
 	if c.Method == nil {
 		if len(c.Replacements) > 0 {
@@ -207,7 +207,7 @@ func (c Command) String() string {
 		}
 		return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
 	}
-	
+
 	// Full format with reason, ID, and savings
 	if len(c.Replacements) > 0 {
 		plural := "replacements"
