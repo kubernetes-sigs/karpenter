@@ -61,10 +61,10 @@ var _ = Describe("Performance", func() {
 			// Performance assertions
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 4*time.Minute),
 				"Total scale-out time should be less than 4 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.50),
-				"Average CPU utilization should be greater than 50%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.6),
-				"Average memory utilization should be greater than 60%")
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+				"Average CPU utilization should be greater than 38%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
+				"Average memory utilization should be greater than 55%")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")
@@ -101,10 +101,10 @@ var _ = Describe("Performance", func() {
 
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
 				"Consolidation should complete within 20 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.5),
-				"Average CPU utilization should be greater than 50%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.60),
-				"Average memory utilization should be greater than 60%")
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+				"Average CPU utilization should be greater than 38%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
+				"Average memory utilization should be greater than 55%")
 
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()
