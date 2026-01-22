@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodeoverlay_test
+package nodeoverlay
 
 import (
 	"context"
@@ -42,7 +42,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -59,8 +58,8 @@ var (
 	nodePoolTwo           *v1.NodePool
 	cluster               *state.Cluster
 	fakeClock             *clock.FakeClock
-	nodeOverlayController *nodeoverlay.Controller
-	store                 *nodeoverlay.InstanceTypeStore
+	nodeOverlayController *Controller
+	store                 *InstanceTypeStore
 )
 
 func TestNodeOverlay(t *testing.T) {
@@ -72,10 +71,10 @@ func TestNodeOverlay(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
-	store = nodeoverlay.NewInstanceTypeStore()
+	store = NewInstanceTypeStore()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store, cluster)
+	nodeOverlayController = NewController(env.Client, cloudProvider, store, cluster)
 })
 
 var _ = BeforeEach(func() {
@@ -2388,6 +2387,62 @@ var _ = Describe("Instance Type Controller", func() {
 					Expect(resource).To(Equal("2Gi"))
 				}
 			}
+		})
+		It("should apply higher weight overlay when multiple overlays match the same instance type", func() {
+			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"default-instance-type"},
+						},
+					},
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
+					},
+				},
+			})
+			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"default-instance-type"},
+						},
+					},
+					Weight: lo.ToPtr(int32(20)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("99"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+			// Both overlays should pass validation since they have different weights
+			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			Expect(err).To(BeNil())
+			instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList, scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...))
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			// The higher weight overlay (overlayB with weight 20) should take precedence
+			fuseResource, exist := instanceTypeList[0].Capacity.Name(corev1.ResourceName("smarter-devices/fuse"), resource.DecimalSI).AsInt64()
+			Expect(exist).To(BeTrue())
+			Expect(fuseResource).To(BeNumerically("==", 99))
 		})
 		It("should that there is not a partial application for instance types", func() {
 			cloudProvider.InstanceTypes = nil

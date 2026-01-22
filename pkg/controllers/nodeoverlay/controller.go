@@ -115,7 +115,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
-
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil
 }
 

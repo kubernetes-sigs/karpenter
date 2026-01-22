@@ -250,6 +250,7 @@ func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.
 		nil,
 		events.NewRecorder(&record.FakeRecorder{}),
 		clock,
+		nil, // volumeReqsByPod
 		opts...,
 	), nil
 }
@@ -450,39 +451,4 @@ func randomMemory() resource.Quantity {
 func randomCPU() resource.Quantity {
 	cpu := []int{100, 250, 500, 1000, 1500}
 	return resource.MustParse(fmt.Sprintf("%dm", cpu[r.Intn(len(cpu))]))
-}
-
-func BenchmarkTopologySpreadHonor(b *testing.B) {
-	benchmarkScheduler(b, makeTopologySpreadHonorPods(5000))
-}
-
-func makeTopologySpreadHonorPods(count int) []*corev1.Pod {
-	var pods []*corev1.Pod
-	honorPolicy := corev1.NodeInclusionPolicyHonor
-	for i := 0; i < count; i++ {
-		pods = append(pods, test.Pod(
-			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: randomLabels(),
-					UID:    uuid.NewUUID(), // set the UUID so the cached data is properly stored in the scheduler
-				},
-				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
-					{
-						MaxSkew:           1,
-						TopologyKey:       corev1.LabelTopologyZone,
-						WhenUnsatisfiable: corev1.DoNotSchedule,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: randomLabels(),
-						},
-						NodeAffinityPolicy: &honorPolicy,
-					},
-				},
-				ResourceRequirements: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceCPU:    randomCPU(),
-						corev1.ResourceMemory: randomMemory(),
-					},
-				}}))
-	}
-	return pods
 }

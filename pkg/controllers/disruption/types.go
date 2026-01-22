@@ -86,14 +86,15 @@ func (c *Candidate) OwnedByStaticNodePool() bool {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
-	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string) (*Candidate, error) {
+	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string,
+) (*Candidate, error) {
 	var err error
 	var pods []*corev1.Pod
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
 	if queue.HasAny(node.ProviderID()) {
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
-	if err = node.ValidateNodeDisruptable(); err != nil {
+	if err = node.ValidateNodeDisruptable(clk); err != nil {
 		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
@@ -137,7 +138,7 @@ type Replacement struct {
 	*scheduling.NodeClaim
 
 	Name string
-	// Use a bool track if a node has already been initialized so we can fire metrics for intialization once.
+	// Use a bool track if a node has already been initialized so we can fire metrics for initialization once.
 	// This intentionally does not capture nodes that go initialized then go NotReady after as other pods can
 	// schedule to this node as well.
 	Initialized bool

@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
@@ -88,23 +87,13 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 		})...))
 
 		// Collect available capacity types from the selected instance types
-		availableCapacityTypes := sets.New[string]()
-		for _, instanceType := range instanceTypes {
-			for _, offering := range instanceType.Offerings {
-				// Only include available offerings that are compatible with current requirements
-				if offering.Available && i.Requirements.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-					availableCapacityTypes.Insert(offering.CapacityType())
-				}
-			}
-		}
-
-		// Add capacity type requirement if we have available types
-		if capacityTypeList := availableCapacityTypes.UnsortedList(); len(capacityTypeList) > 0 {
-			i.Requirements.Add(scheduling.NewRequirement(
-				v1.CapacityTypeLabelKey,
-				corev1.NodeSelectorOpIn,
-				capacityTypeList...,
-			))
+		capacityTypes := lo.Uniq(lo.FlatMap(instanceTypes, func(it *cloudprovider.InstanceType, _ int) []string {
+			return lo.Map(it.Offerings.Available().Compatible(i.Requirements), func(o *cloudprovider.Offering, _ int) string {
+				return o.CapacityType()
+			})
+		}))
+		if len(capacityTypes) > 0 {
+			i.Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityTypes...))
 		}
 
 		if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {

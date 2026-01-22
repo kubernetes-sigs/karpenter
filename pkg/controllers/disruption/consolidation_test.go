@@ -1714,7 +1714,7 @@ var _ = Describe("Consolidation", func() {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
 				node = lo.Ternary(spotToSpot, spotNode, node)
 				// Add these spot instance with this special condition to cloud provider instancetypes
-				cloudProvider.InstanceTypes = lo.Ternary(spotToSpot, spotInstances, onDemandInstances)
+				cloudProvider.InstanceTypes = append(cloudProvider.InstanceTypes, lo.Ternary(spotToSpot, spotInstances, onDemandInstances)...)
 
 				rs := test.ReplicaSet()
 				ExpectApplied(ctx, env.Client, rs)
