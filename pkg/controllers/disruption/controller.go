@@ -25,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
@@ -49,7 +48,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
-	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 type Controller struct {
@@ -68,20 +66,8 @@ type Controller struct {
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
 const pollingPeriod = 10 * time.Second
 
-type ControllerOptions struct {
-	methods []Method
-}
-
-func WithMethods(methods ...Method) option.Function[ControllerOptions] {
-	return func(o *ControllerOptions) {
-		o.methods = methods
-	}
-}
-
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, opts ...option.Function[ControllerOptions]) *Controller {
-
-	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue)...)}, opts...)...)
+	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue) *Controller {
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -91,7 +77,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
-		methods:       o.methods,
+		methods:       NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
 	}
 }
 
@@ -147,17 +133,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	outdatedNodes := lo.Reject(c.cluster.DeepCopyNodes(), func(s *state.StateNode, _ int) bool {
 		return c.queue.HasAny(s.ProviderID()) || s.MarkedForDeletion()
 	})
-	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
+	if err := c.queue.markUndisrupted(ctx, outdatedNodes...); err != nil {
 		if errors.IsConflict(err) {
 			return reconciler.Result{Requeue: true}, nil
 		}
-		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing taint from nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
-	}
-	if err := state.ClearNodeClaimsCondition(ctx, c.kubeClient, v1.ConditionTypeDisruptionReason, outdatedNodes...); err != nil {
-		if errors.IsConflict(err) {
-			return reconciler.Result{Requeue: true}, nil
-		}
-		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
+		return reconciler.Result{}, err
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
@@ -179,6 +159,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
+//nolint:gocyclo
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
@@ -209,15 +190,46 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(cmds) == 0 {
 		return false, nil
 	}
+	// Assign common fields
+	for i := range cmds {
+		cmds[i].Method = disruption
+		cmds[i].ID = uuid.New()
+		cmds[i].CreationTimestamp = c.clock.Now()
+	}
 
+	// Taint each candidate node for disruption and add the Disruption condition to the NodeClaim
 	errs := make([]error, len(cmds))
+	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) { errs[i] = c.queue.MarkDisrupted(ctx, &cmds[i]) })
+	if err := multierr.Combine(errs...); err != nil {
+		return false, fmt.Errorf("disrupting candidates, %w", err)
+	}
+
+	// For non-drift methods, we wait consolidationTTL time and validate to catch the race condition in which kube-scheduler
+	// informers are not up-to-date after we taint the node with NoSchedule. This can cause kube-scheduler to bind a pod
+	// with the do-not-disrupt annotation to the node after we taint it.
+	cmds, invalidCmds, err := c.ValidateCommands(ctx, disruption, cmds)
+
+	// For any invalid commands, remove the disruption taint and condition
+	invalidNodes := lo.Reduce(invalidCmds, func(nodes []*state.StateNode, invalidCmd Command, _ int) []*state.StateNode {
+		cmdNodes := lo.Map(invalidCmd.Candidates, func(invalidCandidate *Candidate, _ int) *state.StateNode {
+			return invalidCandidate.StateNode
+		})
+		return append(nodes, cmdNodes...)
+	}, []*state.StateNode{})
+	if markedErr := c.queue.markUndisrupted(ctx, invalidNodes...); markedErr != nil {
+		err = lo.Ternary(err == nil, markedErr, fmt.Errorf("%w, %w", err, markedErr))
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("validating commands, %w", err)
+	}
+	if len(cmds) == 0 {
+		return false, nil
+	}
+
+	errs = make([]error, len(cmds))
 	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) {
 		cmd := cmds[i]
-
-		// Assign common fields
-		cmd.CreationTimestamp = c.clock.Now()
-		cmd.ID = uuid.New()
-		cmd.Method = disruption
 
 		// Attempt to disrupt
 		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
@@ -267,4 +279,36 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	if buf.Len() > 0 {
 		log.FromContext(ctx).Error(stderrors.New(buf.String()), "detected disruption budget errors")
 	}
+}
+
+// ValidateCommands returns a list of valid commands, invalid commands, and any associated errors.
+// If not drifting:
+// 1. wait for consolidationTTL time
+// 2. validate each commands according to the disruption method
+func (c *Controller) ValidateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, []Command, error) {
+	if m.Reason() == v1.DisruptionReasonDrifted {
+		return cmds, nil, nil
+	}
+	if consolidationTTL > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, cmds, fmt.Errorf("interrupted")
+		case <-c.clock.After(consolidationTTL): // channel which we wait for x duration until receive and continue
+		}
+	}
+
+	validatedCmd := make([]Command, 0, len(cmds))
+	invalidCmds := make([]Command, 0)
+	for _, cmd := range cmds {
+		newCmd, err := m.Validate(ctx, cmd)
+		if newCmd.Decision() == NoOpDecision {
+			invalidCmds = append(invalidCmds, newCmd)
+		} else {
+			validatedCmd = append(validatedCmd, newCmd)
+		}
+		if err != nil {
+			return nil, cmds, err
+		}
+	}
+	return validatedCmd, invalidCmds, nil
 }

@@ -41,8 +41,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-// consolidationTTL is the TTL between creating a consolidation command and validating that it still works.
-const consolidationTTL = 15 * time.Second
+// consolidationTTL is the TTL between marking the Node/NodeClaim as disrupted and validating that it still works.
+const consolidationTTL = 5 * time.Second
 
 // MinInstanceTypesForSpotToSpotConsolidation is the minimum number of instanceTypes in a NodeClaim needed to trigger spot-to-spot single-node consolidation
 const MinInstanceTypesForSpotToSpotConsolidation = 15

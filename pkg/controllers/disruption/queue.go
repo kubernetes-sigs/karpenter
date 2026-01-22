@@ -249,9 +249,19 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	return multierr.Combine(errs...)
 }
 
-// markDisrupted taints the node and adds the Disrupted condition to the NodeClaim for a candidate that is about to be disrupted
+// MarkDisrupted taints the node and adds the Disrupted condition to the NodeClaim for a candidate that is about to be disrupted
 // For static NodeClaims, we mark NodeClaims as pendingdisruption in statenodepool
-func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, error) {
+func (q *Queue) MarkDisrupted(ctx context.Context, cmd *Command) error {
+	// First check if we can add the command.
+	providerIDs := lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
+		return c.ProviderID()
+	})
+	if q.HasAny(providerIDs...) {
+		return fmt.Errorf("candidate is being disrupted")
+	}
+
+	log.FromContext(ctx).WithValues(append([]any{"command-id", cmd.ID, "reason", strings.ToLower(string(cmd.Reason()))}, cmd.LogValues()...)...).Info("disrupting node(s)")
+
 	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
 		if err := state.RequireNoScheduleTaint(ctx, q.kubeClient, true, cmd.Candidates[i].StateNode); err != nil {
@@ -284,7 +294,35 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 			q.cluster.NodePoolState.MarkNodeClaimPendingDisruption(cmd.Candidates[i].NodePool.Name, cmd.Candidates[i].NodeClaim.Name)
 		}
 	}
-	return markedCandidates, multierr.Combine(errs...)
+	err := multierr.Combine(errs...)
+
+	// If we get a failure marking some nodes as disrupted, if we are launching replacements, we shouldn't continue
+	// with disrupting the candidates. If it's just a delete operation, we can proceed
+	if err != nil && (len(cmd.Replacements) > 0 || len(markedCandidates) == 0) {
+		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", err), "command-id", cmd.ID)
+	}
+
+	// Update the command to only consider the successfully MarkDisrupted candidates
+	cmd.Candidates = markedCandidates
+
+	return nil
+}
+
+// markUndisrupted removes the taint from the node and removes the Disrupted condition from the NodeClaim for a candidate
+func (q *Queue) markUndisrupted(ctx context.Context, nodes ...*state.StateNode) error {
+	if err := state.RequireNoScheduleTaint(ctx, q.kubeClient, false, nodes...); err != nil {
+		if errors.IsConflict(err) {
+			return err
+		}
+		return serrors.Wrap(fmt.Errorf("removing taint from nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
+	}
+	if err := state.ClearNodeClaimsCondition(ctx, q.kubeClient, v1.ConditionTypeDisruptionReason, nodes...); err != nil {
+		if errors.IsConflict(err) {
+			return err
+		}
+		return serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
+	}
+	return nil
 }
 
 // createReplacementNodeClaims creates replacement NodeClaims
@@ -304,31 +342,9 @@ func (q *Queue) createReplacementNodeClaims(ctx context.Context, cmd *Command) e
 }
 
 // StartCommand will do the following:
-// 1. Taint candidate nodes
-// 2. Spin up replacement nodes
-// 3. Add Command to the queue to wait to delete the candidates.
+// 1. Spin up replacement nodes
+// 2. Add Command to the queue to wait to delete the candidates.
 func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
-	// First check if we can add the command.
-	providerIDs := lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
-		return c.ProviderID()
-	})
-	if q.HasAny(providerIDs...) {
-		return fmt.Errorf("candidate is being disrupted")
-	}
-
-	log.FromContext(ctx).WithValues(append([]any{"command-id", cmd.ID, "reason", strings.ToLower(string(cmd.Reason()))}, cmd.LogValues()...)...).Info("disrupting node(s)")
-
-	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	markedCandidates, markDisruptedErr := q.markDisrupted(ctx, cmd)
-	// If we get a failure marking some nodes as disrupted, if we are launching replacements, we shouldn't continue
-	// with disrupting the candidates. If it's just a delete operation, we can proceed
-	if markDisruptedErr != nil && (len(cmd.Replacements) > 0 || len(markedCandidates) == 0) {
-		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", markDisruptedErr), "command-id", cmd.ID)
-	}
-
-	// Update the command to only consider the successfully MarkDisrupted candidates
-	cmd.Candidates = markedCandidates
-
 	if err := q.createReplacementNodeClaims(ctx, cmd); err != nil {
 		// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 		// we don't want to disrupt workloads with no way to provision new nodes for them.

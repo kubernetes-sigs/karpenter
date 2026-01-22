@@ -103,6 +103,10 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 	return []Command{}, nil
 }
 
+func (e *Drift) Validate(_ctx context.Context, cmd Command) (Command, error) {
+	return cmd, nil
+}
+
 func (d *Drift) Reason() v1.DisruptionReason {
 	return v1.DisruptionReasonDrifted
 }

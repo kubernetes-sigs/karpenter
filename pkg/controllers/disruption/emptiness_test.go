@@ -97,7 +97,7 @@ var _ = Describe("Emptiness", func() {
 
 			ExpectDeleted(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "empty",
@@ -133,7 +133,7 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				metrics.NodePoolLabel: nodePool.Name,
@@ -216,7 +216,7 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				metrics.NodePoolLabel: nodePool.Name,
@@ -280,7 +280,7 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -345,7 +345,7 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -369,7 +369,7 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
@@ -386,7 +386,7 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
@@ -434,7 +434,7 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectDisruptionControllerReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
@@ -479,7 +479,7 @@ var _ = Describe("Emptiness", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
@@ -590,7 +590,7 @@ var _ = Describe("Emptiness", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
@@ -648,7 +648,7 @@ var _ = Describe("Emptiness", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectDisruptionControllerReconciled(ctx, disruptionController)
 		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
@@ -716,7 +716,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectExists(ctx, env.Client, node)
 	})
 	It("should wait for the node TTL for empty nodes before consolidating", func() {
-		disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+		disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
 
 		// inform cluster state about nodes and nodeclaims
