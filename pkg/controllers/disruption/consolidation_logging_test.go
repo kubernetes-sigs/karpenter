@@ -282,7 +282,7 @@ func mockCandidate(name string) *Candidate {
 	}
 }
 
-func TestConsolidationMoveGeneratedEvent(t *testing.T) {
+func TestConsolidationCandidateEvent(t *testing.T) {
 	recorder := test.NewEventRecorder()
 
 	// Create a mock candidate with Node and NodeClaim
@@ -310,7 +310,7 @@ func TestConsolidationMoveGeneratedEvent(t *testing.T) {
 	}
 
 	// Publish the event
-	recorder.Publish(disruptionevents.ConsolidationMoveGenerated(
+	recorder.Publish(disruptionevents.ConsolidationCandidate(
 		candidate.Node,
 		candidate.NodeClaim,
 		cmd.String(),
@@ -318,8 +318,8 @@ func TestConsolidationMoveGeneratedEvent(t *testing.T) {
 	)...)
 
 	// Verify the event was published
-	if recorder.Calls(events.ConsolidationMoveGenerated) != 2 {
-		t.Errorf("Expected 2 ConsolidationMoveGenerated events (Node + NodeClaim), got %d",
-			recorder.Calls(events.ConsolidationMoveGenerated))
+	if recorder.Calls(events.ConsolidationCandidate) != 2 {
+		t.Errorf("Expected 2 ConsolidationCandidate events (Node + NodeClaim), got %d",
+			recorder.Calls(events.ConsolidationCandidate))
 	}
 }

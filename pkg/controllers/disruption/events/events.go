@@ -137,22 +137,22 @@ func NodePoolBlocked(nodePool *v1.NodePool) events.Event {
 	}
 }
 
-// ConsolidationMoveGenerated is an event that informs the user that a consolidation move has been generated
-func ConsolidationMoveGenerated(node *corev1.Node, nodeClaim *v1.NodeClaim, command string, savings float64) []events.Event {
-	message := fmt.Sprintf("Consolidation move generated: %s (savings: $%.2f)", command, savings)
+// ConsolidationCandidate is an event that informs the user that a consolidation candidate has been generated
+func ConsolidationCandidate(node *corev1.Node, nodeClaim *v1.NodeClaim, command string, savings float64) []events.Event {
+	message := fmt.Sprintf("Consolidation candidate: %s (savings: $%.2f)", command, savings)
 
 	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           corev1.EventTypeNormal,
-			Reason:         events.ConsolidationMoveGenerated,
+			Reason:         events.ConsolidationCandidate,
 			Message:        message,
 			DedupeValues:   []string{string(node.UID), command},
 		},
 		{
 			InvolvedObject: nodeClaim,
 			Type:           corev1.EventTypeNormal,
-			Reason:         events.ConsolidationMoveGenerated,
+			Reason:         events.ConsolidationCandidate,
 			Message:        message,
 			DedupeValues:   []string{string(nodeClaim.UID), command},
 		},

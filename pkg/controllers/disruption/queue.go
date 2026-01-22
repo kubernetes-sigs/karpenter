@@ -317,8 +317,6 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	}
 
 	log.FromContext(ctx).WithValues(append([]any{
-		"command-id", cmd.ID,
-		"reason", strings.ToLower(string(cmd.Reason())),
 		"command", cmd.String(),
 	}, cmd.LogValues()...)...).Info("disrupting node(s)")
 

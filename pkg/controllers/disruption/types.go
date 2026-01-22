@@ -194,14 +194,28 @@ func (c Command) SourceNodeNames() []string {
 // String returns a human-readable representation of the command
 func (c Command) String() string {
 	sources := strings.Join(c.SourceNodeNames(), ", ")
+	
+	// For test commands without Method/ID set, use simple format
+	if c.Method == nil {
+		if len(c.Replacements) > 0 {
+			plural := "replacements"
+			if len(c.Replacements) == 1 {
+				plural = "replacement"
+			}
+			return fmt.Sprintf("%s: [%s] -> [%d %s]", c.Decision(), sources, len(c.Replacements), plural)
+		}
+		return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
+	}
+	
+	// Full format with reason, ID, and savings
 	if len(c.Replacements) > 0 {
 		plural := "replacements"
 		if len(c.Replacements) == 1 {
 			plural = "replacement"
 		}
-		return fmt.Sprintf("%s: [%s] -> [%d %s]", c.Decision(), sources, len(c.Replacements), plural)
+		return fmt.Sprintf("%s/%s: %s: [%s] -> [%d %s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, len(c.Replacements), plural, c.EstimatedSavings())
 	}
-	return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
+	return fmt.Sprintf("%s/%s: %s: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, c.EstimatedSavings())
 }
 
 // EstimatedSavings returns the estimated cost savings from this consolidation.

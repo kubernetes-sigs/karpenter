@@ -228,7 +228,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
+	c.recorder.Publish(disruptionevents.ConsolidationCandidate(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 	return cmd, nil
 }
@@ -277,7 +277,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 			Results:      results,
 		}
-		c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
+		c.recorder.Publish(disruptionevents.ConsolidationCandidate(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 		return cmd, nil
 	}
@@ -315,7 +315,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	c.recorder.Publish(disruptionevents.ConsolidationMoveGenerated(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
+	c.recorder.Publish(disruptionevents.ConsolidationCandidate(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
 
 	return cmd, nil
 }
