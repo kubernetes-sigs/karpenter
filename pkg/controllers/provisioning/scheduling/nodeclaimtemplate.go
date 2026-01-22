@@ -76,6 +76,21 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	return nct
 }
 
+// resolveCustomLabelsFromRequirements resolves the concrete values for user-defined labels from a NodeClaimTemplate's
+// requirements.
+func (i *NodeClaimTemplate) resolveCustomLabelsFromRequirements() map[string]string {
+	labels := map[string]string{}
+	for key, requirement := range i.Requirements {
+		if v1.WellKnownLabels.Has(key) || v1.RestrictedLabels.Has(key) {
+			continue
+		}
+		if value := requirement.Any(); value != "" {
+			labels[key] = value
+		}
+	}
+	return labels
+}
+
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	// Inject instanceType requirements for NodeClaims belonging to dynamic NodePool
 	// For static we let cloudprovider.Create()
@@ -107,6 +122,12 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 			})
 		}
 	}
+
+	// We'll assign any labels with known, concrete values at NodeClaim creation time. This includes any labels from the
+	// NodeClaimTemplate (since there's a single possible value), and any resolved values for custom labels in the
+	// NodeClaimTemplate's requirements. The latter **cannot** be instance type dependent (like well-known labels) since
+	// Karpenter can't reason about which label domains would belong to each instance type.
+	i.Labels = lo.Assign(i.Labels, i.resolveCustomLabelsFromRequirements())
 
 	nc := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{

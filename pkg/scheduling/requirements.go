@@ -273,18 +273,6 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 	return errs
 }
 
-func (r Requirements) Labels() map[string]string {
-	labels := map[string]string{}
-	for key, requirement := range r {
-		if !v1.IsRestrictedNodeLabel(key) {
-			if value := requirement.Any(); value != "" {
-				labels[key] = value
-			}
-		}
-	}
-	return labels
-}
-
 func (r Requirements) HasMinValues() bool {
 	for _, req := range r {
 		if req.MinValues != nil {

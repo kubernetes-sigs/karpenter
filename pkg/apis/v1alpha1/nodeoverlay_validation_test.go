@@ -148,9 +148,9 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 			}
 		})
-		It("should allow restricted domains exceptions", func() {
+		It("should allow kubernetes domains exceptions", func() {
 			oldnodeOverlay := nodeOverlay.DeepCopy()
-			for label := range v1.LabelDomainExceptions {
+			for _, label := range []string{"kubernetes.io", "k8s.io"} {
 				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: label + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
@@ -160,9 +160,9 @@ var _ = Describe("CEL/Validation", func() {
 				nodeOverlay = oldnodeOverlay.DeepCopy()
 			}
 		})
-		It("should allow restricted subdomains exceptions", func() {
+		It("should allow kubernetes subdomains exceptions", func() {
 			oldnodeOverlay := nodeOverlay.DeepCopy()
-			for label := range v1.LabelDomainExceptions {
+			for _, label := range []string{"kubernetes.io", "k8s.io"} {
 				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: "subdomain." + label + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
