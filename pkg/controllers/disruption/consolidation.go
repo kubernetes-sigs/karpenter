@@ -318,11 +318,15 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 // publishConsolidationCandidateEvents emits ConsolidationCandidate events for all candidates in a command
 func (c *consolidation) publishConsolidationCandidateEvents(cmd Command) {
 	for _, candidate := range cmd.Candidates {
-		nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
-		if len(cmd.Candidates) > 1 {
-			nodeCmd = fmt.Sprintf("%s (part of %d-node consolidation)", nodeCmd, len(cmd.Candidates))
+		var eventCmd string
+		if len(cmd.Candidates) == 1 {
+			// Single-node: use full command string with replacement info
+			eventCmd = cmd.String()
+		} else {
+			// Multi-node: use per-node string with context to avoid listing all nodes
+			eventCmd = fmt.Sprintf("%s: [%s] (part of %d-node consolidation)", cmd.Decision(), candidate.Name(), len(cmd.Candidates))
 		}
-		c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, nodeCmd, cmd.EstimatedSavings())...)
+		c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, eventCmd, cmd.EstimatedSavings())...)
 	}
 }
 
