@@ -214,7 +214,7 @@ func TestGetCommandEstimatedSavings_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			savings := tt.cmd.EstimatedSavings()
-			if savings != tt.expectedSavings {
+			if diff := savings - tt.expectedSavings; diff < -floatComparisonDelta || diff > floatComparisonDelta {
 				t.Errorf("Command.EstimatedSavings() = %v, want %v", savings, tt.expectedSavings)
 			}
 		})
