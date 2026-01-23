@@ -1,0 +1,111 @@
+author:	k8s-ci-robot
+association:	contributor
+edited:	false
+status:	none
+--
+[APPROVALNOTIFIER] This PR is **NOT APPROVED**
+
+This pull-request has been approved by: *<a href="https://github.com/kubernetes-sigs/karpenter/pull/2786#" title="Author self-approved">jamesmt-aws</a>*
+**Once this PR has been reviewed and has the lgtm label**, please assign [jmdeal](https://github.com/jmdeal) for approval. For more information see [the Code Review Process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process).
+
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands?repo=kubernetes-sigs%2Fkarpenter).
+
+<details open>
+Needs approval from an approver in each of these files:
+
+- **[OWNERS](https://github.com/kubernetes-sigs/karpenter/blob/main/OWNERS)**
+
+Approvers can indicate their approval by writing `/approve` in a comment
+Approvers can cancel approval by writing `/approve cancel` in a comment
+</details>
+<!-- META={"approvers":["jmdeal"]} -->
+--
+author:	k8s-ci-robot
+association:	contributor
+edited:	false
+status:	none
+--
+Hi @jamesmt-aws. Thanks for your PR.
+
+I'm waiting for a [kubernetes-sigs](https://github.com/orgs/kubernetes-sigs/people) member to verify that this patch is reasonable to test. If it is, they should reply with `/ok-to-test` on its own line. Until that is done, I will not automatically test new commits in this PR, but the usual testing commands by org members will still work. Regular contributors should [join the org](https://git.k8s.io/community/community-membership.md#member) to skip this step.
+
+Once the patch is verified, the new status will be reflected by the `ok-to-test` label.
+
+I understand the commands that are listed [here](https://go.k8s.io/bot-commands?repo=kubernetes-sigs%2Fkarpenter).
+
+<details>
+
+Instructions for interacting with me using PR comments are available [here](https://git.k8s.io/community/contributors/guide/pull-requests.md).  If you have questions or suggestions related to my behavior, please file an issue against the [kubernetes-sigs/prow](https://github.com/kubernetes-sigs/prow/issues/new?title=Prow%20issue:) repository.
+</details>
+
+--
+author:	coveralls
+association:	none
+edited:	true
+status:	none
+--
+## Pull Request Test Coverage Report for [Build 21013181399](https://coveralls.io/builds/77324564)
+
+### Warning: This coverage report may be inaccurate.
+
+This pull request's base commit is no longer the HEAD commit of its target branch. This means it includes changes from outside the original pull request, including, potentially, unrelated coverage changes.
+
+- For more information on this, see <a target="_blank" href="https://docs.coveralls.io/build-types#tracking-coverage-changes-with-pull_request-builds">Tracking coverage changes with pull request builds</a>.
+- To avoid this issue with future PRs, see these <a target="_blank" href="https://docs.coveralls.io/build-types#recommended-ci-configurations">Recommended CI Configurations</a>.
+- For a quick fix, <a target="_blank" href="https://github.blog/changelog/2022-02-03-more-ways-to-keep-your-pull-request-branch-up-to-date/#update-your-pull-request-branch-by-rebasing">rebase this PR at GitHub</a>. Your next report should be accurate.
+
+### Details
+
+* **125** of **134**   **(93.28%)**  changed or added relevant lines in **6** files are covered.
+* **33** unchanged lines in **4** files lost coverage.
+* Overall coverage decreased (**-0.03%**) to **80.671%**
+
+---
+
+|  Changes Missing Coverage | Covered Lines | Changed/Added Lines | % |
+| :-----|--------------|--------|---: |
+| [pkg/controllers/disruption/consolidation.go](https://coveralls.io/builds/77324564/source?filename=pkg%2Fcontrollers%2Fdisruption%2Fconsolidation.go#L163) | 32 | 34 | 94.12%
+| [pkg/controllers/disruption/types.go](https://coveralls.io/builds/77324564/source?filename=pkg%2Fcontrollers%2Fdisruption%2Ftypes.go#L207) | 27 | 29 | 93.1%
+| [pkg/controllers/disruption/validation.go](https://coveralls.io/builds/77324564/source?filename=pkg%2Fcontrollers%2Fdisruption%2Fvalidation.go#L284) | 40 | 45 | 88.89%
+<!-- | **Total:** | **125** | **134** | **93.28%** | -->
+
+|  Files with Coverage Reduction | New Missed Lines | % |
+| :-----|--------------|--: |
+| [pkg/controllers/disruption/consolidation.go](https://coveralls.io/builds/77324564/source?filename=pkg%2Fcontrollers%2Fdisruption%2Fconsolidation.go#L271) | 4 | 89.34% |
+| [pkg/scheduling/requirements.go](https://coveralls.io/builds/77324564/source?filename=pkg%2Fscheduling%2Frequirements.go#L115) | 4 | 97.71% |
+| [pkg/controllers/provisioning/scheduling/nodeclaimtemplate.go](https://coveralls.io/builds/77324564/source?filename=pkg%2Fcontrollers%2Fprovisioning%2Fscheduling%2Fnodeclaimtemplate.go#L100) | 8 | 88.41% |
+| [pkg/scheduling/zz_generated.deepcopy.go](https://coveralls.io/builds/77324564/source?filename=pkg%2Fscheduling%2Fzz_generated.deepcopy.go#L93) | 17 | 54.48% |
+<!-- | **Total:** | **33** |  | -->
+
+|  Totals | [![Coverage Status](https://coveralls.io/builds/77324564/badge)](https://coveralls.io/builds/77324564) |
+| :-- | --: |
+| Change from base [Build 20977977211](https://coveralls.io/builds/77307017): |  -0.03% |
+| Covered Lines: | 12087 |
+| Relevant Lines: | 14983 |
+
+---
+##### 💛  - [Coveralls](https://coveralls.io)
+
+--
+author:	ellistarn
+association:	contributor
+edited:	false
+status:	none
+--
+Could you draw up a simple flow chart with where in the algorithm we want to communicate with customers?
+--
+author:	jamesmt-aws
+association:	contributor
+edited:	false
+status:	none
+--
+> Could you draw up a simple flow chart with where in the algorithm we want to communicate with customers?
+
+My best sketch of that right now is that we have empty, single, and multi-node consolidation with the following:
+1. Candidate selection (which nodes are even considered?)
+2. Move generation (what could we do that looks maybe better?)
+3. Plan generation (given the options available, what can we do that makes a coherent improvement and fits our other concerns, like budgets?)
+4. Execution (what do we actually do?)
+
+All of the consolidation algorithms share elements. Empty, single, and multi-node consolidation are pretty similar for all of these. The logging that I want here is around phase #2 and phase #3. 
+--

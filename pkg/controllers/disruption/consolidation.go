@@ -223,11 +223,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	// Emit events for all candidates
-	for _, candidate := range cmd.Candidates {
-		nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
-		c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, nodeCmd, cmd.EstimatedSavings())...)
-	}
+	c.publishConsolidationCandidateEvents(cmd)
 
 	return cmd, nil
 }
@@ -276,11 +272,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 			Results:      results,
 		}
-		// Emit events for all candidates
-		for _, candidate := range cmd.Candidates {
-			nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
-			c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, nodeCmd, cmd.EstimatedSavings())...)
-		}
+		c.publishConsolidationCandidateEvents(cmd)
 
 		return cmd, nil
 	}
@@ -318,13 +310,20 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	// Emit events for all candidates
-	for _, candidate := range cmd.Candidates {
-		nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
-		c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, nodeCmd, cmd.EstimatedSavings())...)
-	}
+	c.publishConsolidationCandidateEvents(cmd)
 
 	return cmd, nil
+}
+
+// publishConsolidationCandidateEvents emits ConsolidationCandidate events for all candidates in a command
+func (c *consolidation) publishConsolidationCandidateEvents(cmd Command) {
+	for _, candidate := range cmd.Candidates {
+		nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
+		if len(cmd.Candidates) > 1 {
+			nodeCmd = fmt.Sprintf("%s (part of %d-node consolidation)", nodeCmd, len(cmd.Candidates))
+		}
+		c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, nodeCmd, cmd.EstimatedSavings())...)
+	}
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates
