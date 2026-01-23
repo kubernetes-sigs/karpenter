@@ -215,6 +215,17 @@ func (c Command) String() string {
 	return fmt.Sprintf("%s/%s: %s: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, c.EstimatedSavings())
 }
 
+// StringForNode returns a string representation of the command from the perspective of a single candidate node.
+// For single-node commands, returns the full command string. For multi-node commands, returns a per-node
+// string with context to avoid listing all nodes.
+func (c Command) StringForNode(candidate *Candidate) string {
+	if len(c.Candidates) == 1 {
+		return c.String()
+	}
+	// Multi-node: show only this node with context
+	return fmt.Sprintf("%s: [%s] (part of %d-node consolidation)", c.Decision(), candidate.Name(), len(c.Candidates))
+}
+
 // EstimatedSavings returns the estimated cost savings from this consolidation.
 // Returns 0.0 when pricing cannot be determined. getCandidatePrices handles missing
 // offerings by returning 0.0, which causes consolidation to skip the candidate.

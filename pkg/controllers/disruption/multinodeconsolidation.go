@@ -110,17 +110,9 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 				"reason", reason,
 				"estimated_savings", cmd.EstimatedSavings(),
 			)
-			// Emit events for all candidates with per-node command strings
+			// Emit events for all candidates
 			for _, candidate := range cmd.Candidates {
-				var eventCmd string
-				if len(cmd.Candidates) == 1 {
-					// Single-node: use full command string with replacement info
-					eventCmd = cmd.String()
-				} else {
-					// Multi-node: use per-node string with context to avoid listing all nodes
-					eventCmd = fmt.Sprintf("%s: [%s] (part of %d-node consolidation)", cmd.Decision(), candidate.Name(), len(cmd.Candidates))
-				}
-				m.recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, eventCmd, reason, cmd.EstimatedSavings())...)
+				m.recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, cmd.StringForNode(candidate), reason, cmd.EstimatedSavings())...)
 			}
 			return []Command{}, nil
 		}
