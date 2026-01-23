@@ -223,7 +223,11 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	c.recorder.Publish(disruptionevents.ConsolidationCandidate(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
+	// Emit events for all candidates
+	for _, candidate := range cmd.Candidates {
+		nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
+		c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, nodeCmd, cmd.EstimatedSavings())...)
+	}
 
 	return cmd, nil
 }
@@ -272,7 +276,11 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 			Results:      results,
 		}
-		c.recorder.Publish(disruptionevents.ConsolidationCandidate(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
+		// Emit events for all candidates
+		for _, candidate := range cmd.Candidates {
+			nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
+			c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, nodeCmd, cmd.EstimatedSavings())...)
+		}
 
 		return cmd, nil
 	}
@@ -310,7 +318,11 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	c.recorder.Publish(disruptionevents.ConsolidationCandidate(cmd.Candidates[0].Node, cmd.Candidates[0].NodeClaim, cmd.String(), cmd.EstimatedSavings())...)
+	// Emit events for all candidates
+	for _, candidate := range cmd.Candidates {
+		nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
+		c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, nodeCmd, cmd.EstimatedSavings())...)
+	}
 
 	return cmd, nil
 }
