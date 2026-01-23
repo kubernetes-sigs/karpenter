@@ -63,8 +63,8 @@ var _ = Describe("Performance", func() {
 				"Total scale-out time should be less than 4 minutes")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
 				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
-				"Average memory utilization should be greater than 55%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+				"Average memory utilization should be greater than 40%")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")

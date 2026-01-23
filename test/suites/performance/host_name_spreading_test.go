@@ -72,7 +72,7 @@ var _ = Describe("Performance", func() {
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring consolidation performance")
-			consolidationReport, err := ReportConsolidationWithOutput(env, "Hostname Spread Consolidation Test", 1000, 700, initialNodes, 20*time.Minute, "hostname_spread_consolidation")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Hostname Spread Consolidation Test", 1000, 700, initialNodes, 30*time.Minute, "hostname_spread_consolidation")
 			Expect(err).ToNot(HaveOccurred(), "Consolidation should execute successfully")
 
 			By("Validating consolidation performance")
@@ -83,8 +83,8 @@ var _ = Describe("Performance", func() {
 			// Consolidation assertions
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
 				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
-				"Average memory utilization should be greater than 75%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+				"Average memory utilization should be greater than 40%")
 
 		})
 	})

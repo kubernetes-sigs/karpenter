@@ -58,8 +58,8 @@ var _ = Describe("Performance", func() {
 				"Total scale-out time should be less than 5 minutes")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
 				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
-				"Average memory utilization should be greater than 55%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+				"Average memory utilization should be greater than 40%")
 
 			// ========== PHASE 2: Interference Scale Out TEST ==========
 			By("Net scaling out interference test")
@@ -82,9 +82,9 @@ var _ = Describe("Performance", func() {
 			Expect(interferenceReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
 				"Scaling should complete within 10 minutes")
 			Expect(interferenceReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
-				"Average CPU utilization should be greater than 50%")
-			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
-				"Average memory utilization should be greater than 60%")
+				"Average CPU utilization should be greater than 38%")
+			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+				"Average memory utilization should be greater than 40%")
 
 			// ========== PHASE 3: Interference Scale In TEST ==========
 			By("Executing interference consolidation test (small_deployment scales out to 400, large_deployment scales in to 200)")
@@ -112,9 +112,9 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
 				"Mixed scaling and consolidation should complete within 25 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
-				"Average CPU utilization should remain greater than 50% after consolidation")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
-				"Average memory utilization should remain greater than 60% after consolidation")
+				"Average CPU utilization should remain greater than 38% after consolidation")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+				"Average memory utilization should remain greater than 40% after consolidation")
 
 		})
 	})

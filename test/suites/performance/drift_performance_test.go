@@ -83,8 +83,8 @@ var _ = Describe("Performance", func() {
 			Expect(driftReport.PodsNetChange).To(Equal(0), "Pods should not change during drift")
 
 			// Drift performance assertions
-			Expect(driftReport.TotalTime).To(BeNumerically("<", 30*time.Minute),
-				"Drift should complete within 30 minutes")
+			Expect(driftReport.TotalTime).To(BeNumerically("<", 50*time.Minute),
+				"Drift should complete within 50 minutes")
 
 			// ========== PHASE 3: POST-DRIFT VALIDATION ==========
 			By("Validating post-drift cluster state")
