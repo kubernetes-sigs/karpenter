@@ -170,10 +170,6 @@ var (
 	DeleteDecision  Decision = "delete"
 )
 
-func (d Decision) String() string {
-	return string(d)
-}
-
 func (c Command) Decision() Decision {
 	switch {
 	case len(c.Candidates) > 0 && len(c.Replacements) > 0:
