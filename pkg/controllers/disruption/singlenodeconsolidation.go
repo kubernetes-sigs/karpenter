@@ -109,8 +109,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 					"reason", reason,
 					"estimated_savings", cmd.EstimatedSavings(),
 				)
-				nodeCmd := fmt.Sprintf("%s: [%s]", cmd.Decision(), candidate.Name())
-				s.recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, nodeCmd, reason, cmd.EstimatedSavings())...)
+				s.recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, cmd.String(), reason, cmd.EstimatedSavings())...)
 				return []Command{}, nil
 			}
 			return []Command{}, fmt.Errorf("validating consolidation, %w", err)
