@@ -49,6 +49,7 @@ func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOp
 	}
 }
 
+// nolint:gocyclo
 func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if m.IsConsolidated() {
 		return []Command{}, nil
