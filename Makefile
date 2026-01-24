@@ -7,7 +7,8 @@ HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.requests.memory=1Gi \
 			--set controller.resources.limits.cpu=1 \
 			--set controller.resources.limits.memory=1Gi \
-			--set settings.featureGates.nodeRepair=true
+			--set settings.featureGates.nodeRepair=true \
+			--set settings.featureGates.staticCapacity=true
 
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
@@ -52,7 +53,7 @@ e2etests: ## Run the e2e suite against your local cluster
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.skip="${SKIP}" \
 		--ginkgo.timeout=2h \
-		--ginkgo.grace-period=5m \
+		--ginkgo.grace-period=15m \
 		--ginkgo.vv
 
 # Run make install-kwok to install the kwok controller in your cluster first
@@ -80,8 +81,14 @@ test: ## Run tests
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
+test-memory: ## Run memory usage tests for node overlay store
+	go test -v ./pkg/controllers/nodeoverlay/... -run TestMemoryUsage
+
+benchmark: ## Run benchmark tests for node overlay store
+	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
+
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
-	ginkgo \
+	go tool -modfile=go.tools.mod ginkgo \
 		--race \
 		--focus="${FOCUS}" \
 		--timeout=20m \
@@ -91,10 +98,10 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		./pkg/...
 
 vulncheck: ## Verify code vulnerabilities
-	@govulncheck ./pkg/...
+	@go tool -modfile=go.tools.mod govulncheck ./pkg/...
 
 licenses: download ## Verifies dependency licenses
-	! go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
+	! go tool -modfile=go.tools.mod go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
 
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
@@ -109,24 +116,21 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
-	hack/boilerplate.sh
+	go tool -modfile=go.tools.mod nwa config -c add
 	go vet ./...
-	cd kwok/charts && helm-docs
-	golangci-lint run
+	go tool -modfile=go.tools.mod golangci-lint-kube-api-linter run
+	cd kwok/charts && go tool -modfile=../../go.tools.mod helm-docs
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
 		if [ "${CI}" = true ]; then\
 			exit 1;\
 		fi;}
-	actionlint -oneline
+	go tool -modfile=go.tools.mod actionlint -oneline
 
 download: ## Recursively "go mod download" on all directories where go.mod exists
 	$(foreach dir,$(MOD_DIRS),cd $(dir) && go mod download $(newline))
 
-toolchain: ## Install developer toolchain
-	./hack/toolchain.sh
-
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test deflake vulncheck licenses verify download toolchain gen_instance_types
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory benchmark deflake vulncheck licenses verify download gen_instance_types

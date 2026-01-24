@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/registrationhealth"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
@@ -45,6 +46,7 @@ var (
 	cloudProvider *fake.CloudProvider
 	nodePool      *v1.NodePool
 	nodeClass     *v1alpha1.TestNodeClass
+	npState       *nodepoolhealth.State
 )
 
 func TestAPIs(t *testing.T) {
@@ -56,7 +58,8 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
-	controller = registrationhealth.NewController(env.Client, cloudProvider)
+	npState = nodepoolhealth.NewState()
+	controller = registrationhealth.NewController(env.Client, cloudProvider, npState)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
@@ -93,7 +96,7 @@ var _ = Describe("RegistrationHealth", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy)).To(BeNil())
 	})
-	It("should set NodeRegistrationHealthy status condition on nodePool as Unknown if the nodeClass observed generation doesn't match with that on nodePool", func() {
+	It("should set NodeRegistrationHealthy status condition on nodePool as Unknown and reset the NodeRegistrationHealthBuffer if the nodeClass observed generation doesn't match with that on nodePool", func() {
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "unhealthy", "unhealthy")
 		nodePool.Status.NodeClassObservedGeneration = int64(1)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
@@ -104,6 +107,7 @@ var _ = Describe("RegistrationHealth", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeTrue())
 		Expect(nodePool.Status.NodeClassObservedGeneration).To(Equal(int64(2)))
+		Expect(npState.Status(nodePool.UID)).To(BeEquivalentTo(nodepoolhealth.StatusUnknown))
 	})
 	It("should set NodeRegistrationHealthy status condition on nodePool as Unknown if the nodePool is updated", func() {
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "unhealthy", "unhealthy")
@@ -115,6 +119,7 @@ var _ = Describe("RegistrationHealth", func() {
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeTrue())
+		Expect(npState.Status(nodePool.UID)).To(BeEquivalentTo(nodepoolhealth.StatusUnknown))
 	})
 	It("should not set NodeRegistrationHealthy status condition on nodePool as Unknown if it is already set to true", func() {
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
@@ -123,6 +128,7 @@ var _ = Describe("RegistrationHealth", func() {
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeFalse())
+		Expect(npState.Status(nodePool.UID)).To(BeEquivalentTo(nodepoolhealth.StatusHealthy))
 	})
 	It("should not set NodeRegistrationHealthy status condition on nodePool as Unknown if it is already set to false", func() {
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "unhealthy", "unhealthy")
@@ -131,5 +137,6 @@ var _ = Describe("RegistrationHealth", func() {
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeFalse())
+		Expect(npState.Status(nodePool.UID)).To(BeEquivalentTo(nodepoolhealth.StatusUnhealthy))
 	})
 })

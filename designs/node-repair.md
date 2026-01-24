@@ -48,7 +48,7 @@ The RepairPolicy will contain a set of statements that the Karpenter controller 
 
 1. A diagnostic agent will add a status condition on a node 
 2. Karpenter will reconcile nodes and match unhealthy conditions with repair policy statements
-3. Node Health controller will forcefully terminate the the NodeClaim once the node has been in an unhealthy state for the duration specified by the TolerationDuration
+3. Node Health controller will forcefully terminate the NodeClaim once the node has been in an unhealthy state for the duration specified by the TolerationDuration
 
 ### Example
 
@@ -59,12 +59,12 @@ func (c *CloudProvider) RepairPolicy() []cloudprovider.RepairStatement {
         {
             Type: "Ready"
             Status: corev1.ConditionFalse,
-            TrolorationDuration: "30m"
+            TolerationDuration: "30m"
         },
         {
             Type: "NetworkUnavailable"
             Status: corev1.ConditionTrue,
-            TrolorationDuration: "10m"
+            TolerationDuration: "10m"
         },
         ...
     }

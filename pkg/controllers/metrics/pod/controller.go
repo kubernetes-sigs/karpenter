@@ -47,13 +47,12 @@ const (
 	podNamespace        = "namespace"
 	ownerSelfLink       = "owner"
 	podHostName         = "node"
-	podNodePool         = "nodepool"
 	podHostZone         = "zone"
 	podHostArchitecture = "arch"
-	podHostCapacityType = "capacity_type"
 	podHostInstanceType = "instance_type"
 	podPhase            = "phase"
 	podScheduled        = "scheduled"
+	podReady            = "ready"
 )
 
 var (
@@ -63,7 +62,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "state",
-			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, nodepool name, zone, architecture, capacity type, instance type and pod phase.",
+			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, nodepool name, zone, architecture, capacity type, instance type, pod phase, and pod readiness.",
 		},
 		labelNames(),
 	)
@@ -185,12 +184,13 @@ func labelNames() []string {
 		ownerSelfLink,
 		podHostName,
 		podScheduled,
-		podNodePool,
+		metrics.NodePoolLabel,
 		podHostZone,
 		podHostArchitecture,
-		podHostCapacityType,
+		metrics.CapacityTypeLabel,
 		podHostInstanceType,
 		podPhase,
+		podReady,
 	}
 }
 
@@ -207,7 +207,7 @@ func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "metrics.pod")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	pod := &corev1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
@@ -426,6 +426,11 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	metricLabels[podScheduled] = lo.Ternary(pod.Spec.NodeName != "", "true", "false")
 	metricLabels[podPhase] = string(pod.Status.Phase)
 
+	_, ready := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue
+	})
+	metricLabels[podReady] = lo.Ternary(ready, "true", "false")
+
 	node := &corev1.Node{}
 	if pod.Spec.NodeName != "" {
 		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); client.IgnoreNotFound(err) != nil {
@@ -434,15 +439,19 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	}
 	metricLabels[podHostZone] = node.Labels[corev1.LabelTopologyZone]
 	metricLabels[podHostArchitecture] = node.Labels[corev1.LabelArchStable]
-	metricLabels[podHostCapacityType] = node.Labels[v1.CapacityTypeLabelKey]
+	metricLabels[metrics.CapacityTypeLabel] = node.Labels[v1.CapacityTypeLabelKey]
 	metricLabels[podHostInstanceType] = node.Labels[corev1.LabelInstanceTypeStable]
-	metricLabels[podNodePool] = node.Labels[v1.NodePoolLabelKey]
+	metricLabels[metrics.NodePoolLabel] = node.Labels[v1.NodePoolLabelKey]
 	return metricLabels, nil
+}
+
+func (c *Controller) Name() string {
+	return "metrics.pod"
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("metrics.pod").
+		Named(c.Name()).
 		For(&corev1.Pod{}).
 		Complete(c)
 }

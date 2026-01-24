@@ -30,8 +30,8 @@ import (
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
-	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
-	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
+	. "github.com/onsi/ginkgo/v2" //nolint:revive
+	. "github.com/onsi/gomega"    //nolint:revive
 	"github.com/prometheus/client_golang/prometheus"
 	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
@@ -766,4 +766,13 @@ func ExpectParallelized(fs ...func()) {
 		}()
 	}
 	wg.Wait()
+}
+
+func ExpectStateNodePoolCount(cluster *state.Cluster, npName string, r, d, pd int) {
+	GinkgoHelper()
+
+	running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(npName)
+	Expect(running).To(Equal(r))
+	Expect(deleting).To(Equal(d))
+	Expect(pendingdisruption).To(Equal(pd))
 }

@@ -118,9 +118,15 @@ func HasPreferredNodeAffinity(p *corev1.Pod) bool {
 }
 
 func (r Requirements) NodeSelectorRequirements() []v1.NodeSelectorRequirementWithMinValues {
-	return lo.Map(lo.Values(r), func(req *Requirement, _ int) v1.NodeSelectorRequirementWithMinValues {
-		return req.NodeSelectorRequirement()
-	})
+	result := make([]v1.NodeSelectorRequirementWithMinValues, 0, len(r))
+	for _, req := range r {
+		if req.gte != nil && req.lte != nil {
+			result = append(result, req.BoundedNodeSelectorRequirements()...)
+		} else {
+			result = append(result, req.NodeSelectorRequirement())
+		}
+	}
+	return result
 }
 
 // Add requirements to provided requirements. Mutates existing requirements

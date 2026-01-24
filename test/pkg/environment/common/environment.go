@@ -46,7 +46,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck,staticcheck
+	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:staticcheck
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 )
 
@@ -92,8 +92,8 @@ func NewEnvironment(t *testing.T) *Environment {
 	// Get the output dir if it's set
 	outputDir, _ := os.LookupEnv("OUTPUT_DIR")
 
-	gomega.SetDefaultEventuallyTimeout(10 * time.Minute)
-	gomega.SetDefaultEventuallyPollingInterval(1 * time.Second)
+	gomega.SetDefaultEventuallyTimeout(15 * time.Minute)
+	gomega.SetDefaultEventuallyPollingInterval(2 * time.Second)
 	return &Environment{
 		Context:               ctx,
 		cancel:                cancel,

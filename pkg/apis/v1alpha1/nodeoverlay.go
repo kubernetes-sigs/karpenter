@@ -20,37 +20,74 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// A node selector requirement is a selector that contains values, a key, an operator that relates the key and values
+// to have at least that many values.
+type NodeSelectorRequirement struct {
+	//nolint:kubeapilinter
+	// The label key that the selector applies to.
+	// +required
+	Key string `json:"key"`
+
+	// NOTE below: The code generator works strangely, and will union these
+	// enum values into the ones already defined on v1.NodeSelectorOperator
+
+	//nolint:kubeapilinter
+	// Represents a key's relationship to a set of values.
+	// Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
+	// +kubebuilder:validation:Enum:=Gte;Lte
+	// +required
+	Operator corev1.NodeSelectorOperator `json:"operator,omitempty"`
+	//nolint:kubeapilinter
+	// An array of string values. If the operator is In or NotIn,
+	// the values array must be non-empty. If the operator is Exists or DoesNotExist,
+	// the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
+	// array must have a single element, which will be interpreted as an integer.
+	// +optional
+	// +listType=atomic
+	Values []string `json:"values,omitempty"`
+}
+
+// AsNodeSelectorRequirement converts to corev1.NodeSelectorRequirement
+func (r NodeSelectorRequirement) AsNodeSelectorRequirement() corev1.NodeSelectorRequirement {
+	return corev1.NodeSelectorRequirement{Key: r.Key, Operator: r.Operator, Values: r.Values}
+}
+
 type NodeOverlaySpec struct {
+	//nolint:kubeapilinter
 	// Requirements constrain when this NodeOverlay is applied during scheduling simulations.
 	// These requirements can match:
 	// - Well-known labels (e.g., node.kubernetes.io/instance-type, karpenter.sh/nodepool)
 	// - Custom labels from NodePool's spec.template.labels
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'NotIn' must have a value defined",rule="self.all(x, x.operator == 'NotIn' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
-	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt' or 'Lt' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
+	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt', 'Lt', 'Gte' or 'Lte' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt' || x.operator == 'Gte' || x.operator == 'Lte') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
-	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
+	Requirements []NodeSelectorRequirement `json:"requirements,omitempty"`
+	//nolint:kubeapilinter
 	// PriceAdjustment specifies the price change for matching instance types. Accepts either:
 	// - A fixed price modifier (e.g., -0.5, 1.2)
-	// - A percentage modifier (e.g., +10% for increase, -15% for decrees)
+	// - A percentage modifier (e.g., +10% for increase, -15% for decrease)
 	// +kubebuilder:validation:Pattern=`^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$`
 	// +optional
 	PriceAdjustment *string `json:"priceAdjustment,omitempty"`
+	//nolint:kubeapilinter
 	// Price specifies amount for an instance types that match the specified labels. Users can override prices using a signed float representing the price override
 	// +kubebuilder:validation:Pattern=`^\d+(\.\d+)?$`
 	// +optional
 	Price *string `json:"price,omitempty"`
+	//nolint:kubeapilinter
 	// Capacity adds extended resources only, and does not replace any existing resources.
 	// These extended resources are appended to the node's existing resource list.
 	// Note: This field does not modify or override standard resources like cpu, memory, ephemeral-storage, or pods.
 	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))"
 	// +optional
-	Capacity v1.ResourceList `json:"capacity,omitempty"`
+	Capacity corev1.ResourceList `json:"capacity,omitempty"`
+	//nolint:kubeapilinter
 	// Weight defines the priority of this NodeOverlay when overriding node attributes.
 	// NodeOverlays with higher numerical weights take precedence over those with lower weights.
 	// If no weight is specified, the NodeOverlay is treated as having a weight of 0.
@@ -69,12 +106,14 @@ type NodeOverlaySpec struct {
 // +kubebuilder:printcolumn:name="Weight",type="integer",JSONPath=".spec.weight",priority=1,description=""
 // +kubebuilder:subresource:status
 type NodeOverlay struct {
-	metav1.TypeMeta   `json:",inline"`
+	metav1.TypeMeta `json:",inline"`
+	//nolint:kubeapilinter
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	//nolint:kubeapilinter
 	// +kubebuilder:validation:XValidation:message="cannot set both 'price' and 'priceAdjustment'",rule="!has(self.price) || !has(self.priceAdjustment)"
 	Spec   NodeOverlaySpec   `json:"spec"`
-	Status NodeOverlayStatus `json:"status,omitempty"`
+	Status NodeOverlayStatus `json:"status,omitempty"` //nolint:kubeapilinter
 }
 
 // +kubebuilder:object:root=true

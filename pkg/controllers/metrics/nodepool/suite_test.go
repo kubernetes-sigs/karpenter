@@ -31,6 +31,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -96,8 +97,8 @@ var _ = Describe("Metrics", func() {
 
 			for k, v := range limits {
 				m, found := FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
-					"nodepool":      nodePool.GetName(),
-					"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
+					metrics.NodePoolLabel:     nodePool.GetName(),
+					metrics.ResourceTypeLabel: strings.ReplaceAll(k.String(), "-", "_"),
 				})
 				Expect(found).To(Equal(isNodePoolManaged))
 				if isNodePoolManaged {
@@ -121,8 +122,8 @@ var _ = Describe("Metrics", func() {
 
 		for k, v := range resources {
 			m, found := FindMetricWithLabelValues("karpenter_nodepools_usage", map[string]string{
-				"nodepool":      nodePool.GetName(),
-				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
+				metrics.NodePoolLabel:     nodePool.GetName(),
+				metrics.ResourceTypeLabel: strings.ReplaceAll(k.String(), "-", "_"),
 			})
 			Expect(found).To(BeTrue())
 			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
@@ -145,7 +146,7 @@ var _ = Describe("Metrics", func() {
 
 		for _, name := range expectedMetrics {
 			_, found := FindMetricWithLabelValues(name, map[string]string{
-				"nodepool": nodePool.GetName(),
+				metrics.NodePoolLabel: nodePool.GetName(),
 			})
 			Expect(found).To(BeTrue())
 		}
@@ -155,7 +156,7 @@ var _ = Describe("Metrics", func() {
 
 		for _, name := range expectedMetrics {
 			_, found := FindMetricWithLabelValues(name, map[string]string{
-				"nodepool": nodePool.GetName(),
+				metrics.NodePoolLabel: nodePool.GetName(),
 			})
 			Expect(found).To(BeFalse())
 		}

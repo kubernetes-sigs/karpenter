@@ -68,6 +68,8 @@ func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, ins
 }
 
 // Reconcile validates that all node overlays don't have conflicting requirements
+//
+//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
@@ -91,6 +93,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			continue
 		}
 		nodePoolToInstanceTypes[nodePoolList.Items[i].Name] = its
+	}
+	if len(nodePoolToInstanceTypes) == 0 && len(nodePoolList.Items) > 0 {
+		return reconcile.Result{}, fmt.Errorf("unable to get instance types for all NodePools")
 	}
 
 	overlayList.OrderByWeight()
@@ -162,7 +167,9 @@ func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *inte
 }
 
 func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
-	overlayRequirements := scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...)
+	overlayRequirements := scheduling.NewNodeSelectorRequirements(lo.Map(overlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
+		return r.AsNodeSelectorRequirement()
+	})...)
 
 	for _, it := range its {
 		offerings := getOverlaidOfferings(nodePool, it, overlayRequirements)
@@ -185,7 +192,9 @@ func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeSt
 }
 
 func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) {
-	overlayRequirements := scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...)
+	overlayRequirements := scheduling.NewNodeSelectorRequirements(lo.Map(overlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
+		return r.AsNodeSelectorRequirement()
+	})...)
 
 	for _, it := range its {
 		offerings := getOverlaidOfferings(nodePool, it, overlayRequirements)

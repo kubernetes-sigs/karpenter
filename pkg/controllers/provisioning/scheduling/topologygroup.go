@@ -55,14 +55,17 @@ func (t TopologyType) String() string {
 // TopologyGroup is used to track pod counts that match a selector by the topology domain (e.g. SELECT COUNT(*) FROM pods GROUP BY(topology_ke
 type TopologyGroup struct {
 	// Hashed Fields
-	Key         string
-	Type        TopologyType
-	maxSkew     int32
-	minDomains  *int32
-	namespaces  sets.Set[string]
-	selector    labels.Selector
+	Key        string
+	Type       TopologyType
+	maxSkew    int32
+	minDomains *int32
+	namespaces sets.Set[string]
+	selector   labels.Selector
+
+	// NOTE: This is actually nillable since there's no API server validation to require it on affinity / TSC terms. A term without it is a no-op.
 	rawSelector *metav1.LabelSelector
 	nodeFilter  TopologyNodeFilter
+
 	// Index
 	owners       map[types.UID]struct{} // Pods that have this topology as a scheduling rule
 	domains      map[string]int32       // TODO(ellistarn) explore replacing with a minheap
@@ -144,8 +147,8 @@ func (t *TopologyGroup) Record(domains ...string) {
 
 // Counts returns true if the pod would count for the topology, given that it schedule to a node with the provided
 // requirements
-func (t *TopologyGroup) Counts(pod *corev1.Pod, taints []corev1.Taint, requirements scheduling.Requirements, compatabilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
-	return t.selects(pod) && t.nodeFilter.Matches(taints, requirements, compatabilityOptions...)
+func (t *TopologyGroup) Counts(pod *corev1.Pod, taints []corev1.Taint, requirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
+	return t.selects(pod) && t.nodeFilter.Matches(taints, requirements, compatibilityOptions...)
 }
 
 // Register ensures that the topology is aware of the given domain names.
@@ -206,13 +209,14 @@ func (t *TopologyGroup) Hash() uint64 {
 // and the API server inject an expression.
 func hashSelector(selector *metav1.LabelSelector) uint64 {
 	expressionHashes := sets.New[uint64]()
-	for i := range selector.MatchExpressions {
-		expressionHashes.Insert(lo.Must(hashstructure.Hash(selector.MatchExpressions[i], hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})))
+	var selectorHash uint64
+	if selector != nil {
+		for i := range selector.MatchExpressions {
+			expressionHashes.Insert(lo.Must(hashstructure.Hash(selector.MatchExpressions[i], hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})))
+		}
+		selectorHash = lo.Must(hashstructure.Hash(selector.MatchLabels, hashstructure.FormatV2, nil))
 	}
-	return lo.Must(hashstructure.Hash([]interface{}{
-		expressionHashes,
-		lo.Must(hashstructure.Hash(selector.MatchLabels, hashstructure.FormatV2, nil)),
-	}, hashstructure.FormatV2, nil))
+	return lo.Must(hashstructure.Hash([]interface{}{expressionHashes, selectorHash}, hashstructure.FormatV2, nil))
 }
 
 // nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.

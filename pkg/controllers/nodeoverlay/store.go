@@ -17,8 +17,6 @@ limitations under the License.
 package nodeoverlay
 
 import (
-	"errors"
-	"fmt"
 	"sync/atomic"
 
 	"github.com/samber/lo"
@@ -64,7 +62,7 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 	internalStore := lo.FromPtr(s.store.Load())
 
 	if !lo.Contains(internalStore.evaluatedNodePools.UnsortedList(), nodePoolName) {
-		return []*cloudprovider.InstanceType{}, NewUnevaluatedNodePoolError(nodePoolName)
+		return []*cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
 	}
 
 	result := make([]*cloudprovider.InstanceType, 0, len(its))
@@ -114,13 +112,13 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 }
 
 // Apply takes a node pool name and instance type, and returns a modified copy of the instance type
-// with any stored updates applied. It checks for price and capacity updates specific to the given
-// node pool and instance type, creating a deep copy of the original instance type before applying
-// any overrides. If no updates exist for the node pool or instance type, returns the original
-// instance type unchanged.
+// with any stored updates applied. It uses a selective copy-on-write strategy to minimize memory usage:
+// - Shared: Requirements and Overhead (never modified, safe to share)
+// - Selective copy: Offerings (only copied if price overlay applied)
+// - Selective copy: Capacity (only deep copied if capacity overlay applied)
 func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
-		return &cloudprovider.InstanceType{}, NewUnevaluatedNodePoolError(nodePoolName)
+		return &cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
 	}
 
 	instanceTypeList, ok := s.updates[nodePoolName]
@@ -132,19 +130,54 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 		return it, nil
 	}
 
-	overriddenInstanceType := it.DeepCopy()
-	if instanceTypeUpdate.Price != nil {
-		for _, of := range overriddenInstanceType.Offerings {
-			if overlay, ok := instanceTypeUpdate.Price[of.Requirements.String()]; ok {
-				of.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
-			}
-		}
+	// Create a shallow copy of the instance type, sharing immutable fields
+	overriddenInstanceType := &cloudprovider.InstanceType{
+		Name:         it.Name,
+		Requirements: it.Requirements, // Shared - never modified
+		Overhead:     it.Overhead,     // Shared - never modified
 	}
+
+	// Handle capacity overlay - only deep copy if we're modifying it
 	if len(lo.Keys(instanceTypeUpdate.Capacity.OverlayUpdate)) != 0 {
+		overriddenInstanceType.Capacity = it.Capacity.DeepCopy()
 		overriddenInstanceType.ApplyCapacityOverlay(instanceTypeUpdate.Capacity.OverlayUpdate)
+	} else {
+		overriddenInstanceType.Capacity = it.Capacity // Shared - not modified
+	}
+
+	// Handle offerings - copy-on-write only for offerings that need price overlay
+	if instanceTypeUpdate.Price != nil {
+		overriddenInstanceType.Offerings = s.applyPriceOverlays(it.Offerings, instanceTypeUpdate.Price)
+	} else {
+		overriddenInstanceType.Offerings = it.Offerings // Shared - not modified
 	}
 
 	return overriddenInstanceType, nil
+}
+
+// applyPriceOverlays creates a new offerings slice with selective copying:
+// - Offerings that need price overlay are copied and mutated
+// - Offerings without overlay share the original pointer
+// This minimizes allocations while ensuring each node pool has independent pricing.
+func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.Offerings, priceUpdates map[string]*priceUpdate) cloudprovider.Offerings {
+	result := make(cloudprovider.Offerings, len(offerings))
+	for i, offering := range offerings {
+		if overlay, ok := priceUpdates[offering.Requirements.String()]; ok {
+			// This offering needs modification - create a copy
+			copiedOffering := &cloudprovider.Offering{
+				Requirements:        offering.Requirements, // Shared - requirements are immutable
+				Price:               offering.Price,
+				Available:           offering.Available,
+				ReservationCapacity: offering.ReservationCapacity,
+			}
+			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
+			result[i] = copiedOffering
+		} else {
+			// Not modified - share the pointer
+			result[i] = offering
+		}
+	}
+	return result
 }
 
 // updateInstanceTypeCapacity add a new Capacity overlay update to the associated instance type.
@@ -171,8 +204,13 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 		}
 	} else {
 		for resource, quantity := range nodeOverlay.Spec.Capacity {
+			if _, foundCapacityUpdate := i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource]; foundCapacityUpdate {
+				continue
+			}
+
 			i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource] = quantity
 		}
+
 		i.updates[nodePoolName][instanceTypeName].Capacity.lowestWeightCapacityResources = nodeOverlay.Spec.Capacity
 		i.updates[nodePoolName][instanceTypeName].Capacity.lowestWeight = nodeOverlay.Spec.Weight
 	}
@@ -256,28 +294,4 @@ func (i *internalInstanceTypeStore) isOfferingUpdateConflicting(nodePoolName str
 
 func (s *InstanceTypeStore) Reset() {
 	s.store.Swap(NewInstanceTypeStore().store.Load())
-}
-
-// UnevaluatedNodePoolError is an error when the node overlay controller has not updated the instance
-// store based on the overlay in the cluster.
-type UnevaluatedNodePoolError struct {
-	nodePoolName string
-}
-
-func NewUnevaluatedNodePoolError(nodePoolName string) *UnevaluatedNodePoolError {
-	return &UnevaluatedNodePoolError{
-		nodePoolName: nodePoolName,
-	}
-}
-
-func (e *UnevaluatedNodePoolError) Error() string {
-	return fmt.Sprintf("awaiting nodeoverlay evaluation, nodepool %s", e.nodePoolName)
-}
-
-func IsUnevaluatedNodePoolError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var onatnpErr *UnevaluatedNodePoolError
-	return errors.As(err, &onatnpErr)
 }

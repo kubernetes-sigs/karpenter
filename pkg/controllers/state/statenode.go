@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -66,7 +67,7 @@ func IgnorePodBlockEvictionError(err error) error {
 	return err
 }
 
-//go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
+//go:generate go tool -modfile=../../../go.tools.mod controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
 
 // StateNodes is a typed version of a list of *Node
 // nolint: revive
@@ -199,7 +200,7 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*cor
 // ValidateNodeDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
 //
 //nolint:gocyclo
-func (in *StateNode) ValidateNodeDisruptable() error {
+func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 	if in.NodeClaim == nil {
 		return fmt.Errorf("node isn't managed by karpenter")
 	}
@@ -213,7 +214,7 @@ func (in *StateNode) ValidateNodeDisruptable() error {
 		return fmt.Errorf("node is deleting or marked for deletion")
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
-	if in.Nominated() {
+	if in.Nominated(clk) {
 		return fmt.Errorf("node is nominated for a pending pod")
 	}
 	if in.Annotations()[v1.DoNotDisruptAnnotationKey] == "true" {
@@ -428,12 +429,12 @@ func (in *StateNode) Deleted() bool {
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 
-func (in *StateNode) Nominate(ctx context.Context) {
-	in.nominatedUntil = metav1.Time{Time: time.Now().Add(nominationWindow(ctx))}
+func (in *StateNode) Nominate(ctx context.Context, clk clock.Clock) {
+	in.nominatedUntil = metav1.Time{Time: clk.Now().Add(nominationWindow(ctx))}
 }
 
-func (in *StateNode) Nominated() bool {
-	return in.nominatedUntil.After(time.Now())
+func (in *StateNode) Nominated(clk clock.Clock) bool {
+	return in.nominatedUntil.After(clk.Now())
 }
 
 func (in *StateNode) Managed() bool {

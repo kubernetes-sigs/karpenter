@@ -67,17 +67,8 @@ var _ = Describe("Integration", func() {
 				},
 			})
 			numPods := 1
-			dep = test.Deployment(test.DeploymentOptions{
-				Replicas: int32(numPods),
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{"app": "large-app"},
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("4")},
-					},
-				},
-			})
+			dep = test.Deployment(test.CreateDeploymentOptions("large-app", int32(numPods), "100m", "4",
+				test.WithLabels(map[string]string{"app": "large-app"})))
 		})
 		It("should account for LimitRange Default on daemonSet pods for resources", func() {
 			limitrange.Spec.Limits = []corev1.LimitRangeItem{
@@ -160,33 +151,16 @@ var _ = Describe("Integration", func() {
 	Describe("Utilization", Label(debug.NoWatch), Label(debug.NoEvents), func() {
 		It("should provision one pod per node", func() {
 			label := map[string]string{"app": "large-app"}
-			deployment := test.Deployment(test.DeploymentOptions{
-				Replicas: 100,
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							v1.DoNotDisruptAnnotationKey: "true",
-						},
-						Labels: label,
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU: func() resource.Quantity {
-								dsOverhead := env.GetDaemonSetOverhead(nodePool)
-								base := lo.ToPtr(resource.MustParse("1800m"))
-								base.Sub(*dsOverhead.Cpu())
-								return *base
-							}(),
-						},
-					},
-					PodAntiRequirements: []corev1.PodAffinityTerm{{
-						TopologyKey: corev1.LabelHostname,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: label,
-						},
-					}},
-				},
-			})
+			// Calculate dynamic CPU requirement
+			dsOverhead := env.GetDaemonSetOverhead(nodePool)
+			base := lo.ToPtr(resource.MustParse("1800m"))
+			base.Sub(*dsOverhead.Cpu())
+			cpuRequest := base.String()
+
+			deployment := test.Deployment(test.CreateDeploymentOptions("large-app", 100, cpuRequest, "128Mi",
+				test.WithLabels(label),
+				test.WithDoNotDisrupt(),
+				test.WithPodAntiAffinityHostname()))
 
 			env.ExpectCreated(nodeClass, nodePool, deployment)
 			env.EventuallyExpectHealthyPodCountWithTimeout(time.Minute*10, labels.SelectorFromSet(deployment.Spec.Selector.MatchLabels), int(*deployment.Spec.Replicas))
@@ -221,47 +195,58 @@ var _ = Describe("Integration", func() {
 			})
 			It("should error when a requirement references a restricted label (karpenter.sh/nodepool)", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      v1.NodePoolLabelKey,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"default"},
-					}})
+					Key:      v1.NodePoolLabelKey,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"default"},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when a requirement uses In but has no values", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when a requirement uses an unknown operator", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      v1.CapacityTypeLabelKey,
-						Operator: "within",
-						Values:   []string{v1.CapacityTypeSpot},
-					}})
+					Key:      v1.CapacityTypeLabelKey,
+					Operator: "within",
+					Values:   []string{v1.CapacityTypeSpot},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when Gt is used with multiple integer values", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpGt,
-						Values:   []string{"1000000", "2000000"},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpGt,
+					Values:   []string{"1000000", "2000000"},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when Lt is used with multiple integer values", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpLt,
-						Values:   []string{"1000000", "2000000"},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpLt,
+					Values:   []string{"1000000", "2000000"},
+				})
+				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
+			})
+			It("should error when Gte is used with multiple integer values", func() {
+				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpGte,
+					Values:   []string{"1000000", "2000000"},
+				})
+				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
+			})
+			It("should error when Lte is used with multiple integer values", func() {
+				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpLte,
+					Values:   []string{"1000000", "2000000"},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when consolidateAfter is negative", func() {
@@ -276,44 +261,36 @@ var _ = Describe("Integration", func() {
 			})
 			It("should error when minValues for a requirement key is negative", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"insance-type-1", "insance-type-2"},
-					},
+					Key:       corev1.LabelInstanceTypeStable,
+					Operator:  corev1.NodeSelectorOpIn,
+					Values:    []string{"insance-type-1", "insance-type-2"},
 					MinValues: lo.ToPtr(-1)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when minValues for a requirement key is zero", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"insance-type-1", "insance-type-2"},
-					},
+					Key:       corev1.LabelInstanceTypeStable,
+					Operator:  corev1.NodeSelectorOpIn,
+					Values:    []string{"insance-type-1", "insance-type-2"},
 					MinValues: lo.ToPtr(0)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when minValues for a requirement key is more than 50", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"insance-type-1", "insance-type-2"},
-					},
+					Key:       corev1.LabelInstanceTypeStable,
+					Operator:  corev1.NodeSelectorOpIn,
+					Values:    []string{"insance-type-1", "insance-type-2"},
 					MinValues: lo.ToPtr(51)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when minValues for a requirement key is greater than the values specified within In operator", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"insance-type-1", "insance-type-2"},
-					},
+					Key:       corev1.LabelInstanceTypeStable,
+					Operator:  corev1.NodeSelectorOpIn,
+					Values:    []string{"insance-type-1", "insance-type-2"},
 					MinValues: lo.ToPtr(3)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
@@ -333,20 +310,11 @@ var _ = Describe("Integration", func() {
 				}
 				numPods = 1
 				// Add pods with a do-not-disrupt annotation so that we can check node metadata before we disrupt
-				dep = test.Deployment(test.DeploymentOptions{
-					Replicas: int32(numPods),
-					PodOptions: test.PodOptions{
-						ObjectMeta: metav1.ObjectMeta{
-							Labels: map[string]string{
-								"app": "my-app",
-							},
-							Annotations: map[string]string{
-								v1.DoNotDisruptAnnotationKey: "true",
-							},
-						},
-						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
-					},
-				})
+				dep = test.Deployment(test.CreateDeploymentOptions("my-app", int32(numPods), "100m", "128Mi",
+					test.WithNoResourceRequests(),
+					test.WithLabels(map[string]string{"app": "my-app"}),
+					test.WithDoNotDisrupt(),
+					test.WithTerminationGracePeriod(0)))
 				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 			})
 			DescribeTable("Conditions", func(unhealthyCondition corev1.NodeCondition) {

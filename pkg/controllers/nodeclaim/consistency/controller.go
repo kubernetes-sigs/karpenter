@@ -18,7 +18,6 @@ package consistency
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -77,8 +76,12 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 	}
 }
 
+func (c *Controller) Name() string {
+	return "nodeclaim.consistency"
+}
+
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "nodeclaim.consistency")
+	ctx = injection.WithControllerName(ctx, c.Name())
 	if nodeClaim.Status.NodeName != "" {
 		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName)))
 	}
@@ -133,7 +136,7 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 			return fmt.Errorf("checking node with %T, %w", check, err)
 		}
 		for _, issue := range issues {
-			log.FromContext(ctx).Error(stderrors.New(string(issue)), "consistency error")
+			log.FromContext(ctx).Info(fmt.Sprintf("failed consistency check, %s", string(issue)))
 			c.recorder.Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
 		hasIssues = hasIssues || (len(issues) > 0)
@@ -151,7 +154,7 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("nodeclaim.consistency").
+		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Watches(
 			&corev1.Node{},

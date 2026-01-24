@@ -32,7 +32,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -98,6 +100,8 @@ func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Clien
 	return []Method{
 		// Delete any empty NodeClaims as there is zero cost in terms of disruption.
 		NewEmptiness(c),
+		// Terminate and create replacement for drifted NodeClaims in Static NodePool
+		NewStaticDrift(cluster, provisioner, cp),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 		NewDrift(kubeClient, cluster, provisioner, recorder),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
@@ -107,15 +111,19 @@ func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Clien
 	}
 }
 
+func (c *Controller) Name() string {
+	return "disruption"
+}
+
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("disruption").
+		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
-	ctx = injection.WithControllerName(ctx, "disruption")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	// this won't catch if the reconciler loop hangs forever, but it will catch other issues
 	c.logAbnormalRuns(ctx)
@@ -193,19 +201,30 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
 	// Determine the disruption action
-	cmd, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
+	cmds, err := disruption.ComputeCommands(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
-	if cmd.Decision() == NoOpDecision {
+	cmds = lo.Filter(cmds, func(c Command, _ int) bool { return c.Decision() != NoOpDecision })
+	if len(cmds) == 0 {
 		return false, nil
 	}
-	// Assign common fields to the command after creation
-	cmd.CreationTimestamp = c.clock.Now()
-	cmd.ID = uuid.New()
-	cmd.Method = disruption
-	// Attempt to disrupt
-	if err = c.queue.StartCommand(ctx, &cmd); err != nil {
+
+	errs := make([]error, len(cmds))
+	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) {
+		cmd := cmds[i]
+
+		// Assign common fields
+		cmd.CreationTimestamp = c.clock.Now()
+		cmd.ID = uuid.New()
+		cmd.Method = disruption
+
+		// Attempt to disrupt
+		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
+			errs[i] = fmt.Errorf("disrupting candidates, %w", err)
+		}
+	})
+	if err = multierr.Combine(errs...); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 	return true, nil

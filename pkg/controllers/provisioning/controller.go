@@ -57,8 +57,12 @@ func NewPodController(kubeClient client.Client, provisioner *Provisioner, cluste
 }
 
 // Reconcile the resource
+func (c *PodController) Name() string {
+	return "provisioner.trigger.pod"
+}
+
 func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "provisioner.trigger.pod") //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, c.Name()) //nolint:ineffassign,staticcheck
 
 	if !pod.IsProvisionable(p) {
 		return reconcile.Result{}, nil
@@ -75,7 +79,7 @@ func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile
 
 func (c *PodController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("provisioner.trigger.pod").
+		Named(c.Name()).
 		For(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
@@ -96,9 +100,13 @@ func NewNodeController(kubeClient client.Client, provisioner *Provisioner) *Node
 }
 
 // Reconcile the resource
+func (c *NodeController) Name() string {
+	return "provisioner.trigger.node"
+}
+
 func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.Result, error) {
 	//nolint:ineffassign
-	ctx = injection.WithControllerName(ctx, "provisioner.trigger.node") //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, c.Name()) //nolint:ineffassign,staticcheck
 
 	// If the disruption taint doesn't exist and the deletion timestamp isn't set, it's not being disrupted.
 	// We don't check the deletion timestamp here, as we expect the termination controller to eventually set
@@ -118,7 +126,7 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 
 func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("provisioner.trigger.node").
+		Named(c.Name()).
 		For(&corev1.Node{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

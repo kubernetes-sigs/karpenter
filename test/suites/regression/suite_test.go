@@ -65,11 +65,9 @@ var _ = BeforeEach(func() {
 	nodePool = env.DefaultNodePool(nodeClass)
 	if env.IsDefaultNodeClassKWOK() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-				Key:      v1alpha1.InstanceSizeLabelKey,
-				Operator: corev1.NodeSelectorOpLt,
-				Values:   []string{"32"},
-			},
+			Key:      v1alpha1.InstanceSizeLabelKey,
+			Operator: corev1.NodeSelectorOpLt,
+			Values:   []string{"32"},
 		})
 	}
 	// no limits!!! to the moon!!!

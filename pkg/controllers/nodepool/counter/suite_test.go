@@ -23,6 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -262,5 +263,171 @@ var _ = Describe("Counter", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		expected = counter.BaseResources.DeepCopy()
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
+	})
+
+	Context("Status.Nodes Field", func() {
+		It("should set Status.Nodes to zero when no nodes exist", func() {
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+			Expect(nodePool.Status.Nodes).ToNot(BeNil())
+			Expect(*nodePool.Status.Nodes).To(Equal(int64(0)))
+		})
+		It("should set Status.Nodes to 2 when two nodes exist", func() {
+			ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+			Expect(nodePool.Status.Nodes).ToNot(BeNil())
+			Expect(*nodePool.Status.Nodes).To(Equal(int64(2)))
+		})
+		It("should update Status.Nodes when nodes are added and removed", func() {
+			// Start with no nodes
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(*nodePool.Status.Nodes).To(Equal(int64(0)))
+
+			// Add first node
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(*nodePool.Status.Nodes).To(Equal(int64(1)))
+
+			// Add second node
+			ExpectApplied(ctx, env.Client, node2, nodeClaim2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(*nodePool.Status.Nodes).To(Equal(int64(2)))
+
+			// Remove first node
+			ExpectDeleted(ctx, env.Client, node, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(*nodePool.Status.Nodes).To(Equal(int64(1)))
+
+			// Remove second node
+			ExpectDeleted(ctx, env.Client, node2, nodeClaim2)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(*nodePool.Status.Nodes).To(Equal(int64(0)))
+		})
+
+		It("should handle multiple nodepools including static with different node counts", func() {
+			// Create a second nodepool
+			nodePool2 := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(2)),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool2)
+			ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool2)
+
+			// Create nodes for first nodepool
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// Create nodes for second nodepool
+			instanceType := cloudProvider.InstanceTypes[0]
+			nodeClaim3, node3 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool2.Name,
+					corev1.LabelInstanceTypeStable: instanceType.Name,
+					v1.NodeInitializedLabelKey:     "true",
+				}},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("300m"),
+					},
+				},
+			})
+			nodeClaim4, node4 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool2.Name,
+					corev1.LabelInstanceTypeStable: instanceType.Name,
+					v1.NodeInitializedLabelKey:     "true",
+				}},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("300m"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, node3, nodeClaim3, node4, nodeClaim4)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node3, node4}, []*v1.NodeClaim{nodeClaim3, nodeClaim4})
+
+			// Reconcile both nodepools
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool2)
+
+			// Verify node counts
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			nodePool2 = ExpectExists(ctx, env.Client, nodePool2)
+
+			Expect(*nodePool.Status.Nodes).To(Equal(int64(1)))  // First nodepool has 1 node
+			Expect(*nodePool2.Status.Nodes).To(Equal(int64(2))) // Second nodepool has 2 nodes
+		})
+
+		It("should handle static nodepools with replicas correctly", func() {
+			// Create a static nodepool with 3 desired replicas
+			staticNodePool := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(3)),
+				},
+			})
+			ExpectApplied(ctx, env.Client, staticNodePool)
+			ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, staticNodePool)
+
+			// Create 2 nodes for the static nodepool (less than desired replicas)
+			instanceType := cloudProvider.InstanceTypes[0]
+			staticNodeClaim1, staticNode1 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey:            staticNodePool.Name,
+					corev1.LabelInstanceTypeStable: instanceType.Name,
+					v1.NodeInitializedLabelKey:     "true",
+				}},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("300m"),
+					},
+				},
+			})
+			staticNodeClaim2, staticNode2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey:            staticNodePool.Name,
+					corev1.LabelInstanceTypeStable: instanceType.Name,
+					v1.NodeInitializedLabelKey:     "true",
+				}},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("300m"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, staticNode1, staticNodeClaim1, staticNode2, staticNodeClaim2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{staticNode1, staticNode2}, []*v1.NodeClaim{staticNodeClaim1, staticNodeClaim2})
+
+			// Reconcile the static nodepool
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, staticNodePool)
+			staticNodePool = ExpectExists(ctx, env.Client, staticNodePool)
+
+			// Verify that Status.Nodes reflects actual node count (2), not desired replicas (3)
+			Expect(staticNodePool.Status.Nodes).ToNot(BeNil())
+			Expect(*staticNodePool.Status.Nodes).To(Equal(int64(2)))
+
+			// Verify that the static nodepool has replicas set
+			Expect(staticNodePool.Spec.Replicas).ToNot(BeNil())
+			Expect(*staticNodePool.Spec.Replicas).To(Equal(int64(3)))
+		})
 	})
 })

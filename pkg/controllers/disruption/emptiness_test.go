@@ -65,8 +65,8 @@ var _ = Describe("Emptiness", func() {
 				Labels: map[string]string{
 					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: leastExpensiveSpotInstance.Name,
-					v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-					corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					v1.CapacityTypeLabelKey:        leastExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       leastExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1.NodeClaimStatus{
@@ -136,7 +136,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 10))
@@ -178,7 +178,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
@@ -219,7 +219,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
@@ -284,7 +284,7 @@ var _ = Describe("Emptiness", func() {
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
+					metrics.NodePoolLabel: np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 2))
@@ -349,7 +349,7 @@ var _ = Describe("Emptiness", func() {
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
+					metrics.NodePoolLabel: np.Name,
 				})
 				Expect(found).To(BeTrue())
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
@@ -751,5 +751,55 @@ var _ = Describe("Emptiness", func() {
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
+	})
+	Context("Static NodePool", func() {
+		It("should not consolidate static NodePool nodes", func() {
+			staticNp := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas:   lo.ToPtr(int64(2)), // Static nodepool with 2 desired replica
+					Disruption: v1.Disruption{},
+				},
+			})
+
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:        staticNp.Name,
+						v1.NodeInitializedLabelKey: "true",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10"),
+						corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						corev1.ResourcePods:   resource.MustParse("2"),
+					},
+				},
+			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			emptyConsolidation := disruption.NewEmptiness(c)
+			singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c)
+			multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c)
+
+			ExpectApplied(ctx, env.Client, staticNp, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			Expect(err).To(Succeed())
+			Expect(candidates).To(HaveLen(0))
+
+			candidates, err = disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
+			Expect(err).To(Succeed())
+			Expect(candidates).To(HaveLen(0))
+
+			candidates, err = disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
+			Expect(err).To(Succeed())
+			Expect(candidates).To(HaveLen(0))
+		})
 	})
 })

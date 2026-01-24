@@ -23,9 +23,9 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [Bizfly Cloud](https://github.com/bizflycloud/karpenter-provider-bizflycloud)
 - [Cluster API](https://github.com/kubernetes-sigs/karpenter-provider-cluster-api)
 - [GCP](https://github.com/cloudpilot-ai/karpenter-provider-gcp)
-- [IBM Cloud](https://github.com/pfeifferj/karpenter-provider-ibm-cloud)
+- [IBM Cloud](https://github.com/kubernetes-sigs/karpenter-provider-ibm-cloud)
 - [Proxmox](https://github.com/sergelogvinov/karpenter-provider-proxmox)
-- [Oracle Cloud Infrastructure (OCI)](https://github.com/zoom/karpenter-oci)
+- [Oracle Cloud Infrastructure (OCI) - Provided by Zoom](https://github.com/zoom/karpenter-oci)
 
 ## Community, discussion, contribution, and support
 
@@ -40,10 +40,10 @@ Bi-weekly meetings alternating between Thursdays @ 9:00 PT ([convert to your tim
 Weekly meetings alternating between repositories and time slots. Please check the calendar invite for specific dates:
 
 **kubernetes-sigs/karpenter**:
-- Alternating Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and @ 15:00 PT [convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle) monthly
+- Alternating Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and @ 15:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle)) monthly
 
 **aws/karpenter-provider-aws**:
-- Alternating Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and @ 15:00 PT [convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle) monthly
+- Alternating Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and @ 15:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle)) monthly
 
 #### Meeting Resources
 - **Zoom Link**: [Join Meeting](https://zoom.us/j/95618088729) (password: 77777)
@@ -61,6 +61,7 @@ See also our [contributor guide](CONTRIBUTING.md) and the Kubernetes [community 
 Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
 
 ## Talks
+- 04/03/2025 [Automating Kubernetes Cluster Updates: Achieving Zero Downtime Effortlessly @ KubeCon](https://youtu.be/rAIcQvKBuZA?si=UZhNqwjPCIybHCvW)
 - 09/08/2022 [Workload Consolidation with Karpenter](https://youtu.be/BnksdJ3oOEs)
 - 05/19/2022 [Scaling K8s Nodes Without Breaking the Bank or Your Sanity](https://www.youtube.com/watch?v=UBb8wbfSc34)
 - 03/25/2022 [Karpenter @ AWS Community Day 2022](https://youtu.be/sxDtmzbNHwE?t=3931)

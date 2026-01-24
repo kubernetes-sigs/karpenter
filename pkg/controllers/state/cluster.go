@@ -262,7 +262,7 @@ func (c *Cluster) IsNodeNominated(providerID string) bool {
 	defer c.mu.RUnlock()
 
 	if n, ok := c.nodes[providerID]; ok {
-		return n.Nominated()
+		return n.Nominated(c.clock)
 	}
 	return false
 }
@@ -273,7 +273,7 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	defer c.mu.Unlock()
 
 	if n, ok := c.nodes[providerID]; ok {
-		n.Nominate(ctx) // extends nomination window if already nominated
+		n.Nominate(ctx, c.clock) // extends nomination window if already nominated
 	}
 }
 
@@ -571,6 +571,8 @@ func (c *Cluster) NodePoolResourcesFor(nodePoolName string) corev1.ResourceList 
 
 // Reset the cluster state for unit testing
 func (c *Cluster) Reset() {
+	c.unsyncedTimeMu.Lock()
+	defer c.unsyncedTimeMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clusterState = time.Time{}
@@ -580,7 +582,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
-	c.NodePoolState = NewNodePoolState()
+	c.NodePoolState.Reset()
 	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
@@ -588,6 +590,13 @@ func (c *Cluster) Reset() {
 	c.podAcks = sync.Map{}
 	c.podsSchedulingAttempted = sync.Map{}
 	c.podsSchedulableTimes = sync.Map{}
+}
+
+// sets the cluster to be synced or unsynced for unit testing
+func (c *Cluster) SetSynced(state bool) {
+	c.unsyncedTimeMu.Lock()
+	defer c.unsyncedTimeMu.Unlock()
+	c.hasSynced.Store(state)
 }
 
 func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *corev1.Pod {
@@ -896,4 +905,9 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
+}
+
+// HasSynced returns whether the cluster state has been synchronized at least once.
+func (c *Cluster) HasSynced() bool {
+	return c.hasSynced.Load()
 }

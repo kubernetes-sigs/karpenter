@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -130,7 +131,16 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	}
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
+	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
+	// This ensures NodeClaim is created in the correct zone for volumes,
+	// while TSC counting uses pod's original affinity.
+	if err := addVolumeRequirements(nodeClaimRequirements, podData.VolumeRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
+		return nil, nil, nil, err
+	}
+
 	// Check Topology Requirements
+	// NOTE: podData.StrictRequirements does NOT include volume requirements,
+	// ensuring TSC counting uses pod's original affinity.
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
 		return nil, nil, nil, err
@@ -446,4 +456,17 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 
 func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList) bool {
 	return resources.Fits(requests, instanceType.Allocatable())
+}
+
+// addVolumeRequirements adds volume topology requirements to nodeRequirements after checking compatibility.
+// This catches cases like a PV with hostname affinity to a specific node that conflicts with the NodeClaim.
+func addVolumeRequirements(nodeRequirements scheduling.Requirements, volumeRequirements scheduling.Requirements, opts ...option.Function[scheduling.CompatibilityOptions]) error {
+	if len(volumeRequirements) == 0 {
+		return nil
+	}
+	if err := nodeRequirements.Compatible(volumeRequirements, opts...); err != nil {
+		return fmt.Errorf("incompatible volume requirements, %w", err)
+	}
+	nodeRequirements.Add(volumeRequirements.Values()...)
+	return nil
 }

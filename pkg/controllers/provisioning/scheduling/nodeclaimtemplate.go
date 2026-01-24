@@ -51,15 +51,17 @@ type NodeClaimTemplate struct {
 	NodePoolWeight      int32
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
+	IsStaticNodeClaim   bool
 }
 
 func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
-		NodeClaim:      *nodePool.Spec.Template.ToNodeClaim(),
-		NodePoolName:   nodePool.Name,
-		NodePoolUUID:   nodePool.UID,
-		NodePoolWeight: lo.FromPtr(nodePool.Spec.Weight),
-		Requirements:   scheduling.NewRequirements(),
+		NodeClaim:         *nodePool.Spec.Template.ToNodeClaim(),
+		NodePoolName:      nodePool.Name,
+		NodePoolUUID:      nodePool.UID,
+		NodePoolWeight:    lo.FromPtr(nodePool.Spec.Weight),
+		Requirements:      scheduling.NewRequirements(),
+		IsStaticNodeClaim: nodePool.Spec.Replicas != nil,
 	}
 	nct.Annotations = lo.Assign(nct.Annotations, map[string]string{
 		v1.NodePoolHashAnnotationKey:        nodePool.Hash(),
@@ -75,20 +77,35 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
-	// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
-	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
-	i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
-		return i.Name
-	})...))
-	if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {
-		i.Annotations = lo.Assign(i.Annotations, map[string]string{
-			v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
-		})
-	}
-	if foundCapacityOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); foundCapacityOverlay {
-		i.Annotations = lo.Assign(i.Annotations, map[string]string{
-			v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
-		})
+	// Inject instanceType requirements for NodeClaims belonging to dynamic NodePool
+	// For static we let cloudprovider.Create()
+	if !i.IsStaticNodeClaim {
+		// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
+		instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
+		i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
+			return i.Name
+		})...))
+
+		// Collect available capacity types from the selected instance types
+		capacityTypes := lo.Uniq(lo.FlatMap(instanceTypes, func(it *cloudprovider.InstanceType, _ int) []string {
+			return lo.Map(it.Offerings.Available().Compatible(i.Requirements), func(o *cloudprovider.Offering, _ int) string {
+				return o.CapacityType()
+			})
+		}))
+		if len(capacityTypes) > 0 {
+			i.Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityTypes...))
+		}
+
+		if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {
+			i.Annotations = lo.Assign(i.Annotations, map[string]string{
+				v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
+			})
+		}
+		if foundCapacityOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); foundCapacityOverlay {
+			i.Annotations = lo.Assign(i.Annotations, map[string]string{
+				v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
+			})
+		}
 	}
 
 	nc := &v1.NodeClaim{

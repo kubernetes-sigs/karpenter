@@ -434,11 +434,9 @@ var _ = Describe("Provisioning", func() {
 					Spec: v1.NodeClaimTemplateSpec{
 						Requirements: []v1.NodeSelectorRequirementWithMinValues{
 							{
-								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-									Key:      corev1.LabelInstanceTypeStable,
-									Operator: corev1.NodeSelectorOpIn,
-									Values:   []string{"single-pod-instance-type"},
-								},
+								Key:      corev1.LabelInstanceTypeStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"single-pod-instance-type"},
 							},
 						},
 					},
@@ -679,6 +677,61 @@ var _ = Describe("Provisioning", func() {
 		ExpectResources(corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("11"),
 			corev1.ResourceMemory: resource.MustParse("5Gi"),
+		}, node.Status.Capacity)
+	})
+	It("should schedule based on the pod level resources requests", func() {
+		if env.Version.Minor() < 34 {
+			Skip("Pod level resources is only on by default starting in K8s version >= 1.34.x")
+		}
+
+		ExpectApplied(ctx, env.Client, test.NodePool())
+
+		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
+		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+		})
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			PodResourceRequirements: corev1.ResourceRequirements{
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10"), corev1.ResourceMemory: resource.MustParse("4Gi")},
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("9.9"), corev1.ResourceMemory: resource.MustParse("3.9Gi")},
+			},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5"), corev1.ResourceMemory: resource.MustParse("1Gi")},
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5"), corev1.ResourceMemory: resource.MustParse("1Gi")},
+			},
+			InitContainers: []corev1.Container{
+				{
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+					},
+				},
+				{
+					RestartPolicy: lo.ToPtr(corev1.ContainerRestartPolicyAlways),
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+					},
+				},
+			},
+		})
+
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10"),
+			corev1.ResourceMemory: resource.MustParse("4Gi"),
 		}, node.Status.Capacity)
 	})
 
@@ -1345,12 +1398,12 @@ var _ = Describe("Provisioning", func() {
 						},
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
-								{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key-2", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value-2"}}},
-								{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key-3", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-value-3"}}},
-								{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key-4", Operator: corev1.NodeSelectorOpLt, Values: []string{"4"}}},
-								{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key-5", Operator: corev1.NodeSelectorOpGt, Values: []string{"5"}}},
-								{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key-6", Operator: corev1.NodeSelectorOpExists}},
-								{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key-7", Operator: corev1.NodeSelectorOpDoesNotExist}},
+								{Key: "test-key-2", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value-2"}},
+								{Key: "test-key-3", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-value-3"}},
+								{Key: "test-key-4", Operator: corev1.NodeSelectorOpLt, Values: []string{"4"}},
+								{Key: "test-key-5", Operator: corev1.NodeSelectorOpGt, Values: []string{"5"}},
+								{Key: "test-key-6", Operator: corev1.NodeSelectorOpExists},
+								{Key: "test-key-7", Operator: corev1.NodeSelectorOpDoesNotExist},
 							},
 						},
 					},
@@ -1493,18 +1546,14 @@ var _ = Describe("Provisioning", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      "custom-requirement-key",
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"value"},
-									},
+									Key:      "custom-requirement-key",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"value"},
 								},
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      "custom-requirement-key2",
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"value"},
-									},
+									Key:      "custom-requirement-key2",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"value"},
 								},
 							},
 						},
@@ -1547,11 +1596,9 @@ var _ = Describe("Provisioning", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      corev1.LabelArchStable,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"arm64"},
-									},
+									Key:      corev1.LabelArchStable,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"arm64"},
 								},
 							},
 						},
@@ -1586,11 +1633,9 @@ var _ = Describe("Provisioning", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
-									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-										Key:      corev1.LabelOSStable,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"ios"},
-									},
+									Key:      corev1.LabelOSStable,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"ios"},
 								},
 							},
 						},
@@ -2152,7 +2197,7 @@ var _ = Describe("Provisioning", func() {
 					Spec: v1.NodePoolSpec{
 						Template: v1.NodeClaimTemplate{
 							Spec: v1.NodeClaimTemplateSpec{
-								Requirements: []v1.NodeSelectorRequirementWithMinValues{{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}},
+								Requirements: []v1.NodeSelectorRequirementWithMinValues{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}},
 							},
 						},
 					},
@@ -2228,7 +2273,7 @@ var _ = Describe("Provisioning", func() {
 					Spec: v1.NodePoolSpec{
 						Template: v1.NodeClaimTemplate{
 							Spec: v1.NodeClaimTemplateSpec{
-								Requirements: []v1.NodeSelectorRequirementWithMinValues{{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}},
+								Requirements: []v1.NodeSelectorRequirementWithMinValues{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}},
 							},
 						},
 					},
@@ -2564,6 +2609,7 @@ var _ = Describe("Provisioning", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(nodePool.Name))
 		})
+
 		Context("Weighted NodePools", func() {
 			It("should schedule to the nodepool with the highest priority always", func() {
 				nodePools := []client.Object{
@@ -2597,6 +2643,35 @@ var _ = Describe("Provisioning", func() {
 		})
 	})
 
+	Context("StaticNodePool", func() {
+		It("should not create NodeClaims for StaticNodePool", func() {
+			ExpectApplied(ctx, env.Client, test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(2)),
+				}},
+			))
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+
+		It("should still provision dynamic NodeClaims when there are both Static and Dynamic NodePools", func() {
+			// Should contain both static and dynamic node pool
+			targetedNodePool := test.NodePool()
+			staticNodePool := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(1)),
+				}})
+			ExpectApplied(ctx, env.Client, targetedNodePool, staticNodePool)
+
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(staticNodePool.Name))
+			Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
+		})
+	})
+
 	Context("MinValuesPolicy", func() {
 		AfterEach(func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyStrict)}))
@@ -2614,11 +2689,10 @@ var _ = Describe("Provisioning", func() {
 							Spec: v1.NodeClaimTemplateSpec{
 								Requirements: []v1.NodeSelectorRequirementWithMinValues{
 									{
-										NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-											Key:      corev1.LabelInstanceTypeStable,
-											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
-										},
+										Key:      corev1.LabelInstanceTypeStable,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+
 										MinValues: lo.ToPtr(3),
 									},
 								},
@@ -2752,11 +2826,10 @@ var _ = Describe("Provisioning", func() {
 					})
 					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
 						v1.NodeSelectorRequirementWithMinValues{
-							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-								Key:      corev1.LabelInstanceTypeStable,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{"instance-type-1", "instance-type-2"},
-							},
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"instance-type-1", "instance-type-2"},
+
 							MinValues: lo.ToPtr(2),
 						}))
 				})
@@ -2809,11 +2882,9 @@ var _ = Describe("Provisioning", func() {
 								Spec: v1.NodeClaimTemplateSpec{
 									Requirements: []v1.NodeSelectorRequirementWithMinValues{
 										{
-											NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-												Key:      corev1.LabelInstanceTypeStable,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
-											},
+											Key:      corev1.LabelInstanceTypeStable,
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
 										},
 									},
 								},
@@ -2838,11 +2909,10 @@ var _ = Describe("Provisioning", func() {
 					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(defaultNodePool.Name))
 					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
 						v1.NodeSelectorRequirementWithMinValues{
-							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-								Key:      corev1.LabelInstanceTypeStable,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{"instance-type-1", "instance-type-2"},
-							},
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"instance-type-1", "instance-type-2"},
+
 							MinValues: lo.ToPtr(2),
 						}))
 				})
@@ -2895,11 +2965,10 @@ var _ = Describe("Provisioning", func() {
 								Spec: v1.NodeClaimTemplateSpec{
 									Requirements: []v1.NodeSelectorRequirementWithMinValues{
 										{
-											NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-												Key:      corev1.LabelInstanceTypeStable,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
-											},
+											Key:      corev1.LabelInstanceTypeStable,
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+
 											MinValues: lo.ToPtr(3),
 										},
 									},
@@ -2932,11 +3001,10 @@ var _ = Describe("Provisioning", func() {
 					})
 					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
 						v1.NodeSelectorRequirementWithMinValues{
-							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-								Key:      corev1.LabelInstanceTypeStable,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{"instance-type-1", "instance-type-2"},
-							},
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"instance-type-1", "instance-type-2"},
+
 							MinValues: lo.ToPtr(2),
 						}))
 				})
@@ -2954,11 +3022,10 @@ var _ = Describe("Provisioning", func() {
 							Spec: v1.NodeClaimTemplateSpec{
 								Requirements: []v1.NodeSelectorRequirementWithMinValues{
 									{
-										NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-											Key:      corev1.LabelTopologyZone,
-											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
-										},
+										Key:      corev1.LabelTopologyZone,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+
 										MinValues: lo.ToPtr(3),
 									},
 								},
@@ -3067,11 +3134,10 @@ var _ = Describe("Provisioning", func() {
 					})
 					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
 						v1.NodeSelectorRequirementWithMinValues{
-							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-								Key:      corev1.LabelTopologyZone,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
-							},
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+
 							MinValues: lo.ToPtr(2),
 						}))
 				})
@@ -3090,19 +3156,17 @@ var _ = Describe("Provisioning", func() {
 							Spec: v1.NodeClaimTemplateSpec{
 								Requirements: []v1.NodeSelectorRequirementWithMinValues{
 									{
-										NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-											Key:      corev1.LabelInstanceTypeStable,
-											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
-										},
+										Key:      corev1.LabelInstanceTypeStable,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+
 										MinValues: lo.ToPtr(3),
 									},
 									{
-										NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-											Key:      corev1.LabelTopologyZone,
-											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
-										},
+										Key:      corev1.LabelTopologyZone,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+
 										MinValues: lo.ToPtr(3),
 									},
 								},
@@ -3160,19 +3224,17 @@ var _ = Describe("Provisioning", func() {
 					Expect(nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
 					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
 						v1.NodeSelectorRequirementWithMinValues{
-							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-								Key:      corev1.LabelInstanceTypeStable,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{"instance-type-1"},
-							},
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"instance-type-1"},
+
 							MinValues: lo.ToPtr(1),
 						},
 						v1.NodeSelectorRequirementWithMinValues{
-							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-								Key:      corev1.LabelTopologyZone,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
-							},
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+
 							MinValues: lo.ToPtr(2),
 						}))
 
@@ -3191,7 +3253,7 @@ func ExpectNodeClaimRequirements(nodeClaim *v1.NodeClaim, requirements ...corev1
 	GinkgoHelper()
 	for _, requirement := range requirements {
 		req, ok := lo.Find(nodeClaim.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues) bool {
-			return r.Key == requirement.Key && r.Operator == requirement.Operator
+			return r.Key == requirement.Key && string(r.Operator) == string(requirement.Operator)
 		})
 		Expect(ok).To(BeTrue())
 
