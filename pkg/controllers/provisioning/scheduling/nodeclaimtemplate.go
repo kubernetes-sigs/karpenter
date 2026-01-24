@@ -114,13 +114,10 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 		}
 	}
 
-	// Filter out DaemonSet scheduling-only requirements for the actual NodeClaim
-	requirements := scheduling.NewRequirements()
-	for key, req := range i.Requirements {
-		if key != v1.NodeRegisteredLabelKey && key != v1.NodeInitializedLabelKey {
-			requirements.Add(req)
-		}
-	}
+	// Exclude node lifecycle requirements used only for scheduling simulation.
+	requirements := scheduling.NewRequirements(lo.Filter(i.Requirements.Values(), func(req *scheduling.Requirement, _ int) bool {
+		return req.Key != v1.NodeRegisteredLabelKey && req.Key != v1.NodeInitializedLabelKey
+	})...)
 
 	nc := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
