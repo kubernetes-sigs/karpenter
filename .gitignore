@@ -15,3 +15,8 @@ bin/
 .vscode
 .DS_Store
 .kiro
+
+# Vim swap files
+*.swp
+*.swo
+*~
