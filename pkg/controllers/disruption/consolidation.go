@@ -327,7 +327,7 @@ func getCandidatePrices(candidates []*Candidate) float64 {
 	var price float64
 	for _, c := range candidates {
 		// Handle test commands or candidates without instance type info
-		if c.instanceType == nil {
+		if c == nil || c.instanceType == nil {
 			return 0.0
 		}
 		reqs := scheduling.NewLabelRequirements(c.Labels())
