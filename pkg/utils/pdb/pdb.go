@@ -20,12 +20,14 @@ import (
 	"context"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -48,6 +50,11 @@ func NewLimits(ctx context.Context, kubeClient client.Client) (Limits, error) {
 		return nil, err
 	}
 	for _, pdb := range pdbList.Items {
+		// explicitly ignore PDBs with the disruption-ignore annotation
+		if pdb.Annotations[v1.DisruptionIgnoreAnnotationKey] == "true" {
+			continue
+		}
+
 		pi, err := newPdb(pdb)
 		if err != nil {
 			return nil, err
