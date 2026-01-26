@@ -215,9 +215,13 @@ func (c Command) String() string {
 	return fmt.Sprintf("%s/%s: %s: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, c.EstimatedSavings())
 }
 
-// StringForNode returns a string representation of the command from the perspective of a single candidate node.
+// StringForNode returns a string representation of the command from the perspective of a single source candidate node.
 // For single-node commands, returns the full command string. For multi-node commands, returns a per-node
 // string with context to avoid listing all nodes.
+//
+// Note: This method only works for source nodes (Candidates being removed). Consolidation destinations can be
+// either new nodes (Replacements) or existing nodes (ExistingNodes in scheduling.Results), but only Replacements
+// are tracked in the Command. Events are currently only emitted for source nodes, not destinations.
 func (c Command) StringForNode(candidate *Candidate) string {
 	if len(c.Candidates) == 1 {
 		return c.String()
