@@ -43,7 +43,7 @@ type capacityUpdate struct {
 type instanceTypeUpdate struct {
 	Price               map[string]*priceUpdate
 	Capacity            *capacityUpdate
-	OverlayRequirements scheduling.Requirements     // Custom label requirements from the overlay
+	overlayRequirements scheduling.Requirements     // Custom label requirements from the overlay
 	cachedVariant       *cloudprovider.InstanceType // Pre-computed variant to avoid allocations in applyAll
 }
 type InstanceTypeStore struct {
@@ -82,6 +82,10 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 	return result, nil
 }
 
+// Apply returns a single instance type with overlays applied. This method is intended for
+// use cases where only one variant is needed, such as drift detection on existing nodes.
+// For scheduling, use ApplyAll instead which returns all variants including those with
+// custom label requirements.
 func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
 
@@ -124,7 +128,7 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 // - The overlay's price/capacity modifications
 // - The overlay's custom label requirements added to the instance type's requirements
 // This ensures that pods targeting specific overlay values only match the appropriate variant.
-// When overlays have custom label requirements, the base instance type is ALSO returned so that
+// When overlays have custom label requirements, the base instance type is also returned so that
 // pods without those specific requirements can still schedule.
 func (s *internalInstanceTypeStore) applyAll(nodePoolName string, it *cloudprovider.InstanceType) []*cloudprovider.InstanceType {
 	if !s.evaluatedNodePools.Has(nodePoolName) {
@@ -159,7 +163,7 @@ func (s *internalInstanceTypeStore) applyAll(nodePoolName string, it *cloudprovi
 		}
 		results = append(results, variant)
 
-		if len(update.OverlayRequirements) > 0 {
+		if len(update.overlayRequirements) > 0 {
 			hasCustomLabelVariant = true
 		}
 	}
@@ -187,9 +191,9 @@ func (s *internalInstanceTypeStore) applyVariant(it *cloudprovider.InstanceType,
 	}
 
 	// Add overlay's custom label requirements to the instance type's requirements
-	if len(update.OverlayRequirements) > 0 {
+	if len(update.overlayRequirements) > 0 {
 		newReqs := scheduling.NewRequirements(it.Requirements.Values()...)
-		newReqs.Add(update.OverlayRequirements.Values()...)
+		newReqs.Add(update.overlayRequirements.Values()...)
 		overriddenInstanceType.Requirements = newReqs
 	} else {
 		overriddenInstanceType.Requirements = it.Requirements // Shared - not modified
@@ -359,29 +363,29 @@ func (i *internalInstanceTypeStore) ensureVariant(nodePoolName, instanceTypeName
 		i.updates[nodePoolName][instanceTypeName] = map[string]*instanceTypeUpdate{}
 	}
 	if _, ok := i.updates[nodePoolName][instanceTypeName][variantKey]; !ok {
-		// Extract only custom label requirements (non-well-known labels) for the variant
 		customLabelReqs := scheduling.NewRequirements()
 		for key, req := range overlayReqs {
-			if !v1.WellKnownLabels.Has(key) {
-				customLabelReqs.Add(req)
+			if v1.WellKnownLabels.Has(key) {
+				continue
 			}
+			customLabelReqs.Add(req)
 		}
 		i.updates[nodePoolName][instanceTypeName][variantKey] = &instanceTypeUpdate{
 			Price:               map[string]*priceUpdate{},
 			Capacity:            &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
-			OverlayRequirements: customLabelReqs,
+			overlayRequirements: customLabelReqs,
 		}
 	}
 }
 
 // getVariantKey creates a unique key for an overlay based on its custom label requirements
 func getVariantKey(overlayReqs scheduling.Requirements) string {
-	// Extract only custom labels (non-well-known labels) to create the variant key
 	customLabels := scheduling.NewRequirements()
 	for key, req := range overlayReqs {
-		if !v1.WellKnownLabels.Has(key) {
-			customLabels.Add(req)
+		if v1.WellKnownLabels.Has(key) {
+			continue
 		}
+		customLabels.Add(req)
 	}
 	return customLabels.String()
 }
@@ -411,10 +415,9 @@ func (i *internalInstanceTypeStore) FinalizeCache(nodePoolToInstanceTypes map[st
 			hasCustomLabelVariant := false
 
 			for _, update := range variantUpdates {
-				// Pre-compute and cache the variant
 				update.cachedVariant = i.applyVariant(it, update)
 				results = append(results, update.cachedVariant)
-				if len(update.OverlayRequirements) > 0 {
+				if len(update.overlayRequirements) > 0 {
 					hasCustomLabelVariant = true
 				}
 			}
