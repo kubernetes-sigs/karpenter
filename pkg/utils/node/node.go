@@ -159,7 +159,7 @@ func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client
 	}
 
 	return lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return pdbs.IsCurrentlyReschedulable(ctx, kubeClient, p)
+		return pdbs.IsCurrentlyReschedulable(p)
 	}), nil
 }
 

@@ -68,9 +68,9 @@ func NewLimits(ctx context.Context, kubeClient client.Client) (Limits, error) {
 // CanEvictPods returns true if every pod in the list is evictable. They may not all be evictable simultaneously, but
 // for every PDB that controls the pods at least one pod can be evicted.
 // nolint:gocyclo
-func (l Limits) CanEvictPods(ctx context.Context, kubeClient client.Client, pods []*v1.Pod) ([]client.ObjectKey, bool) {
+func (l Limits) CanEvictPods(pods []*corev1.Pod) ([]client.ObjectKey, bool) {
 	for _, pod := range pods {
-		pdbs, evictable := l.isEvictable(ctx, kubeClient, pod, zeroDisruptions, pods)
+		pdbs, evictable := l.isEvictable(pod, zeroDisruptions)
 
 		if !evictable {
 			return pdbs, false
@@ -80,9 +80,8 @@ func (l Limits) CanEvictPods(ctx context.Context, kubeClient client.Client, pods
 }
 
 // isFullyBlocked returns true if the given pod is fully blocked by a PDB.
-func (l Limits) isFullyBlocked(ctx context.Context, kubeClient client.Client, pod *v1.Pod) ([]client.ObjectKey, bool) {
-	// For isFullyBlocked, we only need to check the specific pod, so we pass a single-item slice
-	pdbs, evictable := l.isEvictable(ctx, kubeClient, pod, fullyBlockingPDBs, []*v1.Pod{pod})
+func (l Limits) isFullyBlocked(pod *corev1.Pod) ([]client.ObjectKey, bool) {
+	pdbs, evictable := l.isEvictable(pod, fullyBlockingPDBs)
 
 	if !evictable {
 		return pdbs, true
@@ -91,7 +90,7 @@ func (l Limits) isFullyBlocked(ctx context.Context, kubeClient client.Client, po
 }
 
 // nolint:gocyclo
-func (l Limits) isEvictable(ctx context.Context, kubeClient client.Client, pod *v1.Pod, evictionBlocker evictionBlocker, allPods []*v1.Pod) ([]client.ObjectKey, bool) {
+func (l Limits) isEvictable(pod *corev1.Pod, evictionBlocker evictionBlocker) ([]client.ObjectKey, bool) {
 	// If the pod isn't eligible for being evicted, then the predicate doesn't matter
 	// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
 	if !podutil.IsEvictable(pod) {
@@ -115,7 +114,7 @@ func (l Limits) isEvictable(ctx context.Context, kubeClient client.Client, pod *
 		// evicting unhealthy pods
 		if pdb.canAlwaysEvictUnhealthyPods {
 			for _, c := range pod.Status.Conditions {
-				if c.Type == v1.PodReady && c.Status == v1.ConditionFalse {
+				if c.Type == corev1.PodReady && c.Status == corev1.ConditionFalse {
 					return []client.ObjectKey{}, true
 				}
 			}
@@ -124,17 +123,6 @@ func (l Limits) isEvictable(ctx context.Context, kubeClient client.Client, pod *
 		switch evictionBlocker {
 		case zeroDisruptions:
 			if pdb.disruptionsAllowed == 0 {
-				// Count how many pods match this PDB selector across the entire cluster
-				var podList v1.PodList
-				if err := kubeClient.List(ctx, &podList, client.InNamespace(pdb.key.Namespace)); err == nil {
-					matchingPodCount := lo.CountBy(podList.Items, func(p v1.Pod) bool {
-						return pdb.selector.Matches(labels.Set(p.Labels))
-					})
-					// If there's only a single replica matching this PDB, allow eviction even if disruptionsAllowed == 0
-					if matchingPodCount == 1 {
-						return []client.ObjectKey{}, true
-					}
-				}
 				return []client.ObjectKey{pdb.key}, false
 			}
 		case fullyBlockingPDBs:
@@ -152,10 +140,10 @@ func (l Limits) isEvictable(ctx context.Context, kubeClient client.Client, pod *
 // - Does not have fully blocking PDBs which would prevent the pod from being evicted
 // The way this is different from IsReschedulable is that this also considers non-permanent conditions which prevent a pod from being rescheduled
 // to a different node like the "do-not-disrupt" annotation or fully blocking PDBs.
-func (l Limits) IsCurrentlyReschedulable(ctx context.Context, kubeClient client.Client, pod *v1.Pod) bool {
+func (l Limits) IsCurrentlyReschedulable(pod *corev1.Pod) bool {
 	// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
 	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until these pods are evicted is wasteful.
-	_, isFullyBlocked := l.isFullyBlocked(ctx, kubeClient, pod)
+	_, isFullyBlocked := l.isFullyBlocked(pod)
 
 	return podutil.IsReschedulable(pod) &&
 		!podutil.HasDoNotDisrupt(pod) &&
