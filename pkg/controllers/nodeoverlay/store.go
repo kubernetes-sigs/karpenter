@@ -43,7 +43,8 @@ type capacityUpdate struct {
 type instanceTypeUpdate struct {
 	Price               map[string]*priceUpdate
 	Capacity            *capacityUpdate
-	OverlayRequirements scheduling.Requirements // Custom label requirements from the overlay
+	OverlayRequirements scheduling.Requirements     // Custom label requirements from the overlay
+	cachedVariant       *cloudprovider.InstanceType // Pre-computed variant to avoid allocations in applyAll
 }
 type InstanceTypeStore struct {
 	store atomic.Pointer[internalInstanceTypeStore]
@@ -64,7 +65,7 @@ func (s *InstanceTypeStore) UpdateStore(updatedStore *internalInstanceTypeStore)
 func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
 
-	if !lo.Contains(internalStore.evaluatedNodePools.UnsortedList(), nodePoolName) {
+	if !internalStore.evaluatedNodePools.Has(nodePoolName) {
 		return []*cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
 	}
 
@@ -106,12 +107,14 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 type internalInstanceTypeStore struct {
 	updates            map[string]map[string]map[string]*instanceTypeUpdate // nodePoolName -> instanceName -> variantKey -> updates
 	evaluatedNodePools sets.Set[string]                                     // The set of NodePools that were evaluated to construct this InstanceTypeStore instance
+	cachedResults      map[string]map[string][]*cloudprovider.InstanceType  // nodePoolName -> instanceName -> cached result slice
 }
 
 func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 	return &internalInstanceTypeStore{
 		updates:            map[string]map[string]map[string]*instanceTypeUpdate{},
 		evaluatedNodePools: sets.Set[string]{},
+		cachedResults:      map[string]map[string][]*cloudprovider.InstanceType{},
 	}
 }
 
@@ -124,8 +127,14 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 // When overlays have custom label requirements, the base instance type is ALSO returned so that
 // pods without those specific requirements can still schedule.
 func (s *internalInstanceTypeStore) applyAll(nodePoolName string, it *cloudprovider.InstanceType) []*cloudprovider.InstanceType {
-	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
+	if !s.evaluatedNodePools.Has(nodePoolName) {
 		return []*cloudprovider.InstanceType{it}
+	}
+
+	if cachedNodePool, ok := s.cachedResults[nodePoolName]; ok {
+		if cached, ok := cachedNodePool[it.Name]; ok {
+			return cached
+		}
 	}
 
 	instanceVariants, ok := s.updates[nodePoolName]
@@ -141,9 +150,15 @@ func (s *internalInstanceTypeStore) applyAll(nodePoolName string, it *cloudprovi
 	hasCustomLabelVariant := false
 
 	for _, update := range variantUpdates {
-		variant := s.applyVariant(it, update)
+
+		var variant *cloudprovider.InstanceType
+		if update.cachedVariant != nil {
+			variant = update.cachedVariant
+		} else {
+			variant = s.applyVariant(it, update)
+		}
 		results = append(results, variant)
-		// Track if any variant has custom label requirements
+
 		if len(update.OverlayRequirements) > 0 {
 			hasCustomLabelVariant = true
 		}
@@ -369,6 +384,48 @@ func getVariantKey(overlayReqs scheduling.Requirements) string {
 		}
 	}
 	return customLabels.String()
+}
+
+// FinalizeCache pre-computes and caches the instance type variants for each update.
+// This should be called after all overlays are stored but before the store is swapped in.
+// By caching the variants and result slices, we avoid re-creating them on every applyAll call,
+// significantly reducing memory allocations during scheduling.
+func (i *internalInstanceTypeStore) FinalizeCache(nodePoolToInstanceTypes map[string][]*cloudprovider.InstanceType) {
+	for nodePoolName, instanceTypes := range nodePoolToInstanceTypes {
+		instanceUpdates, ok := i.updates[nodePoolName]
+		if !ok {
+			continue
+		}
+
+		if i.cachedResults[nodePoolName] == nil {
+			i.cachedResults[nodePoolName] = make(map[string][]*cloudprovider.InstanceType)
+		}
+
+		for _, it := range instanceTypes {
+			variantUpdates, ok := instanceUpdates[it.Name]
+			if !ok {
+				continue
+			}
+
+			results := make([]*cloudprovider.InstanceType, 0, len(variantUpdates)+1)
+			hasCustomLabelVariant := false
+
+			for _, update := range variantUpdates {
+				// Pre-compute and cache the variant
+				update.cachedVariant = i.applyVariant(it, update)
+				results = append(results, update.cachedVariant)
+				if len(update.OverlayRequirements) > 0 {
+					hasCustomLabelVariant = true
+				}
+			}
+
+			if hasCustomLabelVariant {
+				results = append(results, it)
+			}
+
+			i.cachedResults[nodePoolName][it.Name] = results
+		}
+	}
 }
 
 func (s *InstanceTypeStore) Reset() {

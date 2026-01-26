@@ -116,6 +116,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{}, fmt.Errorf("updating nodeoverlay statuses, %w", err)
 	}
 
+	// Pre-compute and cache instance type variants to avoid repeated allocations
+	// during scheduling when applyAll is called
+	temporaryStore.FinalizeCache(nodePoolToInstanceTypes)
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil

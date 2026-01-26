@@ -39,37 +39,39 @@ import (
 // If these tests fail, it indicates a potential memory regression that should be investigated.
 const (
 	// MaxAllocsNoOverlays is the maximum allowed allocations when no overlays are applied.
-	// With the variant-based overlay system, applyAll returns slices which adds some
-	// allocation overhead even when no overlays are applied.
-	// Baseline: ~143,000 allocations
-	MaxAllocsNoOverlays = 175000
+	// With no overlays and no updates, applyAll returns a singleton slice containing
+	// just the original instance type. This path has minimal allocations.
+	// Baseline: ~71,500 allocations (no caching needed - no updates exist)
+	MaxAllocsNoOverlays = 100000
 
 	// MaxAllocsPriceOverlaysOnly is the maximum allowed allocations for price-only overlays.
-	// Price overlays require copying the offerings slice but not capacity.
-	// Baseline: ~1,380,000 allocations
-	MaxAllocsPriceOverlaysOnly = 1700000
+	// With FinalizeCache(), result slices are pre-computed and cached, so applyAll
+	// returns cached slices with zero new allocations in the hot path.
+	// Baseline: ~7 allocations
+	MaxAllocsPriceOverlaysOnly = 100
 
 	// MaxAllocsCapacityOverlaysOnly is the maximum allowed allocations for capacity-only overlays.
-	// Capacity overlays require copying the capacity map but not offerings.
-	// With the variant-based overlay system, allocations are higher due to
-	// the additional map structure for variants.
-	// Baseline: ~1,030,000 allocations
-	MaxAllocsCapacityOverlaysOnly = 1250000
+	// With FinalizeCache(), result slices are pre-computed and cached, so applyAll
+	// returns cached slices with zero new allocations in the hot path.
+	// Baseline: ~7 allocations
+	MaxAllocsCapacityOverlaysOnly = 100
 
 	// MaxAllocsMixedOverlays is the maximum allowed allocations when both price and capacity overlays are applied.
-	// This is the most expensive scenario as both offerings and capacity need to be copied.
-	// Baseline: ~7,260,000 allocations (200 instance types x 5 node pools x 100 iterations)
-	MaxAllocsMixedOverlays = 8800000
+	// With FinalizeCache(), all variants and result slices are pre-computed.
+	// Baseline: ~7 allocations
+	MaxAllocsMixedOverlays = 100
 
 	// MaxAllocsPerNodePool is the maximum allowed allocations per node pool when scaling.
 	// Used to verify memory scales linearly with node pool count.
-	// Baseline: ~1,451,000 allocations per node pool
-	MaxAllocsPerNodePool = 1500000
+	// With caching, allocations are nearly zero per node pool.
+	// Baseline: ~7 allocations total for all node pools (cached path)
+	MaxAllocsPerNodePool = 100
 
 	// MaxAllocsPerInstanceType is the maximum allowed allocations per instance type when scaling.
 	// Used to verify memory scales linearly with instance type count.
-	// Baseline: ~10,150 per instance type per node pool
-	MaxAllocsPerInstanceType = 10500
+	// With caching, allocations are nearly zero per instance type.
+	// Baseline: ~0.035 per instance type (7 allocs / 200 instance types)
+	MaxAllocsPerInstanceType = 10
 )
 
 // memStats captures memory statistics for a test
@@ -176,6 +178,10 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 				}
 			}
 
+			store.FinalizeCache(map[string][]*cloudprovider.InstanceType{
+				"default": instanceTypes,
+			})
+
 			ms := captureMemStats()
 
 			for i := 0; i < 100; i++ {
@@ -210,6 +216,10 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 				}
 				store.updateInstanceTypeCapacity("default", it.Name, overlay, overlayReqs)
 			}
+
+			store.FinalizeCache(map[string][]*cloudprovider.InstanceType{
+				"default": instanceTypes,
+			})
 
 			ms := captureMemStats()
 
@@ -372,12 +382,15 @@ func createRealisticInstanceTypes(count int) []*cloudprovider.InstanceType {
 }
 
 // createStoreWithOverlays creates an instance type store with realistic overlays applied
+// and FinalizeCache called to pre-compute variants and result slices
 func createStoreWithOverlays(instanceTypes []*cloudprovider.InstanceType, nodePools []string) *internalInstanceTypeStore {
 	store := newInternalInstanceTypeStore()
 	overlayReqs := scheduling.NewRequirements()
 
+	nodePoolToInstanceTypes := make(map[string][]*cloudprovider.InstanceType)
 	for _, np := range nodePools {
 		store.evaluatedNodePools.Insert(np)
+		nodePoolToInstanceTypes[np] = instanceTypes
 
 		for _, it := range instanceTypes {
 			// Apply price overlays to spot offerings
@@ -404,6 +417,8 @@ func createStoreWithOverlays(instanceTypes []*cloudprovider.InstanceType, nodePo
 			store.updateInstanceTypeCapacity(np, it.Name, overlay, overlayReqs)
 		}
 	}
+
+	store.FinalizeCache(nodePoolToInstanceTypes)
 
 	return store
 }
