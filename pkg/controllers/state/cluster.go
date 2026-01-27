@@ -149,10 +149,13 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 		c.mu.RLock()
 		defer c.mu.RUnlock()
 
-		for _, providerID := range c.nodeClaimNameToProviderID {
+		for n, providerID := range c.nodeClaimNameToProviderID {
 			// Check to see if any node claim doesn't have a provider ID. If it doesn't, then the nodeclaim hasn't been
 			// launched, and we need to wait to see what the resolved values are before continuing.
 			if providerID == "" {
+
+				fmt.Printf("ABORT node has no provider id %v\n", n)
+
 				return false
 			}
 		}
@@ -183,6 +186,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 		// launched, and we need to wait to see what the resolved values are before continuing.
 		if providerID == "" {
 			c.mu.RUnlock()
+			fmt.Printf("ABORT node has no provider id %v\n", name)
 			return false
 		}
 		stateNodeClaimNames.Insert(name)
@@ -203,6 +207,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/nodeClaim that exists on the apiserver
 	synced = stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
+	fmt.Printf("SYNCED: %v\n", synced)
 	if synced {
 		c.hasSynced.Store(true)
 	}

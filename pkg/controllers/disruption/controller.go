@@ -30,11 +30,9 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 
-	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -123,6 +121,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
+	fmt.Println("Reconciling disruption")
 	ctx = injection.WithControllerName(ctx, c.Name())
 
 	// this won't catch if the reconciler loop hangs forever, but it will catch other issues
@@ -138,7 +137,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !c.cluster.Synced(ctx) {
-		return reconciler.Result{RequeueAfter: time.Second}, nil
+		fmt.Println("IGNORING cluster not synced")
+		//return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process while it progresses in memory.
@@ -211,19 +211,20 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 
 	errs := make([]error, len(cmds))
-	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) {
-		cmd := cmds[i]
-
-		// Assign common fields
-		cmd.CreationTimestamp = c.clock.Now()
-		cmd.ID = uuid.New()
-		cmd.Method = disruption
-
-		// Attempt to disrupt
-		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
-			errs[i] = fmt.Errorf("disrupting candidates, %w", err)
-		}
-	})
+	fmt.Printf("DISRUPING %v\n", cmds)
+	//workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) {
+	//	cmd := cmds[i]
+	//
+	//	// Assign common fields
+	//	cmd.CreationTimestamp = c.clock.Now()
+	//	cmd.ID = uuid.New()
+	//	cmd.Method = disruption
+	//
+	//	// Attempt to disrupt
+	//	if err := c.queue.StartCommand(ctx, &cmd); err != nil {
+	//		errs[i] = fmt.Errorf("disrupting candidates, %w", err)
+	//	}
+	//})
 	if err = multierr.Combine(errs...); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
