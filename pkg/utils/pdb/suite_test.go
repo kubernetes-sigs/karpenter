@@ -222,7 +222,6 @@ var _ = Describe("CanEvictPods", func() {
 			}),
 		),
 	)
-
 	It("ignores PDBs with disruption-ignore annotation set to true", func() {
 		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -252,7 +251,6 @@ var _ = Describe("CanEvictPods", func() {
 		Expect(violatingPDBs).To(HaveLen(0))
 		Expect(canEvict).To(BeTrue())
 	})
-
 	It("respects PDBs with disruption-ignore annotation set to false", func() {
 		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
 			ObjectMeta: metav1.ObjectMeta{
