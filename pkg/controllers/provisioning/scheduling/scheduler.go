@@ -488,7 +488,7 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// Timing and metrics block
 	start := time.Now()
-	numNodesInBatch := -1
+	numNodesInCluster := -1
 	numPodsInBatch := -1
 	numPodsInCluster := -1
 	numTopologyGroups := -1
@@ -500,7 +500,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 			"karpenter-timing: scheduler.add complete",
 			"function", "scheduling.scheduler.add()",
 			"timestamp", start.Format(time.RFC3339),
-			"num_nodes_in_batch", numNodesInBatch,
+			"num_nodes_in_cluster", numNodesInCluster,
 			"num_pods_in_batch", numPodsInBatch,
 			"num_pods_in_cluster", numPodsInCluster,
 			"num_topology_groups", numTopologyGroups,
@@ -510,8 +510,8 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 		)
 	}()
 
-	// Capture scheduling batch metrics
-	numNodesInBatch = len(s.existingNodes)
+	// Capture scheduling cluster metrics
+	numNodesInCluster = len(s.existingNodes)
 
 	// Count pods in current scheduling batch
 	numPodsInBatch = 0
