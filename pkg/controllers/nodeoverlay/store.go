@@ -184,7 +184,7 @@ func (s *internalInstanceTypeStore) applyAll(nodePoolName string, it *cloudprovi
 
 // applyVariant creates a single variant of an instance type with the given update applied
 func (s *internalInstanceTypeStore) applyVariant(it *cloudprovider.InstanceType, update *instanceTypeUpdate) *cloudprovider.InstanceType {
-	// Create a shallow copy of the instance type, sharing immutable fields
+
 	overriddenInstanceType := &cloudprovider.InstanceType{
 		Name:     it.Name,
 		Overhead: it.Overhead, // Shared - never modified
@@ -249,7 +249,7 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 		return
 	}
 
-	variantKey := getVariantKey(overlayReqs)
+	variantKey := getCustomLabelRequirements(overlayReqs).String()
 	i.ensureVariant(nodePoolName, instanceTypeName, variantKey, overlayReqs)
 
 	update := i.updates[nodePoolName][instanceTypeName][variantKey]
@@ -272,7 +272,7 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 }
 
 func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, overlayReqs scheduling.Requirements) bool {
-	variantKey := getVariantKey(overlayReqs)
+	variantKey := getCustomLabelRequirements(overlayReqs).String()
 
 	_, ok := i.updates[nodePoolName]
 	if !ok {
@@ -311,7 +311,7 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 		return
 	}
 
-	variantKey := getVariantKey(overlayReqs)
+	variantKey := getCustomLabelRequirements(overlayReqs).String()
 	i.ensureVariant(nodePoolName, instanceTypeName, variantKey, overlayReqs)
 
 	update := i.updates[nodePoolName][instanceTypeName][variantKey]
@@ -328,7 +328,7 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 }
 
 func (i *internalInstanceTypeStore) isOfferingUpdateConflicting(nodePoolName string, instanceTypeName string, of *cloudprovider.Offering, nodeOverlay v1alpha1.NodeOverlay, overlayReqs scheduling.Requirements) bool {
-	variantKey := getVariantKey(overlayReqs)
+	variantKey := getCustomLabelRequirements(overlayReqs).String()
 
 	_, ok := i.updates[nodePoolName]
 	if !ok {
@@ -363,31 +363,25 @@ func (i *internalInstanceTypeStore) ensureVariant(nodePoolName, instanceTypeName
 		i.updates[nodePoolName][instanceTypeName] = map[string]*instanceTypeUpdate{}
 	}
 	if _, ok := i.updates[nodePoolName][instanceTypeName][variantKey]; !ok {
-		customLabelReqs := scheduling.NewRequirements()
-		for key, req := range overlayReqs {
-			if v1.WellKnownLabels.Has(key) {
-				continue
-			}
-			customLabelReqs.Add(req)
-		}
 		i.updates[nodePoolName][instanceTypeName][variantKey] = &instanceTypeUpdate{
 			Price:               map[string]*priceUpdate{},
 			Capacity:            &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
-			overlayRequirements: customLabelReqs,
+			overlayRequirements: getCustomLabelRequirements(overlayReqs),
 		}
 	}
 }
 
-// getVariantKey creates a unique key for an overlay based on its custom label requirements
-func getVariantKey(overlayReqs scheduling.Requirements) string {
+// getCustomLabelRequirements filters out well-known labels and returns only custom label requirements.
+// Custom labels are those not in v1.WellKnownLabels (e.g., nvidia.com/device-plugin.config).
+func getCustomLabelRequirements(reqs scheduling.Requirements) scheduling.Requirements {
 	customLabels := scheduling.NewRequirements()
-	for key, req := range overlayReqs {
+	for key, req := range reqs {
 		if v1.WellKnownLabels.Has(key) {
 			continue
 		}
 		customLabels.Add(req)
 	}
-	return customLabels.String()
+	return customLabels
 }
 
 // FinalizeCache pre-computes and caches the instance type variants for each update.
