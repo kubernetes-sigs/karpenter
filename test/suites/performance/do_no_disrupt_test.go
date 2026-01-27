@@ -23,11 +23,12 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = Describe("Performance", func() {
+var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Do Not Disrupt Performance Test", func() {
 		It("should efficiently scale three deployments and test disruption protection", func() {
 			By("Setting up NodePool and NodeClass for the test")

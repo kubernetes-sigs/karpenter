@@ -22,11 +22,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = Describe("Performance", func() {
+var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Self Anti-Affinity Deployment Interference", func() {
 		It("should efficiently scale two deployments with self anti-affinity", func() {
 			By("Setting up NodePool and NodeClass for the test")

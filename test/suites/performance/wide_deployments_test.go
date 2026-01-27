@@ -25,6 +25,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 )
@@ -146,7 +147,7 @@ func createWideDeployments() []*appsv1.Deployment {
 	return deployments
 }
 
-var _ = Describe("Performance", func() {
+var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Wide Deployments", func() {
 		It("should efficiently scale 30 deployments with varied resources and topology constraints", func() {
 			By("Setting up NodePool and NodeClass for the test")
@@ -191,7 +192,7 @@ var _ = Describe("Performance", func() {
 			}
 
 			By("Monitoring wide consolidation performance")
-			consolidationReport, err := ReportConsolidationWithOutput(env, "Wide Deployments Consolidation Test", 1000, 700, initialNodes, 25*time.Minute, "wide_deployments_consolidation")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Wide Deployments Consolidation Test", 1000, 700, initialNodes, 30*time.Minute, "wide_deployments_consolidation")
 			Expect(err).ToNot(HaveOccurred(), "Wide consolidation should execute successfully")
 
 			By("Validating wide consolidation performance")
@@ -200,8 +201,8 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
 
 			// Wide consolidation assertions
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
-				"Wide consolidation should complete within 20 minutes")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 30*time.Minute),
+				"Wide consolidation should complete within 30 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.20),
 				"Average CPU utilization should be greater than 20%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.20),

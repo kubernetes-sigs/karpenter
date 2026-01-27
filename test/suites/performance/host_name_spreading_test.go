@@ -22,11 +22,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = Describe("Performance", func() {
+var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Host Name Spreading Deployment Reg", func() {
 		It("should efficiently scale two deployments with host name topology spreading", func() {
 			By("Setting up NodePool and NodeClass for the test")
