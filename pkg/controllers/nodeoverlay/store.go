@@ -82,10 +82,11 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 	return result, nil
 }
 
-// Apply returns a single instance type with overlays applied. This method is intended for
-// use cases where only one variant is needed, such as drift detection on existing nodes.
-// For scheduling, use ApplyAll instead which returns all variants including those with
-// custom label requirements.
+// Apply returns a single instance type with overlays applied. This method returns the base
+// instance type (without overlay modifications) since we cannot reliably determine which
+// variant to use without Kubernetes labels. This is appropriate for List/Get paths used
+// in garbage collection where overlay capacity isn't critical.
+// For scheduling, use ApplyAll instead which returns all variants.
 func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
 
@@ -93,8 +94,8 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 	if len(variants) == 0 {
 		return it, nil
 	}
-	// Return the first variant for backward compatibility
-	return variants[0], nil
+
+	return variants[len(variants)-1], nil
 }
 
 // InstanceTypeStore manages instance type updates for node pools.
@@ -174,9 +175,17 @@ func (s *internalInstanceTypeStore) applyAll(nodePoolName string, it *cloudprovi
 	}
 
 	// If any variant has custom label requirements, also include the base instance type
-	// so that pods without those specific requirements can still schedule
+	// with just well-known label requirements so that pods without those specific
+	// requirements can still schedule.
 	if hasCustomLabelVariant {
-		results = append(results, it)
+		baseInstanceType := &cloudprovider.InstanceType{
+			Name:         it.Name,
+			Requirements: getWellKnownLabelRequirements(it.Requirements),
+			Capacity:     it.Capacity,
+			Overhead:     it.Overhead,
+			Offerings:    it.Offerings,
+		}
+		results = append(results, baseInstanceType)
 	}
 
 	return results
@@ -372,7 +381,6 @@ func (i *internalInstanceTypeStore) ensureVariant(nodePoolName, instanceTypeName
 }
 
 // getCustomLabelRequirements filters out well-known labels and returns only custom label requirements.
-// Custom labels are those not in v1.WellKnownLabels (e.g., nvidia.com/device-plugin.config).
 func getCustomLabelRequirements(reqs scheduling.Requirements) scheduling.Requirements {
 	customLabels := scheduling.NewRequirements()
 	for key, req := range reqs {
@@ -382,6 +390,18 @@ func getCustomLabelRequirements(reqs scheduling.Requirements) scheduling.Require
 		customLabels.Add(req)
 	}
 	return customLabels
+}
+
+// getWellKnownLabelRequirements filters out custom labels and returns only well-known label requirements.
+func getWellKnownLabelRequirements(reqs scheduling.Requirements) scheduling.Requirements {
+	wellKnownLabels := scheduling.NewRequirements()
+	for key, req := range reqs {
+		if !v1.WellKnownLabels.Has(key) {
+			continue
+		}
+		wellKnownLabels.Add(req)
+	}
+	return wellKnownLabels
 }
 
 // FinalizeCache pre-computes and caches the instance type variants for each update.
@@ -417,7 +437,14 @@ func (i *internalInstanceTypeStore) FinalizeCache(nodePoolToInstanceTypes map[st
 			}
 
 			if hasCustomLabelVariant {
-				results = append(results, it)
+				baseInstanceType := &cloudprovider.InstanceType{
+					Name:         it.Name,
+					Requirements: getWellKnownLabelRequirements(it.Requirements),
+					Capacity:     it.Capacity,
+					Overhead:     it.Overhead,
+					Offerings:    it.Offerings,
+				}
+				results = append(results, baseInstanceType)
 			}
 
 			i.cachedResults[nodePoolName][it.Name] = results
