@@ -514,5 +514,46 @@ var _ = Describe("Drift", Ordered, func() {
 			env.EventuallyExpectDrifted(nodeClaims...)
 			env.ConsistentlyExpectNoDisruptions(int(numPods), time.Minute)
 		})
+		It("should drift node with single replica when PDB has disruption-ignore annotation", func() {
+			// This test validates the disruption-ignore annotation feature
+			// Scenario: 1 replica with minAvailable: 1 PDB (normally blocks disruption)
+			// With annotation="true", Karpenter should proceed with drift disruption decision
+			dep := test.Deployment(test.CreateDeploymentOptions("single-replica", 1, "100m", "128Mi",
+				test.WithNoResourceRequests(),
+				test.WithLabels(map[string]string{"app": "single-replica"})))
+			selector := labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+
+			// Create PDB with minAvailable: 1 AND disruption-ignore annotation
+			// Without the annotation, this would block drift since we only have 1 replica
+			minAvailable := intstr.FromInt32(1)
+			pdb := test.PodDisruptionBudget(test.PDBOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DisruptionIgnoreAnnotationKey: "true",
+					},
+				},
+				Labels:       dep.Spec.Template.Labels,
+				MinAvailable: &minAvailable,
+			})
+			env.ExpectCreated(dep, nodeClass, nodePool, pdb)
+
+			nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+			node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+			env.EventuallyExpectHealthyPodCount(selector, 1)
+
+			// Drift the nodeclaim by updating nodepool
+			nodePool.Spec.Template.Annotations = map[string]string{"test": "drift-annotation"}
+			env.ExpectUpdated(nodePool)
+
+			env.EventuallyExpectDrifted(nodeClaim)
+
+			// The key assertion: node should be disrupted even with blocking PDB because of annotation
+			env.EventuallyExpectNotFound(nodeClaim, node)
+
+			// Verify new node is created and pod is rescheduled
+			env.EventuallyExpectCreatedNodeClaimCount("==", 1)
+			env.EventuallyExpectCreatedNodeCount("==", 1)
+			env.EventuallyExpectHealthyPodCount(selector, 1)
+		})
 	})
 })
