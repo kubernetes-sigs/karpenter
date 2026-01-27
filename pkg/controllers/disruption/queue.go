@@ -360,6 +360,17 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	q.Unlock()
 
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
+	nodePools := lo.Uniq(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
+		return c.NodePool.Name
+	}))
+	for _, nodePool := range nodePools {
+		NodepoolDecisionsPerformed.Inc(map[string]string{
+			metrics.NodePoolLabel:  nodePool,
+			decisionLabel:          string(cmd.Decision()),
+			metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
+			ConsolidationTypeLabel: cmd.ConsolidationType(),
+		})
+	}
 	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
 		metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
