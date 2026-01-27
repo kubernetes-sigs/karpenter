@@ -58,6 +58,27 @@ var (
 
 type DriftReason string
 
+// contextKey is a type for context keys used in this package
+type contextKey string
+
+const (
+	// SkipNodeOverlayKey is a context key that, when set to true, tells the cloud provider
+	// to skip applying node overlays when returning instance types. This is used by the
+	// nodeoverlay controller to get raw instance types for evaluation.
+	SkipNodeOverlayKey contextKey = "skipNodeOverlay"
+)
+
+// WithSkipNodeOverlay returns a context that signals to skip node overlay application
+func WithSkipNodeOverlay(ctx context.Context) context.Context {
+	return context.WithValue(ctx, SkipNodeOverlayKey, true)
+}
+
+// ShouldSkipNodeOverlay returns true if node overlay application should be skipped
+func ShouldSkipNodeOverlay(ctx context.Context) bool {
+	skip, ok := ctx.Value(SkipNodeOverlayKey).(bool)
+	return ok && skip
+}
+
 type RepairPolicy struct {
 	// ConditionType of unhealthy state that is found on the node
 	ConditionType corev1.NodeConditionType
