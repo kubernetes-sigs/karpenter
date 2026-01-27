@@ -161,6 +161,7 @@ var _ = AfterEach(func() {
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
 	disruption.ConsolidationSkippedTotal.Reset()
+	disruption.NodepoolDecisionsPerformed.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -1937,6 +1938,11 @@ var _ = Describe("Metrics", func() {
 			"decision":          "delete",
 			metrics.ReasonLabel: "empty",
 		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "delete",
+			metrics.ReasonLabel:   "empty",
+		})
 	})
 	It("should fire metrics for single node delete disruption", func() {
 		nodeClaims, nodes = nodeClaims[:2], nodes[:2]
@@ -1962,6 +1968,11 @@ var _ = Describe("Metrics", func() {
 			"decision":          "delete",
 			metrics.ReasonLabel: "drifted",
 		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "delete",
+			metrics.ReasonLabel:   "drifted",
+		})
 	})
 	It("should fire metrics for single node replace disruption", func() {
 		nodeClaim, node := nodeClaims[0], nodes[0]
@@ -1985,6 +1996,11 @@ var _ = Describe("Metrics", func() {
 			"decision":          "replace",
 			metrics.ReasonLabel: "drifted",
 		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "replace",
+			metrics.ReasonLabel:   "drifted",
+		})
 	})
 	It("should fire metrics for multi-node empty disruption", func() {
 		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
@@ -1996,6 +2012,12 @@ var _ = Describe("Metrics", func() {
 			"decision":           "delete",
 			metrics.ReasonLabel:  "empty",
 			"consolidation_type": "empty",
+		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "delete",
+			metrics.ReasonLabel:   "empty",
+			"consolidation_type":  "empty",
 		})
 	})
 	It("should fire metrics for multi-node delete disruption", func() {
@@ -2031,6 +2053,12 @@ var _ = Describe("Metrics", func() {
 			"decision":           "delete",
 			metrics.ReasonLabel:  "underutilized",
 			"consolidation_type": "multi",
+		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "delete",
+			metrics.ReasonLabel:   "underutilized",
+			"consolidation_type":  "multi",
 		})
 	})
 	It("should fire metrics for multi-node replace disruption", func() {
@@ -2086,6 +2114,12 @@ var _ = Describe("Metrics", func() {
 			"decision":           "replace",
 			metrics.ReasonLabel:  "underutilized",
 			"consolidation_type": "multi",
+		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "replace",
+			metrics.ReasonLabel:   "underutilized",
+			"consolidation_type":  "multi",
 		})
 	})
 	It("should stop multi-node consolidation after context deadline is reached", func() {
