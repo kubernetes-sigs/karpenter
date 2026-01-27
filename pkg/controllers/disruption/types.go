@@ -255,6 +255,20 @@ func (c Command) EstimatedSavings() float64 {
 	return sourcePrice - destPrice
 }
 
+// EmitCandidateEvents emits ConsolidationCandidate events for all candidates in this command
+func (c Command) EmitCandidateEvents(recorder events.Recorder) {
+	for _, candidate := range c.Candidates {
+		recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, c.StringForNode(candidate), c.EstimatedSavings())...)
+	}
+}
+
+// EmitRejectedEvents emits ConsolidationRejected events for all candidates in this command
+func (c Command) EmitRejectedEvents(recorder events.Recorder, reason string) {
+	for _, candidate := range c.Candidates {
+		recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, c.StringForNode(candidate), reason, c.EstimatedSavings())...)
+	}
+}
+
 func (c Command) LogValues() []any {
 	podCount := lo.Reduce(c.Candidates, func(_ int, cd *Candidate, _ int) int { return len(cd.reschedulablePods) }, 0)
 

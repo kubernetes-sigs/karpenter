@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -105,15 +104,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			reason := getValidationFailureReason(err)
-			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("consolidation move rejected",
-				"command", cmd.String(),
-				"reason", reason,
-				"estimated_savings", cmd.EstimatedSavings(),
-			)
-			// Emit events for all candidates
-			for _, candidate := range cmd.Candidates {
-				m.recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, cmd.StringForNode(candidate), reason, cmd.EstimatedSavings())...)
-			}
+			cmd.EmitRejectedEvents(m.recorder, reason)
 			return []Command{}, nil
 		}
 		return []Command{}, fmt.Errorf("validating consolidation, %w", err)

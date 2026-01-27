@@ -223,7 +223,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	c.publishConsolidationCandidateEvents(cmd)
+	cmd.EmitCandidateEvents(c.recorder)
 
 	return cmd, nil
 }
@@ -272,7 +272,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 			Results:      results,
 		}
-		c.publishConsolidationCandidateEvents(cmd)
+		cmd.EmitCandidateEvents(c.recorder)
 
 		return cmd, nil
 	}
@@ -310,16 +310,9 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 		Results:      results,
 	}
-	c.publishConsolidationCandidateEvents(cmd)
+	cmd.EmitCandidateEvents(c.recorder)
 
 	return cmd, nil
-}
-
-// publishConsolidationCandidateEvents emits ConsolidationCandidate events for all candidates in a command
-func (c *consolidation) publishConsolidationCandidateEvents(cmd Command) {
-	for _, candidate := range cmd.Candidates {
-		c.recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, cmd.StringForNode(candidate), cmd.EstimatedSavings())...)
-	}
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates

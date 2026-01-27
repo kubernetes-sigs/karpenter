@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 )
 
 var SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
@@ -104,12 +103,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		if _, err = s.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
 				reason := getValidationFailureReason(err)
-				log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("consolidation move rejected",
-					"command", cmd.String(),
-					"reason", reason,
-					"estimated_savings", cmd.EstimatedSavings(),
-				)
-				s.recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, cmd.StringForNode(candidate), reason, cmd.EstimatedSavings())...)
+				cmd.EmitRejectedEvents(s.recorder, reason)
 				return []Command{}, nil
 			}
 			return []Command{}, fmt.Errorf("validating consolidation, %w", err)
