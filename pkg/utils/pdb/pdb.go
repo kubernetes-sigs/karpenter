@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -50,11 +49,6 @@ func NewLimits(ctx context.Context, kubeClient client.Client) (Limits, error) {
 		return nil, err
 	}
 	for _, pdb := range pdbList.Items {
-		// explicitly ignore PDBs with the disruption-ignore annotation
-		if pdb.Annotations[v1.DisruptionIgnoreAnnotationKey] == "true" {
-			continue
-		}
-
 		pi, err := newPdb(pdb)
 		if err != nil {
 			return nil, err
@@ -122,11 +116,11 @@ func (l Limits) isEvictable(pod *corev1.Pod, evictionBlocker evictionBlocker) ([
 
 		switch evictionBlocker {
 		case zeroDisruptions:
-			if pdb.disruptionsAllowed == 0 {
+			if !pdb.hasDisruptionIgnore && pdb.disruptionsAllowed == 0 {
 				return []client.ObjectKey{pdb.key}, false
 			}
 		case fullyBlockingPDBs:
-			if pdb.isFullyBlocking {
+			if !pdb.hasDisruptionIgnore && pdb.isFullyBlocking {
 				return []client.ObjectKey{pdb.key}, false
 			}
 		}
@@ -156,6 +150,7 @@ type pdbItem struct {
 	disruptionsAllowed          int32
 	isFullyBlocking             bool
 	canAlwaysEvictUnhealthyPods bool
+	hasDisruptionIgnore         bool
 }
 
 // nolint:gocyclo
@@ -165,6 +160,7 @@ func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 		return nil, err
 	}
 	canAlwaysEvictUnhealthyPods := pdb.Spec.UnhealthyPodEvictionPolicy != nil && *pdb.Spec.UnhealthyPodEvictionPolicy == policyv1.AlwaysAllow
+	hasDisruptionIgnore := pdb.Annotations != nil && pdb.Annotations[v1.DisruptionIgnoreAnnotationKey] == "true"
 
 	return &pdbItem{
 		key:                client.ObjectKeyFromObject(&pdb),
@@ -174,5 +170,6 @@ func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 			(pdb.Spec.MaxUnavailable != nil && pdb.Spec.MaxUnavailable.Type == intstr.String && pdb.Spec.MaxUnavailable.StrVal == "0%") ||
 			(pdb.Spec.MinAvailable != nil && pdb.Spec.MinAvailable.Type == intstr.String && pdb.Spec.MinAvailable.StrVal == "100%"),
 		canAlwaysEvictUnhealthyPods: canAlwaysEvictUnhealthyPods,
+		hasDisruptionIgnore:         hasDisruptionIgnore,
 	}, nil
 }
