@@ -494,6 +494,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	numTopologyGroups := -1
 	numInverseTopologyGroups := -1
 	numTopologyKeys := -1
+	schedulingPath := "failed"
 
 	defer func() {
 		log.FromContext(ctx).Info(
@@ -506,6 +507,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 			"num_topology_groups", numTopologyGroups,
 			"num_inverse_topology_groups", numInverseTopologyGroups,
 			"num_topology_keys", numTopologyKeys,
+			"scheduling_path", schedulingPath,
 			"duration_ms", float64(time.Since(start).Microseconds())/1000.0,
 		)
 	}()
@@ -534,6 +536,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// first try to schedule against an in-flight real node
 	if err := s.addToExistingNode(ctx, pod); err == nil {
+		schedulingPath = "existing_node"
 		return nil
 	}
 	// Consider using https://pkg.go.dev/container/heap
@@ -541,6 +544,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// Pick existing node that we are about to create
 	if err := s.addToInflightNode(ctx, pod); err == nil {
+		schedulingPath = "inflight_node"
 		return nil
 	}
 	if len(s.nodeClaimTemplates) == 0 {
@@ -548,6 +552,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	}
 	err := s.addToNewNodeClaim(ctx, pod)
 	if err == nil {
+		schedulingPath = "new_node_claim"
 		return nil
 	}
 	return err
