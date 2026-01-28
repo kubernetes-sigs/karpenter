@@ -31,6 +31,8 @@ jobs:
             focus: "Do Not Disrupt Performance Test"
           - name: "Self Anti-Affinity Deployment Interference"
             focus: "Self Anti-Affinity Deployment Interference"
+          - name: "Scheduler Packing Peformance Test"
+            focus: "Scheduler Packing Performance Test"
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performance
