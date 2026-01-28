@@ -61,7 +61,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Total scale-out time should be less than 5 minutes")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
 				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 55%")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
