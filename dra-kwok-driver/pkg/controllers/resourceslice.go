@@ -37,15 +37,15 @@ import (
 
 // ResourceSliceController manages ResourceSlice lifecycle based on Node events and driver configuration
 type ResourceSliceController struct {
-	client.Client
+	kubeClient       client.Client
 	driverName       string
 	configController *ConfigMapController
 }
 
 // NewResourceSliceController creates a new ResourceSlice controller
-func NewResourceSliceController(client client.Client, driverName string, configController *ConfigMapController) *ResourceSliceController {
+func NewResourceSliceController(kubeClient client.Client, driverName string, configController *ConfigMapController) *ResourceSliceController {
 	return &ResourceSliceController{
-		Client:           client,
+		kubeClient:       kubeClient,
 		driverName:       driverName,
 		configController: configController,
 	}
@@ -74,8 +74,7 @@ func (r *ResourceSliceController) Reconcile(ctx context.Context, req reconcile.R
 
 	// Get the node
 	node := &corev1.Node{}
-	err := r.Get(ctx, req.NamespacedName, node)
-	if err != nil {
+	if err := r.kubeClient.Get(ctx, req.NamespacedName, node); err != nil {
 		if errors.IsNotFound(err) {
 			// Node was deleted - clean up ResourceSlices
 			log.Info("node deleted, cleaning up resourceslices", "node", req.Name)
@@ -177,8 +176,7 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 
 		// Create or update the ResourceSlice for this mapping
 		existing := &resourcev1.ResourceSlice{}
-		err := r.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing)
-		if err != nil {
+		if err := r.kubeClient.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing); err != nil {
 			if errors.IsNotFound(err) {
 				// Create new ResourceSlice
 				log.Info("creating resourceslice",
@@ -187,7 +185,7 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 					"mapping", mapping.Name,
 					"devices", len(resourceSlice.Spec.Devices),
 				)
-				if err := r.Create(ctx, resourceSlice); err != nil {
+				if err := r.kubeClient.Create(ctx, resourceSlice); err != nil {
 					log.Error(err, "failed to create resourceslice", "resourceslice", resourceSliceName)
 					return reconcile.Result{}, err
 				}
@@ -206,7 +204,7 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 				"mapping", mapping.Name,
 				"devices", len(resourceSlice.Spec.Devices),
 			)
-			if err := r.Update(ctx, existing); err != nil {
+			if err := r.kubeClient.Update(ctx, existing); err != nil {
 				log.Error(err, "failed to update resourceslice", "resourceslice", resourceSliceName)
 				return reconcile.Result{}, err
 			}
@@ -222,11 +220,10 @@ func (r *ResourceSliceController) cleanupResourceSlicesForNode(ctx context.Conte
 
 	// List all ResourceSlices for this node
 	resourceSlices := &resourcev1.ResourceSliceList{}
-	err := r.List(ctx, resourceSlices, client.MatchingLabels{
+	if err := r.kubeClient.List(ctx, resourceSlices, client.MatchingLabels{
 		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
 		"kwok.x-k8s.io/node":       nodeName,
-	})
-	if err != nil {
+	}); err != nil {
 		log.Error(err, "failed to list resourceslices for cleanup", "node", nodeName)
 		return reconcile.Result{}, err
 	}
@@ -234,7 +231,7 @@ func (r *ResourceSliceController) cleanupResourceSlicesForNode(ctx context.Conte
 	// Delete each ResourceSlice
 	for _, rs := range resourceSlices.Items {
 		log.Info("deleting resourceslice", "resourceslice", rs.Name, "node", nodeName)
-		if err := r.Delete(ctx, &rs); err != nil && !errors.IsNotFound(err) {
+		if err := r.kubeClient.Delete(ctx, &rs); err != nil && !errors.IsNotFound(err) {
 			log.Error(err, "failed to delete resourceslice", "resourceslice", rs.Name)
 			return reconcile.Result{}, err
 		}
@@ -247,11 +244,10 @@ func (r *ResourceSliceController) cleanupResourceSlicesForNode(ctx context.Conte
 // GetResourceSlicesForNode returns all ResourceSlices managed by this driver for a specific node
 func (r *ResourceSliceController) GetResourceSlicesForNode(ctx context.Context, nodeName string) ([]*resourcev1.ResourceSlice, error) {
 	resourceSlices := &resourcev1.ResourceSliceList{}
-	err := r.List(ctx, resourceSlices, client.MatchingLabels{
+	if err := r.kubeClient.List(ctx, resourceSlices, client.MatchingLabels{
 		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
 		"kwok.x-k8s.io/node":       nodeName,
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
 
@@ -271,8 +267,7 @@ func (r *ResourceSliceController) ReconcileAllNodes(ctx context.Context) error {
 
 	// List all KWOK nodes
 	nodes := &corev1.NodeList{}
-	err := r.List(ctx, nodes)
-	if err != nil {
+	if err := r.kubeClient.List(ctx, nodes); err != nil {
 		log.Error(err, "failed to list nodes for configuration update")
 		return err
 	}

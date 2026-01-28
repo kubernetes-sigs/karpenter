@@ -101,8 +101,8 @@ test-memory: ## Run memory usage tests for node overlay store
 
 benchmark: ## Run benchmark tests for node overlay store
 	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
-	
-test-dra: ## Run DRA tests
+
+test-dra-driver: ## Run DRA tests
 	go test ./dra-kwok-driver/pkg/... \
 		-race \
 		-timeout 20m \

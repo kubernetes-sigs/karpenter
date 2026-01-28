@@ -28,19 +28,19 @@ import (
 // Config represents the DRA KWOK driver configuration loaded from ConfigMap
 type Config struct {
 	// Driver specifies the DRA driver name for ResourceSlices
-	Driver string `yaml:"driver" json:"driver"`
+	Driver string `json:"driver"`
 	// Mappings defines how to map node labels to device configurations
-	Mappings []Mapping `yaml:"mappings" json:"mappings"`
+	Mappings []Mapping `json:"mappings"`
 }
 
 // Mapping defines a mapping from node selector to ResourceSlice configuration
 type Mapping struct {
 	// Name is a human-readable identifier for this mapping
-	Name string `yaml:"name" json:"name"`
+	Name string `json:"name"`
 	// NodeSelector determines which nodes this mapping applies to
-	NodeSelector metav1.LabelSelector `yaml:"nodeSelector" json:"nodeSelector"`
+	NodeSelector metav1.LabelSelector `json:"nodeSelector"`
 	// ResourceSlice defines the upstream ResourceSlice spec to create for matching nodes
-	ResourceSlice resourcev1.ResourceSliceSpec `yaml:"resourceSlice" json:"resourceSlice"`
+	ResourceSlice resourcev1.ResourceSliceSpec `json:"resourceSlice"`
 }
 
 // ResourceSliceConfig and DeviceConfig types removed - using upstream resourcev1.ResourceSliceSpec directly

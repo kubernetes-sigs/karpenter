@@ -50,11 +50,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 		}
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      "node.kubernetes.io/instance-type",
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"c-4x-amd64-linux", "m-8x-amd64-linux"},
-				},
+				Key:      "node.kubernetes.io/instance-type",
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"c-4x-amd64-linux", "m-8x-amd64-linux"},
 			},
 		}
 

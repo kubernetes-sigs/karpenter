@@ -37,7 +37,7 @@ import (
 
 // ConfigMapController watches for ConfigMap changes and updates the driver configuration
 type ConfigMapController struct {
-	client.Client
+	kubeClient         client.Client
 	configMapName      string
 	configMapNamespace string
 	driverConfig       *config.Config
@@ -45,9 +45,9 @@ type ConfigMapController struct {
 }
 
 // NewConfigMapController creates a new ConfigMap controller
-func NewConfigMapController(client client.Client, configMapName, configMapNamespace string, onConfigChange func(*config.Config)) *ConfigMapController {
+func NewConfigMapController(kubeClient client.Client, configMapName, configMapNamespace string, onConfigChange func(*config.Config)) *ConfigMapController {
 	return &ConfigMapController{
-		Client:             client,
+		kubeClient:         kubeClient,
 		configMapName:      configMapName,
 		configMapNamespace: configMapNamespace,
 		onConfigChange:     onConfigChange,
@@ -77,8 +77,7 @@ func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Reque
 
 	// Fetch the ConfigMap
 	configMap := &corev1.ConfigMap{}
-	err := r.Get(ctx, req.NamespacedName, configMap)
-	if err != nil {
+	if err := r.kubeClient.Get(ctx, req.NamespacedName, configMap); err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("configmap not found, using empty configuration")
 			// Clear configuration when ConfigMap is deleted
@@ -170,8 +169,7 @@ func (r *ConfigMapController) LoadInitialConfig(ctx context.Context) error {
 		Namespace: r.configMapNamespace,
 	}
 
-	err := r.Get(ctx, key, configMap)
-	if err != nil {
+	if err := r.kubeClient.Get(ctx, key, configMap); err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("configmap not found during initial load, will wait for it to be created",
 				"name", r.configMapName,
