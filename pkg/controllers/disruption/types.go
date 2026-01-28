@@ -41,6 +41,7 @@ import (
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
+	"strings"
 )
 
 const (
@@ -90,11 +91,20 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 ) (*Candidate, error) {
 	var err error
 	var pods []*corev1.Pod
+	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
+	if !strings.HasPrefix(nodePoolName, "node-usw2a") {
+		return nil, fmt.Errorf("node pool %q does not have a node-usw2a label", nodePoolName)
+	}
+
+	fmt.Printf("%s - node: %s\n", nodePoolName, node.Name())
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
 	if queue.HasAny(node.ProviderID()) {
+		fmt.Println("node is already disrupted", err.Error())
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
 	if err = node.ValidateNodeDisruptable(clk); err != nil {
+		fmt.Println("node is not disruptable:", err.Error())
+
 		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
@@ -102,7 +112,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, err
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
-	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
+	fmt.Println("nodepool:", nodePoolName)
 	nodePool := nodePoolMap[nodePoolName]
 	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool

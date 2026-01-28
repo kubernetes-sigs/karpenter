@@ -181,10 +181,14 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	candidates := lo.FilterMap(cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
+	fmt.Println("nodepools:", len(nodePoolMap))
+	nodes := cluster.DeepCopyNodes()
+	fmt.Println("nodes:", len(nodes))
+	candidates := lo.FilterMap(nodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil
 	})
+	fmt.Println("unfiltered candidates:", len(candidates))
 	// Filter only the valid candidates that we should disrupt
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) }), nil
 }

@@ -162,6 +162,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {
+		// we only care about that one atm
+		if m.ConsolidationType() != "multi" {
+			continue
+		}
+
+		fmt.Printf("running method %s - %s - %s\n", m.Class(), m.Reason(), m.ConsolidationType())
 		c.recordRun(fmt.Sprintf("%T", m))
 		success, err := c.disrupt(ctx, m)
 		if err != nil {
@@ -185,6 +191,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
+	fmt.Println("candidates:", len(candidates))
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
