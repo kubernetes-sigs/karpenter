@@ -29,10 +29,10 @@ jobs:
             focus: "Basic Deployment"
           - name: "Do Not Disrupt Performance"
             focus: "Do Not Disrupt Performance Test"
-          - name: "Provisioning"
-            focus: "Provisioning"
           - name: "Self Anti-Affinity Deployment Interference"
             focus: "Self Anti-Affinity Deployment Interference"
+          - name: "Scheduler Packing Peformance Test"
+            focus: "Scheduler Packing Performance Test"
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performance
