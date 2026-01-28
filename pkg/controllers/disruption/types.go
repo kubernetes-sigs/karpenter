@@ -32,6 +32,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
+	"os"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -92,8 +93,9 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	var err error
 	var pods []*corev1.Pod
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
-	if !strings.HasPrefix(nodePoolName, "node-usw2a") {
-		return nil, fmt.Errorf("node pool %q does not have a node-usw2a label", nodePoolName)
+	prefix := os.Getenv("NODEPOOLPREFIX")
+	if !strings.HasPrefix(nodePoolName, prefix) {
+		return nil, fmt.Errorf("node pool %s does not have %s prefix", nodePoolName, prefix)
 	}
 
 	fmt.Printf("%s - node: %s\n", nodePoolName, node.Name())
@@ -112,7 +114,6 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, err
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
-	fmt.Println("nodepool:", nodePoolName)
 	nodePool := nodePoolMap[nodePoolName]
 	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool

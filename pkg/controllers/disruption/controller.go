@@ -170,6 +170,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		fmt.Printf("running method %s - %s - %s\n", m.Class(), m.Reason(), m.ConsolidationType())
 		c.recordRun(fmt.Sprintf("%T", m))
 		success, err := c.disrupt(ctx, m)
+		fmt.Printf("disrupt result success:%v - err:%v\n", success, err)
 		if err != nil {
 			if errors.IsConflict(err) {
 				return reconciler.Result{Requeue: true}, nil

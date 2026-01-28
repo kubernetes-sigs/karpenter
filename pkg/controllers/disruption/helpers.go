@@ -186,6 +186,10 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	fmt.Println("nodes:", len(nodes))
 	candidates := lo.FilterMap(nodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
+		if e != nil && !strings.Contains(e.Error(), "prefix") {
+			fmt.Printf("rejected candidate node: %s -- %s\n", n.Name, e.Error())
+		}
+
 		return cn, e == nil
 	})
 	fmt.Println("unfiltered candidates:", len(candidates))
