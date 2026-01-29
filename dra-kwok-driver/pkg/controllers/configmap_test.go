@@ -56,9 +56,11 @@ var _ = Describe("ConfigMapController", func() {
 driver: karpenter.sh/dra-kwok-driver
 mappings:
 - name: gpu-mapping
-  nodeSelector:
-    matchLabels:
-      node.kubernetes.io/instance-type: g4dn.xlarge
+  nodeSelectorTerms:
+  - matchExpressions:
+    - key: node.kubernetes.io/instance-type
+      operator: In
+      values: ["g4dn.xlarge"]
   resourceSlice:
     driver: karpenter.sh/dra-kwok-driver
     pool:
@@ -98,9 +100,11 @@ mappings:
 driver: test.example.com/device
 mappings:
 - name: test-mapping
-  nodeSelector:
-    matchLabels:
-      test: value
+  nodeSelectorTerms:
+  - matchExpressions:
+    - key: test
+      operator: In
+      values: ["value"]
   resourceSlice:
     driver: test.example.com/device
     pool:

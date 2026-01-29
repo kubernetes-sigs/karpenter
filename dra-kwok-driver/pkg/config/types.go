@@ -21,8 +21,8 @@ import (
 	"regexp"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Config represents the DRA KWOK driver configuration loaded from ConfigMap
@@ -37,8 +37,9 @@ type Config struct {
 type Mapping struct {
 	// Name is a human-readable identifier for this mapping
 	Name string `json:"name"`
-	// NodeSelector determines which nodes this mapping applies to
-	NodeSelector metav1.LabelSelector `json:"nodeSelector"`
+	// NodeSelectorTerms determines which nodes this mapping applies to.
+	// Multiple terms are ORed together, allowing this mapping to apply to disjoint sets of nodes.
+	NodeSelectorTerms []corev1.NodeSelectorTerm `json:"nodeSelectorTerms"`
 	// ResourceSlice defines the upstream ResourceSlice spec to create for matching nodes
 	ResourceSlice resourcev1.ResourceSliceSpec `json:"resourceSlice"`
 }
@@ -81,10 +82,10 @@ func (m *Mapping) Validate() error {
 		return &ValidationError{Field: "name", Message: "mapping name cannot be empty"}
 	}
 
-	if len(m.NodeSelector.MatchLabels) == 0 && len(m.NodeSelector.MatchExpressions) == 0 {
+	if len(m.NodeSelectorTerms) == 0 {
 		return &ValidationError{
-			Field:   "nodeSelector",
-			Message: "nodeSelector must have at least one matchLabel or matchExpression",
+			Field:   "nodeSelectorTerms",
+			Message: "at least one node selector term must be defined",
 		}
 	}
 

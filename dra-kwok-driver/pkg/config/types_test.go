@@ -21,8 +21,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestConfig(t *testing.T) {
@@ -38,9 +38,15 @@ var _ = Describe("Config", func() {
 				Mappings: []Mapping{
 					{
 						Name: "test-mapping",
-						NodeSelector: metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"test": "value",
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "test",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"value"},
+									},
+								},
 							},
 						},
 						ResourceSlice: resourcev1.ResourceSliceSpec{
