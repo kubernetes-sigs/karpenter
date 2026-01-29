@@ -82,24 +82,32 @@ data:
     driver: "karpenter.sh.dra-kwok-driver"
     mappings:
     - name: "h100-nodes"
-      nodeSelector:
-        matchLabels:
-          node.kubernetes.io/instance-type: "g5.48xlarge"
-          kwok.x-k8s.io/node: "fake"
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["g5.48xlarge"]
+        - key: kwok.x-k8s.io/node
+          operator: In
+          values: ["fake"]
       resourceSlice:
         devices:
         - name: "nvidia-h100"
           count: 8
           attributes:
             memory: "80Gi"
-            compute-capability: "9.0" 
+            compute-capability: "9.0"
             device_class: "gpu"
             vendor: "nvidia"
     - name: "fpga-nodes"
-      nodeSelector:
-        matchLabels:
-          node.kubernetes.io/instance-type: "f1.2xlarge"
-          kwok.x-k8s.io/node: "fake"
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["f1.2xlarge"]
+        - key: kwok.x-k8s.io/node
+          operator: In
+          values: ["fake"]
       resourceSlice:
         devices:
         - name: "xilinx-u250"

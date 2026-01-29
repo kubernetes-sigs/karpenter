@@ -103,9 +103,15 @@ var _ = Describe("ResourceSliceController", func() {
 			mappings = []config.Mapping{
 				{
 					Name: "gpu-mapping",
-					NodeSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"node.kubernetes.io/instance-type": "g4dn.xlarge",
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1.NodeSelectorRequirement{
+								{
+									Key:      "node.kubernetes.io/instance-type",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"g4dn.xlarge"},
+								},
+							},
 						},
 					},
 					ResourceSlice: resourcev1.ResourceSliceSpec{
@@ -121,10 +127,20 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 				{
 					Name: "multi-gpu-mapping",
-					NodeSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"node.kubernetes.io/instance-type": "p3.2xlarge",
-							"accelerator":                      "nvidia-tesla-v100",
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1.NodeSelectorRequirement{
+								{
+									Key:      "node.kubernetes.io/instance-type",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"p3.2xlarge"},
+								},
+								{
+									Key:      "accelerator",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"nvidia-tesla-v100"},
+								},
+							},
 						},
 					},
 					ResourceSlice: resourcev1.ResourceSliceSpec{
@@ -226,9 +242,15 @@ var _ = Describe("ResourceSliceController", func() {
 				Mappings: []config.Mapping{
 					{
 						Name: "gpu-mapping",
-						NodeSelector: metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"node.kubernetes.io/instance-type": "g4dn.xlarge",
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "node.kubernetes.io/instance-type",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"g4dn.xlarge"},
+									},
+								},
 							},
 						},
 						ResourceSlice: resourcev1.ResourceSliceSpec{
