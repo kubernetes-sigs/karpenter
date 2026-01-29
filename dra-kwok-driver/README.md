@@ -88,9 +88,11 @@ data:
     driver: karpenter.sh/dra-kwok-driver
     mappings:
       - name: gpu-t4-mapping
-        nodeSelector:
-          matchLabels:
-            node.kubernetes.io/instance-type: c-4x-amd64-linux
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: In
+                values: ["c-4x-amd64-linux"]
         resourceSlice:
           driver: karpenter.sh/dra-kwok-driver
           pool:
@@ -121,9 +123,11 @@ data:
     driver: karpenter.sh/dra-kwok-driver
     mappings:
       - name: fpga-mapping
-        nodeSelector:
-          matchLabels:
-            node.kubernetes.io/instance-type: f1.2xlarge
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: In
+                values: ["f1.2xlarge"]
         resourceSlice:
           driver: karpenter.sh/dra-kwok-driver
           pool:
@@ -155,9 +159,11 @@ data:
     mappings:
       # GPU devices
       - name: gpu-mapping
-        nodeSelector:
-          matchLabels:
-            accelerator-type: gpu
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: accelerator-type
+                operator: In
+                values: ["gpu"]
         resourceSlice:
           driver: karpenter.sh/dra-kwok-driver
           pool:
@@ -172,12 +178,14 @@ data:
               attributes:
                 type:
                   String: nvidia-tesla-v100
-      
+
       # FPGA devices on same nodes
       - name: fpga-mapping
-        nodeSelector:
-          matchLabels:
-            accelerator-type: gpu  # Same selector - creates multiple ResourceSlices per node
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: accelerator-type
+                operator: In
+                values: ["gpu"]  # Same selector - creates multiple ResourceSlices per node
         resourceSlice:
           driver: karpenter.sh/dra-kwok-driver
           pool:
@@ -202,9 +210,11 @@ data:
     driver: karpenter.sh/dra-kwok-driver
     mappings:
       - name: cluster-wide-resource
-        nodeSelector:
-          matchLabels:
-            has-shared-storage: "true"
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: has-shared-storage
+                operator: In
+                values: ["true"]
         resourceSlice:
           driver: karpenter.sh/dra-kwok-driver
           allNodes: true  # Available cluster-wide

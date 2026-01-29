@@ -87,10 +87,14 @@ driver: karpenter.sh/dra-kwok-driver
 mappings:
   # NVIDIA T4 GPUs (c-4x-amd64-linux)
   - name: gpu-t4-mapping
-    nodeSelector:
-      matchLabels:
-        node.kubernetes.io/instance-type: c-4x-amd64-linux
-        karpenter.sh/nodepool: ` + nodePool.Name + `
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["c-4x-amd64-linux"]
+          - key: karpenter.sh/nodepool
+            operator: In
+            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -108,12 +112,16 @@ mappings:
             cuda_cores:
               String: "2560"
 
-  # NVIDIA V100 GPUs (m-8x-amd64-linux)  
+  # NVIDIA V100 GPUs (m-8x-amd64-linux)
   - name: gpu-v100-mapping
-    nodeSelector:
-      matchLabels:
-        node.kubernetes.io/instance-type: m-8x-amd64-linux
-        karpenter.sh/nodepool: ` + nodePool.Name + `
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["m-8x-amd64-linux"]
+          - key: karpenter.sh/nodepool
+            operator: In
+            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -317,10 +325,14 @@ mappings:
 driver: karpenter.sh/dra-kwok-driver
 mappings:
   - name: gpu-t4-updated-mapping
-    nodeSelector:
-      matchLabels:
-        node.kubernetes.io/instance-type: c-4x-amd64-linux
-        karpenter.sh/nodepool: ` + nodePool.Name + `
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["c-4x-amd64-linux"]
+          - key: karpenter.sh/nodepool
+            operator: In
+            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -382,10 +394,14 @@ driver: karpenter.sh/dra-kwok-driver
 mappings:
   # FPGA mapping for c-4x-amd64-linux nodes
   - name: fpga-c4x-mapping
-    nodeSelector:
-      matchLabels:
-        node.kubernetes.io/instance-type: c-4x-amd64-linux
-        karpenter.sh/nodepool: ` + nodePool.Name + `
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["c-4x-amd64-linux"]
+          - key: karpenter.sh/nodepool
+            operator: In
+            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -405,10 +421,14 @@ mappings:
 
   # FPGA mapping for m-8x-amd64-linux nodes
   - name: fpga-m8x-mapping
-    nodeSelector:
-      matchLabels:
-        node.kubernetes.io/instance-type: m-8x-amd64-linux
-        karpenter.sh/nodepool: ` + nodePool.Name + `
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["m-8x-amd64-linux"]
+          - key: karpenter.sh/nodepool
+            operator: In
+            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -518,10 +538,14 @@ driver: karpenter.sh/dra-kwok-driver
 mappings:
   # First ResourceSlice: GPU devices for c-4x-amd64-linux
   - name: gpu-mapping-c4x
-    nodeSelector:
-      matchLabels:
-        node.kubernetes.io/instance-type: c-4x-amd64-linux
-        karpenter.sh/nodepool: ` + nodePool.Name + `
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["c-4x-amd64-linux"]
+          - key: karpenter.sh/nodepool
+            operator: In
+            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -544,13 +568,17 @@ mappings:
               string: 16Gi
             device_class:
               string: gpu
-            
+
   # Second ResourceSlice: FPGA devices for same instance type
   - name: fpga-mapping-c4x
-    nodeSelector:
-      matchLabels:
-        node.kubernetes.io/instance-type: c-4x-amd64-linux
-        karpenter.sh/nodepool: ` + nodePool.Name + `
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["c-4x-amd64-linux"]
+          - key: karpenter.sh/nodepool
+            operator: In
+            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -785,10 +813,14 @@ mappings: []
 driver: karpenter.sh/dra-kwok-driver
 mappings:
   - name: gpu-scheduling-mapping
-    nodeSelector:
-      matchLabels:
-        node.kubernetes.io/instance-type: c-4x-amd64-linux
-        karpenter.sh/nodepool: ` + nodePool.Name + `
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["c-4x-amd64-linux"]
+          - key: karpenter.sh/nodepool
+            operator: In
+            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
