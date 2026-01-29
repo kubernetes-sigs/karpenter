@@ -41,16 +41,22 @@ type ConfigMapController struct {
 	kubeClient         client.Client
 	configMapName      string
 	configMapNamespace string
-	driverConfig       *config.Config
+	configStore        *config.Store
 	onConfigChange     func(*config.Config)
 }
 
 // NewConfigMapController creates a new ConfigMap controller
-func NewConfigMapController(kubeClient client.Client, configMapName, configMapNamespace string, onConfigChange func(*config.Config)) *ConfigMapController {
+func NewConfigMapController(
+	kubeClient client.Client,
+	configMapName, configMapNamespace string,
+	configStore *config.Store,
+	onConfigChange func(*config.Config),
+) *ConfigMapController {
 	return &ConfigMapController{
 		kubeClient:         kubeClient,
 		configMapName:      configMapName,
 		configMapNamespace: configMapNamespace,
+		configStore:        configStore,
 		onConfigChange:     onConfigChange,
 	}
 }
@@ -82,6 +88,7 @@ func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Reque
 		if errors.IsNotFound(err) {
 			log.Info("configmap not found, using empty configuration")
 			// Clear configuration when ConfigMap is deleted
+			r.configStore.Clear()
 			if r.onConfigChange != nil {
 				r.onConfigChange(nil)
 			}
@@ -111,7 +118,7 @@ func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Reque
 	)
 
 	// Store configuration and notify callback
-	r.driverConfig = cfg
+	r.configStore.Set(cfg)
 	if r.onConfigChange != nil {
 		r.onConfigChange(cfg)
 	}
@@ -154,9 +161,9 @@ func (r *ConfigMapController) sanitizeConfig(cfg *config.Config) {
 	// Kubernetes API server validation will handle attribute name validation
 }
 
-// GetConfig returns the current configuration
+// GetConfig returns the current configuration from the store
 func (r *ConfigMapController) GetConfig() *config.Config {
-	return r.driverConfig
+	return r.configStore.Get()
 }
 
 // LoadInitialConfig loads the initial configuration from the ConfigMap
@@ -190,7 +197,7 @@ func (r *ConfigMapController) LoadInitialConfig(ctx context.Context) error {
 		return fmt.Errorf("invalid initial configuration: %w", err)
 	}
 
-	r.driverConfig = cfg
+	r.configStore.Set(cfg)
 	log.Info("loaded initial configuration",
 		"driver", cfg.Driver,
 		"mappings", len(cfg.Mappings),

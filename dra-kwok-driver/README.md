@@ -4,20 +4,23 @@ A Kubernetes Dynamic Resource Allocation (DRA) driver that creates ResourceSlice
 
 ## Architecture Overview
 
-The DRA KWOK driver consists of 4 main components:
+The DRA KWOK driver consists of 5 main components:
 
 ```
-ConfigMap ──▶ ConfigMapController ──▶ ResourceSliceController ──▶ ResourceSlices
-  (YAML)        (Parser/Watcher)        (Node Event Handler)
+ConfigMap ──▶ ConfigMapController ──▶ Config Store ◀── ResourceSliceController ──▶ ResourceSlices
+  (YAML)        (Parser/Watcher)       (Shared State)     (Node Event Handler)
 ```
+
+The **Config Store** is a thread-safe shared data structure that decouples the controllers, avoiding circular dependencies while enabling both controllers to access the current configuration.
 
 ## Breakdown 
 
 ### **`main.go`** - Application Bootstrap
-Sets up the controller-runtime manager and initializes both controllers.
+Sets up the controller-runtime manager and initializes both controllers with a shared config store.
 - Creates Kubernetes client and controller-runtime manager
-- Registers DRA ResourceSlice API types in the scheme  
-- Initializes ConfigMapController and ResourceSliceController
+- Registers DRA ResourceSlice API types in the scheme
+- Creates shared Config Store for thread-safe configuration access
+- Initializes ConfigMapController and ResourceSliceController with the shared store
 - Single manager for both controllers to share Kubernetes client and event system
 - Sets up health checks and metrics endpoints
 - Handles graceful shutdown
@@ -26,22 +29,29 @@ Sets up the controller-runtime manager and initializes both controllers.
 Defines the complete data structure for ConfigMap configuration with validation.
 **Key Structures:**
 - **Config**: Top-level configuration with driver name and mappings array
-- **Mapping**: Links node selectors to upstream ResourceSlice specifications  
+- **Mapping**: Links node selectors to upstream ResourceSlice specifications
 - **ResourceSliceSpec**: Uses upstream Kubernetes ResourceSlice spec directly for complete API coverage
 
+### **`pkg/config/store.go`** - Shared Configuration Store
+Thread-safe store for driver configuration that allows for ConfigMapController and ResourceSliceController to share the configuration instead of interacting with eachother.
+- **Thread-safe access**: Uses `sync.Mutex` for concurrent read/write operations
+- **API**: `Get()`, `Set()`, and `Clear()` methods for configuration management
+
 ### **`pkg/controllers/configmap.go`** - Configuration Management
-Watches ConfigMap changes, parses YAML configuration, validates it, and makes it available to other controllers.
+Watches ConfigMap changes, parses YAML configuration, validates it, and stores it in the shared config store.
 - Watches only the specific ConfigMap (`dra-kwok-configmap` in `karpenter` namespace)
 - Parses `config.yaml` data from ConfigMap into Go structs
 - Validates configuration structure and business rules
-- Stores validated configuration and notifies ResourceSliceController of changes
-- Handles ConfigMap deletion by clearing configuration
-  
- Single-threaded reconciliation prevents race conditions during configuration updates. Invalid configurations are logged but don't crash the driver.
+- Stores validated configuration in the shared Config Store
+- Triggers optional callback to notify other components of configuration changes
+- Handles ConfigMap deletion by clearing configuration from store
+
+Single-threaded reconciliation prevents race conditions during configuration updates. Invalid configurations are logged but don't crash the driver.
 
 ### **`pkg/controllers/resourceslice.go`** - ResourceSlice Lifecycle
-Watches Node events, detects KWOK nodes, matches them against configuration, and manages ResourceSlice CRUD operations.
+Watches Node events, detects KWOK nodes, reads configuration from the shared store, matches nodes against configuration, and manages ResourceSlice CRUD operations.
 - **Node Filtering**: Only processes nodes with `kwok.x-k8s.io/node` annotation (Karpenter KWOK nodes)
+- **Configuration Access**: Reads current configuration from the shared Config Store
 - **Label Matching**: Uses Kubernetes label selectors to find configuration mappings for each node
 - **ResourceSlice Creation**: Creates real Kubernetes ResourceSlice objects with device specifications from config
 - **Automatic Cleanup**: Uses owner references so ResourceSlices are deleted when nodes are removed
@@ -50,25 +60,28 @@ Watches Node events, detects KWOK nodes, matches them against configuration, and
 
 ### **Initialization**
 1. **main.go** creates controller-runtime manager with Kubernetes client
-2. **ConfigMapController** and **ResourceSliceController** register for event watching
-3. **ConfigMapController** attempts to load initial configuration from existing ConfigMap
-4. Manager starts watching Kubernetes API for ConfigMap and Node events
+2. **main.go** creates shared Config Store instance
+3. **ConfigMapController** and **ResourceSliceController** are initialized with the shared store
+4. Both controllers register for event watching (ConfigMap and Node events respectively)
+5. **ConfigMapController** attempts to load initial configuration from existing ConfigMap into the store
+6. Manager starts watching Kubernetes API for ConfigMap and Node events
 
-### **Configuration** 
+### **Configuration**
 When ConfigMap is created or updated:
 1. **ConfigMapController** receives ConfigMap event
 2. Extracts `config.yaml` data and parses YAML into Go structs using upstream ResourceSlice spec
-3. Validates configuration structure and rules  
-4. Stores validated configuration internally
-5. **ResourceSliceController** can now access configuration via shared reference
+3. Validates configuration structure and rules
+4. Stores validated configuration in the shared Config Store using `store.Set(config)`
+5. Triggers callback to notify **ResourceSliceController** to reconcile all existing nodes
+6. **ResourceSliceController** can now access the new configuration via `store.Get()`
 
 ### **Node Processing**
 When Karpenter creates a KWOK node:
 1. **ResourceSliceController** receives Node event
 2. Checks for `kwok.x-k8s.io/node` annotation to identify KWOK nodes
-3. Gets current configuration from **ConfigMapController**
+3. Gets current configuration from the shared Config Store via `store.Get()`
 4. Iterates through configuration mappings to find matching nodeSelector
-5. If match found: Creates ResourceSlice 
+5. If match found: Creates ResourceSlice
 6. Only adds node-specific metadata (NodeName, owner references, labels) - all other fields come from config
 
 ### **Cleanup**
