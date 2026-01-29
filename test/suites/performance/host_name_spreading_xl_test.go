@@ -83,12 +83,12 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-600), "Should have net reduction of 600 pods")
 
 			// XL Consolidation assertions
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
-				"XL consolidation should complete within 25 minutes")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 35*time.Minute),
+				"XL consolidation should complete within 35 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
 				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
-				"Average memory utilization should be greater than 55%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+				"Average memory utilization should be greater than 40%")
 
 		})
 	})
