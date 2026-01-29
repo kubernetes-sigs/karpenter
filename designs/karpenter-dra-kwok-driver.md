@@ -3,20 +3,20 @@
 ## Summary
 The upstream kubernetes/perf-tests repository includes a [DRA KWOK Driver](https://github.com/kubernetes/perf-tests/pull/3491/files), but it's designed for **ClusterLoader2 scale testing** with pre-created static nodes that cannot be used for Karpenter testing.
 
-This design introduces a **Karpenter DRA KWOK Driver** - a mock DRA driver that acts on behalf of KWOK nodes created by Karpenter. When KWOK nodes register with the cluster, the driver creates ResourceSlices advertising fake GPU/device resources. This simulates what a real DRA driver (like NVIDIA GPU Operator) would do, but with fake devices for testing purposes. The driver watches for KWOK nodes and creates corresponding ResourceSlices based on either Node Overlay or ConfigMap configuration. The driver acts independently as a standard Kubernetes controller, ensuring ResourceSlices exist on the API server for both the scheduler and Karpenter's cluster state to discover.
+This design introduces a **Karpenter DRA KWOK Driver** - a mock DRA driver that acts on behalf of KWOK nodes created by Karpenter. When KWOK nodes register with the cluster, the driver creates ResourceSlices advertising fake GPU/device resources. This simulates what a real DRA driver (like NVIDIA GPU Operator) would do, but with fake devices for testing purposes. The driver uses a polling approach (30-second interval) to periodically reconcile all KWOK nodes and creates corresponding ResourceSlices based on either Node Overlay or ConfigMap configuration. The driver acts independently as a standard Kubernetes controller, ensuring ResourceSlices exist on the API server for both the scheduler and Karpenter's cluster state to discover.
 
 ### Workflow
 1. **Test creates ResourceClaim** with device attribute selectors
 2. **Test creates DRA pod** referencing the ResourceClaim
 3. **Karpenter provisions KWOK node** in response to unschedulable pod
-4. **Node registration triggers ResourceSlice creation** based on:
+4. **Driver polling loop detects new node** (within 30 seconds) and creates ResourceSlices based on:
    - **Case 1:** Check for matching NodeOverlay with embedded ResourceSlice objects (future enhancement)
    - **Case 2:** Use ConfigMap mappings if no NodeOverlay matches
    - **Case 3:** Eventually cloudproviders will be able to provide potential ResourceSlice shapes through the InstanceType interface (Future TODO: implement a way for cloudproviders to inform our DRAKWOKDriver of those shapes).
 5. **Kubernetes scheduler discovers ResourceSlices** and binds pod to node
 6. **Pod successfully schedules** to the node with available DRA resources
 7. **Test validates** node creation, ResourceSlice creation, pod scheduling, and Karpenter behavior
-8. **Cleanup automatically removes** ResourceSlices when nodes are deleted
+8. **Cleanup automatically removes** ResourceSlices in next polling cycle when nodes are deleted
 
 ## Implementation
 

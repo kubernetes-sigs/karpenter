@@ -84,22 +84,12 @@ func main() {
 		configStore,
 	)
 
-	// Initialize ConfigMap controller with callback to trigger ResourceSlice reconciliation
+	// Initialize ConfigMap controller
 	configMapController := controllers.NewConfigMapController(
 		mgr.GetClient(),
 		"dra-kwok-configmap",
 		"karpenter",
 		configStore,
-		func(cfg *config.Config) {
-			if cfg != nil {
-				logger.Info("Configuration updated, reconciling all nodes", "driver", cfg.Driver, "mappings", len(cfg.Mappings))
-				if err := resourceSliceController.ReconcileAllNodes(ctx); err != nil {
-					logger.Error(err, "Failed to reconcile nodes after configuration change")
-				}
-			} else {
-				logger.Info("Configuration cleared")
-			}
-		},
 	)
 
 	// Register controllers

@@ -4,14 +4,14 @@ A Kubernetes Dynamic Resource Allocation (DRA) driver that creates ResourceSlice
 
 ## Architecture Overview
 
-The DRA KWOK driver consists of 5 main components:
+The DRA KWOK driver consists of two main controllers that independently manage their responsibilities:
 
 ```
 ConfigMap ──▶ ConfigMapController ──▶ Config Store ◀── ResourceSliceController ──▶ ResourceSlices
-  (YAML)        (Parser/Watcher)       (Shared State)     (Node Event Handler)
+  (YAML)        (Parser/Watcher)       (Shared State)     (Polls for changes)
 ```
 
-The **Config Store** is a thread-safe shared data structure that decouples the controllers, avoiding circular dependencies while enabling both controllers to access the current configuration.
+The **Config Store** is a thread-safe shared data structure that enables both controllers to access the current configuration. The **ResourceSliceController** periodically polls all nodes (every 30 seconds) to ensure ResourceSlices match the current configuration.
 
 ## Breakdown 
 
@@ -43,18 +43,19 @@ Watches ConfigMap changes, parses YAML configuration, validates it, and stores i
 - Parses `config.yaml` data from ConfigMap into Go structs
 - Validates configuration structure and business rules
 - Stores validated configuration in the shared Config Store
-- Triggers optional callback to notify other components of configuration changes
 - Handles ConfigMap deletion by clearing configuration from store
 
 Single-threaded reconciliation prevents race conditions during configuration updates. Invalid configurations are logged but don't crash the driver.
 
 ### **`pkg/controllers/resourceslice.go`** - ResourceSlice Lifecycle
-Watches Node events, detects KWOK nodes, reads configuration from the shared store, matches nodes against configuration, and manages ResourceSlice CRUD operations.
+Periodically polls all nodes (every 30 seconds), detects KWOK nodes, reads configuration from the shared store, matches nodes against configuration, and manages ResourceSlice CRUD operations.
+- **Polling Loop**: Runs every 30 seconds to reconcile all nodes, ensuring eventual consistency
 - **Node Filtering**: Only processes nodes with `kwok.x-k8s.io/node` annotation (Karpenter KWOK nodes)
 - **Configuration Access**: Reads current configuration from the shared Config Store
 - **Label Matching**: Uses Kubernetes label selectors to find configuration mappings for each node
-- **ResourceSlice Creation**: Creates real Kubernetes ResourceSlice objects with device specifications from config
-- **Automatic Cleanup**: Uses owner references so ResourceSlices are deleted when nodes are removed
+- **ResourceSlice Management**: Creates, updates, or deletes ResourceSlices to match desired state
+- **Error Handling**: Continues processing other nodes if one fails; failed nodes are retried in the next cycle
+- **Cleanup**: Removes ResourceSlices that shouldn't exist (orphaned slices, deleted nodes, configuration changes)
 
 ## End-to-End Workflow
 
@@ -62,9 +63,10 @@ Watches Node events, detects KWOK nodes, reads configuration from the shared sto
 1. **main.go** creates controller-runtime manager with Kubernetes client
 2. **main.go** creates shared Config Store instance
 3. **ConfigMapController** and **ResourceSliceController** are initialized with the shared store
-4. Both controllers register for event watching (ConfigMap and Node events respectively)
-5. **ConfigMapController** attempts to load initial configuration from existing ConfigMap into the store
-6. Manager starts watching Kubernetes API for ConfigMap and Node events
+4. **ConfigMapController** registers for ConfigMap event watching
+5. **ResourceSliceController** starts polling loop (30-second interval)
+6. **ConfigMapController** attempts to load initial configuration from existing ConfigMap into the store
+7. Manager starts watching Kubernetes API for ConfigMap events
 
 ### **Configuration**
 When ConfigMap is created or updated:
@@ -72,20 +74,29 @@ When ConfigMap is created or updated:
 2. Extracts `config.yaml` data and parses YAML into Go structs using upstream ResourceSlice spec
 3. Validates configuration structure and rules
 4. Stores validated configuration in the shared Config Store using `store.Set(config)`
-5. Triggers callback to notify **ResourceSliceController** to reconcile all existing nodes
-6. **ResourceSliceController** can now access the new configuration via `store.Get()`
+5. Configuration becomes available to **ResourceSliceController** via `store.Get()`
+6. **ResourceSliceController** picks up the new configuration in its next polling cycle (within 30 seconds)
 
-### **Node Processing**
-When Karpenter creates a KWOK node:
-1. **ResourceSliceController** receives Node event
-2. Checks for `kwok.x-k8s.io/node` annotation to identify KWOK nodes
-3. Gets current configuration from the shared Config Store via `store.Get()`
-4. Iterates through configuration mappings to find matching nodeSelector
-5. If match found: Creates ResourceSlice
-6. Only adds node-specific metadata (NodeName, owner references, labels) - all other fields come from config
+### **Node Processing (Polling Loop)**
+Every 30 seconds, the ResourceSliceController:
+1. Retrieves current configuration from the shared Config Store via `store.Get()`
+2. Lists all nodes in the cluster
+3. For each node:
+   - Checks for `kwok.x-k8s.io/node` annotation to identify KWOK nodes
+   - Iterates through configuration mappings to find matching nodeSelectors
+   - If match found: Creates or updates ResourceSlice with device specifications
+   - If no match: Ensures no ResourceSlices exist for this node
+4. Cleans up any orphaned ResourceSlices (nodes deleted, configuration removed, etc.)
+5. Logs summary of reconciliation (nodes processed, errors encountered)
+
+This polling approach ensures eventual consistency - any changes to nodes or configuration are reconciled within 30 seconds.
 
 ### **Cleanup**
-When KWOK node is deleted automatically removes ResourceSlices
+ResourceSlices are automatically cleaned up when:
+- KWOK node is deleted (detected in next polling cycle)
+- Node no longer matches any configuration mapping (labels changed)
+- ConfigMap is deleted or configuration is cleared
+- Mapping is removed from configuration
 
 ## ConfigMap Examples
 

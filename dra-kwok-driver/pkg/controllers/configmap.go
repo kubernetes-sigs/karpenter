@@ -42,7 +42,6 @@ type ConfigMapController struct {
 	configMapName      string
 	configMapNamespace string
 	configStore        *config.Store
-	onConfigChange     func(*config.Config)
 }
 
 // NewConfigMapController creates a new ConfigMap controller
@@ -50,14 +49,12 @@ func NewConfigMapController(
 	kubeClient client.Client,
 	configMapName, configMapNamespace string,
 	configStore *config.Store,
-	onConfigChange func(*config.Config),
 ) *ConfigMapController {
 	return &ConfigMapController{
 		kubeClient:         kubeClient,
 		configMapName:      configMapName,
 		configMapNamespace: configMapNamespace,
 		configStore:        configStore,
-		onConfigChange:     onConfigChange,
 	}
 }
 
@@ -89,9 +86,6 @@ func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Reque
 			log.Info("configmap not found, using empty configuration")
 			// Clear configuration when ConfigMap is deleted
 			r.configStore.Clear()
-			if r.onConfigChange != nil {
-				r.onConfigChange(nil)
-			}
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting configmap, %w", err), "ConfigMap", klog.KRef(req.Namespace, req.Name))
@@ -117,11 +111,8 @@ func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Reque
 		"mappings", len(cfg.Mappings),
 	)
 
-	// Store configuration and notify callback
+	// Store configuration
 	r.configStore.Set(cfg)
-	if r.onConfigChange != nil {
-		r.onConfigChange(cfg)
-	}
 
 	return reconcile.Result{}, nil
 }
