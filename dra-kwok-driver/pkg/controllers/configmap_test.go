@@ -42,7 +42,8 @@ var _ = Describe("ConfigMapController", func() {
 
 	BeforeEach(func() {
 		fakeClient = fake.NewClientBuilder()
-		controller = NewConfigMapController(fakeClient.Build(), configMapName, configMapNamespace, nil)
+		configStore := config.NewStore()
+		controller = NewConfigMapController(fakeClient.Build(), configMapName, configMapNamespace, configStore, nil)
 	})
 
 	// Unit tests focus on core parsing and validation logic
@@ -160,7 +161,7 @@ mappings:
 				Driver: "test.example.com/device",
 			}
 
-			controller.driverConfig = testConfig
+			controller.configStore.Set(testConfig)
 
 			cfg := controller.GetConfig()
 			Expect(cfg).To(Equal(testConfig))
@@ -171,10 +172,12 @@ mappings:
 		It("should create controller with correct parameters", func() {
 			onConfigChangeCalled := false
 			testClient := fake.NewClientBuilder().Build()
+			testConfigStore := config.NewStore()
 			testController := NewConfigMapController(
 				testClient,
 				"test-config",
 				"test-namespace",
+				testConfigStore,
 				func(cfg *config.Config) {
 					onConfigChangeCalled = true
 				},
@@ -183,6 +186,7 @@ mappings:
 			Expect(testController).ToNot(BeNil())
 			Expect(testController.configMapName).To(Equal("test-config"))
 			Expect(testController.configMapNamespace).To(Equal("test-namespace"))
+			Expect(testController.configStore).To(Equal(testConfigStore))
 
 			// Test callback function works
 			testController.onConfigChange(nil)

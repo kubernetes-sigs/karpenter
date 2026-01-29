@@ -40,23 +40,18 @@ import (
 
 // ResourceSliceController manages ResourceSlice lifecycle based on Node events and driver configuration
 type ResourceSliceController struct {
-	kubeClient       client.Client
-	driverName       string
-	configController *ConfigMapController
+	kubeClient  client.Client
+	driverName  string
+	configStore *config.Store
 }
 
 // NewResourceSliceController creates a new ResourceSlice controller
-func NewResourceSliceController(kubeClient client.Client, driverName string, configController *ConfigMapController) *ResourceSliceController {
+func NewResourceSliceController(kubeClient client.Client, driverName string, configStore *config.Store) *ResourceSliceController {
 	return &ResourceSliceController{
-		kubeClient:       kubeClient,
-		driverName:       driverName,
-		configController: configController,
+		kubeClient:  kubeClient,
+		driverName:  driverName,
+		configStore: configStore,
 	}
-}
-
-// SetConfigController sets the config controller reference (used when controllers are initialized in sequence)
-func (r *ResourceSliceController) SetConfigController(configController *ConfigMapController) {
-	r.configController = configController
 }
 
 // Register registers the controller with the manager
@@ -93,7 +88,7 @@ func (r *ResourceSliceController) Reconcile(ctx context.Context, req reconcile.R
 	}
 
 	// Get current driver configuration
-	cfg := r.configController.GetConfig()
+	cfg := r.configStore.Get()
 	if cfg == nil {
 		log.V(1).Info("no driver configuration available, skipping node", "node", node.Name)
 		return reconcile.Result{}, nil
