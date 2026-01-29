@@ -20,12 +20,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -80,8 +82,7 @@ func (r *ResourceSliceController) Reconcile(ctx context.Context, req reconcile.R
 			log.Info("node deleted, cleaning up resourceslices", "node", req.Name)
 			return r.cleanupResourceSlicesForNode(ctx, req.Name)
 		}
-		log.Error(err, "failed to fetch node")
-		return reconcile.Result{}, err
+		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting node, %w", err), "Node", klog.KRef("", req.Name))
 	}
 
 	// Skip non-KWOK nodes
@@ -186,12 +187,10 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 					"devices", len(resourceSlice.Spec.Devices),
 				)
 				if err := r.kubeClient.Create(ctx, resourceSlice); err != nil {
-					log.Error(err, "failed to create resourceslice", "resourceslice", resourceSliceName)
-					return reconcile.Result{}, err
+					return reconcile.Result{}, serrors.Wrap(fmt.Errorf("creating resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
 				}
 			} else {
-				log.Error(err, "failed to get resourceslice", "resourceslice", resourceSliceName)
-				return reconcile.Result{}, err
+				return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
 			}
 		} else {
 			// Update existing ResourceSlice
@@ -205,8 +204,7 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 				"devices", len(resourceSlice.Spec.Devices),
 			)
 			if err := r.kubeClient.Update(ctx, existing); err != nil {
-				log.Error(err, "failed to update resourceslice", "resourceslice", resourceSliceName)
-				return reconcile.Result{}, err
+				return reconcile.Result{}, serrors.Wrap(fmt.Errorf("updating resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
 			}
 		}
 	}
@@ -224,16 +222,14 @@ func (r *ResourceSliceController) cleanupResourceSlicesForNode(ctx context.Conte
 		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
 		"kwok.x-k8s.io/node":       nodeName,
 	}); err != nil {
-		log.Error(err, "failed to list resourceslices for cleanup", "node", nodeName)
-		return reconcile.Result{}, err
+		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("listing resourceslices for cleanup, %w", err), "Node", klog.KRef("", nodeName))
 	}
 
 	// Delete each ResourceSlice
 	for _, rs := range resourceSlices.Items {
 		log.Info("deleting resourceslice", "resourceslice", rs.Name, "node", nodeName)
 		if err := r.kubeClient.Delete(ctx, &rs); err != nil && !errors.IsNotFound(err) {
-			log.Error(err, "failed to delete resourceslice", "resourceslice", rs.Name)
-			return reconcile.Result{}, err
+			return reconcile.Result{}, serrors.Wrap(fmt.Errorf("deleting resourceslice, %w", err), "ResourceSlice", klog.KRef("", rs.Name))
 		}
 	}
 
@@ -268,8 +264,7 @@ func (r *ResourceSliceController) ReconcileAllNodes(ctx context.Context) error {
 	// List all KWOK nodes
 	nodes := &corev1.NodeList{}
 	if err := r.kubeClient.List(ctx, nodes); err != nil {
-		log.Error(err, "failed to list nodes for configuration update")
-		return err
+		return fmt.Errorf("listing nodes for configuration update, %w", err)
 	}
 
 	// Count nodes that will be reconciled

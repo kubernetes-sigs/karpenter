@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -86,8 +87,7 @@ func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Reque
 			}
 			return reconcile.Result{}, nil
 		}
-		log.Error(err, "failed to fetch configmap")
-		return reconcile.Result{}, err
+		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("getting configmap, %w", err), "ConfigMap", klog.KRef(req.Namespace, req.Name))
 	}
 
 	// Parse configuration from ConfigMap
