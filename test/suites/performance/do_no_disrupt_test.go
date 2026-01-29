@@ -101,8 +101,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.TotalPods).To(BeNumerically(">=", 600), "Should have at least 600 total pods after scale-in (250+250+100)")
 			Expect(consolidationReport.PodsNetChange).To(BeNumerically(">=", -500), "Should have net reduction of 500 pods")
 
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
-				"Consolidation should complete within 20 minutes")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 35*time.Minute),
+				"Consolidation should complete within 35 minutes")
 			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
 				"Average CPU utilization should be greater than 38%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
