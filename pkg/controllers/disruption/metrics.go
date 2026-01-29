@@ -58,6 +58,16 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
+	NodepoolDecisionsPerformed = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "decisions_by_nodepool_total",
+			Help:      "Number of disruption decisions performed by nodepool. Labeled by nodepool name, disruption decision, reason, and consolidation type.",
+		},
+		[]string{metrics.NodePoolLabel, decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+	)
 	EligibleNodes = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
@@ -95,6 +105,16 @@ var (
 			Subsystem: metrics.NodePoolSubsystem,
 			Name:      "allowed_disruptions",
 			Help:      "The number of nodes for a given NodePool that can be concurrently disrupting at a point in time. Labeled by NodePool. Note that allowed disruptions can change very rapidly, as new nodes may be created and others may be deleted at any point.",
+		},
+		[]string{metrics.NodePoolLabel, metrics.ReasonLabel},
+	)
+	NodePoolNodesConsumingBudgets = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodePoolSubsystem,
+			Name:      "nodes_consuming_budgets",
+			Help:      "The number of nodes consuming the budget of a nodepool at a point in time. Labeled by NodePool.",
 		},
 		[]string{metrics.NodePoolLabel, metrics.ReasonLabel},
 	)

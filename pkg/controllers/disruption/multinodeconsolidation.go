@@ -48,6 +48,7 @@ func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOp
 	}
 }
 
+// nolint:gocyclo
 func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if m.IsConsolidated() {
 		return []Command{}, nil
@@ -102,7 +103,8 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 
 	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
-			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
+			reason := getValidationFailureReason(err)
+			cmd.EmitRejectedEvents(m.recorder, reason)
 			return []Command{}, nil
 		}
 		return []Command{}, fmt.Errorf("validating consolidation, %w", err)

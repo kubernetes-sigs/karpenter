@@ -151,6 +151,10 @@ var _ = Describe("Drift", func() {
 				metrics.NodePoolLabel: nodePool.Name,
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
+			ExpectMetricGaugeValue(disruption.NodePoolNodesConsumingBudgets, 0, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
+			})
 		})
 		It("should disrupt 3 nodes, taking into account commands in progress", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
@@ -321,6 +325,16 @@ var _ = Describe("Drift", func() {
 			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 10, map[string]string{
 				metrics.ReasonLabel: "drifted",
 			})
+			for _, np := range nps {
+				ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+					metrics.NodePoolLabel: np.Name,
+					metrics.ReasonLabel:   "drifted",
+				})
+				ExpectMetricGaugeValue(disruption.NodePoolNodesConsumingBudgets, 0, map[string]string{
+					metrics.NodePoolLabel: nodePool.Name,
+					metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
+				})
+			}
 		})
 	})
 	Context("Drift", func() {

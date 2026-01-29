@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
@@ -177,6 +178,94 @@ func (c Command) Decision() Decision {
 		return DeleteDecision
 	default:
 		return NoOpDecision
+	}
+}
+
+// SourceNodeNames returns the names of all candidate nodes
+func (c Command) SourceNodeNames() []string {
+	return lo.Map(c.Candidates, func(candidate *Candidate, _ int) string {
+		return candidate.Name()
+	})
+}
+
+// String returns a human-readable representation of the command
+func (c Command) String() string {
+	sources := strings.Join(c.SourceNodeNames(), ", ")
+
+	// For test commands without Method/ID set, use simple format
+	if c.Method == nil {
+		if len(c.Replacements) > 0 {
+			plural := "replacements"
+			if len(c.Replacements) == 1 {
+				plural = "replacement"
+			}
+			return fmt.Sprintf("%s: [%s] -> [%d %s]", c.Decision(), sources, len(c.Replacements), plural)
+		}
+		return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
+	}
+
+	// Full format with reason, ID, and savings
+	if len(c.Replacements) > 0 {
+		plural := "replacements"
+		if len(c.Replacements) == 1 {
+			plural = "replacement"
+		}
+		return fmt.Sprintf("%s/%s: %s: [%s] -> [%d %s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, len(c.Replacements), plural, c.EstimatedSavings())
+	}
+	return fmt.Sprintf("%s/%s: %s: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, c.EstimatedSavings())
+}
+
+// StringForNode returns a string representation of the command from the perspective of a single source candidate node.
+// For single-node commands, returns the full command string. For multi-node commands, returns a per-node
+// string with context to avoid listing all nodes.
+//
+// Note: This method only works for source nodes (Candidates being removed). Consolidation destinations can be
+// either new nodes (Replacements) or existing nodes (ExistingNodes in scheduling.Results), but only Replacements
+// are tracked in the Command. Events are currently only emitted for source nodes, not destinations.
+func (c Command) StringForNode(candidate *Candidate) string {
+	if len(c.Candidates) == 1 {
+		return c.String()
+	}
+	// Multi-node: show only this node with context
+	return fmt.Sprintf("%s: [%s] (part of %d-node consolidation)", c.Decision(), candidate.Name(), len(c.Candidates))
+}
+
+// EstimatedSavings returns the estimated cost savings from this consolidation.
+// Returns 0.0 when pricing cannot be determined. getCandidatePrices handles missing
+// offerings by returning 0.0, which causes consolidation to skip the candidate.
+func (c Command) EstimatedSavings() float64 {
+	sourcePrice := getCandidatePrices(c.Candidates)
+
+	// For delete consolidation, all source cost is savings
+	if len(c.Replacements) == 0 {
+		return sourcePrice
+	}
+
+	// For replace consolidation, sum destination costs from all replacement NodeClaims
+	destPrice := 0.0
+	for _, nodeClaim := range c.Results.NewNodeClaims {
+		if len(nodeClaim.InstanceTypeOptions) > 0 {
+			offerings := nodeClaim.InstanceTypeOptions[0].Offerings
+			if len(offerings) > 0 {
+				destPrice += offerings.Cheapest().Price
+			}
+		}
+	}
+
+	return sourcePrice - destPrice
+}
+
+// EmitCandidateEvents emits ConsolidationCandidate events for all candidates in this command
+func (c Command) EmitCandidateEvents(recorder events.Recorder) {
+	for _, candidate := range c.Candidates {
+		recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, c.StringForNode(candidate), c.EstimatedSavings())...)
+	}
+}
+
+// EmitRejectedEvents emits ConsolidationRejected events for all candidates in this command
+func (c Command) EmitRejectedEvents(recorder events.Recorder, reason string) {
+	for _, candidate := range c.Candidates {
+		recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, c.StringForNode(candidate), reason, c.EstimatedSavings())...)
 	}
 }
 
