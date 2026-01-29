@@ -56,8 +56,9 @@ var _ = Describe("ResourceSliceController", func() {
 		Expect(resourcev1.AddToScheme(scheme)).To(Succeed())
 
 		fakeClient = fake.NewClientBuilder().WithScheme(scheme).Build()
-		configController = NewConfigMapController(fakeClient, "dra-kwok-configmap", "karpenter", nil)
-		resourceController = NewResourceSliceController(fakeClient, driverName, configController)
+		configStore := config.NewStore()
+		configController = NewConfigMapController(fakeClient, "dra-kwok-configmap", "karpenter", configStore, nil)
+		resourceController = NewResourceSliceController(fakeClient, driverName, configStore)
 	})
 
 	Describe("isKWOKNode", func() {
@@ -279,7 +280,7 @@ var _ = Describe("ResourceSliceController", func() {
 					},
 				},
 			}
-			configController.driverConfig = testConfig
+			configController.configStore.Set(testConfig)
 		})
 
 		It("should skip non-KWOK nodes", func() {
@@ -312,7 +313,7 @@ var _ = Describe("ResourceSliceController", func() {
 
 		It("should handle missing configuration gracefully", func() {
 			// Clear configuration
-			configController.driverConfig = nil
+			configController.configStore.Clear()
 
 			Expect(fakeClient.Create(ctx, node)).To(Succeed())
 

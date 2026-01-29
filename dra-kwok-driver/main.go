@@ -74,11 +74,14 @@ func main() {
 		panic(err)
 	}
 
-	// Initialize ResourceSlice controller first
+	// Create shared config store
+	configStore := config.NewStore()
+
+	// Initialize ResourceSlice controller
 	resourceSliceController := controllers.NewResourceSliceController(
 		mgr.GetClient(),
 		"karpenter.sh.dra-kwok-driver",
-		nil, // Will be set after ConfigMap controller is created
+		configStore,
 	)
 
 	// Initialize ConfigMap controller with callback to trigger ResourceSlice reconciliation
@@ -86,6 +89,7 @@ func main() {
 		mgr.GetClient(),
 		"dra-kwok-configmap",
 		"karpenter",
+		configStore,
 		func(cfg *config.Config) {
 			if cfg != nil {
 				logger.Info("Configuration updated, reconciling all nodes", "driver", cfg.Driver, "mappings", len(cfg.Mappings))
@@ -97,9 +101,6 @@ func main() {
 			}
 		},
 	)
-
-	// Update ResourceSlice controller with ConfigMap controller reference
-	resourceSliceController.SetConfigController(configMapController)
 
 	// Register controllers
 	logger.Info("Registering controllers")
