@@ -34,7 +34,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -204,7 +203,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 
 		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
-			if nodeoverlay.IsUnevaluatedNodePoolError(err) {
+			if cloudprovider.IsUnevaluatedNodePoolError(err) {
 				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, node overlies are not applied")
 				continue
 			}
@@ -269,6 +268,9 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		allowedDisruptions := nodePool.MustGetAllowedDisruptions(clk, numNodes[nodePool.Name], reason)
 		disruptionBudgetMapping[nodePool.Name] = lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
 		NodePoolAllowedDisruptions.Set(float64(allowedDisruptions), map[string]string{
+			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
+		})
+		NodePoolNodesConsumingBudgets.Set(float64(disrupting[nodePool.Name]), map[string]string{
 			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
 		})
 		if numNodes[nodePool.Name] != 0 && allowedDisruptions == 0 {

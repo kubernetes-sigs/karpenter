@@ -445,28 +445,28 @@ var _ = Context("Scheduling", func() {
 					ExpectNotScheduled(ctx, env.Client, pod)
 				}
 			})
-			It("should schedule pods that have node selectors with label in restricted domains exceptions list", func() {
+			It("should schedule pods that have node selectors with label in the kubernetes domains", func() {
 				var requirements []v1.NodeSelectorRequirementWithMinValues
-				for domain := range v1.LabelDomainExceptions {
+				for _, domain := range []string{"kubernetes.io", "k8s.io"} {
 					requirements = append(requirements, v1.NodeSelectorRequirementWithMinValues{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}})
 				}
 				nodePool.Spec.Template.Spec.Requirements = requirements
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1.LabelDomainExceptions {
+				for _, domain := range []string{"kubernetes.io", "k8s.io"} {
 					pod := test.UnschedulablePod()
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
 				}
 			})
-			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
+			It("should schedule pods that have node selectors with label in subdomain from kubernetes domains", func() {
 				var requirements []v1.NodeSelectorRequirementWithMinValues
-				for domain := range v1.LabelDomainExceptions {
+				for _, domain := range []string{"kubernetes.io", "k8s.io"} {
 					requirements = append(requirements, v1.NodeSelectorRequirementWithMinValues{Key: "subdomain." + domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}})
 				}
 				nodePool.Spec.Template.Spec.Requirements = requirements
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1.LabelDomainExceptions {
+				for _, domain := range []string{"kubernetes.io", "k8s.io"} {
 					pod := test.UnschedulablePod()
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
@@ -896,28 +896,28 @@ var _ = Context("Scheduling", func() {
 					ExpectNotScheduled(ctx, env.Client, pod)
 				}
 			})
-			It("should schedule pods that have node selectors with label in restricted domains exceptions list", func() {
+			It("should schedule pods that have node selectors with label in kubernetes domains", func() {
 				var requirements []v1.NodeSelectorRequirementWithMinValues
-				for domain := range v1.LabelDomainExceptions {
+				for _, domain := range []string{"kubernetes.io", "k8s.io"} {
 					requirements = append(requirements, v1.NodeSelectorRequirementWithMinValues{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}})
 				}
 				nodePool.Spec.Template.Spec.Requirements = requirements
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1.LabelDomainExceptions {
+				for _, domain := range []string{"kubernetes.io", "k8s.io"} {
 					pod := test.UnschedulablePod()
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
 				}
 			})
-			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
+			It("should schedule pods that have node selectors with label in subdomain from kubernetes domains", func() {
 				var requirements []v1.NodeSelectorRequirementWithMinValues
-				for domain := range v1.LabelDomainExceptions {
+				for _, domain := range []string{"kubernetes.io", "k8s.io"} {
 					requirements = append(requirements, v1.NodeSelectorRequirementWithMinValues{Key: "subdomain." + domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}})
 				}
 				nodePool.Spec.Template.Spec.Requirements = requirements
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1.LabelDomainExceptions {
+				for _, domain := range []string{"kubernetes.io", "k8s.io"} {
 					pod := test.UnschedulablePod()
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
@@ -4913,7 +4913,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler1 := scheduling.NewScheduler(ctx1, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology1,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil)
 			results1, err := scheduler1.Solve(ctx1, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results1.NewNodeClaims).To(HaveLen(1))
@@ -4926,7 +4926,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler2 := scheduling.NewScheduler(ctx2, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology2,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil)
 			results2, err := scheduler2.Solve(ctx2, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results2.NewNodeClaims).To(HaveLen(1))

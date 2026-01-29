@@ -81,6 +81,12 @@ test: ## Run tests
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
+test-memory: ## Run memory usage tests for node overlay store
+	go test -v ./pkg/controllers/nodeoverlay/... -run TestMemoryUsage
+
+benchmark: ## Run benchmark tests for node overlay store
+	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
+
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	go tool -modfile=go.tools.mod ginkgo \
 		--race \
@@ -127,4 +133,4 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test deflake vulncheck licenses verify download gen_instance_types
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory benchmark deflake vulncheck licenses verify download gen_instance_types

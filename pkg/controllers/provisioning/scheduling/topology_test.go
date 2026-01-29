@@ -3031,3 +3031,88 @@ var _ = Describe("Taints", func() {
 		Expect(node.Spec.Taints).To(HaveLen(1)) // Expect no taints generated beyond the default
 	})
 })
+
+// Test for TSC + Volume bug: Pod with PVC bound to a specific zone and TSC with minDomains
+// should schedule correctly. Previously, volume zone requirements polluted TSC calculations.
+// See issues 1239 and 2777 for more context.
+var _ = Describe("Topology with Volume Requirements", func() {
+	var nodePool *v1.NodePool
+	labels := map[string]string{"app": "test"}
+
+	BeforeEach(func() {
+		nodePool = test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Template: v1.NodeClaimTemplate{
+					Spec: v1.NodeClaimTemplateSpec{
+						Requirements: []v1.NodeSelectorRequirementWithMinValues{
+							{
+								Key:      v1.CapacityTypeLabelKey,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{v1.CapacityTypeOnDemand},
+							},
+						},
+					},
+				},
+			},
+		})
+	})
+
+	It("should schedule pod with PVC and TSC minDomains=3 when pods are spread across 3 zones", func() {
+		// A pod with a PVC bound to zone-1 and TSC minDomains=3 should schedule successfully
+		// when pods are already spread across all 3 zones. The volume zone requirement should
+		// only affect NodeClaim placement, not TSC domain counting.
+
+		// Create a PV bound to test-zone-1
+		pv := test.PersistentVolume(test.PersistentVolumeOptions{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pv"},
+			Zones:      []string{"test-zone-1"},
+		})
+
+		// Create a PVC bound to that PV
+		pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pvc", Namespace: "default"},
+			VolumeName: pv.Name,
+		})
+
+		// TSC with minDomains=3
+		minDomains := int32(3)
+		topology := []corev1.TopologySpreadConstraint{{
+			TopologyKey:       corev1.LabelTopologyZone,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+			MaxSkew:           1,
+			MinDomains:        &minDomains,
+		}}
+
+		ExpectApplied(ctx, env.Client, nodePool, pv, pvc)
+
+		// First, create 3 pods without volumes to establish pods in all 3 zones
+		initialPods := test.UnschedulablePods(test.PodOptions{
+			ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+			TopologySpreadConstraints: topology,
+		}, 3)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPods...)
+		for _, pod := range initialPods {
+			ExpectScheduled(ctx, env.Client, pod)
+		}
+		// Verify spread: should be 1 pod per zone
+		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1))
+
+		// Now create a pod with PVC + same TSC
+		podWithPVC := test.UnschedulablePod(test.PodOptions{
+			ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+			TopologySpreadConstraints: topology,
+			PersistentVolumeClaims:    []string{pvc.Name},
+		})
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, podWithPVC)
+
+		// Pod should be scheduled successfully
+		node := ExpectScheduled(ctx, env.Client, podWithPVC)
+
+		// And it should be in zone-1 (where the volume is)
+		Expect(node.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-1"))
+
+		// Verify final skew: should be 2,1,1 (zone-1 has 2 pods now)
+		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
+	})
+})
