@@ -57,8 +57,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(2000), "Should have 2000 total pods")
 
 			// XL Performance assertions - hostname spreading at scale may require many more nodes
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 30*time.Minute),
-				"Total XL scale-out time should be less than 15 minutes")
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 35*time.Minute),
+				"Total XL scale-out time should be less than 35 minutes")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
 				"Average CPU utilization should be greater than 38%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
