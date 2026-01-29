@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -128,16 +129,47 @@ func (r *ResourceSliceController) isKWOKNode(node *corev1.Node) bool {
 func (r *ResourceSliceController) findMatchingMappings(node *corev1.Node, mappings []config.Mapping) []config.Mapping {
 	var matches []config.Mapping
 	for _, mapping := range mappings {
-		selector, err := metav1.LabelSelectorAsSelector(&mapping.NodeSelector)
-		if err != nil {
-			continue // Skip invalid selectors
-		}
-
-		if selector.Matches(labels.Set(node.Labels)) {
+		if r.nodeMatchesTerms(node, mapping.NodeSelectorTerms) {
 			matches = append(matches, mapping)
 		}
 	}
 	return matches
+}
+
+// nodeMatchesTerms returns true if the node matches any of the NodeSelectorTerms (terms are ORed together)
+func (r *ResourceSliceController) nodeMatchesTerms(node *corev1.Node, terms []corev1.NodeSelectorTerm) bool {
+	nodeLabels := labels.Set(node.Labels)
+
+	for _, term := range terms {
+		if r.nodeMatchesTerm(nodeLabels, term) {
+			return true // Any term matching is sufficient (OR logic)
+		}
+	}
+	return false
+}
+
+// nodeMatchesTerm returns true if the node matches a single NodeSelectorTerm
+func (r *ResourceSliceController) nodeMatchesTerm(nodeLabels labels.Set, term corev1.NodeSelectorTerm) bool {
+	// MatchExpressions must all match (AND logic within a term)
+	for _, expr := range term.MatchExpressions {
+		req, err := labels.NewRequirement(expr.Key, selection.Operator(expr.Operator), expr.Values)
+		if err != nil {
+			return false // Invalid expression doesn't match
+		}
+		if !req.Matches(nodeLabels) {
+			return false // All expressions must match
+		}
+	}
+
+	// MatchFields are not commonly used in this context, but we should handle them
+	// For KWOK nodes, we typically only use MatchExpressions
+	if len(term.MatchFields) > 0 {
+		// MatchFields require access to the full Node object, not just labels
+		// For now, we'll skip this since KWOK nodes don't typically use field selectors
+		return false
+	}
+
+	return true // All match expressions passed
 }
 
 // reconcileResourceSlicesForNode creates or updates ResourceSlices for a node (one per mapping)
