@@ -43,7 +43,7 @@ var _ = Describe("ConfigMapController", func() {
 	BeforeEach(func() {
 		fakeClient = fake.NewClientBuilder()
 		configStore := config.NewStore()
-		controller = NewConfigMapController(fakeClient.Build(), configMapName, configMapNamespace, configStore, nil)
+		controller = NewConfigMapController(fakeClient.Build(), configMapName, configMapNamespace, configStore)
 	})
 
 	// Unit tests focus on core parsing and validation logic
@@ -170,7 +170,6 @@ mappings:
 
 	Describe("Constructor", func() {
 		It("should create controller with correct parameters", func() {
-			onConfigChangeCalled := false
 			testClient := fake.NewClientBuilder().Build()
 			testConfigStore := config.NewStore()
 			testController := NewConfigMapController(
@@ -178,19 +177,12 @@ mappings:
 				"test-config",
 				"test-namespace",
 				testConfigStore,
-				func(cfg *config.Config) {
-					onConfigChangeCalled = true
-				},
 			)
 
 			Expect(testController).ToNot(BeNil())
 			Expect(testController.configMapName).To(Equal("test-config"))
 			Expect(testController.configMapNamespace).To(Equal("test-namespace"))
 			Expect(testController.configStore).To(Equal(testConfigStore))
-
-			// Test callback function works
-			testController.onConfigChange(nil)
-			Expect(onConfigChangeCalled).To(BeTrue())
 		})
 	})
 })
