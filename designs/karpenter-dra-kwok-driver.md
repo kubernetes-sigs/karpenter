@@ -87,9 +87,6 @@ data:
         - key: node.kubernetes.io/instance-type
           operator: In
           values: ["g5.48xlarge"]
-        - key: kwok.x-k8s.io/node
-          operator: In
-          values: ["fake"]
       resourceSlice:
         devices:
         - name: "nvidia-h100"
@@ -105,9 +102,6 @@ data:
         - key: node.kubernetes.io/instance-type
           operator: In
           values: ["f1.2xlarge"]
-        - key: kwok.x-k8s.io/node
-          operator: In
-          values: ["fake"]
       resourceSlice:
         devices:
         - name: "xilinx-u250"
@@ -129,22 +123,23 @@ data:
 ## Directory Structure
 ```
 karpenter/
-├── dra-kwok-driver/                   
-│   ├── main.go                        # Driver entry point                     
+├── dra-kwok-driver/
+│   ├── main.go                        # Driver entry point
 │   └── pkg/
-│       ├── controller/
-│       │   ├── controller.go          # Main controller logic
-│       │   ├── nodeoverlay.go         # NodeOverlay parsing (Case 1)
-│       │   ├── configmap.go           # ConfigMap parsing (Case 2)
-│       │   └── resourceslice.go       # ResourceSlice operations
+│       ├── controllers/               # Controller implementations
+│       │   ├── configmap.go           # ConfigMap watching and parsing
+│       │   ├── configmap_test.go      # ConfigMap controller tests
+│       │   ├── resourceslice.go       # ResourceSlice lifecycle management
+│       │   └── resourceslice_test.go  # ResourceSlice controller tests
 │       └── config/
-│           └── types.go               # Configuration types
-└── test/suites/integration/
-    └── dra_kwok_test.go               # Our DRA KWOK integration tests
+│           ├── types.go               # Configuration data structures
+│           ├── types_test.go          # Configuration validation tests
+│           └── store.go               # Thread-safe config store
+└── test/suites/dra/
+    └── dra_kwok_test.go               # DRA integration tests
 ```
-1. main.go starts the controller
-2. controller.go receives KWOK node events
-3. nodeoverlay.go tries to find matching NodeOverlay (Case 1)
-4. If no match: configmap.go provides fallback config (Case 2)  
-5. resourceslice.go creates/updates/deletes the ResourceSlices
-6. types.go provides the data structures throughout
+1. main.go starts both controllers with a shared config store
+2. configmap.go watches ConfigMap and stores parsed config in the store
+3. resourceslice.go polls nodes every 30 seconds and reads config from the store
+4. types.go defines the configuration structure using upstream ResourceSlice specs
+5. store.go provides thread-safe configuration access between controllers
