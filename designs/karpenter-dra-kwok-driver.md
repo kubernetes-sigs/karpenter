@@ -3,20 +3,20 @@
 ## Summary
 The upstream kubernetes/perf-tests repository includes a [DRA KWOK Driver](https://github.com/kubernetes/perf-tests/pull/3491/files), but it's designed for **ClusterLoader2 scale testing** with pre-created static nodes that cannot be used for Karpenter testing.
 
-This design introduces a **Karpenter DRA KWOK Driver** - a mock DRA driver that acts on behalf of KWOK nodes created by Karpenter. When KWOK nodes register with the cluster, the driver creates ResourceSlices advertising fake GPU/device resources. This simulates what a real DRA driver (like NVIDIA GPU Operator) would do, but with fake devices for testing purposes. The driver watches for KWOK nodes and creates corresponding ResourceSlices based on either Node Overlay or ConfigMap configuration. The driver acts independently as a standard Kubernetes controller, ensuring ResourceSlices exist on the API server for both the scheduler and Karpenter's cluster state to discover.
+This design introduces a **Karpenter DRA KWOK Driver** - a mock DRA driver that acts on behalf of KWOK nodes created by Karpenter. When KWOK nodes register with the cluster, the driver creates ResourceSlices advertising fake GPU/device resources. This simulates what a real DRA driver (like NVIDIA GPU Operator) would do, but with fake devices for testing purposes. The driver uses a polling approach (30-second interval) to periodically reconcile all KWOK nodes and creates corresponding ResourceSlices based on either Node Overlay or ConfigMap configuration. The driver acts independently as a standard Kubernetes controller, ensuring ResourceSlices exist on the API server for both the scheduler and Karpenter's cluster state to discover.
 
 ### Workflow
 1. **Test creates ResourceClaim** with device attribute selectors
 2. **Test creates DRA pod** referencing the ResourceClaim
 3. **Karpenter provisions KWOK node** in response to unschedulable pod
-4. **Node registration triggers ResourceSlice creation** based on:
+4. **Driver polling loop detects new node** (within 30 seconds) and creates ResourceSlices based on:
    - **Case 1:** Check for matching NodeOverlay with embedded ResourceSlice objects (future enhancement)
    - **Case 2:** Use ConfigMap mappings if no NodeOverlay matches
    - **Case 3:** Eventually cloudproviders will be able to provide potential ResourceSlice shapes through the InstanceType interface (Future TODO: implement a way for cloudproviders to inform our DRAKWOKDriver of those shapes).
 5. **Kubernetes scheduler discovers ResourceSlices** and binds pod to node
 6. **Pod successfully schedules** to the node with available DRA resources
 7. **Test validates** node creation, ResourceSlice creation, pod scheduling, and Karpenter behavior
-8. **Cleanup automatically removes** ResourceSlices when nodes are deleted
+8. **Cleanup automatically removes** ResourceSlices in next polling cycle when nodes are deleted
 
 ## Implementation
 
@@ -82,24 +82,26 @@ data:
     driver: "karpenter.sh.dra-kwok-driver"
     mappings:
     - name: "h100-nodes"
-      nodeSelector:
-        matchLabels:
-          node.kubernetes.io/instance-type: "g5.48xlarge"
-          kwok.x-k8s.io/node: "fake"
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["g5.48xlarge"]
       resourceSlice:
         devices:
         - name: "nvidia-h100"
           count: 8
           attributes:
             memory: "80Gi"
-            compute-capability: "9.0" 
+            compute-capability: "9.0"
             device_class: "gpu"
             vendor: "nvidia"
     - name: "fpga-nodes"
-      nodeSelector:
-        matchLabels:
-          node.kubernetes.io/instance-type: "f1.2xlarge"
-          kwok.x-k8s.io/node: "fake"
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["f1.2xlarge"]
       resourceSlice:
         devices:
         - name: "xilinx-u250"
@@ -121,22 +123,23 @@ data:
 ## Directory Structure
 ```
 karpenter/
-├── dra-kwok-driver/                   
-│   ├── main.go                        # Driver entry point                     
+├── dra-kwok-driver/
+│   ├── main.go                        # Driver entry point
 │   └── pkg/
-│       ├── controller/
-│       │   ├── controller.go          # Main controller logic
-│       │   ├── nodeoverlay.go         # NodeOverlay parsing (Case 1)
-│       │   ├── configmap.go           # ConfigMap parsing (Case 2)
-│       │   └── resourceslice.go       # ResourceSlice operations
+│       ├── controllers/               # Controller implementations
+│       │   ├── configmap.go           # ConfigMap watching and parsing
+│       │   ├── configmap_test.go      # ConfigMap controller tests
+│       │   ├── resourceslice.go       # ResourceSlice lifecycle management
+│       │   └── resourceslice_test.go  # ResourceSlice controller tests
 │       └── config/
-│           └── types.go               # Configuration types
-└── test/suites/integration/
-    └── dra_kwok_test.go               # Our DRA KWOK integration tests
+│           ├── types.go               # Configuration data structures
+│           ├── types_test.go          # Configuration validation tests
+│           └── store.go               # Thread-safe config store
+└── test/suites/dra/
+    └── dra_kwok_test.go               # DRA integration tests
 ```
-1. main.go starts the controller
-2. controller.go receives KWOK node events
-3. nodeoverlay.go tries to find matching NodeOverlay (Case 1)
-4. If no match: configmap.go provides fallback config (Case 2)  
-5. resourceslice.go creates/updates/deletes the ResourceSlices
-6. types.go provides the data structures throughout
+1. main.go starts both controllers with a shared config store
+2. configmap.go watches ConfigMap and stores parsed config in the store
+3. resourceslice.go polls nodes every 30 seconds and reads config from the store
+4. types.go defines the configuration structure using upstream ResourceSlice specs
+5. store.go provides thread-safe configuration access between controllers
