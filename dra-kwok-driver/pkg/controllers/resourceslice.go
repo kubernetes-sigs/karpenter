@@ -168,17 +168,44 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 
 	logger.V(1).Info("found matching mappings", "count", len(matchingMappings))
 
-	// Batch operations for this node
+	// Track which ResourceSlices should exist
 	var expectedNames []string
-	var createSlices []*resourcev1.ResourceSlice
-	var updateSlices []*resourcev1.ResourceSlice
 
 	// Process each mapping
 	for _, mapping := range matchingMappings {
 		resourceSliceName := fmt.Sprintf("%s-devices-%s", node.Name, mapping.Name)
 		expectedNames = append(expectedNames, resourceSliceName)
 
-		// Create the desired ResourceSlice
+		// Check if ResourceSlice exists
+		existing := &resourcev1.ResourceSlice{}
+		err := r.kubeClient.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing)
+
+		var generation int64 = 0
+		if err == nil {
+			// ResourceSlice exists - check if update is needed
+			if !r.resourceSliceNeedsUpdate(existing, &mapping.ResourceSlice) {
+				// No change needed
+				continue
+			}
+
+			// Update needed - bump generation and delete old slice
+			generation = existing.Spec.Pool.Generation + 1
+			logger.Info("updating resourceslice with new generation",
+				"resourceslice", resourceSliceName,
+				"old_generation", existing.Spec.Pool.Generation,
+				"new_generation", generation,
+			)
+
+			// Delete old ResourceSlice before creating new one
+			if err := r.kubeClient.Delete(ctx, existing); err != nil {
+				return nil, serrors.Wrap(fmt.Errorf("deleting old resourceslice generation, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
+			}
+		} else if !errors.IsNotFound(err) {
+			return nil, serrors.Wrap(fmt.Errorf("getting resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
+		}
+		// If not found, generation starts at 0 (default)
+
+		// Create the new ResourceSlice with current/incremented generation
 		desired := &resourcev1.ResourceSlice{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: resourceSliceName,
@@ -202,56 +229,46 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 		// Override node-specific fields
 		desired.Spec.NodeName = &node.Name
 		desired.Spec.Driver = r.driverName
+		desired.Spec.Pool.Generation = generation
 
-		// Check if it exists
-		existing := &resourcev1.ResourceSlice{}
-		if err := r.kubeClient.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing); err != nil {
-			if errors.IsNotFound(err) {
-				createSlices = append(createSlices, desired)
-			} else {
-				return nil, serrors.Wrap(fmt.Errorf("getting resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
-			}
-		} else {
-			// Check if update is needed
-			if !r.resourceSliceEqual(existing, desired) {
-				existing.Spec = desired.Spec
-				existing.Labels = desired.Labels
-				updateSlices = append(updateSlices, existing)
-			}
-		}
-	}
-
-	// Apply batched creates
-	for _, slice := range createSlices {
 		logger.Info("creating resourceslice",
-			"resourceslice", slice.Name,
-			"mapping", slice.Labels["kwok.x-k8s.io/mapping"],
-			"devices", len(slice.Spec.Devices),
+			"resourceslice", desired.Name,
+			"mapping", desired.Labels["kwok.x-k8s.io/mapping"],
+			"generation", generation,
+			"devices", len(desired.Spec.Devices),
 		)
-		if err := r.kubeClient.Create(ctx, slice); err != nil {
-			return nil, serrors.Wrap(fmt.Errorf("creating resourceslice, %w", err), "ResourceSlice", klog.KRef("", slice.Name))
-		}
-	}
-
-	// Apply batched updates
-	for _, slice := range updateSlices {
-		logger.Info("updating resourceslice",
-			"resourceslice", slice.Name,
-			"mapping", slice.Labels["kwok.x-k8s.io/mapping"],
-			"devices", len(slice.Spec.Devices),
-		)
-		if err := r.kubeClient.Update(ctx, slice); err != nil {
-			return nil, serrors.Wrap(fmt.Errorf("updating resourceslice, %w", err), "ResourceSlice", klog.KRef("", slice.Name))
+		if err := r.kubeClient.Create(ctx, desired); err != nil {
+			return nil, serrors.Wrap(fmt.Errorf("creating resourceslice, %w", err), "ResourceSlice", klog.KRef("", desired.Name))
 		}
 	}
 
 	return expectedNames, nil
 }
 
-// resourceSliceEqual checks if two ResourceSlices have the same spec and labels
-func (r *ResourceSliceController) resourceSliceEqual(a, b *resourcev1.ResourceSlice) bool {
-	// Simple comparison - in production you might want a deeper comparison
-	// For now, we always update to ensure consistency
+// resourceSliceNeedsUpdate checks if the existing ResourceSlice differs from the desired spec
+func (r *ResourceSliceController) resourceSliceNeedsUpdate(existing *resourcev1.ResourceSlice, desired *resourcev1.ResourceSliceSpec) bool {
+	// Compare device count
+	if len(existing.Spec.Devices) != len(desired.Devices) {
+		return true
+	}
+
+	// Compare pool name
+	if existing.Spec.Pool.Name != desired.Pool.Name {
+		return true
+	}
+
+	// Compare pool resource slice count
+	if existing.Spec.Pool.ResourceSliceCount != desired.Pool.ResourceSliceCount {
+		return true
+	}
+
+	// Compare AllNodes field
+	if existing.Spec.AllNodes != desired.AllNodes {
+		return true
+	}
+
+	// For a more thorough comparison, we could compare individual devices
+	// For now, device count and pool metadata are sufficient
 	return false
 }
 
