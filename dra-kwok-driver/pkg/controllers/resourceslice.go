@@ -350,7 +350,27 @@ func (r *ResourceSliceController) nodeMatchesTerms(node *corev1.Node, terms []co
 func (r *ResourceSliceController) nodeMatchesTerm(nodeLabels labels.Set, term corev1.NodeSelectorTerm) bool {
 	// MatchExpressions must all match (AND logic within a term)
 	for _, expr := range term.MatchExpressions {
-		req, err := labels.NewRequirement(expr.Key, selection.Operator(expr.Operator), expr.Values)
+		// Convert NodeSelectorOperator to labels.Operator (handles case differences)
+		var op selection.Operator
+		switch expr.Operator {
+		case corev1.NodeSelectorOpIn:
+			op = selection.In
+		case corev1.NodeSelectorOpNotIn:
+			op = selection.NotIn
+		case corev1.NodeSelectorOpExists:
+			op = selection.Exists
+		case corev1.NodeSelectorOpDoesNotExist:
+			op = selection.DoesNotExist
+		case corev1.NodeSelectorOpGt:
+			op = selection.GreaterThan
+		case corev1.NodeSelectorOpLt:
+			op = selection.LessThan
+		default:
+			// Unknown operator
+			return false
+		}
+
+		req, err := labels.NewRequirement(expr.Key, op, expr.Values)
 		if err != nil {
 			return false // Invalid expression doesn't match
 		}

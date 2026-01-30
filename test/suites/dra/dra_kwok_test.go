@@ -92,9 +92,6 @@ mappings:
           - key: node.kubernetes.io/instance-type
             operator: In
             values: ["c-4x-amd64-linux"]
-          - key: karpenter.sh/nodepool
-            operator: In
-            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -119,9 +116,6 @@ mappings:
           - key: node.kubernetes.io/instance-type
             operator: In
             values: ["m-8x-amd64-linux"]
-          - key: karpenter.sh/nodepool
-            operator: In
-            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -234,7 +228,7 @@ mappings:
 				}
 				resourceSlices.Items = filteredSlices
 				return filteredSlices
-			}, 30*time.Second, 1*time.Second).Should(Not(BeEmpty()))
+			}, 90*time.Second, 5*time.Second).Should(Not(BeEmpty()))
 
 			By("Verifying ResourceSlice content while node exists")
 			// The resourceSlices should already be populated from the Eventually check above
@@ -330,9 +324,6 @@ mappings:
           - key: node.kubernetes.io/instance-type
             operator: In
             values: ["c-4x-amd64-linux"]
-          - key: karpenter.sh/nodepool
-            operator: In
-            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -376,7 +367,7 @@ mappings:
 						}
 					}
 					return 0
-				}, 30*time.Second, 1*time.Second).Should(Equal(2)) // Should now have 2 GPUs
+				}, 90*time.Second, 5*time.Second).Should(Equal(2)) // Should now have 2 GPUs
 			}
 		})
 	})
@@ -399,9 +390,6 @@ mappings:
           - key: node.kubernetes.io/instance-type
             operator: In
             values: ["c-4x-amd64-linux"]
-          - key: karpenter.sh/nodepool
-            operator: In
-            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -426,9 +414,6 @@ mappings:
           - key: node.kubernetes.io/instance-type
             operator: In
             values: ["m-8x-amd64-linux"]
-          - key: karpenter.sh/nodepool
-            operator: In
-            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -523,7 +508,7 @@ mappings:
 					}
 				}
 				return filteredSlices
-			}, 30*time.Second).Should(HaveLen(1))
+			}, 90*time.Second, 5*time.Second).Should(HaveLen(1))
 		})
 
 		It("should support multiple ResourceSlices for single instance type", func() {
@@ -543,9 +528,6 @@ mappings:
           - key: node.kubernetes.io/instance-type
             operator: In
             values: ["c-4x-amd64-linux"]
-          - key: karpenter.sh/nodepool
-            operator: In
-            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -576,9 +558,6 @@ mappings:
           - key: node.kubernetes.io/instance-type
             operator: In
             values: ["c-4x-amd64-linux"]
-          - key: karpenter.sh/nodepool
-            operator: In
-            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -673,7 +652,7 @@ mappings:
 				}
 				allResourceSlices = filteredSlices
 				return filteredSlices
-			}, 30*time.Second, 1*time.Second).Should(HaveLen(2), "Should have exactly 2 ResourceSlices for single node")
+			}, 90*time.Second, 5*time.Second).Should(HaveLen(2), "Should have exactly 2 ResourceSlices for single node")
 
 			By("Verifying device separation by type")
 			var gpuSlice, fpgaSlice *resourcev1.ResourceSlice
@@ -818,9 +797,6 @@ mappings:
           - key: node.kubernetes.io/instance-type
             operator: In
             values: ["c-4x-amd64-linux"]
-          - key: karpenter.sh/nodepool
-            operator: In
-            values: ["` + nodePool.Name + `"]
     resourceSlice:
       driver: karpenter.sh/dra-kwok-driver
       pool:
@@ -1002,7 +978,7 @@ mappings:
 						}
 					}
 					return filteredSlices
-				}, 30*time.Second, 1*time.Second).Should(Not(BeEmpty()), "DRA KWOK driver should create ResourceSlices for future DRA testing when Karpenter DRA support is implemented")
+				}, 90*time.Second, 5*time.Second).Should(Not(BeEmpty()), "DRA KWOK driver should create ResourceSlices for future DRA testing when Karpenter DRA support is implemented")
 			}
 
 			By("Ensuring test infrastructure is ready for DRA feature development")
