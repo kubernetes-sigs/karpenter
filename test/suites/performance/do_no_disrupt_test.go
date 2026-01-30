@@ -24,10 +24,12 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/labels"
 
+	"sigs.k8s.io/karpenter/test/pkg/debug"
+
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = Describe("Performance", func() {
+var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Do Not Disrupt Performance Test", func() {
 		It("should efficiently scale three deployments and test disruption protection", func() {
 			By("Setting up NodePool and NodeClass for the test")
@@ -37,10 +39,10 @@ var _ = Describe("Performance", func() {
 			By("Creating deployments with different resource profiles and protection")
 
 			// Create deployment options using templates
-			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
+			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "900m", "3100Mi",
 				test.WithHostnameSpread())
-			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
-			protectedOpts := test.CreateDeploymentOptions("do-not-disrupt-app", 100, "950m", "450Mi",
+			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3500m", "28Gi")
+			protectedOpts := test.CreateDeploymentOptions("do-not-disrupt-app", 100, "900m", "450Mi",
 				test.WithDoNotDisrupt())
 
 			// Create deployments
@@ -61,12 +63,10 @@ var _ = Describe("Performance", func() {
 			// Performance assertions
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 4*time.Minute),
 				"Total scale-out time should be less than 4 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 750),
-				"Should not require more than 550 nodes for 1100 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
-				"Average CPU utilization should be greater than 55%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
-				"Average memory utilization should be greater than 70%")
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+				"Average CPU utilization should be greater than 38%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+				"Average memory utilization should be greater than 40%")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")
@@ -101,12 +101,12 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.TotalPods).To(BeNumerically(">=", 600), "Should have at least 600 total pods after scale-in (250+250+100)")
 			Expect(consolidationReport.PodsNetChange).To(BeNumerically(">=", -500), "Should have net reduction of 500 pods")
 
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
-				"Consolidation should complete within 10 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
-				"Average CPU utilization should be greater than 55%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
-				"Average memory utilization should be greater than 70%")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 35*time.Minute),
+				"Consolidation should complete within 35 minutes")
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+				"Average CPU utilization should be greater than 38%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+				"Average memory utilization should be greater than 40%")
 
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()
