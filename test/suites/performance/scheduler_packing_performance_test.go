@@ -23,15 +23,21 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var _ = Describe("Performance", Label(debug.NoWatch), func() {
-	Context("Self Anti-Affinity Deployment Interference", func() {
+	Context("Scheduler Packing Performance Test", func() {
 		It("should efficiently scale two deployments with self anti-affinity", func() {
 			By("Setting up NodePool and NodeClass for the test")
+			// Change consolidation policy for this specific test
+			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("60s") // Optional: adjust timing
+
 			env.ExpectCreated(nodePool, nodeClass)
 
 			// ========== PHASE 1: SCALE-OUT TEST WITH SELF ANTI-AFFINITY ==========
