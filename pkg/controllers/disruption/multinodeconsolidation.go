@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
@@ -126,10 +127,15 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	}
 
 	lastSavedCommand := Command{}
+	iterationCount := 0
+	var failedIterationTime time.Duration
+
 	// Set a timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
 	for min <= max {
+		iterationCount++
+		iterationStart := m.clock.Now()
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
@@ -164,9 +170,35 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			lastSavedCommand = cmd
 			min = mid + 1
 		} else {
+			// This iteration failed - accumulate the time spent
+			failedIterationTime += m.clock.Since(iterationStart)
 			max = mid - 1
 		}
 	}
+
+	// Record metrics
+	MultiNodeConsolidationIterations.Observe(float64(iterationCount), map[string]string{})
+
+	// Determine if binary search ultimately succeeded
+	simSuccess := lastSavedCommand.Decision() != NoOpDecision
+
+	if failedIterationTime > 0 {
+		MultiNodeConsolidationFailedSimDuration.Observe(failedIterationTime.Seconds(), map[string]string{
+			"sim_success": strconv.FormatBool(simSuccess),
+		})
+	}
+
+	if simSuccess {
+		batchSize := len(lastSavedCommand.Candidates)
+		decision := "delete"
+		if lastSavedCommand.Decision() == ReplaceDecision {
+			decision = "replace"
+		}
+		MultiNodeConsolidationBatchSize.Observe(float64(batchSize), map[string]string{
+			decisionLabel: decision,
+		})
+	}
+
 	return lastSavedCommand, nil
 }
 
