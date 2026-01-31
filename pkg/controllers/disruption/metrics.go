@@ -68,6 +68,16 @@ var (
 		},
 		[]string{metrics.NodePoolLabel, decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
+	ConsolidationSkippedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "consolidation_skipped_total",
+			Help:      "Number of times consolidation was skipped. Labeled by reason and consolidation type.",
+		},
+		[]string{metrics.ReasonLabel, ConsolidationTypeLabel},
+	)
 	EligibleNodes = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
