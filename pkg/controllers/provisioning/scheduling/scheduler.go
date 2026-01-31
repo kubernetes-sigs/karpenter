@@ -491,6 +491,49 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
+	// Timing and metrics block
+	start := time.Now()
+	numNodesInCluster := -1
+	numPodsInBatch := -1
+	numPodsInCluster := -1
+	numTopologyGroups := -1
+	numInverseTopologyGroups := -1
+	numTopologyKeys := -1
+	schedulingPath := "failed"
+
+	defer func() {
+		log.FromContext(ctx).Info(
+			"karpenter-timing: scheduler.add complete",
+			"function", "scheduling.scheduler.add()",
+			"timestamp", start.Format(time.RFC3339),
+			"num_nodes_in_cluster", numNodesInCluster,
+			"num_pods_in_batch", numPodsInBatch,
+			"num_pods_in_cluster", numPodsInCluster,
+			"num_topology_groups", numTopologyGroups,
+			"num_inverse_topology_groups", numInverseTopologyGroups,
+			"num_topology_keys", numTopologyKeys,
+			"scheduling_path", schedulingPath,
+			"duration_ms", float64(time.Since(start).Microseconds())/1000.0,
+		)
+	}()
+
+	// Capture scheduling cluster metrics
+	numNodesInCluster = len(s.existingNodes)
+
+	// Count pods in current scheduling batch
+	numPodsInBatch = 0
+	for _, node := range s.existingNodes {
+		numPodsInBatch += len(node.Pods)
+	}
+
+	// Get total pods in cluster using PodCount() method
+	numPodsInCluster = s.cluster.PodCount()
+
+	// Capture topology metrics
+	numTopologyGroups = len(s.topology.topologyGroups)
+	numInverseTopologyGroups = len(s.topology.inverseTopologyGroups)
+	numTopologyKeys = len(s.topology.domainGroups)
+
 	// Check if pod has DRA requirements - if so, return DRA error when IgnoreDRARequests is enabled
 	if s.cachedPodData[pod.UID].HasResourceClaimRequests && karpopts.FromContext(ctx).IgnoreDRARequests {
 		return NewDRAError(fmt.Errorf("pod has Dynamic Resource Allocation requirements that are not yet supported by Karpenter"))
@@ -498,6 +541,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// first try to schedule against an in-flight real node
 	if err := s.addToExistingNode(ctx, pod); err == nil {
+		schedulingPath = "existing_node"
 		return nil
 	}
 	// Consider using https://pkg.go.dev/container/heap
@@ -505,6 +549,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// Pick existing node that we are about to create
 	if err := s.addToInflightNode(ctx, pod); err == nil {
+		schedulingPath = "inflight_node"
 		return nil
 	}
 	if len(s.nodeClaimTemplates) == 0 {
@@ -512,6 +557,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	}
 	err := s.addToNewNodeClaim(ctx, pod)
 	if err == nil {
+		schedulingPath = "new_node_claim"
 		return nil
 	}
 	return err
