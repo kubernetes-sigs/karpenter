@@ -80,7 +80,7 @@ func main() {
 	// Initialize ResourceSlice controller
 	resourceSliceController := controllers.NewResourceSliceController(
 		mgr.GetClient(),
-		"dra-kwok-driver.karpenter.sh",
+		"karpenter.sh",
 		configStore,
 	)
 

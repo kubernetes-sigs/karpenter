@@ -143,22 +143,3 @@ func isValidRFC1123Subdomain(name string) bool {
 }
 
 // isValidCIdentifier function removed - no longer needed with upstream ResourceSlice types
-
-// SanitizeDriverName converts a driver name to DNS subdomain format
-// Converts "domain.com/driver-name" to "driver-name.domain.com" format
-// This ensures compatibility with Kubernetes ResourceSlice API which requires DNS subdomains
-func SanitizeDriverName(name string) string {
-	// If the name contains a slash, convert from "domain/name" to "name.domain" format
-	if strings.Contains(name, "/") {
-		parts := strings.Split(name, "/")
-		if len(parts) == 2 {
-			// Convert "karpenter.sh/dra-kwok-driver" to "dra-kwok-driver.karpenter.sh"
-			return parts[1] + "." + parts[0]
-		}
-	}
-
-	// Already in correct format or no conversion needed
-	return name
-}
-
-// SanitizeAttributeName function removed - no longer needed with upstream ResourceSlice types

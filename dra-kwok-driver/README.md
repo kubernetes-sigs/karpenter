@@ -109,7 +109,7 @@ metadata:
   namespace: karpenter
 data:
   config.yaml: |
-    driver: karpenter.sh/dra-kwok-driver
+    driver: karpenter.sh
     mappings:
       - name: gpu-t4-mapping
         nodeSelectorTerms:
@@ -118,7 +118,7 @@ data:
                 operator: In
                 values: ["c-4x-amd64-linux"]
         resourceSlice:
-          driver: karpenter.sh/dra-kwok-driver
+          driver: karpenter.sh
           pool:
             name: t4-gpu-pool
             resourceSliceCount: 1
@@ -144,7 +144,7 @@ metadata:
   namespace: karpenter
 data:
   config.yaml: |
-    driver: karpenter.sh/dra-kwok-driver
+    driver: karpenter.sh
     mappings:
       - name: fpga-mapping
         nodeSelectorTerms:
@@ -153,7 +153,7 @@ data:
                 operator: In
                 values: ["f1.2xlarge"]
         resourceSlice:
-          driver: karpenter.sh/dra-kwok-driver
+          driver: karpenter.sh
           pool:
             name: fpga-pool
             resourceSliceCount: 1
@@ -179,7 +179,7 @@ metadata:
   namespace: karpenter
 data:
   config.yaml: |
-    driver: karpenter.sh/dra-kwok-driver
+    driver: karpenter.sh
     mappings:
       # GPU devices
       - name: gpu-mapping
@@ -189,7 +189,7 @@ data:
                 operator: In
                 values: ["gpu"]
         resourceSlice:
-          driver: karpenter.sh/dra-kwok-driver
+          driver: karpenter.sh
           pool:
             name: gpu-pool
             resourceSliceCount: 1
@@ -211,7 +211,7 @@ data:
                 operator: In
                 values: ["gpu"]  # Same selector - creates multiple ResourceSlices per node
         resourceSlice:
-          driver: karpenter.sh/dra-kwok-driver
+          driver: karpenter.sh
           pool:
             name: fpga-pool
             resourceSliceCount: 1
@@ -231,7 +231,7 @@ metadata:
   namespace: karpenter
 data:
   config.yaml: |
-    driver: karpenter.sh/dra-kwok-driver
+    driver: karpenter.sh
     mappings:
       - name: cluster-wide-resource
         nodeSelectorTerms:
@@ -240,7 +240,7 @@ data:
                 operator: In
                 values: ["true"]
         resourceSlice:
-          driver: karpenter.sh/dra-kwok-driver
+          driver: karpenter.sh
           allNodes: true  # Available cluster-wide
           pool:
             name: shared-storage-pool
