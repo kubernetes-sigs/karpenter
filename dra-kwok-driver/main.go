@@ -55,9 +55,9 @@ func main() {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
-			BindAddress: ":8080",
+			BindAddress: ":8082",
 		},
-		HealthProbeBindAddress: ":8081",
+		HealthProbeBindAddress: ":8083",
 	})
 	if err != nil {
 		logger.Error(err, "unable to start manager")
@@ -80,7 +80,7 @@ func main() {
 	// Initialize ResourceSlice controller
 	resourceSliceController := controllers.NewResourceSliceController(
 		mgr.GetClient(),
-		"karpenter.sh.dra-kwok-driver",
+		"dra-kwok-driver.karpenter.sh",
 		configStore,
 	)
 

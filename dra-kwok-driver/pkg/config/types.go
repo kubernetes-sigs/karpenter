@@ -52,11 +52,12 @@ func (c *Config) Validate() error {
 		return &ValidationError{Field: "driver", Message: "driver name cannot be empty"}
 	}
 
-	// Validate driver name against Kubernetes RFC 1123 subdomain requirements
+	// Validate driver name as a DNS subdomain (RFC 1123)
+	// DRA driver names must be DNS subdomains like "dra-kwok-driver.karpenter.sh"
 	if !isValidRFC1123Subdomain(c.Driver) {
 		return &ValidationError{
 			Field:   "driver",
-			Message: fmt.Sprintf("driver name '%s' must be a valid RFC 1123 subdomain (lowercase alphanumeric characters, '-' or '.', starting and ending with alphanumeric)", c.Driver),
+			Message: fmt.Sprintf("driver name '%s' must be a valid DNS subdomain (lowercase alphanumeric characters, '-' or '.', starting and ending with alphanumeric)", c.Driver),
 		}
 	}
 
@@ -143,32 +144,21 @@ func isValidRFC1123Subdomain(name string) bool {
 
 // isValidCIdentifier function removed - no longer needed with upstream ResourceSlice types
 
-// SanitizeDriverName converts a driver name to be RFC 1123 subdomain compliant
+// SanitizeDriverName converts a driver name to DNS subdomain format
+// Converts "domain.com/driver-name" to "driver-name.domain.com" format
+// This ensures compatibility with Kubernetes ResourceSlice API which requires DNS subdomains
 func SanitizeDriverName(name string) string {
-	// Convert to lowercase (though it may already be lowercase)
-	sanitized := strings.ToLower(name)
-
-	// Replace slashes and other invalid characters with dots (more semantic for driver names)
-	sanitized = strings.ReplaceAll(sanitized, "/", ".")
-
-	// Replace any remaining invalid characters with hyphens
-	sanitized = regexp.MustCompile(`[^a-z0-9\.\-]`).ReplaceAllString(sanitized, "-")
-
-	// Remove leading/trailing non-alphanumeric characters
-	sanitized = regexp.MustCompile(`^[^a-z0-9]+|[^a-z0-9]+$`).ReplaceAllString(sanitized, "")
-
-	// Collapse multiple consecutive hyphens/dots
-	sanitized = regexp.MustCompile(`[\.\-]{2,}`).ReplaceAllString(sanitized, ".")
-
-	// Ensure it's not empty and doesn't exceed length limits
-	if len(sanitized) == 0 {
-		sanitized = "dra-driver"
-	}
-	if len(sanitized) > 253 {
-		sanitized = sanitized[:253]
+	// If the name contains a slash, convert from "domain/name" to "name.domain" format
+	if strings.Contains(name, "/") {
+		parts := strings.Split(name, "/")
+		if len(parts) == 2 {
+			// Convert "karpenter.sh/dra-kwok-driver" to "dra-kwok-driver.karpenter.sh"
+			return parts[1] + "." + parts[0]
+		}
 	}
 
-	return sanitized
+	// Already in correct format or no conversion needed
+	return name
 }
 
 // SanitizeAttributeName function removed - no longer needed with upstream ResourceSlice types
