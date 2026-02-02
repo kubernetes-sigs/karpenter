@@ -144,8 +144,9 @@ mappings:
 			env.ExpectCreated(draConfigMap)
 
 			By("Waiting for ConfigMap to be processed by DRA KWOK driver")
-			// The DRA KWOK driver should detect the ConfigMap and start creating ResourceSlices
-			time.Sleep(5 * time.Second)
+			// The DRA KWOK driver should detect the ConfigMap immediately via watch
+			// But give it a moment to reconcile
+			time.Sleep(2 * time.Second)
 
 			By("Creating a deployment that requests GPU resources")
 			deployment = &appsv1.Deployment{
@@ -228,7 +229,7 @@ mappings:
 				}
 				resourceSlices.Items = filteredSlices
 				return filteredSlices
-			}, 90*time.Second, 5*time.Second).Should(Not(BeEmpty()))
+			}, 2*time.Minute, 5*time.Second).Should(Not(BeEmpty()), "DRA driver should create ResourceSlices within 2 minutes (accounting for 30s polling interval)")
 
 			By("Verifying ResourceSlice content while node exists")
 			// The resourceSlices should already be populated from the Eventually check above
@@ -236,7 +237,7 @@ mappings:
 			resourceSlice = &resourceSlices.Items[0]
 
 			// Verify ResourceSlice has correct driver and devices
-			Expect(resourceSlice.Spec.Driver).To(Equal("karpenter.sh.dra-kwok-driver"))
+			Expect(resourceSlice.Spec.Driver).To(Equal("dra-kwok-driver.karpenter.sh"))
 			Expect(resourceSlice.Spec.Devices).To(HaveLen(1))
 
 			device := resourceSlice.Spec.Devices[0]
@@ -367,7 +368,7 @@ mappings:
 						}
 					}
 					return 0
-				}, 90*time.Second, 5*time.Second).Should(Equal(2)) // Should now have 2 GPUs
+				}, 2*time.Minute, 5*time.Second).Should(Equal(2), "DRA driver should update ResourceSlices within 2 minutes after ConfigMap update (accounting for 30s polling interval)")
 			}
 		})
 	})
@@ -508,7 +509,7 @@ mappings:
 					}
 				}
 				return filteredSlices
-			}, 90*time.Second, 5*time.Second).Should(HaveLen(1))
+			}, 2*time.Minute, 5*time.Second).Should(HaveLen(1), "DRA driver should create ResourceSlices within 2 minutes (accounting for 30s polling interval)")
 		})
 
 		It("should support multiple ResourceSlices for single instance type", func() {
@@ -652,7 +653,7 @@ mappings:
 				}
 				allResourceSlices = filteredSlices
 				return filteredSlices
-			}, 90*time.Second, 5*time.Second).Should(HaveLen(2), "Should have exactly 2 ResourceSlices for single node")
+			}, 2*time.Minute, 5*time.Second).Should(HaveLen(2), "DRA driver should create ResourceSlices within 2 minutes (accounting for 30s polling interval)")
 
 			By("Verifying device separation by type")
 			var gpuSlice, fpgaSlice *resourcev1.ResourceSlice
@@ -978,7 +979,7 @@ mappings:
 						}
 					}
 					return filteredSlices
-				}, 90*time.Second, 5*time.Second).Should(Not(BeEmpty()), "DRA KWOK driver should create ResourceSlices for future DRA testing when Karpenter DRA support is implemented")
+				}, 2*time.Minute, 5*time.Second).Should(Not(BeEmpty()), "DRA KWOK driver should create ResourceSlices within 2 minutes (accounting for 30s polling interval)")
 			}
 
 			By("Ensuring test infrastructure is ready for DRA feature development")
