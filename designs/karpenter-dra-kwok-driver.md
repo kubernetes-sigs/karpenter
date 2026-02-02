@@ -36,23 +36,23 @@ spec:
     operator: In
     values: ["g5.48xlarge"]
   capacity:
-    karpenter.sh.dra-kwok-driver/device: "8"  # Custom extended resource for DRA devices
+    karpenter.sh/device: "8"  # Custom extended resource for DRA devices
   # TODO: Extend NodeOverlay API to embed ResourceSlice templates
   resourceSlices:  # FUTURE: Embedded ResourceSlice objects (not yet implemented)
   - apiVersion: resource.k8s.io/v1
     kind: ResourceSlice
     spec:
       # nodeName will be filled in by driver when node is created
-      driver: "karpenter.sh.dra-kwok-driver"
+      driver: "karpenter.sh"
       devices:
       - name: "nvidia-h100-0"
-        driver: "karpenter.sh.dra-kwok-driver"
+        driver: "karpenter.sh"
         attributes:
           memory: "80Gi"
           compute-capability: "9.0"
           vendor: "nvidia"
       - name: "nvidia-h100-1"
-        driver: "karpenter.sh.dra-kwok-driver"
+        driver: "karpenter.sh"
         attributes:
           memory: "80Gi"
           compute-capability: "9.0"
@@ -79,7 +79,7 @@ metadata:
   namespace: karpenter
 data:
   config.yaml: |
-    driver: "karpenter.sh.dra-kwok-driver"
+    driver: "karpenter.sh"
     mappings:
     - name: "h100-nodes"
       nodeSelectorTerms:

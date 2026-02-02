@@ -81,7 +81,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 				Data: map[string]string{
 					"config.yaml": `
 # GPU DRA Configuration for KWOK Mock Driver using upstream ResourceSlice spec
-driver: karpenter.sh/dra-kwok-driver
+driver: karpenter.sh
 
 # Device mappings for different GPU node types
 mappings:
@@ -93,7 +93,7 @@ mappings:
             operator: In
             values: ["c-4x-amd64-linux"]
     resourceSlice:
-      driver: karpenter.sh/dra-kwok-driver
+      driver: karpenter.sh
       pool:
         name: t4-gpu-pool
         resourceSliceCount: 1
@@ -117,7 +117,7 @@ mappings:
             operator: In
             values: ["m-8x-amd64-linux"]
     resourceSlice:
-      driver: karpenter.sh/dra-kwok-driver
+      driver: karpenter.sh
       pool:
         name: v100-gpu-pool
         resourceSliceCount: 1
@@ -237,7 +237,7 @@ mappings:
 			resourceSlice = &resourceSlices.Items[0]
 
 			// Verify ResourceSlice has correct driver and devices
-			Expect(resourceSlice.Spec.Driver).To(Equal("dra-kwok-driver.karpenter.sh"))
+			Expect(resourceSlice.Spec.Driver).To(Equal("karpenter.sh"))
 			Expect(resourceSlice.Spec.Devices).To(HaveLen(1))
 
 			device := resourceSlice.Spec.Devices[0]
@@ -317,7 +317,7 @@ mappings:
 			Eventually(func() error {
 				// Update ConfigMap to add more devices
 				draConfigMap.Data["config.yaml"] = `
-driver: karpenter.sh/dra-kwok-driver
+driver: karpenter.sh
 mappings:
   - name: gpu-t4-updated-mapping
     nodeSelectorTerms:
@@ -326,7 +326,7 @@ mappings:
             operator: In
             values: ["c-4x-amd64-linux"]
     resourceSlice:
-      driver: karpenter.sh/dra-kwok-driver
+      driver: karpenter.sh
       pool:
         name: t4-gpu-pool-updated
         resourceSliceCount: 1
@@ -382,7 +382,7 @@ mappings:
 				},
 				Data: map[string]string{
 					"config.yaml": `
-driver: karpenter.sh/dra-kwok-driver
+driver: karpenter.sh
 mappings:
   # FPGA mapping for c-4x-amd64-linux nodes
   - name: fpga-c4x-mapping
@@ -392,7 +392,7 @@ mappings:
             operator: In
             values: ["c-4x-amd64-linux"]
     resourceSlice:
-      driver: karpenter.sh/dra-kwok-driver
+      driver: karpenter.sh
       pool:
         name: fpga-c4x-pool
         resourceSliceCount: 1
@@ -416,7 +416,7 @@ mappings:
             operator: In
             values: ["m-8x-amd64-linux"]
     resourceSlice:
-      driver: karpenter.sh/dra-kwok-driver
+      driver: karpenter.sh
       pool:
         name: fpga-m8x-pool
         resourceSliceCount: 1
@@ -520,7 +520,7 @@ mappings:
 				},
 				Data: map[string]string{
 					"config.yaml": `
-driver: karpenter.sh/dra-kwok-driver
+driver: karpenter.sh
 mappings:
   # First ResourceSlice: GPU devices for c-4x-amd64-linux
   - name: gpu-mapping-c4x
@@ -530,7 +530,7 @@ mappings:
             operator: In
             values: ["c-4x-amd64-linux"]
     resourceSlice:
-      driver: karpenter.sh/dra-kwok-driver
+      driver: karpenter.sh
       pool:
         name: multi-gpu-pool
         resourceSliceCount: 1
@@ -560,7 +560,7 @@ mappings:
             operator: In
             values: ["c-4x-amd64-linux"]
     resourceSlice:
-      driver: karpenter.sh/dra-kwok-driver
+      driver: karpenter.sh
       pool:
         name: multi-fpga-pool
         resourceSliceCount: 1
@@ -790,7 +790,7 @@ mappings: []
 				},
 				Data: map[string]string{
 					"config.yaml": `
-driver: karpenter.sh/dra-kwok-driver
+driver: karpenter.sh
 mappings:
   - name: gpu-scheduling-mapping
     nodeSelectorTerms:
@@ -799,7 +799,7 @@ mappings:
             operator: In
             values: ["c-4x-amd64-linux"]
     resourceSlice:
-      driver: karpenter.sh/dra-kwok-driver
+      driver: karpenter.sh
       pool:
         name: test-gpu-pool
         resourceSliceCount: 1

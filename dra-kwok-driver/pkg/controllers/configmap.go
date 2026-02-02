@@ -131,25 +131,7 @@ func (r *ConfigMapController) parseConfigFromConfigMap(cm *corev1.ConfigMap) (*c
 		return nil, fmt.Errorf("failed to parse YAML configuration: %w", err)
 	}
 
-	// Sanitize configuration to ensure Kubernetes compliance
-	r.sanitizeConfig(cfg)
-
 	return cfg, nil
-}
-
-// sanitizeConfig modifies the configuration to ensure all values are Kubernetes-compliant
-func (r *ConfigMapController) sanitizeConfig(cfg *config.Config) {
-	log := ctrl.Log.WithName("configmap-sanitizer")
-
-	// Sanitize driver name
-	originalDriverName := cfg.Driver
-	cfg.Driver = config.SanitizeDriverName(cfg.Driver)
-	if originalDriverName != cfg.Driver {
-		log.Info("sanitized driver name", "original", originalDriverName, "sanitized", cfg.Driver)
-	}
-
-	// Device attribute sanitization removed - using upstream ResourceSlice types directly
-	// Kubernetes API server validation will handle attribute name validation
 }
 
 // GetConfig returns the current configuration from the store
