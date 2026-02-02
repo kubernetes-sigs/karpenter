@@ -67,8 +67,17 @@ var _ = Describe("Integration", func() {
 				},
 			})
 			numPods := 1
-			dep = test.Deployment(test.CreateDeploymentOptions("large-app", int32(numPods), "100m", "4",
-				test.WithLabels(map[string]string{"app": "large-app"})))
+			dep = test.Deployment(test.DeploymentOptions{
+				Replicas: int32(numPods),
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "large-app"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("4")},
+					},
+				},
+			})
 		})
 		It("should account for LimitRange Default on daemonSet pods for resources", func() {
 			limitrange.Spec.Limits = []corev1.LimitRangeItem{
