@@ -54,7 +54,7 @@ var _ = Describe("ConfigMapController", func() {
 			configMap := &corev1.ConfigMap{
 				Data: map[string]string{
 					"config.yaml": `
-driver: karpenter.sh/dra-kwok-driver
+driver: karpenter.sh
 mappings:
 - name: gpu-mapping
   nodeSelectorTerms:
@@ -63,7 +63,7 @@ mappings:
       operator: In
       values: ["g4dn.xlarge"]
   resourceSlice:
-    driver: karpenter.sh/dra-kwok-driver
+    driver: karpenter.sh
     pool:
       name: gpu-pool
       resourceSliceCount: 1
@@ -82,12 +82,12 @@ mappings:
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cfg).ToNot(BeNil())
-			Expect(cfg.Driver).To(Equal("karpenter.sh.dra-kwok-driver"))
+			Expect(cfg.Driver).To(Equal("karpenter.sh")) // Exact format from ConfigMap
 			Expect(cfg.Mappings).To(HaveLen(1))
 			Expect(cfg.Mappings[0].Name).To(Equal("gpu-mapping"))
 			Expect(cfg.Mappings[0].ResourceSlice.Devices).To(HaveLen(1))
 			Expect(cfg.Mappings[0].ResourceSlice.Devices[0].Name).To(Equal("nvidia-gpu-0"))
-			Expect(cfg.Mappings[0].ResourceSlice.Driver).To(Equal("karpenter.sh/dra-kwok-driver"))
+			Expect(cfg.Mappings[0].ResourceSlice.Driver).To(Equal("karpenter.sh")) // Exact format
 			Expect(cfg.Mappings[0].ResourceSlice.Pool.Name).To(Equal("gpu-pool"))
 		})
 
@@ -98,7 +98,7 @@ mappings:
 				configMap := &corev1.ConfigMap{
 					Data: map[string]string{
 						key: `
-driver: test.example.com/device
+driver: test.example.com
 mappings:
 - name: test-mapping
   nodeSelectorTerms:
@@ -107,7 +107,7 @@ mappings:
       operator: In
       values: ["value"]
   resourceSlice:
-    driver: test.example.com/device
+    driver: test.example.com
     pool:
       name: test-pool
       resourceSliceCount: 1
@@ -119,7 +119,7 @@ mappings:
 
 				cfg, err := controller.parseConfigFromConfigMap(configMap)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(cfg.Driver).To(Equal("test.example.com.device"))
+				Expect(cfg.Driver).To(Equal("test.example.com")) // Exact format from ConfigMap
 			}
 		})
 
