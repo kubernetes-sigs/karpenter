@@ -184,9 +184,9 @@ var _ = Describe("Integration", func() {
 				}
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
-			It("should error when a restricted label is used in labels (kubernetes.io/custom-label)", func() {
+			It("should error when a restricted label is used in labels (karpenter.sh/custom-label)", func() {
 				nodePool.Spec.Template.Labels = map[string]string{
-					"kubernetes.io/custom-label": "custom-value",
+					"karpenter.sh/custom-label": "custom-value",
 				}
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
