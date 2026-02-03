@@ -522,8 +522,8 @@ mappings:
 					"config.yaml": `
 driver: karpenter.sh
 mappings:
-  # First ResourceSlice: GPU devices for c-4x-amd64-linux
-  - name: gpu-mapping-c4x
+  # First ResourceSlice: GPU devices for c-4x-amd64-linux (part 1 of 2)
+  - name: gpu-mapping-c4x-slice1
     nodeSelectorTerms:
       - matchExpressions:
           - key: node.kubernetes.io/instance-type
@@ -532,8 +532,8 @@ mappings:
     resourceSlice:
       driver: karpenter.sh
       pool:
-        name: multi-gpu-pool
-        resourceSliceCount: 1
+        name: multi-device-pool
+        resourceSliceCount: 2  # Pool expects 2 slices total
       devices:
         - name: nvidia-t4-0
           attributes:
@@ -552,8 +552,8 @@ mappings:
             device_class:
               string: gpu
 
-  # Second ResourceSlice: FPGA devices for same instance type
-  - name: fpga-mapping-c4x
+  # Second ResourceSlice: More devices for same instance type (part 2 of 2)
+  - name: gpu-mapping-c4x-slice2
     nodeSelectorTerms:
       - matchExpressions:
           - key: node.kubernetes.io/instance-type
@@ -562,8 +562,8 @@ mappings:
     resourceSlice:
       driver: karpenter.sh
       pool:
-        name: multi-fpga-pool
-        resourceSliceCount: 1
+        name: multi-device-pool  # Same pool name!
+        resourceSliceCount: 2     # Same count - indicates pool has 2 slices
       devices:
         - name: xilinx-u250-0
           attributes:
