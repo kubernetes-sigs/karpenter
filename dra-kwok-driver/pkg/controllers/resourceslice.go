@@ -180,7 +180,6 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 		existing := &resourcev1.ResourceSlice{}
 		err := r.kubeClient.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing)
 
-		var generation int64 = 0
 		if err == nil {
 			// ResourceSlice exists - check if update is needed
 			if !r.resourceSliceNeedsUpdate(existing, &mapping.ResourceSlice) {
@@ -188,57 +187,64 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 				continue
 			}
 
-			// Update needed - bump generation and delete old slice
-			generation = existing.Spec.Pool.Generation + 1
-			logger.Info("updating resourceslice with new generation",
+			// Update needed - bump generation and update in place
+			oldGeneration := existing.Spec.Pool.Generation
+			newGeneration := oldGeneration + 1
+
+			// Update the spec with new configuration
+			existing.Spec = mapping.ResourceSlice
+			existing.Spec.NodeName = &node.Name
+			existing.Spec.Driver = r.driverName
+			existing.Spec.Pool.Generation = newGeneration
+
+			logger.Info("updating resourceslice in place with new generation",
 				"resourceslice", resourceSliceName,
-				"old_generation", existing.Spec.Pool.Generation,
-				"new_generation", generation,
+				"old_generation", oldGeneration,
+				"new_generation", newGeneration,
+				"devices", len(existing.Spec.Devices),
 			)
 
-			// Delete old ResourceSlice before creating new one
-			if err := r.kubeClient.Delete(ctx, existing); err != nil {
-				return nil, serrors.Wrap(fmt.Errorf("deleting old resourceslice generation, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
+			if err := r.kubeClient.Update(ctx, existing); err != nil {
+				return nil, serrors.Wrap(fmt.Errorf("updating resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
 			}
-		} else if !errors.IsNotFound(err) {
-			return nil, serrors.Wrap(fmt.Errorf("getting resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
-		}
-		// If not found, generation starts at 0 (default)
-
-		// Create the new ResourceSlice with current/incremented generation
-		desired := &resourcev1.ResourceSlice{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: resourceSliceName,
-				Labels: map[string]string{
-					"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
-					"kwok.x-k8s.io/node":       node.Name,
-					"kwok.x-k8s.io/mapping":    mapping.Name,
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: "v1",
-						Kind:       "Node",
-						Name:       node.Name,
-						UID:        node.UID,
+		} else if errors.IsNotFound(err) {
+			// ResourceSlice doesn't exist - create it
+			desired := &resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: resourceSliceName,
+					Labels: map[string]string{
+						"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
+						"kwok.x-k8s.io/node":       node.Name,
+						"kwok.x-k8s.io/mapping":    mapping.Name,
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "v1",
+							Kind:       "Node",
+							Name:       node.Name,
+							UID:        node.UID,
+						},
 					},
 				},
-			},
-			Spec: mapping.ResourceSlice,
-		}
+				Spec: mapping.ResourceSlice,
+			}
 
-		// Override node-specific fields
-		desired.Spec.NodeName = &node.Name
-		desired.Spec.Driver = r.driverName
-		desired.Spec.Pool.Generation = generation
+			// Override node-specific fields
+			desired.Spec.NodeName = &node.Name
+			desired.Spec.Driver = r.driverName
+			desired.Spec.Pool.Generation = 0 // Start at generation 0
 
-		logger.Info("creating resourceslice",
-			"resourceslice", desired.Name,
-			"mapping", desired.Labels["kwok.x-k8s.io/mapping"],
-			"generation", generation,
-			"devices", len(desired.Spec.Devices),
-		)
-		if err := r.kubeClient.Create(ctx, desired); err != nil {
-			return nil, serrors.Wrap(fmt.Errorf("creating resourceslice, %w", err), "ResourceSlice", klog.KRef("", desired.Name))
+			logger.Info("creating resourceslice",
+				"resourceslice", desired.Name,
+				"mapping", desired.Labels["kwok.x-k8s.io/mapping"],
+				"generation", 0,
+				"devices", len(desired.Spec.Devices),
+			)
+			if err := r.kubeClient.Create(ctx, desired); err != nil {
+				return nil, serrors.Wrap(fmt.Errorf("creating resourceslice, %w", err), "ResourceSlice", klog.KRef("", desired.Name))
+			}
+		} else {
+			return nil, serrors.Wrap(fmt.Errorf("getting resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
 		}
 	}
 
