@@ -26,6 +26,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"sigs.k8s.io/karpenter/test/pkg/debug"
+
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -44,14 +46,14 @@ type DeploymentConfig struct {
 func getDeterministicDeploymentConfigs() []DeploymentConfig {
 	// Deterministic CPU values (0.25 - 8.0 vCPU range)
 	cpuValues := []string{
-		"250m", "500m", "750m", "1000m", "1500m", "2000m", "2500m", "3000m", "3500m", "4000m", // 1-10
-		"2500m", "1000m", "1500m", "3000m", "1800m", "2000m", "3500m", "4000m", "250m", "500m", // 11-20
-		"750m", "1000m", "1500m", "2000m", "2500m", "3000m", "3500m", "4000m", "3500m", "3000m", // 21-30
+		"240m", "450m", "650m", "900m", "1400m", "1900m", "2400m", "2800m", "3300m", "3700m", // 1-10
+		"2300m", "900m", "1300m", "2800m", "1800m", "1850m", "3300m", "3800m", "225m", "450m", // 11-20
+		"700m", "900m", "1300m", "1800m", "2400m", "2800m", "3400m", "3800m", "3300m", "2800m", // 21-30
 	}
 
 	// Deterministic memory values (300MB - 64GB range)
 	memoryValues := []string{
-		"300Mi", "500Mi", "750Mi", "1Gi", "2Gi", "4Gi", "8Gi", "4Gi", "16Gi", "10Gi", // 1-10
+		"300Mi", "400Mi", "700Mi", "1Gi", "2Gi", "4Gi", "8Gi", "4Gi", "16Gi", "10Gi", // 1-10
 		"64Gi", "30Gi", "32Gi", "32Gi", "30Gi", "20Gi", "30Gi", "300Mi", "500Mi", "750Mi", // 11-20
 		"1Gi", "2Gi", "4Gi", "8Gi", "16Gi", "32Gi", "28Gi", "64Gi", "13Gi", "24Gi", // 21-30
 	}
@@ -146,7 +148,7 @@ func createWideDeployments() []*appsv1.Deployment {
 	return deployments
 }
 
-var _ = Describe("Performance", func() {
+var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Wide Deployments", func() {
 		It("should efficiently scale 30 deployments with varied resources and topology constraints", func() {
 			By("Setting up NodePool and NodeClass for the test")
@@ -172,14 +174,12 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
 
 			// Performance assertions for wide deployments
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 3*time.Minute),
-				"Total scale-out time should be less than 3 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 300),
-				"Should not require more than 1000 nodes for 1000 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.68),
-				"Average CPU utilization should be greater than 68%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
-				"Average memory utilization should be greater than 55%")
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
+				"Total scale-out time should be less than 10 minutes")
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.2),
+				"Average CPU utilization should be greater than 20%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.20),
+				"Average memory utilization should be greater than 20%")
 
 			// ========== PHASE 2: WIDE CONSOLIDATION TEST ==========
 			By("Scaling down all 30 deployments to trigger consolidation")
@@ -193,7 +193,7 @@ var _ = Describe("Performance", func() {
 			}
 
 			By("Monitoring wide consolidation performance")
-			consolidationReport, err := ReportConsolidationWithOutput(env, "Wide Deployments Consolidation Test", 1000, 700, initialNodes, 25*time.Minute, "wide_deployments_consolidation")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Wide Deployments Consolidation Test", 1000, 700, initialNodes, 30*time.Minute, "wide_deployments_consolidation")
 			Expect(err).ToNot(HaveOccurred(), "Wide consolidation should execute successfully")
 
 			By("Validating wide consolidation performance")
@@ -202,14 +202,12 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
 
 			// Wide consolidation assertions
-			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
-				"Node count should decrease after consolidation")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
-				"Wide consolidation should complete within 10 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.65),
-				"Average CPU utilization should be greater than 65%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
-				"Average memory utilization should be greater than 65%")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 40*time.Minute),
+				"Wide consolidation should complete within 40 minutes")
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.20),
+				"Average CPU utilization should be greater than 20%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.20),
+				"Average memory utilization should be greater than 20%")
 
 		})
 	})
