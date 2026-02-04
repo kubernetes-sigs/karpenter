@@ -60,10 +60,15 @@ var _ = Describe("Chaos", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 
 			numPods := 1
-			dep := test.Deployment(test.CreateDeploymentOptions("my-app", int32(numPods), "100m", "128Mi",
-				test.WithNoResourceRequests(),
-				test.WithLabels(map[string]string{"app": "my-app"}),
-				test.WithTerminationGracePeriod(0)))
+			dep := test.Deployment(test.DeploymentOptions{
+				Replicas: int32(numPods),
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "my-app"},
+					},
+					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+				},
+			})
 			// Start a controller that adds taints to nodes after creation
 			Expect(startTaintAdder(ctx, env.Config)).To(Succeed())
 			startNodeCountMonitor(ctx, env.Client)
@@ -85,10 +90,15 @@ var _ = Describe("Chaos", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 			numPods := 1
-			dep := test.Deployment(test.CreateDeploymentOptions("my-app", int32(numPods), "100m", "128Mi",
-				test.WithNoResourceRequests(),
-				test.WithLabels(map[string]string{"app": "my-app"}),
-				test.WithTerminationGracePeriod(0)))
+			dep := test.Deployment(test.DeploymentOptions{
+				Replicas: int32(numPods),
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "my-app"},
+					},
+					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+				},
+			})
 			// Start a controller that adds taints to nodes after creation
 			Expect(startTaintAdder(ctx, env.Config)).To(Succeed())
 			startNodeCountMonitor(ctx, env.Client)
