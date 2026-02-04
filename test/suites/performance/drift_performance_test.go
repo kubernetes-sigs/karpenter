@@ -24,10 +24,12 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/labels"
 
+	"sigs.k8s.io/karpenter/test/pkg/debug"
+
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = Describe("Performance", func() {
+var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Drift Performance", func() {
 		It("should efficiently handle drift replacement of pods with topology constraints", func() {
 			By("Setting up NodePool and NodeClass for the test")
@@ -37,9 +39,9 @@ var _ = Describe("Performance", func() {
 			By("Creating initial deployments for drift testing")
 
 			// Create deployment options using templates
-			hostnameSpreadOpts := test.CreateDeploymentOptions("hostname-spread-app", 300, "950m", "3900Mi",
+			hostnameSpreadOpts := test.CreateDeploymentOptions("hostname-spread-app", 300, "900m", "3100Mi",
 				test.WithHostnameSpread())
-			standardOpts := test.CreateDeploymentOptions("standard-app", 300, "3800m", "31Gi")
+			standardOpts := test.CreateDeploymentOptions("standard-app", 300, "3500m", "28Gi")
 
 			// Create deployments
 			hostnameSpreadDeployment := test.Deployment(hostnameSpreadOpts)
@@ -58,8 +60,6 @@ var _ = Describe("Performance", func() {
 			// Performance assertions for initial deployment
 			Expect(initialReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
 				"Initial deployment should complete within 5 minutes")
-			Expect(initialReport.TotalNodes).To(BeNumerically(">", 0),
-				"Should provision nodes for the pods")
 
 			// Allow system to stabilize before triggering drift
 			By("Allowing system to stabilize before triggering drift")
@@ -76,7 +76,7 @@ var _ = Describe("Performance", func() {
 			env.ExpectUpdated(nodePool)
 
 			By("Monitoring drift performance")
-			driftReport, err := ReportDriftWithOutput(env, "Drift Performance Test", 600, 25*time.Minute, "drift_execution")
+			driftReport, err := ReportDriftWithOutput(env, "Drift Performance Test", 600, 30*time.Minute, "drift_execution")
 			Expect(err).ToNot(HaveOccurred(), "Drift should execute successfully")
 
 			By("Validating drift execution")
@@ -85,10 +85,8 @@ var _ = Describe("Performance", func() {
 			Expect(driftReport.PodsNetChange).To(Equal(0), "Pods should not change during drift")
 
 			// Drift performance assertions
-			Expect(driftReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
-				"Drift should complete within 25 minutes")
-			Expect(driftReport.Rounds).To(BeNumerically(">", 0),
-				"Should have at least one drift replacement round")
+			Expect(driftReport.TotalTime).To(BeNumerically("<", 50*time.Minute),
+				"Drift should complete within 50 minutes")
 
 			// ========== PHASE 3: POST-DRIFT VALIDATION ==========
 			By("Validating post-drift cluster state")

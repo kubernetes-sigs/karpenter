@@ -24,7 +24,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -36,10 +35,10 @@ var nodePool *v1.NodePool
 var nodeClass *unstructured.Unstructured
 var env *common.Environment
 
-var testLabels = map[string]string{
-	test.DiscoveryLabel: "owned",
-}
-var labelSelector = labels.SelectorFromSet(testLabels)
+//var testLabels = map[string]string{
+//	test.DiscoveryLabel: "owned",
+//}
+//var labelSelector = labels.SelectorFromSet(testLabels)
 
 func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
