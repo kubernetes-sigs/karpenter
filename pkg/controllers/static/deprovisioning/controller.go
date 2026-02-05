@@ -251,14 +251,7 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 	candidates := make([]*v1.NodeClaim, 0, count)
 
 	// Priority 1: Empty nodes
-	emptyNodes := lo.Filter(nodes, func(node *state.StateNode, _ int) bool {
-		pods, err := node.Pods(ctx, c.kubeClient)
-		if err != nil {
-			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, treating as non-empty")
-			return false
-		}
-		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, pod.HasDoNotDisrupt)
-	})
+	emptyNodes := c.filterEmptyNodes(ctx, nodes)
 
 	// Sort empty nodes by priority (highest first)
 	slices.SortFunc(emptyNodes, func(i, j *state.StateNode) int {
@@ -270,20 +263,52 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 	}
 
 	remaining := count - len(candidates)
-
 	if remaining == 0 {
 		return candidates
 	}
 
-	// Get non-empty nodes with their costs
-	type NonEmptyNode struct {
-		node            *state.StateNode
-		pods            []*corev1.Pod
-		hasDoNotDisrupt bool
+	// Priority 2: Non-empty nodes sorted by disruption cost
+	nonEmptyNodes := c.getNonEmptyNodes(ctx, nodes, emptyNodes)
+	c.sortNonEmptyNodesByPriority(ctx, nonEmptyNodes, np)
+
+	for _, nwc := range lo.Slice(nonEmptyNodes, 0, remaining) {
+		candidates = append(candidates, nwc.node.NodeClaim)
 	}
 
+	return candidates
+}
+
+// filterEmptyNodes returns nodes that are empty (no pods or only DaemonSet pods without do-not-disrupt)
+func (c *Controller) filterEmptyNodes(ctx context.Context, nodes []*state.StateNode) []*state.StateNode {
+	return lo.Filter(nodes, func(node *state.StateNode, _ int) bool {
+		pods, err := node.Pods(ctx, c.kubeClient)
+		if err != nil {
+			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, treating as non-empty")
+			return false
+		}
+		return c.isNodeEmpty(pods)
+	})
+}
+
+// isNodeEmpty checks if a node is considered empty for deprovisioning purposes
+func (c *Controller) isNodeEmpty(pods []*corev1.Pod) bool {
+	if len(pods) == 0 {
+		return true
+	}
+	return lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, pod.HasDoNotDisrupt)
+}
+
+// NonEmptyNode represents a non-empty node with its pods and disruption metadata
+type NonEmptyNode struct {
+	node            *state.StateNode
+	pods            []*corev1.Pod
+	hasDoNotDisrupt bool
+}
+
+// getNonEmptyNodes returns all non-empty nodes with their pod information
+func (c *Controller) getNonEmptyNodes(ctx context.Context, nodes []*state.StateNode, emptyNodes []*state.StateNode) []NonEmptyNode {
 	emptyNodesSet := sets.New(emptyNodes...)
-	nonEmptyNodes := lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NonEmptyNode, bool) {
+	return lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NonEmptyNode, bool) {
 		if emptyNodesSet.Has(node) {
 			return NonEmptyNode{}, false
 		}
@@ -300,35 +325,36 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 			hasDoNotDisrupt: lo.SomeBy(pods, pod.HasDoNotDisrupt),
 		}, true
 	})
+}
 
-	slices.SortFunc(nonEmptyNodes, func(i, j NonEmptyNode) int {
-		// Priority 1: If one node has do-not-disrupt pods and the other doesn't,
-		// the one without should come first (protect critical workloads)
-		if i.hasDoNotDisrupt != j.hasDoNotDisrupt {
-			return lo.Ternary(i.hasDoNotDisrupt, 1, -1)
-		}
-
-		// Priority 2: Explicit deprovisioning priority annotation (higher = removed first)
-		// Only matters among nodes with the same do-not-disrupt status
-		priorityI := getDeprovisioningPriority(i.node.NodeClaim)
-		priorityJ := getDeprovisioningPriority(j.node.NodeClaim)
-		if priorityI != priorityJ {
-			return cmp.Compare(priorityJ, priorityI) // Reverse: higher priority first
-		}
-
-		// Priority 3: Compare disruption costs as final tiebreaker
-		return cmp.Compare(
-			disruptionutils.ReschedulingCost(ctx, i.pods)*disruptionutils.LifetimeRemaining(c.clock, np, i.node.NodeClaim),
-			disruptionutils.ReschedulingCost(ctx, j.pods)*disruptionutils.LifetimeRemaining(c.clock, np, j.node.NodeClaim),
-		)
+// sortNonEmptyNodesByPriority sorts non-empty nodes by do-not-disrupt status, priority annotation, and disruption cost
+func (c *Controller) sortNonEmptyNodesByPriority(ctx context.Context, nodes []NonEmptyNode, np *v1.NodePool) {
+	slices.SortFunc(nodes, func(i, j NonEmptyNode) int {
+		return c.compareNonEmptyNodes(ctx, i, j, np)
 	})
+}
 
-	// Take the remaining needed nodes with lowest cost
-	for _, nwc := range lo.Slice(nonEmptyNodes, 0, remaining) {
-		candidates = append(candidates, nwc.node.NodeClaim)
+// compareNonEmptyNodes compares two non-empty nodes for deprovisioning priority
+func (c *Controller) compareNonEmptyNodes(ctx context.Context, i, j NonEmptyNode, np *v1.NodePool) int {
+	// Priority 1: If one node has do-not-disrupt pods and the other doesn't,
+	// the one without should come first (protect critical workloads)
+	if i.hasDoNotDisrupt != j.hasDoNotDisrupt {
+		return lo.Ternary(i.hasDoNotDisrupt, 1, -1)
 	}
 
-	return candidates
+	// Priority 2: Explicit deprovisioning priority annotation (higher = removed first)
+	// Only matters among nodes with the same do-not-disrupt status
+	priorityI := getDeprovisioningPriority(i.node.NodeClaim)
+	priorityJ := getDeprovisioningPriority(j.node.NodeClaim)
+	if priorityI != priorityJ {
+		return cmp.Compare(priorityJ, priorityI) // Reverse: higher priority first
+	}
+
+	// Priority 3: Compare disruption costs as final tiebreaker
+	return cmp.Compare(
+		disruptionutils.ReschedulingCost(ctx, i.pods)*disruptionutils.LifetimeRemaining(c.clock, np, i.node.NodeClaim),
+		disruptionutils.ReschedulingCost(ctx, j.pods)*disruptionutils.LifetimeRemaining(c.clock, np, j.node.NodeClaim),
+	)
 }
 
 // getDeprovisioningPriority returns the deprovisioning priority from NodeClaim annotations.
