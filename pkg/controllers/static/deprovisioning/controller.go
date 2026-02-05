@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/samber/lo"
@@ -226,6 +227,12 @@ func (c *Controller) unresolvedDeprovisioningCandidates(ctx context.Context, nod
 	}
 
 	unresolvedToDelete := lo.Min([]int{count, len(unresolvedNodeClaims)})
+
+	// Sort by priority (highest first)
+	slices.SortFunc(unresolvedNodeClaims, func(i, j *v1.NodeClaim) int {
+		return cmp.Compare(getDeprovisioningPriority(j), getDeprovisioningPriority(i))
+	})
+
 	candidates := make([]*v1.NodeClaim, 0, unresolvedToDelete)
 	for i := range unresolvedToDelete {
 		candidates = append(candidates, unresolvedNodeClaims[i])
@@ -251,6 +258,11 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 			return false
 		}
 		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, pod.HasDoNotDisrupt)
+	})
+
+	// Sort empty nodes by priority (highest first)
+	slices.SortFunc(emptyNodes, func(i, j *state.StateNode) int {
+		return cmp.Compare(getDeprovisioningPriority(j.NodeClaim), getDeprovisioningPriority(i.NodeClaim))
 	})
 
 	for _, node := range lo.Slice(emptyNodes, 0, count) {
@@ -290,11 +302,21 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 	})
 
 	slices.SortFunc(nonEmptyNodes, func(i, j NonEmptyNode) int {
-		// If one node has do-not-disrupt pods and the other doesn't, the one without should come first
+		// Priority 1: If one node has do-not-disrupt pods and the other doesn't,
+		// the one without should come first (protect critical workloads)
 		if i.hasDoNotDisrupt != j.hasDoNotDisrupt {
 			return lo.Ternary(i.hasDoNotDisrupt, 1, -1)
 		}
-		// If neither has do-not-disrupt pods, compare their costs
+
+		// Priority 2: Explicit deprovisioning priority annotation (higher = removed first)
+		// Only matters among nodes with the same do-not-disrupt status
+		priorityI := getDeprovisioningPriority(i.node.NodeClaim)
+		priorityJ := getDeprovisioningPriority(j.node.NodeClaim)
+		if priorityI != priorityJ {
+			return cmp.Compare(priorityJ, priorityI) // Reverse: higher priority first
+		}
+
+		// Priority 3: Compare disruption costs as final tiebreaker
 		return cmp.Compare(
 			disruptionutils.ReschedulingCost(ctx, i.pods)*disruptionutils.LifetimeRemaining(c.clock, np, i.node.NodeClaim),
 			disruptionutils.ReschedulingCost(ctx, j.pods)*disruptionutils.LifetimeRemaining(c.clock, np, j.node.NodeClaim),
@@ -307,4 +329,18 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 	}
 
 	return candidates
+}
+
+// getDeprovisioningPriority returns the deprovisioning priority from NodeClaim annotations.
+// Higher values are deprovisioned first. Returns 0 if annotation is not set or invalid.
+func getDeprovisioningPriority(nc *v1.NodeClaim) int {
+	if nc == nil || nc.Annotations == nil {
+		return 0
+	}
+	if priority, ok := nc.Annotations["karpenter.sh/deprovisioning-priority"]; ok {
+		if val, err := strconv.Atoi(priority); err == nil {
+			return val
+		}
+	}
+	return 0
 }
