@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,22 +30,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/config"
+	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/apis/v1alpha1"
 )
-
-// stringPtr returns a pointer to a string
-func stringPtr(s string) *string {
-	return &s
-}
 
 var _ = Describe("ResourceSliceController", func() {
 	var (
 		ctx                context.Context
 		resourceController *ResourceSliceController
-		configStore        *config.Store
 		fakeClient         client.Client
 		scheme             *runtime.Scheme
-		driverName         = "karpenter.sh/dra-kwok-driver"
+		driverName         = "test.karpenter.sh"
+		namespace          = "karpenter"
 	)
 
 	BeforeEach(func() {
@@ -52,10 +48,10 @@ var _ = Describe("ResourceSliceController", func() {
 		scheme = runtime.NewScheme()
 		Expect(clientgoscheme.AddToScheme(scheme)).To(Succeed())
 		Expect(resourcev1.AddToScheme(scheme)).To(Succeed())
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 		fakeClient = fake.NewClientBuilder().WithScheme(scheme).Build()
-		configStore = config.NewStore()
-		resourceController = NewResourceSliceController(fakeClient, driverName, configStore)
+		resourceController = NewResourceSliceController(fakeClient, driverName, namespace)
 	})
 
 	Describe("isKWOKNode", func() {
@@ -95,10 +91,10 @@ var _ = Describe("ResourceSliceController", func() {
 	})
 
 	Describe("findMatchingMappings", func() {
-		var mappings []config.Mapping
+		var mappings []v1alpha1.Mapping
 
 		BeforeEach(func() {
-			mappings = []config.Mapping{
+			mappings = []v1alpha1.Mapping{
 				{
 					Name: "gpu-mapping",
 					NodeSelectorTerms: []corev1.NodeSelectorTerm{
@@ -110,6 +106,15 @@ var _ = Describe("ResourceSliceController", func() {
 									Values:   []string{"g4dn.xlarge", "g4dn.2xlarge"},
 								},
 							},
+						},
+					},
+					ResourceSlice: v1alpha1.ResourceSliceTemplate{
+						Pool: resourcev1.ResourcePool{
+							Name:               "test-pool",
+							ResourceSliceCount: 1,
+						},
+						Devices: []resourcev1.Device{
+							{Name: "device-0"},
 						},
 					},
 				},
@@ -124,6 +129,15 @@ var _ = Describe("ResourceSliceController", func() {
 									Values:   []string{"m5.large", "m5.xlarge"},
 								},
 							},
+						},
+					},
+					ResourceSlice: v1alpha1.ResourceSliceTemplate{
+						Pool: resourcev1.ResourcePool{
+							Name:               "cpu-pool",
+							ResourceSliceCount: 1,
+						},
+						Devices: []resourcev1.Device{
+							{Name: "cpu-0"},
 						},
 					},
 				},
@@ -158,7 +172,7 @@ var _ = Describe("ResourceSliceController", func() {
 		})
 
 		It("should find multiple mappings when node matches multiple selectors", func() {
-			mappings = append(mappings, config.Mapping{
+			mappings = append(mappings, v1alpha1.Mapping{
 				Name: "all-nodes",
 				NodeSelectorTerms: []corev1.NodeSelectorTerm{
 					{
@@ -168,6 +182,15 @@ var _ = Describe("ResourceSliceController", func() {
 								Operator: corev1.NodeSelectorOpExists,
 							},
 						},
+					},
+				},
+				ResourceSlice: v1alpha1.ResourceSliceTemplate{
+					Pool: resourcev1.ResourcePool{
+						Name:               "all-pool",
+						ResourceSliceCount: 1,
+					},
+					Devices: []resourcev1.Device{
+						{Name: "generic-0"},
 					},
 				},
 			})
@@ -188,7 +211,7 @@ var _ = Describe("ResourceSliceController", func() {
 		})
 
 		It("should handle OR logic with multiple NodeSelectorTerms", func() {
-			multiTermMapping := config.Mapping{
+			multiTermMapping := v1alpha1.Mapping{
 				Name: "multi-term",
 				NodeSelectorTerms: []corev1.NodeSelectorTerm{
 					{
@@ -210,6 +233,15 @@ var _ = Describe("ResourceSliceController", func() {
 						},
 					},
 				},
+				ResourceSlice: v1alpha1.ResourceSliceTemplate{
+					Pool: resourcev1.ResourcePool{
+						Name:               "multi-pool",
+						ResourceSliceCount: 1,
+					},
+					Devices: []resourcev1.Device{
+						{Name: "zone-device"},
+					},
+				},
 			}
 
 			// Node matching first term
@@ -220,7 +252,7 @@ var _ = Describe("ResourceSliceController", func() {
 					},
 				},
 			}
-			matches := resourceController.findMatchingMappings(node1, []config.Mapping{multiTermMapping})
+			matches := resourceController.findMatchingMappings(node1, []v1alpha1.Mapping{multiTermMapping})
 			Expect(matches).To(HaveLen(1))
 
 			// Node matching second term
@@ -231,13 +263,16 @@ var _ = Describe("ResourceSliceController", func() {
 					},
 				},
 			}
-			matches = resourceController.findMatchingMappings(node2, []config.Mapping{multiTermMapping})
+			matches = resourceController.findMatchingMappings(node2, []v1alpha1.Mapping{multiTermMapping})
 			Expect(matches).To(HaveLen(1))
 		})
 	})
 
 	Describe("reconcileAllNodes", func() {
-		var node *corev1.Node
+		var (
+			node      *corev1.Node
+			draConfig *v1alpha1.DRAConfig
+		)
 
 		BeforeEach(func() {
 			node = &corev1.Node{
@@ -253,35 +288,40 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 			}
 
-			// Set up configuration in the store
-			testConfig := &config.Config{
-				Driver: driverName,
-				Mappings: []config.Mapping{
-					{
-						Name: "gpu-mapping",
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{
-										Key:      "node.kubernetes.io/instance-type",
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"g4dn.xlarge"},
+			// Create DRAConfig CRD
+			draConfig = &v1alpha1.DRAConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      driverName, // "test.karpenter.sh"
+					Namespace: namespace,  // "karpenter"
+				},
+				Spec: v1alpha1.DRAConfigSpec{
+					Driver: driverName,
+					Mappings: []v1alpha1.Mapping{
+						{
+							Name: "gpu-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"g4dn.xlarge"},
+										},
 									},
 								},
 							},
-						},
-						ResourceSlice: resourcev1.ResourceSliceSpec{
-							Driver: "karpenter.sh/dra-kwok-driver",
-							Pool: resourcev1.ResourcePool{
-								Name:               "test-gpu-pool",
-								ResourceSliceCount: 1,
-							},
-							Devices: []resourcev1.Device{
-								{
-									Name: "nvidia-gpu-0",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":   {StringValue: stringPtr("nvidia-tesla-v100")},
-										"memory": {StringValue: stringPtr("32Gi")},
+							ResourceSlice: v1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "test-gpu-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "nvidia-gpu-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":   {StringValue: lo.ToPtr("nvidia-tesla-v100")},
+											"memory": {StringValue: lo.ToPtr("32Gi")},
+										},
 									},
 								},
 							},
@@ -289,11 +329,11 @@ var _ = Describe("ResourceSliceController", func() {
 					},
 				},
 			}
-			configStore.Set(testConfig)
 		})
 
 		It("should create ResourceSlices for matching nodes", func() {
-			// Create the node
+			// Create DRAConfig and node
+			Expect(fakeClient.Create(ctx, draConfig)).To(Succeed())
 			Expect(fakeClient.Create(ctx, node)).To(Succeed())
 
 			// Run reconciliation
@@ -306,7 +346,8 @@ var _ = Describe("ResourceSliceController", func() {
 			Expect(resourceSlices.Items).To(HaveLen(1))
 
 			rs := &resourceSlices.Items[0]
-			Expect(rs.Name).To(Equal("kwok-node-1-devices-gpu-mapping"))
+			// Naming: <sanitized-driver>-<node-name>-<mapping-name>
+			Expect(rs.Name).To(Equal("test-karpenter-sh-kwok-node-1-gpu-mapping"))
 			Expect(rs.Labels["kwok.x-k8s.io/managed-by"]).To(Equal("dra-kwok-driver"))
 			Expect(rs.Labels["kwok.x-k8s.io/node"]).To(Equal("kwok-node-1"))
 			Expect(rs.Spec.Devices).To(HaveLen(1))
@@ -314,6 +355,9 @@ var _ = Describe("ResourceSliceController", func() {
 		})
 
 		It("should not create ResourceSlices for non-matching nodes", func() {
+			// Create DRAConfig
+			Expect(fakeClient.Create(ctx, draConfig)).To(Succeed())
+
 			// Modify node to not match any mappings
 			node.Labels["node.kubernetes.io/instance-type"] = "t3.micro"
 			Expect(fakeClient.Create(ctx, node)).To(Succeed())
@@ -329,6 +373,9 @@ var _ = Describe("ResourceSliceController", func() {
 		})
 
 		It("should skip non-KWOK nodes", func() {
+			// Create DRAConfig
+			Expect(fakeClient.Create(ctx, draConfig)).To(Succeed())
+
 			// Remove KWOK annotation
 			delete(node.Annotations, "kwok.x-k8s.io/node")
 			Expect(fakeClient.Create(ctx, node)).To(Succeed())
@@ -344,7 +391,8 @@ var _ = Describe("ResourceSliceController", func() {
 		})
 
 		It("should clean up orphaned ResourceSlices when node is deleted", func() {
-			// Create node and run initial reconciliation
+			// Create DRAConfig and node, run initial reconciliation
+			Expect(fakeClient.Create(ctx, draConfig)).To(Succeed())
 			Expect(fakeClient.Create(ctx, node)).To(Succeed())
 			err := resourceController.reconcileAllNodes(ctx)
 			Expect(err).NotTo(HaveOccurred())
@@ -366,8 +414,9 @@ var _ = Describe("ResourceSliceController", func() {
 			Expect(resourceSlices.Items).To(BeEmpty())
 		})
 
-		It("should clean up all ResourceSlices when configuration is cleared", func() {
-			// Create node and run initial reconciliation
+		It("should clean up all ResourceSlices when DRAConfig is deleted", func() {
+			// Create DRAConfig and node, run initial reconciliation
+			Expect(fakeClient.Create(ctx, draConfig)).To(Succeed())
 			Expect(fakeClient.Create(ctx, node)).To(Succeed())
 			err := resourceController.reconcileAllNodes(ctx)
 			Expect(err).NotTo(HaveOccurred())
@@ -377,8 +426,8 @@ var _ = Describe("ResourceSliceController", func() {
 			Expect(fakeClient.List(ctx, resourceSlices)).To(Succeed())
 			Expect(resourceSlices.Items).To(HaveLen(1))
 
-			// Clear configuration
-			configStore.Clear()
+			// Delete DRAConfig
+			Expect(fakeClient.Delete(ctx, draConfig)).To(Succeed())
 
 			// Run reconciliation again
 			err = resourceController.reconcileAllNodes(ctx)
@@ -390,6 +439,9 @@ var _ = Describe("ResourceSliceController", func() {
 		})
 
 		It("should handle errors gracefully and continue processing other nodes", func() {
+			// Create DRAConfig
+			Expect(fakeClient.Create(ctx, draConfig)).To(Succeed())
+
 			// Create multiple nodes
 			node2 := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
@@ -422,13 +474,14 @@ var _ = Describe("ResourceSliceController", func() {
 				sliceNames = append(sliceNames, rs.Name)
 			}
 			Expect(sliceNames).To(ConsistOf(
-				"kwok-node-1-devices-gpu-mapping",
-				"kwok-node-2-devices-gpu-mapping",
+				"test-karpenter-sh-kwok-node-1-gpu-mapping",
+				"test-karpenter-sh-kwok-node-2-gpu-mapping",
 			))
 		})
 
 		It("should update existing ResourceSlices when configuration changes", func() {
-			// Create node and run initial reconciliation
+			// Create DRAConfig and node, run initial reconciliation
+			Expect(fakeClient.Create(ctx, draConfig)).To(Succeed())
 			Expect(fakeClient.Create(ctx, node)).To(Succeed())
 			err := resourceController.reconcileAllNodes(ctx)
 			Expect(err).NotTo(HaveOccurred())
@@ -439,58 +492,26 @@ var _ = Describe("ResourceSliceController", func() {
 			Expect(resourceSlices.Items).To(HaveLen(1))
 			Expect(resourceSlices.Items[0].Spec.Devices).To(HaveLen(1))
 
-			// Update configuration with more devices
-			newConfig := &config.Config{
-				Driver: driverName,
-				Mappings: []config.Mapping{
-					{
-						Name: "gpu-mapping",
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{
-										Key:      "node.kubernetes.io/instance-type",
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"g4dn.xlarge"},
-									},
-								},
-							},
-						},
-						ResourceSlice: resourcev1.ResourceSliceSpec{
-							Driver: "karpenter.sh/dra-kwok-driver",
-							Pool: resourcev1.ResourcePool{
-								Name:               "test-gpu-pool",
-								ResourceSliceCount: 1,
-							},
-							Devices: []resourcev1.Device{
-								{
-									Name: "nvidia-gpu-0",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type": {StringValue: stringPtr("nvidia-tesla-v100")},
-									},
-								},
-								{
-									Name: "nvidia-gpu-1",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type": {StringValue: stringPtr("nvidia-tesla-v100")},
-									},
-								},
-							},
-						},
+			// Update DRAConfig with more devices
+			draConfig.Spec.Mappings[0].ResourceSlice.Devices = append(
+				draConfig.Spec.Mappings[0].ResourceSlice.Devices,
+				resourcev1.Device{
+					Name: "nvidia-gpu-1",
+					Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"type": {StringValue: lo.ToPtr("nvidia-tesla-v100")},
 					},
 				},
-			}
-			configStore.Set(newConfig)
+			)
+			Expect(fakeClient.Update(ctx, draConfig)).To(Succeed())
 
 			// Run reconciliation again
 			err = resourceController.reconcileAllNodes(ctx)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify ResourceSlice was updated (our simple implementation always updates)
+			// Verify ResourceSlice was updated
 			Expect(fakeClient.List(ctx, resourceSlices)).To(Succeed())
 			Expect(resourceSlices.Items).To(HaveLen(1))
-			// Note: The fake client doesn't actually update the spec in our test
-			// In a real scenario, the update would change the device count
+			Expect(resourceSlices.Items[0].Spec.Devices).To(HaveLen(2))
 		})
 	})
 })

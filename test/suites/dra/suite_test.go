@@ -22,9 +22,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	drav1alpha1 "sigs.k8s.io/karpenter/dra-kwok-driver/pkg/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/debug"
@@ -39,6 +42,10 @@ func TestDRA(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
+		// Register DRAConfig CRD scheme
+		utilruntime.Must(drav1alpha1.AddToScheme(env.Client.Scheme()))
+		// Register ResourceSlice scheme (for cleanup)
+		utilruntime.Must(resourcev1.AddToScheme(env.Client.Scheme()))
 	})
 	AfterSuite(func() {
 		// Write out the timestamps from our tests
@@ -64,6 +71,8 @@ var _ = BeforeEach(func() {
 
 var _ = AfterEach(func() {
 	env.TimeIntervalCollector.Finalize()
+	// Clean up DRA-specific resources before standard cleanup
+	env.CleanupObjects(&drav1alpha1.DRAConfig{}, &resourcev1.ResourceSlice{})
 	env.Cleanup()
 	env.AfterEach()
 })

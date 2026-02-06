@@ -29,15 +29,18 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	drav1alpha1 "sigs.k8s.io/karpenter/dra-kwok-driver/pkg/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 var _ = Describe("DRA KWOK Driver", func() {
 	var (
-		draConfigMap  *corev1.ConfigMap
-		deployment    *appsv1.Deployment
-		resourceSlice *resourcev1.ResourceSlice
+		draDriverConfig *drav1alpha1.DRAConfig
+		deployment      *appsv1.Deployment
+		resourceSlice   *resourcev1.ResourceSlice
 	)
 
 	BeforeEach(func() {
@@ -62,8 +65,8 @@ var _ = Describe("DRA KWOK Driver", func() {
 
 	AfterEach(func() {
 		// Cleanup resources
-		if draConfigMap != nil {
-			env.ExpectDeleted(draConfigMap)
+		if draDriverConfig != nil {
+			env.ExpectDeleted(draDriverConfig)
 		}
 		if deployment != nil {
 			env.ExpectDeleted(deployment)
@@ -72,79 +75,89 @@ var _ = Describe("DRA KWOK Driver", func() {
 
 	Context("GPU Configuration", func() {
 		BeforeEach(func() {
-			// Create DRA KWOK driver ConfigMap with GPU configuration
-			draConfigMap = &corev1.ConfigMap{
+			// Create DRAConfig CRD with GPU configuration
+			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-configmap",
+					Name:      "test.karpenter.sh",
 					Namespace: "karpenter",
 				},
-				Data: map[string]string{
-					"config.yaml": `
-# GPU DRA Configuration for KWOK Mock Driver using upstream ResourceSlice spec
-driver: karpenter.sh
-
-# Device mappings for different GPU node types
-mappings:
-  # NVIDIA T4 GPUs (c-4x-amd64-linux)
-  - name: gpu-t4-mapping
-    nodeSelectorTerms:
-      - matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["c-4x-amd64-linux"]
-    resourceSlice:
-      driver: karpenter.sh
-      pool:
-        name: t4-gpu-pool
-        resourceSliceCount: 1
-      devices:
-        - name: nvidia-t4-0
-          attributes:
-            type:
-              String: nvidia-tesla-t4
-            memory:
-              String: 16Gi
-            compute_capability:
-              String: "7.5"
-            cuda_cores:
-              String: "2560"
-
-  # NVIDIA V100 GPUs (m-8x-amd64-linux)
-  - name: gpu-v100-mapping
-    nodeSelectorTerms:
-      - matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["m-8x-amd64-linux"]
-    resourceSlice:
-      driver: karpenter.sh
-      pool:
-        name: v100-gpu-pool
-        resourceSliceCount: 1
-      devices:
-        - name: nvidia-v100-0
-          attributes:
-            type:
-              String: nvidia-tesla-v100
-            memory:
-              String: 32Gi
-            compute_capability:
-              String: "7.0"
-            cuda_cores:
-              String: "5120"
-            nvlink:
-              string: "true"
-`,
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "test.karpenter.sh",
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "gpu-t4-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "t4-gpu-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "nvidia-t4-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+											"memory":             {StringValue: lo.ToPtr("16Gi")},
+											"compute_capability": {StringValue: lo.ToPtr("7.5")},
+											"cuda_cores":         {StringValue: lo.ToPtr("2560")},
+										},
+									},
+								},
+							},
+						},
+						{
+							Name: "gpu-v100-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"m-8x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "v100-gpu-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "nvidia-v100-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":               {StringValue: lo.ToPtr("nvidia-tesla-v100")},
+											"memory":             {StringValue: lo.ToPtr("32Gi")},
+											"compute_capability": {StringValue: lo.ToPtr("7.0")},
+											"cuda_cores":         {StringValue: lo.ToPtr("5120")},
+											"nvlink":             {StringValue: lo.ToPtr("true")},
+										},
+									},
+								},
+							},
+						},
+					},
 				},
 			}
 		})
 
-		It("should create and manage ResourceSlices based on ConfigMap", func() {
-			By("Creating the DRA ConfigMap")
-			env.ExpectCreated(draConfigMap)
+		It("should create and manage ResourceSlices based on CRD configuration", func() {
+			By("Creating the DRAConfig CRD")
+			env.ExpectCreated(draDriverConfig)
 
-			By("Waiting for ConfigMap to be processed by DRA KWOK driver")
-			// The DRA KWOK driver should detect the ConfigMap immediately via watch
+			By("Waiting for CRD to be processed by DRA KWOK driver")
+			// The DRA KWOK driver should detect the CRD immediately via watch
 			// But give it a moment to reconcile
 			time.Sleep(2 * time.Second)
 
@@ -237,7 +250,7 @@ mappings:
 			resourceSlice = &resourceSlices.Items[0]
 
 			// Verify ResourceSlice has correct driver and devices
-			Expect(resourceSlice.Spec.Driver).To(Equal("karpenter.sh"))
+			Expect(resourceSlice.Spec.Driver).To(Equal("test.karpenter.sh"))
 			Expect(resourceSlice.Spec.Devices).To(HaveLen(1))
 
 			device := resourceSlice.Spec.Devices[0]
@@ -251,9 +264,9 @@ mappings:
 			}
 		})
 
-		It("should handle ConfigMap updates dynamically", func() {
-			By("Creating initial ConfigMap")
-			env.ExpectCreated(draConfigMap)
+		It("should handle DRAConfig updates dynamically", func() {
+			By("Creating initial DRAConfig")
+			env.ExpectCreated(draDriverConfig)
 
 			By("Creating a GPU workload")
 			deployment = &appsv1.Deployment{
@@ -313,42 +326,57 @@ mappings:
 			Expect(nodes).To(HaveLen(1))
 			node := nodes[0]
 
-			By("Updating the ConfigMap with new device configuration")
+			By("Updating the DRAConfig with new device configuration")
 			Eventually(func() error {
-				// Update ConfigMap to add more devices
-				draConfigMap.Data["config.yaml"] = `
-driver: karpenter.sh
-mappings:
-  - name: gpu-t4-updated-mapping
-    nodeSelectorTerms:
-      - matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["c-4x-amd64-linux"]
-    resourceSlice:
-      driver: karpenter.sh
-      pool:
-        name: t4-gpu-pool-updated
-        resourceSliceCount: 1
-      devices:
-        - name: nvidia-t4-0
-          attributes:
-            type:
-              String: nvidia-tesla-t4
-            memory:
-              String: 16Gi
-            compute_capability:
-              String: "7.5"
-        - name: nvidia-t4-1
-          attributes:
-            type:
-              String: nvidia-tesla-t4
-            memory:
-              String: 16Gi
-            compute_capability:
-              String: "7.5"
-`
-				return env.Client.Update(env.Context, draConfigMap)
+				// Fetch latest version to avoid conflicts
+				latest := &drav1alpha1.DRAConfig{}
+				if err := env.Client.Get(env.Context, client.ObjectKeyFromObject(draDriverConfig), latest); err != nil {
+					return err
+				}
+
+				// Update with additional devices
+				latest.Spec.Mappings = []drav1alpha1.Mapping{
+					{
+						Name: "gpu-t4-updated-mapping",
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "node.kubernetes.io/instance-type",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"c-4x-amd64-linux"},
+									},
+								},
+							},
+						},
+						ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+							Pool: resourcev1.ResourcePool{
+								Name:               "t4-gpu-pool-updated",
+								ResourceSliceCount: 1,
+							},
+							Devices: []resourcev1.Device{
+								{
+									Name: "nvidia-t4-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+										"memory":             {StringValue: lo.ToPtr("16Gi")},
+										"compute_capability": {StringValue: lo.ToPtr("7.5")},
+									},
+								},
+								{
+									Name: "nvidia-t4-1",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+										"memory":             {StringValue: lo.ToPtr("16Gi")},
+										"compute_capability": {StringValue: lo.ToPtr("7.5")},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				return env.Client.Update(env.Context, latest)
 			}, 10*time.Second, 1*time.Second).Should(Succeed())
 
 			By("Verifying ResourceSlices are updated with new configuration")
@@ -375,67 +403,81 @@ mappings:
 
 	Context("Advanced Device Configuration", func() {
 		It("should support FPGA device types", func() {
-			draConfigMap = &corev1.ConfigMap{
+			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-configmap",
+					Name:      "test.karpenter.sh",
 					Namespace: "karpenter",
 				},
-				Data: map[string]string{
-					"config.yaml": `
-driver: karpenter.sh
-mappings:
-  # FPGA mapping for c-4x-amd64-linux nodes
-  - name: fpga-c4x-mapping
-    nodeSelectorTerms:
-      - matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["c-4x-amd64-linux"]
-    resourceSlice:
-      driver: karpenter.sh
-      pool:
-        name: fpga-c4x-pool
-        resourceSliceCount: 1
-      devices:
-        - name: xilinx-u250-0
-          attributes:
-            type:
-              String: xilinx-alveo-u250
-            memory:
-              String: 32Gi
-            dsp_slices:
-              String: "6144"
-            interface:
-              String: pcie-gen3
-
-  # FPGA mapping for m-8x-amd64-linux nodes
-  - name: fpga-m8x-mapping
-    nodeSelectorTerms:
-      - matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["m-8x-amd64-linux"]
-    resourceSlice:
-      driver: karpenter.sh
-      pool:
-        name: fpga-m8x-pool
-        resourceSliceCount: 1
-      devices:
-        - name: xilinx-u250-0
-          attributes:
-            type:
-              String: xilinx-alveo-u250
-            memory:
-              String: 64Gi
-            dsp_slices:
-              String: "12288"
-            interface:
-              String: pcie-gen3
-`,
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "test.karpenter.sh",
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "fpga-c4x-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "fpga-c4x-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "xilinx-u250-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":       {StringValue: lo.ToPtr("xilinx-alveo-u250")},
+											"memory":     {StringValue: lo.ToPtr("32Gi")},
+											"dsp_slices": {StringValue: lo.ToPtr("6144")},
+											"interface":  {StringValue: lo.ToPtr("pcie-gen3")},
+										},
+									},
+								},
+							},
+						},
+						{
+							Name: "fpga-m8x-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"m-8x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "fpga-m8x-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "xilinx-u250-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":       {StringValue: lo.ToPtr("xilinx-alveo-u250")},
+											"memory":     {StringValue: lo.ToPtr("64Gi")},
+											"dsp_slices": {StringValue: lo.ToPtr("12288")},
+											"interface":  {StringValue: lo.ToPtr("pcie-gen3")},
+										},
+									},
+								},
+							},
+						},
+					},
 				},
 			}
 
-			env.ExpectCreated(draConfigMap)
+			env.ExpectCreated(draDriverConfig)
 
 			By("Creating FPGA workload that should trigger node creation")
 			deployment = &appsv1.Deployment{
@@ -513,71 +555,87 @@ mappings:
 		})
 
 		It("should support multiple ResourceSlices for single instance type", func() {
-			draConfigMap = &corev1.ConfigMap{
+			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-configmap",
+					Name:      "test.karpenter.sh",
 					Namespace: "karpenter",
 				},
-				Data: map[string]string{
-					"config.yaml": `
-driver: karpenter.sh
-mappings:
-  # First ResourceSlice: GPU devices for c-4x-amd64-linux (part 1 of 2)
-  - name: gpu-mapping-c4x-slice1
-    nodeSelectorTerms:
-      - matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["c-4x-amd64-linux"]
-    resourceSlice:
-      driver: karpenter.sh
-      pool:
-        name: multi-device-pool
-        resourceSliceCount: 2  # Pool expects 2 slices total
-      devices:
-        - name: nvidia-t4-0
-          attributes:
-            type:
-              string: nvidia-tesla-t4
-            memory:
-              string: 16Gi
-            device_class:
-              string: gpu
-        - name: nvidia-t4-1
-          attributes:
-            type:
-              string: nvidia-tesla-t4
-            memory:
-              string: 16Gi
-            device_class:
-              string: gpu
-
-  # Second ResourceSlice: More devices for same instance type (part 2 of 2)
-  - name: gpu-mapping-c4x-slice2
-    nodeSelectorTerms:
-      - matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["c-4x-amd64-linux"]
-    resourceSlice:
-      driver: karpenter.sh
-      pool:
-        name: multi-device-pool  # Same pool name!
-        resourceSliceCount: 2     # Same count - indicates pool has 2 slices
-      devices:
-        - name: xilinx-u250-0
-          attributes:
-            type:
-              string: xilinx-alveo-u250
-            memory:
-              string: 32Gi
-            device_class:
-              string: fpga
-`,
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "test.karpenter.sh",
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "gpu-mapping-c4x-slice1",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "multi-device-pool",
+									ResourceSliceCount: 2,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "nvidia-t4-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":         {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+											"memory":       {StringValue: lo.ToPtr("16Gi")},
+											"device_class": {StringValue: lo.ToPtr("gpu")},
+										},
+									},
+									{
+										Name: "nvidia-t4-1",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":         {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+											"memory":       {StringValue: lo.ToPtr("16Gi")},
+											"device_class": {StringValue: lo.ToPtr("gpu")},
+										},
+									},
+								},
+							},
+						},
+						{
+							Name: "gpu-mapping-c4x-slice2",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "multi-device-pool",
+									ResourceSliceCount: 2,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "xilinx-u250-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":         {StringValue: lo.ToPtr("xilinx-alveo-u250")},
+											"memory":       {StringValue: lo.ToPtr("32Gi")},
+											"device_class": {StringValue: lo.ToPtr("fpga")},
+										},
+									},
+								},
+							},
+						},
+					},
 				},
 			}
 
-			env.ExpectCreated(draConfigMap)
+			env.ExpectCreated(draDriverConfig)
 
 			By("Creating workload for multi-device instance type")
 			deployment = &appsv1.Deployment{
@@ -695,24 +753,41 @@ mappings:
 	})
 
 	Context("Configuration Validation", func() {
-		It("should handle invalid ConfigMap gracefully", func() {
-			draConfigMap = &corev1.ConfigMap{
+		It("should reject invalid DRAConfig via API server validation", func() {
+			// With CRD, invalid configs are rejected at creation time by API server
+			invalidConfig := &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-configmap",
+					Name:      "test.karpenter.sh",
 					Namespace: "karpenter",
 				},
-				Data: map[string]string{
-					"config.yaml": `
-driver: ""  # Invalid empty driver
-mappings: []
-`,
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver:   "invalid driver name!",  // Invalid: contains spaces
+					Mappings: []drav1alpha1.Mapping{}, // Invalid: empty mappings
 				},
 			}
 
-			By("Creating invalid ConfigMap")
-			env.ExpectCreated(draConfigMap)
+			By("Attempting to create invalid DRAConfig")
+			// API server should reject this due to validation rules
+			err := env.Client.Create(env.Context, invalidConfig)
+			Expect(err).To(HaveOccurred(), "API server should reject invalid DRAConfig")
+			Expect(err.Error()).To(ContainSubstring("spec.driver"), "Error should mention driver field validation")
 
-			By("Creating workload that requests DRA resources")
+			By("Creating valid config with empty driver should also fail")
+			invalidConfig2 := &drav1alpha1.DRAConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "invalid-config-2",
+					Namespace: "karpenter",
+				},
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver:   "", // Empty driver
+					Mappings: []drav1alpha1.Mapping{},
+				},
+			}
+			err = env.Client.Create(env.Context, invalidConfig2)
+			Expect(err).To(HaveOccurred(), "API server should reject empty driver")
+
+			By("Verifying that no ResourceSlices are created for invalid configs")
+			// Since configs were rejected, no ResourceSlices should exist
 			deployment = &appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-config-workload",
@@ -759,65 +834,67 @@ mappings: []
 				},
 			}
 
-			env.ExpectCreated(deployment)
-
-			By("Verifying that no ResourceSlices are created with invalid config")
+			By("Verifying that no ResourceSlices are created for invalid configs")
+			// Since configs were rejected, no ResourceSlices should exist
 			Consistently(func() int {
 				var resourceSlices resourcev1.ResourceSliceList
 				err := env.Client.List(env.Context, &resourceSlices)
 				if err != nil {
 					return -1
 				}
-				// Filter for our driver
-				count := 0
-				for _, rs := range resourceSlices.Items {
-					if rs.Spec.Driver == "" { // Invalid driver should not create slices
-						count++
-					}
-				}
-				return count
-			}, 10*time.Second, 1*time.Second).Should(Equal(0))
+				return len(resourceSlices.Items)
+			}, 10*time.Second, 1*time.Second).Should(Equal(0), "No ResourceSlices should exist for rejected configs")
 		})
 	})
 
 	Context("DRA Pod Scheduling in KWOK Environment", func() {
 		BeforeEach(func() {
-			// Create DRA KWOK driver ConfigMap with device configuration
-			draConfigMap = &corev1.ConfigMap{
+			// Create DRAConfig with device configuration
+			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-configmap",
+					Name:      "test.karpenter.sh",
 					Namespace: "karpenter",
 				},
-				Data: map[string]string{
-					"config.yaml": `
-driver: karpenter.sh
-mappings:
-  - name: gpu-scheduling-mapping
-    nodeSelectorTerms:
-      - matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["c-4x-amd64-linux"]
-    resourceSlice:
-      driver: karpenter.sh
-      pool:
-        name: test-gpu-pool
-        resourceSliceCount: 1
-      devices:
-        - name: nvidia-test-gpu
-          attributes:
-            type:
-              String: nvidia-test-gpu
-            memory:
-              String: 8Gi
-`,
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "test.karpenter.sh",
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "gpu-scheduling-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "test-gpu-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "nvidia-test-gpu",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":   {StringValue: lo.ToPtr("nvidia-test-gpu")},
+											"memory": {StringValue: lo.ToPtr("8Gi")},
+										},
+									},
+								},
+							},
+						},
+					},
 				},
 			}
 		})
 
 		It("should ignore DRA pods when IgnoreDRARequests is enabled (default behavior)", func() {
-			By("Creating the DRA ConfigMap to simulate DRA infrastructure")
-			env.ExpectCreated(draConfigMap)
+			By("Creating the DRAConfig to simulate DRA infrastructure")
+			env.ExpectCreated(draDriverConfig)
 
 			By("Creating a deployment with DRA resource claims")
 			deployment = &appsv1.Deployment{
@@ -896,8 +973,8 @@ mappings:
 		})
 
 		It("should prepare DRA testing infrastructure for future Karpenter DRA implementation", func() {
-			By("Creating the DRA ConfigMap to set up DRA KWOK driver")
-			env.ExpectCreated(draConfigMap)
+			By("Creating the DRAConfig to set up DRA KWOK driver")
+			env.ExpectCreated(draDriverConfig)
 
 			By("Creating a regular pod to trigger KWOK node creation")
 			regularDeployment := &appsv1.Deployment{
@@ -985,6 +1062,125 @@ mappings:
 			By("Ensuring test infrastructure is ready for DRA feature development")
 			// This test validates that the DRA testing infrastructure works in KWOK
 			// When Karpenter DRA support is implemented, these ResourceSlices will enable testing
+		})
+	})
+
+	Context("CRD-Specific Features", func() {
+		It("should support DRAConfig CRD status fields", func() {
+			By("Creating DRAConfig")
+			draDriverConfig = &drav1alpha1.DRAConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test.karpenter.sh",
+					Namespace: "karpenter",
+				},
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "test.karpenter.sh",
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "status-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "status-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "test-device-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type": {StringValue: lo.ToPtr("test-gpu")},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			env.ExpectCreated(draDriverConfig)
+
+			By("Verifying CRD can be read back")
+			retrieved := &drav1alpha1.DRAConfig{}
+			Eventually(func() error {
+				return env.Client.Get(env.Context, client.ObjectKeyFromObject(draDriverConfig), retrieved)
+			}, 10*time.Second, 1*time.Second).Should(Succeed(), "DRAConfig should be readable")
+
+			By("Verifying status subresource exists and can be updated")
+			// The status may be nil if not yet initialized by the controller
+			if retrieved.Status != nil {
+				Expect(retrieved.Status.ResourceSliceCount).To(BeNil()) // Not yet populated
+				Expect(retrieved.Status.NodeCount).To(BeNil())          // Not yet populated
+			}
+
+			By("Simulating status update (as DRA driver controller would do)")
+			// Retry status update to handle conflicts with driver controller
+			Eventually(func() error {
+				// Re-fetch to get latest resourceVersion
+				latest := &drav1alpha1.DRAConfig{}
+				if err := env.Client.Get(env.Context, client.ObjectKeyFromObject(draDriverConfig), latest); err != nil {
+					return err
+				}
+
+				// Initialize Status if nil
+				if latest.Status == nil {
+					latest.Status = &drav1alpha1.DRAConfigStatus{}
+				}
+
+				latest.Status.Conditions = []metav1.Condition{
+					{
+						Type:               "Ready",
+						Status:             metav1.ConditionTrue,
+						LastTransitionTime: metav1.Now(),
+						Reason:             "ConfigurationValid",
+						Message:            "DRAConfig is valid and ready",
+					},
+				}
+				latest.Status.NodeCount = ptr.To(int32(2))
+				latest.Status.ResourceSliceCount = ptr.To(int32(2))
+
+				// Update status subresource (may conflict if driver updates concurrently)
+				return env.Client.Status().Update(env.Context, latest)
+			}, 10*time.Second, 500*time.Millisecond).Should(Succeed(), "Status update should eventually succeed")
+
+			By("Verifying status was persisted")
+			updated := &drav1alpha1.DRAConfig{}
+			Eventually(func() bool {
+				if err := env.Client.Get(env.Context, client.ObjectKeyFromObject(draDriverConfig), updated); err != nil {
+					return false
+				}
+				if updated.Status == nil {
+					return false
+				}
+				return ptr.Deref(updated.Status.NodeCount, 0) == 2 &&
+					ptr.Deref(updated.Status.ResourceSliceCount, 0) == 2 &&
+					len(updated.Status.Conditions) > 0
+			}, 10*time.Second, 1*time.Second).Should(BeTrue(), "Status should be persisted")
+
+			By("Verifying Ready condition details")
+			// The driver controller may also update conditions, so check that our condition exists
+			var readyCondition *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == "Ready" &&
+					updated.Status.Conditions[i].Reason == "ConfigurationValid" {
+					readyCondition = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(readyCondition).ToNot(BeNil(), "Should have Ready condition with ConfigurationValid reason")
+			Expect(readyCondition.Status).To(Equal(metav1.ConditionTrue))
+
+			// Cleanup
+			env.ExpectDeleted(draDriverConfig)
 		})
 	})
 })
