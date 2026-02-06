@@ -167,6 +167,20 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(0))
 		})
+		It("should return early if nodepool is being deleted", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectDeletionTimestampSet(ctx, env.Client, nodePool)
+
+			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(BeZero())
+
+			// Should not create any NodeClaims
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(0))
+		})
 		It("should return early if nodepool replicas is nil", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = nil

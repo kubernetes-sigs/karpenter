@@ -154,6 +154,43 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 
 			Expect(result.RequeueAfter).To(BeZero())
 		})
+		It("should return early if nodepool is being deleted", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+
+			// Create 2 nodeclaims (more than desired replicas of 1)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						v1.NodeInitializedLabelKey:     "true",
+						corev1.LabelInstanceTypeStable: "stable.instance",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10"),
+						corev1.ResourceMemory: resource.MustParse("1000Mi"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
+			ExpectDeletionTimestampSet(ctx, env.Client, nodePool)
+
+			// Update cluster state to track the nodes
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			Expect(cluster.Nodes()).To(HaveLen(2))
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 2, 0, 0)
+
+			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(BeZero())
+
+			// Should not delete any NodeClaims since nodepool is being deleted
+			existingNodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, existingNodeClaims)).To(Succeed())
+			Expect(existingNodeClaims.Items).To(HaveLen(2))
+		})
 		It("should return early if current node count is less than or equal to desired replicas", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
