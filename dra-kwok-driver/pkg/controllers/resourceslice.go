@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -34,22 +35,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/config"
+	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/apis/v1alpha1"
 )
 
-// ResourceSliceController manages ResourceSlice lifecycle based on periodic polling of nodes and driver configuration
+// ResourceSliceController manages ResourceSlice lifecycle based on periodic polling of nodes and DRAConfig CRD
 type ResourceSliceController struct {
-	kubeClient  client.Client
-	driverName  string
-	configStore *config.Store
+	kubeClient client.Client
+	driverName string
+	namespace  string // Namespace where DRAConfig CRD is located
 }
 
 // NewResourceSliceController creates a new ResourceSlice controller
-func NewResourceSliceController(kubeClient client.Client, driverName string, configStore *config.Store) *ResourceSliceController {
+func NewResourceSliceController(kubeClient client.Client, driverName string, namespace string) *ResourceSliceController {
 	return &ResourceSliceController{
-		kubeClient:  kubeClient,
-		driverName:  driverName,
-		configStore: configStore,
+		kubeClient: kubeClient,
+		driverName: driverName,
+		namespace:  namespace,
 	}
 }
 
@@ -92,15 +93,35 @@ func (r *ResourceSliceController) startPollingLoop(ctx context.Context) {
 func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("resourceslice")
 
-	// Get current driver configuration
-	cfg := r.configStore.Get()
-	if cfg == nil {
-		logger.V(1).Info("no driver configuration available, checking for orphaned ResourceSlices")
-		// Even without config, we should clean up any orphaned ResourceSlices
+	// Get THE single DRAConfig CRD for this driver
+	draConfig := &v1alpha1.DRAConfig{}
+	err := r.kubeClient.Get(ctx, types.NamespacedName{
+		Name:      r.driverName,
+		Namespace: r.namespace,
+	}, draConfig)
+
+	if errors.IsNotFound(err) {
+		logger.V(1).Info("no DRAConfig found for driver, cleaning up all ResourceSlices", "driver", r.driverName)
+		// No config exists - cleanup all ResourceSlices
 		return r.cleanupOrphanedResourceSlices(ctx)
 	}
 
-	logger.V(1).Info("starting reconciliation cycle", "driver", cfg.Driver)
+	if err != nil {
+		return serrors.Wrap(fmt.Errorf("getting DRAConfig, %w", err), "DRAConfig", klog.KRef(r.namespace, r.driverName))
+	}
+
+	// Verify driver name matches (sanity check)
+	if draConfig.Spec.Driver != r.driverName {
+		logger.Error(fmt.Errorf("driver name mismatch"), "DRAConfig driver field doesn't match controller driver",
+			"crd_driver", draConfig.Spec.Driver,
+			"controller_driver", r.driverName)
+		return fmt.Errorf("driver name mismatch: CRD has driver=%s but controller expects driver=%s",
+			draConfig.Spec.Driver, r.driverName)
+	}
+
+	logger.V(1).Info("starting reconciliation cycle",
+		"driver", draConfig.Spec.Driver,
+		"mappings", len(draConfig.Spec.Mappings))
 
 	// List all nodes in the cluster
 	nodes := &corev1.NodeList{}
@@ -121,7 +142,7 @@ func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 		kwokNodeCount++
 
 		// Process this node and track expected ResourceSlices
-		expected, err := r.reconcileNodeResourceSlices(ctx, &node, cfg)
+		expected, err := r.reconcileNodeResourceSlices(ctx, &node, draConfig)
 		if err != nil {
 			logger.Error(err, "failed to reconcile node", "node", node.Name)
 			errorCount++
@@ -154,11 +175,11 @@ func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 }
 
 // reconcileNodeResourceSlices processes a single node and returns the names of ResourceSlices that should exist
-func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Context, node *corev1.Node, cfg *config.Config) ([]string, error) {
+func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Context, node *corev1.Node, draConfig *v1alpha1.DRAConfig) ([]string, error) {
 	logger := log.FromContext(ctx).WithName("resourceslice").WithValues("node", node.Name)
 
 	// Find all matching mappings for this node
-	matchingMappings := r.findMatchingMappings(node, cfg.Mappings)
+	matchingMappings := r.findMatchingMappings(node, draConfig.Spec.Mappings)
 
 	if len(matchingMappings) == 0 {
 		logger.V(1).Info("no matching mappings found for node")
@@ -173,7 +194,10 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 
 	// Process each mapping
 	for _, mapping := range matchingMappings {
-		resourceSliceName := fmt.Sprintf("%s-devices-%s", node.Name, mapping.Name)
+		// ResourceSlice naming: test-karpenter-sh-<nodename>-<mapping-name>
+		// Sanitize driver name: "test.karpenter.sh" -> "test-karpenter-sh"
+		driverSanitized := sanitizeDriverName(r.driverName)
+		resourceSliceName := fmt.Sprintf("%s-%s-%s", driverSanitized, node.Name, mapping.Name)
 		expectedNames = append(expectedNames, resourceSliceName)
 
 		// Check if ResourceSlice exists
@@ -191,10 +215,9 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 			oldGeneration := existing.Spec.Pool.Generation
 			newGeneration := oldGeneration + 1
 
-			// Update the spec with new configuration
-			existing.Spec = mapping.ResourceSlice
+			// Update the spec with new configuration using ToResourceSliceSpec
+			existing.Spec = mapping.ResourceSlice.ToResourceSliceSpec(r.driverName)
 			existing.Spec.NodeName = &node.Name
-			existing.Spec.Driver = r.driverName
 			existing.Spec.Pool.Generation = newGeneration
 
 			logger.Info("updating resourceslice in place with new generation",
@@ -226,12 +249,11 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 						},
 					},
 				},
-				Spec: mapping.ResourceSlice,
+				Spec: mapping.ResourceSlice.ToResourceSliceSpec(r.driverName),
 			}
 
 			// Override node-specific fields
 			desired.Spec.NodeName = &node.Name
-			desired.Spec.Driver = r.driverName
 			desired.Spec.Pool.Generation = 0 // Start at generation 0
 
 			logger.Info("creating resourceslice",
@@ -244,6 +266,7 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 				return nil, serrors.Wrap(fmt.Errorf("creating resourceslice, %w", err), "ResourceSlice", klog.KRef("", desired.Name))
 			}
 		} else {
+			// Unexpected error
 			return nil, serrors.Wrap(fmt.Errorf("getting resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
 		}
 	}
@@ -251,181 +274,202 @@ func (r *ResourceSliceController) reconcileNodeResourceSlices(ctx context.Contex
 	return expectedNames, nil
 }
 
-// resourceSliceNeedsUpdate checks if the existing ResourceSlice differs from the desired spec
-func (r *ResourceSliceController) resourceSliceNeedsUpdate(existing *resourcev1.ResourceSlice, desired *resourcev1.ResourceSliceSpec) bool {
-	// Compare device count
+// isKWOKNode checks if a node is a KWOK node by looking for the Karpenter KWOK annotation
+func (r *ResourceSliceController) isKWOKNode(node *corev1.Node) bool {
+	if node.Annotations == nil {
+		return false
+	}
+	// Check for kwok.x-k8s.io/node annotation (set by Karpenter when using KWOK provider)
+	_, hasKWOKAnnotation := node.Annotations["kwok.x-k8s.io/node"]
+	return hasKWOKAnnotation
+}
+
+// findMatchingMappings returns all mappings that match the given node
+func (r *ResourceSliceController) findMatchingMappings(node *corev1.Node, mappings []v1alpha1.Mapping) []v1alpha1.Mapping {
+	var matches []v1alpha1.Mapping
+
+	for _, mapping := range mappings {
+		if r.nodeSelectorMatches(node, mapping.NodeSelectorTerms) {
+			matches = append(matches, mapping)
+		}
+	}
+
+	return matches
+}
+
+// nodeSelectorMatches checks if a node matches ANY of the NodeSelectorTerms (OR logic)
+func (r *ResourceSliceController) nodeSelectorMatches(node *corev1.Node, terms []corev1.NodeSelectorTerm) bool {
+	// Empty terms means match nothing
+	if len(terms) == 0 {
+		return false
+	}
+
+	// OR across terms - node must match at least one term
+	for _, term := range terms {
+		if r.nodeMatchesTerm(node, term) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// nodeMatchesTerm checks if a node matches ALL requirements in a NodeSelectorTerm (AND logic)
+func (r *ResourceSliceController) nodeMatchesTerm(node *corev1.Node, term corev1.NodeSelectorTerm) bool {
+	// AND across match expressions - node must match ALL expressions in the term
+	for _, expr := range term.MatchExpressions {
+		if !r.nodeMatchesExpression(node, expr) {
+			return false
+		}
+	}
+
+	// AND across match fields
+	for _, field := range term.MatchFields {
+		if !r.nodeMatchesFieldExpression(node, field) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// nodeMatchesExpression checks if a node matches a single NodeSelectorRequirement
+func (r *ResourceSliceController) nodeMatchesExpression(node *corev1.Node, expr corev1.NodeSelectorRequirement) bool {
+	nodeLabels := node.Labels
+	if nodeLabels == nil {
+		nodeLabels = map[string]string{}
+	}
+
+	// Map NodeSelectorOperator to selection.Operator
+	var op selection.Operator
+	switch expr.Operator {
+	case corev1.NodeSelectorOpIn:
+		op = selection.In
+	case corev1.NodeSelectorOpNotIn:
+		op = selection.NotIn
+	case corev1.NodeSelectorOpExists:
+		op = selection.Exists
+	case corev1.NodeSelectorOpDoesNotExist:
+		op = selection.DoesNotExist
+	case corev1.NodeSelectorOpGt:
+		op = selection.GreaterThan
+	case corev1.NodeSelectorOpLt:
+		op = selection.LessThan
+	default:
+		return false
+	}
+
+	// Convert to label selector requirement for easier matching
+	requirement, err := labels.NewRequirement(expr.Key, op, expr.Values)
+	if err != nil {
+		return false
+	}
+
+	return requirement.Matches(labels.Set(nodeLabels))
+}
+
+// nodeMatchesFieldExpression checks if a node matches a field selector requirement
+func (r *ResourceSliceController) nodeMatchesFieldExpression(node *corev1.Node, expr corev1.NodeSelectorRequirement) bool {
+	// For field selectors, we need to extract the field value from the node
+	var fieldValue string
+
+	switch expr.Key {
+	case "metadata.name":
+		fieldValue = node.Name
+	case "metadata.namespace":
+		fieldValue = node.Namespace
+	default:
+		// Unknown field
+		return false
+	}
+
+	// Convert to label selector requirement for matching logic
+	requirement, err := labels.NewRequirement(expr.Key, selection.Operator(expr.Operator), expr.Values)
+	if err != nil {
+		return false
+	}
+
+	// Create a label set with just this field
+	fieldSet := labels.Set{expr.Key: fieldValue}
+	return requirement.Matches(fieldSet)
+}
+
+// resourceSliceNeedsUpdate checks if an existing ResourceSlice needs to be updated based on device count or pool configuration changes
+func (r *ResourceSliceController) resourceSliceNeedsUpdate(existing *resourcev1.ResourceSlice, desired *v1alpha1.ResourceSliceTemplate) bool {
 	if len(existing.Spec.Devices) != len(desired.Devices) {
 		return true
 	}
 
-	// Compare pool name
 	if existing.Spec.Pool.Name != desired.Pool.Name {
 		return true
 	}
 
-	// Compare pool resource slice count
-	if existing.Spec.Pool.ResourceSliceCount != desired.Pool.ResourceSliceCount {
-		return true
-	}
-
-	// Compare AllNodes field
-	if existing.Spec.AllNodes != desired.AllNodes {
-		return true
-	}
-
-	// For a more thorough comparison, we could compare individual devices
-	// For now, device count and pool metadata are sufficient
 	return false
+}
+
+// cleanupOrphanedResourceSlices removes ALL ResourceSlices managed by this driver
+func (r *ResourceSliceController) cleanupOrphanedResourceSlices(ctx context.Context) error {
+	logger := log.FromContext(ctx).WithName("resourceslice")
+
+	// List all ResourceSlices with our management label
+	resourceSlices := &resourcev1.ResourceSliceList{}
+	managedByLabel := labels.SelectorFromSet(labels.Set{
+		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
+	})
+
+	if err := r.kubeClient.List(ctx, resourceSlices, &client.ListOptions{
+		LabelSelector: managedByLabel,
+	}); err != nil {
+		return serrors.Wrap(fmt.Errorf("listing resourceslices, %w", err), "ResourceSliceList")
+	}
+
+	// Delete all of them
+	for i := range resourceSlices.Items {
+		rs := &resourceSlices.Items[i]
+		logger.Info("deleting orphaned resourceslice", "resourceslice", rs.Name)
+		if err := r.kubeClient.Delete(ctx, rs); err != nil && !errors.IsNotFound(err) {
+			logger.Error(err, "failed to delete orphaned resourceslice", "resourceslice", rs.Name)
+		}
+	}
+
+	return nil
 }
 
 // cleanupUnexpectedResourceSlices removes ResourceSlices that shouldn't exist
 func (r *ResourceSliceController) cleanupUnexpectedResourceSlices(ctx context.Context, expectedSlices map[string]bool) error {
 	logger := log.FromContext(ctx).WithName("resourceslice")
 
-	// List all ResourceSlices managed by this driver
+	// List all ResourceSlices with our management label
 	resourceSlices := &resourcev1.ResourceSliceList{}
-	if err := r.kubeClient.List(ctx, resourceSlices, client.MatchingLabels{
+	managedByLabel := labels.SelectorFromSet(labels.Set{
 		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
+	})
+
+	if err := r.kubeClient.List(ctx, resourceSlices, &client.ListOptions{
+		LabelSelector: managedByLabel,
 	}); err != nil {
-		return serrors.Wrap(fmt.Errorf("listing resourceslices for cleanup, %w", err))
+		return serrors.Wrap(fmt.Errorf("listing resourceslices, %w", err), "ResourceSliceList")
 	}
 
-	// Delete unexpected ones
-	deletedCount := 0
-	for _, rs := range resourceSlices.Items {
+	// Delete any that aren't in the expected set
+	for i := range resourceSlices.Items {
+		rs := &resourceSlices.Items[i]
 		if !expectedSlices[rs.Name] {
 			logger.Info("deleting unexpected resourceslice", "resourceslice", rs.Name)
-			if err := r.kubeClient.Delete(ctx, &rs); err != nil && !errors.IsNotFound(err) {
-				// Log error but continue with other deletions
-				logger.Error(err, "failed to delete resourceslice", "resourceslice", rs.Name)
-			} else {
-				deletedCount++
+			if err := r.kubeClient.Delete(ctx, rs); err != nil && !errors.IsNotFound(err) {
+				logger.Error(err, "failed to delete unexpected resourceslice", "resourceslice", rs.Name)
 			}
 		}
 	}
 
-	if deletedCount > 0 {
-		logger.Info("cleaned up unexpected resourceslices", "count", deletedCount)
-	}
-
 	return nil
 }
 
-// cleanupOrphanedResourceSlices removes all ResourceSlices when no configuration exists
-func (r *ResourceSliceController) cleanupOrphanedResourceSlices(ctx context.Context) error {
-	logger := log.FromContext(ctx).WithName("resourceslice")
-
-	// List all ResourceSlices managed by this driver
-	resourceSlices := &resourcev1.ResourceSliceList{}
-	if err := r.kubeClient.List(ctx, resourceSlices, client.MatchingLabels{
-		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
-	}); err != nil {
-		return serrors.Wrap(fmt.Errorf("listing resourceslices for cleanup, %w", err))
-	}
-
-	if len(resourceSlices.Items) == 0 {
-		return nil
-	}
-
-	// Delete all since we have no configuration
-	logger.Info("no configuration exists, cleaning up all ResourceSlices", "count", len(resourceSlices.Items))
-	for _, rs := range resourceSlices.Items {
-		if err := r.kubeClient.Delete(ctx, &rs); err != nil && !errors.IsNotFound(err) {
-			logger.Error(err, "failed to delete orphaned resourceslice", "resourceslice", rs.Name)
-			// Continue with other deletions
-		}
-	}
-
-	return nil
-}
-
-// isKWOKNode determines if a node is a KWOK node created by Karpenter's KWOK provider
-func (r *ResourceSliceController) isKWOKNode(node *corev1.Node) bool {
-	// Karpenter KWOK provider adds this annotation to all nodes it creates
-	_, ok := node.Annotations["kwok.x-k8s.io/node"]
-	return ok
-}
-
-// findMatchingMappings finds all mappings that match the node's labels
-func (r *ResourceSliceController) findMatchingMappings(node *corev1.Node, mappings []config.Mapping) []config.Mapping {
-	var matches []config.Mapping
-	for _, mapping := range mappings {
-		if r.nodeMatchesTerms(node, mapping.NodeSelectorTerms) {
-			matches = append(matches, mapping)
-		}
-	}
-	return matches
-}
-
-// nodeMatchesTerms returns true if the node matches any of the NodeSelectorTerms (terms are ORed together)
-func (r *ResourceSliceController) nodeMatchesTerms(node *corev1.Node, terms []corev1.NodeSelectorTerm) bool {
-	nodeLabels := labels.Set(node.Labels)
-
-	for _, term := range terms {
-		if r.nodeMatchesTerm(nodeLabels, term) {
-			return true // Any term matching is sufficient (OR logic)
-		}
-	}
-	return false
-}
-
-// nodeMatchesTerm returns true if the node matches a single NodeSelectorTerm
-func (r *ResourceSliceController) nodeMatchesTerm(nodeLabels labels.Set, term corev1.NodeSelectorTerm) bool {
-	// MatchExpressions must all match (AND logic within a term)
-	for _, expr := range term.MatchExpressions {
-		// Convert NodeSelectorOperator to labels.Operator (handles case differences)
-		var op selection.Operator
-		switch expr.Operator {
-		case corev1.NodeSelectorOpIn:
-			op = selection.In
-		case corev1.NodeSelectorOpNotIn:
-			op = selection.NotIn
-		case corev1.NodeSelectorOpExists:
-			op = selection.Exists
-		case corev1.NodeSelectorOpDoesNotExist:
-			op = selection.DoesNotExist
-		case corev1.NodeSelectorOpGt:
-			op = selection.GreaterThan
-		case corev1.NodeSelectorOpLt:
-			op = selection.LessThan
-		default:
-			// Unknown operator
-			return false
-		}
-
-		req, err := labels.NewRequirement(expr.Key, op, expr.Values)
-		if err != nil {
-			return false // Invalid expression doesn't match
-		}
-		if !req.Matches(nodeLabels) {
-			return false // All expressions must match
-		}
-	}
-
-	// MatchFields are not commonly used in this context, but we should handle them
-	// For KWOK nodes, we typically only use MatchExpressions
-	if len(term.MatchFields) > 0 {
-		// MatchFields require access to the full Node object, not just labels
-		// For now, we'll skip this since KWOK nodes don't typically use field selectors
-		return false
-	}
-
-	return true // All match expressions passed
-}
-
-// GetResourceSlicesForNode returns all ResourceSlices managed by this driver for a specific node
-func (r *ResourceSliceController) GetResourceSlicesForNode(ctx context.Context, nodeName string) ([]*resourcev1.ResourceSlice, error) {
-	resourceSlices := &resourcev1.ResourceSliceList{}
-	if err := r.kubeClient.List(ctx, resourceSlices, client.MatchingLabels{
-		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
-		"kwok.x-k8s.io/node":       nodeName,
-	}); err != nil {
-		return nil, err
-	}
-
-	result := make([]*resourcev1.ResourceSlice, len(resourceSlices.Items))
-	for i := range resourceSlices.Items {
-		result[i] = &resourceSlices.Items[i]
-	}
-	return result, nil
+// sanitizeDriverName converts driver name to DNS-safe format
+// Example: "test.karpenter.sh" -> "test-karpenter-sh"
+func sanitizeDriverName(driverName string) string {
+	// Replace dots and slashes with hyphens
+	sanitized := strings.ReplaceAll(driverName, ".", "-")
+	sanitized = strings.ReplaceAll(sanitized, "/", "-")
+	return sanitized
 }

@@ -30,8 +30,10 @@ import (
 	// Import DRA API types
 	resourcev1 "k8s.io/api/resource/v1"
 
-	// Import our controllers and config
-	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/config"
+	// Import our CRD API types
+	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/apis/v1alpha1"
+
+	// Import our controllers
 	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/controllers"
 )
 
@@ -40,6 +42,7 @@ var scheme = runtime.NewScheme()
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(resourcev1.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme)) // Register our CRD types
 }
 
 func main() {
@@ -49,9 +52,9 @@ func main() {
 	ctx := context.Background()
 	logger := ctrl.Log.WithName("dra-kwok-driver")
 
-	logger.Info("Starting DRA KWOK Driver")
+	logger.Info("Starting DRA KWOK Driver (One CRD per driver)")
 
-	// Create simple manager
+	// Create manager
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
@@ -74,31 +77,16 @@ func main() {
 		panic(err)
 	}
 
-	// Create shared config store
-	configStore := config.NewStore()
-
-	// Initialize ResourceSlice controller
+	// Initialize ResourceSlice controller (single controller, no config store)
+	// CRD name must match driver name (test.karpenter.sh)
 	resourceSliceController := controllers.NewResourceSliceController(
 		mgr.GetClient(),
-		"karpenter.sh",
-		configStore,
-	)
-
-	// Initialize ConfigMap controller
-	configMapController := controllers.NewConfigMapController(
-		mgr.GetClient(),
-		"dra-kwok-configmap",
+		"test.karpenter.sh",
 		"karpenter",
-		configStore,
 	)
 
-	// Register controllers
-	logger.Info("Registering controllers")
-	if err := configMapController.Register(ctx, mgr); err != nil {
-		logger.Error(err, "unable to register configmap controller")
-		panic(err)
-	}
-
+	// Register controller
+	logger.Info("Registering ResourceSlice controller")
 	if err := resourceSliceController.Register(ctx, mgr); err != nil {
 		logger.Error(err, "unable to register resourceslice controller")
 		panic(err)
