@@ -23,8 +23,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	drav1alpha1 "sigs.k8s.io/karpenter/dra-kwok-driver/pkg/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/debug"
@@ -39,6 +41,8 @@ func TestDRA(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
+		// Register DRADriverConfig CRD scheme
+		utilruntime.Must(drav1alpha1.AddToScheme(env.Client.Scheme()))
 	})
 	AfterSuite(func() {
 		// Write out the timestamps from our tests

@@ -1,6 +1,7 @@
 # This is the format of an AWS ECR Public Repo as an example.
 export KWOK_REPO ?= ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
 export KARPENTER_NAMESPACE=kube-system
+export KIND_CLUSTER_NAME ?= test-cluster
 
 HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.requests.cpu=1 \
@@ -57,6 +58,17 @@ get-kind-image: ## Extract the actual KWOK image repository from Kind cluster
 	$(eval IMG_TAG=latest)
 	@echo "Using Repository: $(IMG_REPOSITORY), Tag: $(IMG_TAG)"
 
+setup-kind-dra: ## Setup Kind cluster for DRA testing
+	kind create cluster --image kindest/node:v1.34.0 --name $(KIND_CLUSTER_NAME)
+	KWOK_REPO=kind.local KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) $(MAKE) install-kwok
+	KWOK_REPO=kind.local KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) $(MAKE) build-with-kind
+	KWOK_REPO=kind.local KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) $(MAKE) dra-apply-with-kind
+	kubectl taint nodes $(KIND_CLUSTER_NAME)-control-plane CriticalAddonsOnly=true:NoSchedule --overwrite
+	kubectl create namespace karpenter --dry-run=client -o yaml | kubectl apply -f -
+
+delete-kind-dra: ## Delete DRA Kind cluster
+	kind delete cluster --name $(KIND_CLUSTER_NAME)
+
 JUNIT_REPORT := $(if $(ARTIFACT_DIR), --ginkgo.junit-report="$(ARTIFACT_DIR)/junit_report.xml")
 e2etests: ## Run the e2e suite against your local cluster
 	cd test && go test \
@@ -99,10 +111,7 @@ test: ## Run tests
 test-memory: ## Run memory usage tests for node overlay store
 	go test -v ./pkg/controllers/nodeoverlay/... -run TestMemoryUsage
 
-benchmark: ## Run benchmark tests for node overlay store
-	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
-
-test-dra-driver: ## Run DRA tests
+dratest: ## Run DRA KWOK driver unit tests
 	go test ./dra-kwok-driver/pkg/... \
 		-race \
 		-timeout 20m \
@@ -110,6 +119,29 @@ test-dra-driver: ## Run DRA tests
 		--ginkgo.randomize-all \
 		--ginkgo.v \
 		-cover
+
+e2etest-dra: ## Run DRA integration tests (requires running dra-kwok-driver)
+	@echo "Installing DRADriverConfig CRD..."
+	kubectl apply -f dra-kwok-driver/pkg/apis/crds/karpenter.sh_dradriverconfigs.yaml
+	@echo "Cleaning up any leftover DRA resources..."
+	-kubectl delete dradriverconfigs --all -n karpenter --ignore-not-found=true
+	-kubectl delete resourceslices --all --ignore-not-found=true
+	@echo "Killing any existing dra-kwok-driver processes..."
+	-pkill -f dra-kwok-driver || true
+	@echo "Building and starting fresh dra-kwok-driver..."
+	cd dra-kwok-driver && go build -o dra-kwok-driver main.go
+	cd dra-kwok-driver && ./dra-kwok-driver > /tmp/dra-driver.log 2>&1 & echo $$! > /tmp/dra-driver.pid
+	sleep 2
+	TEST_SUITE=dra $(MAKE) e2etests
+	@echo "Cleaning up DRA resources after tests..."
+	-kubectl delete dradriverconfigs --all -n karpenter --ignore-not-found=true
+	-kubectl delete resourceslices --all --ignore-not-found=true
+	-kill $$(cat /tmp/dra-driver.pid) 2>/dev/null || true
+	-rm -f /tmp/dra-driver.pid
+	@echo "Done! Check /tmp/dra-driver.log for driver logs"
+
+benchmark: ## Run benchmark tests for node overlay store
+	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	go tool -modfile=go.tools.mod ginkgo \
@@ -157,4 +189,4 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory benchmark deflake vulncheck licenses verify download gen_instance_types
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory dratest e2etest-dra benchmark deflake vulncheck licenses verify download gen_instance_types setup-kind-dra delete-kind-dra
