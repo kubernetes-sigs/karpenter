@@ -241,13 +241,38 @@ func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient cli
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
 		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
 		if !podutils.IsDisruptable(po) {
+			klog.FromContext(ctx).Info("cannot consolidate node, pod has do-not-disrupt annotation",
+				"node", in.Name(),
+				"nodeClaim", in.NodeClaim.Name,
+				"pod", klog.KObj(po),
+				"reason", "do-not-disrupt")
 			return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf(`pod has "karpenter.sh/do-not-disrupt" annotation`), "Pod", klog.KObj(po)))
 		}
 	}
 	if pdbKeys, ok := pdbs.CanEvictPods(pods); !ok {
+		// Identify which specific pods are blocked by PDBs
+		blockedPods := []string{}
+		for _, po := range pods {
+			if _, evictable := pdbs.CanEvictPods([]*corev1.Pod{po}); !evictable {
+				blockedPods = append(blockedPods, fmt.Sprintf("%s/%s", po.Namespace, po.Name))
+			}
+		}
+
 		if len(pdbKeys) > 1 {
+			klog.FromContext(ctx).Info("cannot consolidate node, multiple PDBs block eviction",
+				"node", in.Name(),
+				"nodeClaim", in.NodeClaim.Name,
+				"pods", blockedPods,
+				"pdbs", pdbKeys,
+				"reason", "multiple-pdbs")
 			return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf("eviction does not support multiple PDBs"), "PodDisruptionBudget(s)", pdbKeys))
 		}
+		klog.FromContext(ctx).Info("cannot consolidate node, PDB prevents eviction",
+			"node", in.Name(),
+			"nodeClaim", in.NodeClaim.Name,
+			"pods", blockedPods,
+			"pdb", pdbKeys[0],
+			"reason", "pdb-blocks-eviction")
 		return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf("pdb prevents pod evictions"), "PodDisruptionBudget", pdbKeys))
 	}
 
