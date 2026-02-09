@@ -91,28 +91,47 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 	}
 	// avoid creating our temp set of requirements until after we've ensured that at least
 	// the pod is compatible
-	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
-	nodeRequirements.Add(podData.Requirements.Values()...)
+	baseRequirements := scheduling.NewRequirements(n.requirements.Values()...)
+	baseRequirements.Add(podData.Requirements.Values()...)
 
-	// Add volume requirements to nodeRequirements ONLY (not to pod's affinity).
-	// This ensures existing node must be in the correct zone for volumes,
-	// while TSC counting uses pod's original affinity.
-	if err := addVolumeRequirements(nodeRequirements, podData.VolumeRequirements); err != nil {
-		return nil, err
+	// Build the list of volume requirement alternatives to try.
+	volumeAlternatives := podData.VolumeRequirements
+	if len(volumeAlternatives) == 0 {
+		volumeAlternatives = []scheduling.Requirements{nil}
 	}
 
-	// Check Topology Requirements
-	// NOTE: podData.StrictRequirements does NOT include volume requirements,
-	// ensuring TSC counting uses pod's original affinity.
-	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
-	if err != nil {
-		return nil, err
+	// Try each volume alternative. Choosing a zone for volumes affects topology checks.
+	var lastErr error
+	for _, volReqs := range volumeAlternatives {
+		nodeRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
+
+		// Add volume requirements to nodeRequirements ONLY (not to pod's affinity).
+		// This ensures existing node must be in the correct zone for volumes,
+		// while TSC counting uses pod's original affinity.
+		if volReqs != nil {
+			if err := nodeRequirements.Compatible(volReqs); err != nil {
+				lastErr = fmt.Errorf("incompatible volume requirements, %w", err)
+				continue
+			}
+			nodeRequirements.Add(volReqs.Values()...)
+		}
+
+		// Check Topology Requirements
+		// NOTE: podData.StrictRequirements does NOT include volume requirements,
+		// ensuring TSC counting uses pod's original affinity.
+		topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err = nodeRequirements.Compatible(topologyRequirements); err != nil {
+			lastErr = err
+			continue
+		}
+		nodeRequirements.Add(topologyRequirements.Values()...)
+		return nodeRequirements, nil
 	}
-	if err = nodeRequirements.Compatible(topologyRequirements); err != nil {
-		return nil, err
-	}
-	nodeRequirements.Add(topologyRequirements.Values()...)
-	return nodeRequirements, nil
+	return nil, lastErr
 }
 
 // Add updates the ExistingNode to schedule the pod to this ExistingNode, updating

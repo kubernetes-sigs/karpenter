@@ -19,7 +19,6 @@ package scheduling
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
