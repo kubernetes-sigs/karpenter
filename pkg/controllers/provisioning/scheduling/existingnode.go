@@ -103,35 +103,43 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 	// Try each volume alternative. Choosing a zone for volumes affects topology checks.
 	var lastErr error
 	for _, volReqs := range volumeAlternatives {
-		nodeRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
-
-		// Add volume requirements to nodeRequirements ONLY (not to pod's affinity).
-		// This ensures existing node must be in the correct zone for volumes,
-		// while TSC counting uses pod's original affinity.
-		if volReqs != nil {
-			if err := nodeRequirements.Compatible(volReqs); err != nil {
-				lastErr = fmt.Errorf("incompatible volume requirements, %w", err)
-				continue
-			}
-			nodeRequirements.Add(volReqs.Values()...)
-		}
-
-		// Check Topology Requirements
-		// NOTE: podData.StrictRequirements does NOT include volume requirements,
-		// ensuring TSC counting uses pod's original affinity.
-		topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
+		reqs, err := n.tryVolumeAlternative(pod, podData, baseRequirements, volReqs)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		if err = nodeRequirements.Compatible(topologyRequirements); err != nil {
-			lastErr = err
-			continue
-		}
-		nodeRequirements.Add(topologyRequirements.Values()...)
-		return nodeRequirements, nil
+		return reqs, nil
 	}
 	return nil, lastErr
+}
+
+// tryVolumeAlternative attempts to add a pod with a specific set of volume requirements,
+// checking topology compatibility against the existing node.
+func (n *ExistingNode) tryVolumeAlternative(pod *v1.Pod, podData *PodData, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements) (scheduling.Requirements, error) {
+	nodeRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
+
+	// Add volume requirements to nodeRequirements ONLY (not to pod's affinity).
+	// This ensures existing node must be in the correct zone for volumes,
+	// while TSC counting uses pod's original affinity.
+	if volReqs != nil {
+		if err := nodeRequirements.Compatible(volReqs); err != nil {
+			return nil, fmt.Errorf("incompatible volume requirements, %w", err)
+		}
+		nodeRequirements.Add(volReqs.Values()...)
+	}
+
+	// Check Topology Requirements
+	// NOTE: podData.StrictRequirements does NOT include volume requirements,
+	// ensuring TSC counting uses pod's original affinity.
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
+	if err != nil {
+		return nil, err
+	}
+	if err = nodeRequirements.Compatible(topologyRequirements); err != nil {
+		return nil, err
+	}
+	nodeRequirements.Add(topologyRequirements.Values()...)
+	return nodeRequirements, nil
 }
 
 // Add updates the ExistingNode to schedule the pod to this ExistingNode, updating

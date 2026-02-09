@@ -142,57 +142,63 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	// for volumes affects downstream topology checks (e.g., pod anti-affinity).
 	var lastErr error
 	for _, volReqs := range volumeAlternatives {
-		nodeClaimRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
-
-		// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
-		// This ensures NodeClaim is created in the correct zone for volumes,
-		// while TSC counting uses pod's original affinity.
-		if volReqs != nil {
-			if err := nodeClaimRequirements.Compatible(volReqs, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-				lastErr = fmt.Errorf("incompatible volume requirements, %w", err)
-				continue
-			}
-			nodeClaimRequirements.Add(volReqs.Values()...)
-		}
-
-		// Check Topology Requirements
-		// NOTE: podData.StrictRequirements does NOT include volume requirements,
-		// ensuring TSC counting uses pod's original affinity.
-		topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+		reqs, its, ofs, err := n.tryVolumeAlternative(ctx, pod, podData, baseRequirements, volReqs, relaxMinValues)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-			lastErr = err
-			continue
-		}
-		nodeClaimRequirements.Add(topologyRequirements.Values()...)
-
-		// Check instance type combinations
-		requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
-
-		remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, podData.Requests, n.daemonResources, requests, relaxMinValues)
-		if relaxMinValues {
-			// Update min values on the requirements if they are relaxed
-			for key, minValues := range unsatisfiableKeys {
-				nodeClaimRequirements.Get(key).MinValues = lo.ToPtr(minValues)
-			}
-		}
-		if err != nil {
-			// We avoid wrapping this err because calling String() on InstanceTypeFilterError is an expensive operation
-			// due to calls to resources.Merge and stringifying the nodeClaimRequirements
-			lastErr = err
-			continue
-		}
-		ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		return nodeClaimRequirements, remaining, ofs, nil
+		return reqs, its, ofs, nil
 	}
 	return nil, nil, nil, lastErr
+}
+
+// tryVolumeAlternative attempts to add a pod with a specific set of volume requirements,
+// checking topology, instance types, and offerings compatibility.
+func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, podData *PodData, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements, relaxMinValues bool) (scheduling.Requirements, []*cloudprovider.InstanceType, []*cloudprovider.Offering, error) {
+	nodeClaimRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
+
+	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
+	// This ensures NodeClaim is created in the correct zone for volumes,
+	// while TSC counting uses pod's original affinity.
+	if volReqs != nil {
+		if err := nodeClaimRequirements.Compatible(volReqs, scheduling.AllowUndefinedWellKnownLabels); err != nil {
+			return nil, nil, nil, fmt.Errorf("incompatible volume requirements, %w", err)
+		}
+		nodeClaimRequirements.Add(volReqs.Values()...)
+	}
+
+	// Check Topology Requirements
+	// NOTE: podData.StrictRequirements does NOT include volume requirements,
+	// ensuring TSC counting uses pod's original affinity.
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
+		return nil, nil, nil, err
+	}
+	nodeClaimRequirements.Add(topologyRequirements.Values()...)
+
+	// Check instance type combinations
+	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
+
+	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, podData.Requests, n.daemonResources, requests, relaxMinValues)
+	if relaxMinValues {
+		// Update min values on the requirements if they are relaxed
+		for key, minValues := range unsatisfiableKeys {
+			nodeClaimRequirements.Get(key).MinValues = lo.ToPtr(minValues)
+		}
+	}
+	if err != nil {
+		// We avoid wrapping this err because calling String() on InstanceTypeFilterError is an expensive operation
+		// due to calls to resources.Merge and stringifying the nodeClaimRequirements
+		return nil, nil, nil, err
+	}
+	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return nodeClaimRequirements, remaining, ofs, nil
 }
 
 // Add updates the NodeClaim to schedule the pod to this NodeClaim, updating
