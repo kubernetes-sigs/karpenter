@@ -166,16 +166,20 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		success, err := c.disrupt(ctx, m)
 		if err != nil {
 			if errors.IsConflict(err) {
+				log.FromContext(ctx).V(1).Info("consolidation outcome: conflict", "method", m)
 				return reconciler.Result{Requeue: true}, nil
 			}
+			log.FromContext(ctx).V(0).Error(err, "consolidation outcome: error", "method", m)
 			return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(m.Reason())), "reason")
 		}
 		if success {
+			log.FromContext(ctx).V(1).Info("consolidation outcome: success", "method", m)
 			return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 		}
 	}
 
 	// All methods did nothing, so return nothing to do
+	log.FromContext(ctx).V(1).Info("consolidation outcome: noop")
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
