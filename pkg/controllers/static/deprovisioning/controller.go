@@ -81,7 +81,7 @@ func (c *Controller) Name() string {
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
-	if !nodepoolutils.IsManaged(np, c.cloudProvider) || np.Spec.Replicas == nil {
+	if !nodepoolutils.IsManaged(np, c.cloudProvider) || np.Spec.Replicas == nil || !np.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
 
