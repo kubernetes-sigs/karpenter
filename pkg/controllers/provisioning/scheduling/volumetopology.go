@@ -206,6 +206,9 @@ func (v *VolumeTopology) validateVolume(ctx context.Context, volumeName string) 
 		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volumeName}, pv); err != nil {
 			return err
 		}
+		if !pv.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("persistentvolume is being deleted")
+		}
 	}
 	return nil
 }
