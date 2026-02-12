@@ -88,7 +88,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	nodePool.Status.Resources = lo.Assign(BaseResources, c.cluster.NodePoolResourcesFor(nodePool.Name))
 	nodeQuantity := nodePool.Status.Resources[resources.Node]
 	nodePool.Status.Nodes = lo.ToPtr(nodeQuantity.Value())
-	if !equality.Semantic.DeepEqual(stored, nodePool) {
+	if !equality.Semantic.DeepEqual(stored.Status, nodePool.Status) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
