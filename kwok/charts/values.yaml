@@ -134,7 +134,7 @@ settings:
   # will be batched separately.
   batchIdleDuration: 1s
   # -- The interval between polling rounds for disruption calculations. 
-  disruptionPollingInterval: 10s
+  disruptionPollingPeriod: 10s
   # -- How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution
   # node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'
   preferencePolicy: Respect
