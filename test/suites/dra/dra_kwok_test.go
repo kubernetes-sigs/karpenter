@@ -1183,4 +1183,293 @@ var _ = Describe("DRA KWOK Driver", func() {
 			env.ExpectDeleted(draDriverConfig)
 		})
 	})
+
+	Context("Multi-Driver Support", func() {
+		It("should support multiple drivers simultaneously", func() {
+			By("Creating DRAConfigs for different drivers")
+
+			// GPU driver config
+			gpuConfig := &drav1alpha1.DRAConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "gpu-config",
+					Namespace: "karpenter",
+				},
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "gpu.nvidia.com",
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "h100-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "nvidia-gpu-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "h100-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type":   {StringValue: lo.ToPtr("nvidia-h100")},
+											"memory": {StringValue: lo.ToPtr("80Gi")},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			// FPGA driver config
+			fpgaConfig := &drav1alpha1.DRAConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fpga-config",
+					Namespace: "karpenter",
+				},
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "fpga.intel.com",
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "arria-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "intel-fpga-pool",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "arria-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type": {StringValue: lo.ToPtr("intel-arria10")},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			env.ExpectCreated(gpuConfig, fpgaConfig)
+
+			By("Creating a deployment to trigger node creation")
+			deployment := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "multi-driver-test",
+					Namespace: "default",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: lo.ToPtr(int32(1)),
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "multi-driver-test",
+						},
+					},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								"app": "multi-driver-test",
+							},
+						},
+						Spec: corev1.PodSpec{
+							NodeSelector: map[string]string{
+								"node.kubernetes.io/instance-type": "c-4x-amd64-linux",
+							},
+							Containers: []corev1.Container{
+								{
+									Name:  "test-container",
+									Image: "public.ecr.aws/eks-distro/kubernetes/pause:3.2",
+								},
+							},
+						},
+					},
+				},
+			}
+			env.ExpectCreated(deployment)
+
+			By("Verifying ResourceSlices created for BOTH drivers")
+			Eventually(func(g Gomega) {
+				resourceSlices := &resourcev1.ResourceSliceList{}
+				g.Expect(env.Client.List(env.Context, resourceSlices)).To(Succeed())
+
+				// Filter by driver
+				gpuSlices := lo.Filter(resourceSlices.Items, func(s resourcev1.ResourceSlice, _ int) bool {
+					return s.Spec.Driver == "gpu.nvidia.com"
+				})
+				fpgaSlices := lo.Filter(resourceSlices.Items, func(s resourcev1.ResourceSlice, _ int) bool {
+					return s.Spec.Driver == "fpga.intel.com"
+				})
+
+				// Should have ResourceSlices for BOTH drivers on same node
+				g.Expect(gpuSlices).To(HaveLen(1), "Should have 1 GPU ResourceSlice")
+				g.Expect(fpgaSlices).To(HaveLen(1), "Should have 1 FPGA ResourceSlice")
+
+				// Verify they're for the same node
+				g.Expect(*gpuSlices[0].Spec.NodeName).To(Equal(*fpgaSlices[0].Spec.NodeName))
+			}).WithTimeout(2 * time.Minute).Should(Succeed())
+
+			// Cleanup
+			env.ExpectDeleted(gpuConfig, fpgaConfig, deployment)
+		})
+
+		It("should warn on duplicate driver configs", func() {
+			By("Creating two DRAConfigs with same driver")
+
+			config1 := &drav1alpha1.DRAConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "gpu-config-1",
+					Namespace: "karpenter",
+				},
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "gpu.nvidia.com",
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "h100-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"c-4x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "gpu-pool-1",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "h100-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type": {StringValue: lo.ToPtr("nvidia-h100")},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			config2 := &drav1alpha1.DRAConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "gpu-config-2",
+					Namespace: "karpenter",
+				},
+				Spec: drav1alpha1.DRAConfigSpec{
+					Driver: "gpu.nvidia.com", // Same driver!
+					Mappings: []drav1alpha1.Mapping{
+						{
+							Name: "a100-mapping",
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"m-8x-amd64-linux"},
+										},
+									},
+								},
+							},
+							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
+								Pool: resourcev1.ResourcePool{
+									Name:               "gpu-pool-2",
+									ResourceSliceCount: 1,
+								},
+								Devices: []resourcev1.Device{
+									{
+										Name: "a100-0",
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"type": {StringValue: lo.ToPtr("nvidia-a100")},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			env.ExpectCreated(config1, config2)
+
+			By("Creating nodes matching first config only")
+			deployment := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "duplicate-driver-test",
+					Namespace: "default",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: lo.ToPtr(int32(1)),
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "duplicate-driver-test",
+						},
+					},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								"app": "duplicate-driver-test",
+							},
+						},
+						Spec: corev1.PodSpec{
+							NodeSelector: map[string]string{
+								"node.kubernetes.io/instance-type": "c-4x-amd64-linux",
+							},
+							Containers: []corev1.Container{
+								{
+									Name:  "test-container",
+									Image: "public.ecr.aws/eks-distro/kubernetes/pause:3.2",
+								},
+							},
+						},
+					},
+				},
+			}
+			env.ExpectCreated(deployment)
+
+			By("Verifying only first config is used (alphabetically first)")
+			Eventually(func(g Gomega) {
+				resourceSlices := &resourcev1.ResourceSliceList{}
+				g.Expect(env.Client.List(env.Context, resourceSlices)).To(Succeed())
+
+				gpuSlices := lo.Filter(resourceSlices.Items, func(s resourcev1.ResourceSlice, _ int) bool {
+					return s.Spec.Driver == "gpu.nvidia.com"
+				})
+
+				// Should have slices from first config only (config1 is alphabetically first)
+				g.Expect(gpuSlices).ToNot(BeEmpty())
+				// Verify it's using pool-1 (from first config)
+				g.Expect(gpuSlices[0].Spec.Pool.Name).To(Equal("gpu-pool-1"))
+			}).WithTimeout(2 * time.Minute).Should(Succeed())
+
+			// Cleanup
+			env.ExpectDeleted(config1, config2, deployment)
+		})
+	})
 })

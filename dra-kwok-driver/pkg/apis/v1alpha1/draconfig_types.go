@@ -24,14 +24,13 @@ import (
 
 // DRAConfigSpec defines the desired state of DRAConfig
 type DRAConfigSpec struct {
+	//nolint:kubeapilinter
 	// driver specifies the DRA driver name that will manage these resources.
-	// For single-driver support (Phase 1), this must be "test.karpenter.sh".
-	// Future: Will support simulating other drivers like "gpu.nvidia.com".
+	// Supports simulating multiple drivers
 	//
 	// +required
-	// +kubebuilder:validation:Enum=test.karpenter.sh
 	// +kubebuilder:validation:Pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
-	Driver string `json:"driver,omitempty"`
+	Driver string `json:"driver"`
 
 	// mappings defines how KWOK nodes map to ResourceSlices.
 	// Each mapping specifies node selectors and the ResourceSlice configuration to create.

@@ -1,16 +1,16 @@
 # DRA KWOK Driver
 
-A Kubernetes Dynamic Resource Allocation (DRA) driver that creates ResourceSlices on Karpenter KWOK nodes. This enables comprehensive DRA integration testing without requiring actual device/resources.
+A Kubernetes Dynamic Resource Allocation (DRA) driver that creates ResourceSlices on Karpenter KWOK nodes. Supports simulating multiple DRA drivers (e.g., gpu.nvidia.com, fpga.intel.com) simultaneously. This enables comprehensive DRA integration testing without requiring actual devices/resources.
 
 ## Architecture Overview
 
-The DRA KWOK driver uses a **single-controller architecture** that reads the DRAConfig CRD directly from Kubernetes API server:
+The DRA KWOK driver uses a **single-controller architecture** that manages multiple drivers dynamically:
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │              Kubernetes API Server                  │
 │  ┌────────────────────────────────────────────────┐ │
-│  │    DRAConfig CRD                               │ │
+│  │    DRAConfig CRDs (multiple drivers)           │ │
 │  │    KWOK nodes created by Karpenter             │ │
 │  │    ResourceSlices (created by controller)      │ │
 │  └────────────────────────────────────────────────┘ │
@@ -21,19 +21,19 @@ The DRA KWOK driver uses a **single-controller architecture** that reads the DRA
         │  ResourceSlice Controller  │
         │                            │
         │  Every 30 seconds:         │
-        │  1. GET the CRD            │
-        │  2. Convert to config      │
+        │  1. LIST all DRAConfigs    │
+        │  2. Group by driver name   │
         │  3. List KWOK nodes        │
         │  4. Create ResourceSlices  │
         │  5. Cleanup orphaned       │
         └────────────────────────────┘
 ```
 
-**One CRD Per Driver**
-- CRD name must match driver name (`test.karpenter.sh`)
-- Single DRAConfig contains all device mappings (GPU, FPGA, etc.)
-- Controller reads CRD directly
-- Kubernetes API server is the source of truth
+**Multi-Driver Support**
+- One DRAConfig per driver (e.g., `gpu-config` for `gpu.nvidia.com`)
+- Single controller discovers and manages all drivers automatically
+- Dynamic driver discovery - no restart needed when adding/removing drivers
+- Warns when multiple DRAConfigs use the same driver (uses first one alphabetically)
 
 **CRD-based configuration** provides API server validation and structured types without YAML parsing.
 
@@ -43,7 +43,7 @@ The DRA KWOK driver uses a **single-controller architecture** that reads the DRA
 Sets up the controller-runtime manager and initializes the ResourceSlice controller.
 - Creates Kubernetes client and controller-runtime manager
 - Registers DRA ResourceSlice and DRAConfig CRD API types in the scheme
-- Initializes ResourceSliceController with Kubernetes client and driver name
+- Initializes ResourceSliceController with Kubernetes client and namespace (no driver name - manages all drivers)
 - Sets up health checks and metrics endpoints (ports 8082/8083)
 - Handles graceful shutdown
 
@@ -55,44 +55,46 @@ Defines the DRAConfig CRD types used for configuration.
 - **ResourceSliceTemplate**: Template for creating ResourceSlices, with ToResourceSliceSpec() conversion method
 
 ### **`pkg/controllers/resourceslice.go`** - ResourceSlice Lifecycle
-Periodically polls nodes and the DRAConfig CRD (every 30 seconds), reads configuration directly from the API server, matches nodes against mappings, and manages ResourceSlice CRUD operations.
-- **Polling Loop**: Runs every 30 seconds to reconcile all nodes and configuration, ensuring eventual consistency
-- **CRD Reading**: GETs the single DRAConfig CRD from API server (`karpenter/test.karpenter.sh`)
+Periodically polls nodes and DRAConfigs (every 30 seconds), discovers drivers dynamically, matches nodes against mappings, and manages ResourceSlice CRUD operations.
+- **Polling Loop**: Runs every 30 seconds to reconcile all nodes and configurations, ensuring eventual consistency
+- **Multi-Driver Discovery**: LISTs all DRAConfig CRDs, groups by driver name, warns on duplicates
 - **Node Filtering**: Only processes nodes with `kwok.x-k8s.io/node` annotation (Karpenter KWOK nodes)
 - **Label Matching**: Uses Kubernetes label selectors to find configuration mappings for each node
 - **ResourceSlice Management**: Creates, updates, or deletes ResourceSlices to match desired state using ToResourceSliceSpec()
-- **Error Handling**: Continues processing other nodes if one fails; failed nodes are retried in the next cycle
+- **Error Handling**: Continues processing other nodes/drivers if one fails; failed ones are retried in the next cycle
 - **Cleanup**: Removes ResourceSlices that shouldn't exist (orphaned slices, deleted nodes, deleted CRD)
 
 ## End-to-End Workflow
 
 ### **Initialization**
 1. **main.go** creates controller-runtime manager with Kubernetes client
-2. **ResourceSliceController** is initialized with driver name (`test.karpenter.sh`) and namespace (`karpenter`)
+2. **ResourceSliceController** is initialized with namespace (`karpenter`)
 3. **ResourceSliceController** registers and starts polling loop (30-second interval)
-4. Manager starts, controller begins reconciling nodes and DRAConfig CRD
+4. Manager starts, controller begins discovering drivers and reconciling nodes
 
 ### **Configuration**
-When DRAConfig CRD is created or updated:
-1. **User creates the DRAConfig** with name matching driver name (`test.karpenter.sh`)
-2. **ResourceSliceController** detects it in next polling cycle (within 30 seconds)
-3. GETs `karpenter/test.karpenter.sh` DRAConfig from API server
-4. Uses CRD spec directly (already validated by API server)
-5. Reconciles nodes and creates ResourceSlices using draConfig.Spec.Mappings
+When DRAConfig CRDs are created or updated:
+1. **User creates DRAConfigs** with user-chosen names (e.g., `gpu-config`, `fpga-config`)
+2. **Each DRAConfig specifies its driver** in `spec.driver` field (e.g., `gpu.nvidia.com`)
+3. **ResourceSliceController** detects them in next polling cycle (within 30 seconds)
+4. LISTs all DRAConfigs in `karpenter` namespace
+5. Groups configs by driver name (warns if duplicates found)
+6. Reconciles nodes and creates ResourceSlices for each driver
 
 ### **Node Processing (Polling Loop)**
 Every 30 seconds, the ResourceSliceController:
-1. GETs the DRAConfig CRD (`karpenter/test.karpenter.sh`)
-2. If not found: cleanup all ResourceSlices and return
-3. If found: uses draConfig.Spec directly
+1. LISTs all DRAConfig CRDs in the namespace
+2. If none found: cleanup all ResourceSlices and return
+3. Groups DRAConfigs by driver name (one config per driver, warns on duplicates)
 4. Lists all nodes in the cluster
-5. For each node:
-   - Checks for `kwok.x-k8s.io/node` annotation to identify KWOK nodes
-   - Iterates through draConfig.Spec.Mappings to find matching nodeSelectors
-   - If match found: Uses ResourceSliceTemplate.ToResourceSliceSpec() to create or update ResourceSlice
-   - If no match: Ensures no ResourceSlices exist for this node
-6. Cleans up any orphaned ResourceSlices (nodes deleted, CRD deleted, etc.)
-7. Logs summary of reconciliation (nodes processed, errors encountered)
+5. For each driver:
+   - For each KWOK node (has `kwok.x-k8s.io/node` annotation):
+     - Iterates through driver's mappings to find matching nodeSelectors
+     - If match found: Uses ResourceSliceTemplate.ToResourceSliceSpec() to create or update ResourceSlice
+     - ResourceSlice naming: `<driver-sanitized>-<node>-<mapping>`
+       - Example: `gpu-nvidia-com-node1-h100-mapping`
+6. Cleans up any orphaned ResourceSlices (nodes deleted, configs deleted, etc.)
+7. Logs summary of reconciliation (drivers, nodes processed, errors encountered)
 
 This polling approach ensures eventual consistency - any changes to nodes or configuration are reconciled within 30 seconds.
 
@@ -100,17 +102,77 @@ This polling approach ensures eventual consistency - any changes to nodes or con
 ResourceSlices are automatically cleaned up when:
 - KWOK node is deleted (detected in next polling cycle)
 - Node no longer matches any configuration mapping (labels changed)
-- DRAConfig CRD is deleted or configuration is cleared
+- DRAConfig CRD is deleted
 - Mapping is removed from DRAConfig CRD
+- Driver is changed in DRAConfig (old driver's slices cleaned up)
 
 ## DRAConfig CRD Examples
 
-### **Basic: Single Device Type**
+### **Multi-Driver Setup (Recommended)**
+Simulate multiple DRA drivers simultaneously - GPU and FPGA drivers on the same nodes:
+
+```yaml
+# GPU driver simulation
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: gpu-config  # User-chosen name
+  namespace: karpenter
+spec:
+  driver: gpu.nvidia.com  # Simulated driver name
+  mappings:
+    - name: h100-mapping
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["g5.xlarge"]
+      resourceSlice:
+        pool:
+          name: nvidia-gpu-pool
+          resourceSliceCount: 1
+        devices:
+          - name: h100-0
+            attributes:
+              type: {stringValue: "nvidia-h100"}
+              memory: {stringValue: "80Gi"}
+
+---
+# FPGA driver simulation
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: fpga-config
+  namespace: karpenter
+spec:
+  driver: fpga.intel.com  # Different driver
+  mappings:
+    - name: arria-mapping
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["g5.xlarge"]  # Same instance type as above
+      resourceSlice:
+        pool:
+          name: intel-fpga-pool
+          resourceSliceCount: 1
+        devices:
+          - name: arria-0
+            attributes:
+              type: {stringValue: "intel-arria10"}
+```
+
+**Result:** A single `g5.xlarge` node will have ResourceSlices from both drivers:
+- `gpu-nvidia-com-node1-h100-mapping` (driver: `gpu.nvidia.com`)
+- `fpga-intel-com-node1-arria-mapping` (driver: `fpga.intel.com`)
+
+### **Basic: Single Driver, Single Device Type**
 ```yaml
 apiVersion: test.karpenter.sh/v1alpha1
 kind: DRAConfig
 metadata:
-  name: test.karpenter.sh  # MUST match driver name
+  name: my-config
   namespace: karpenter
 spec:
   driver: test.karpenter.sh
@@ -132,12 +194,12 @@ spec:
               memory: {stringValue: "24Gi"}
 ```
 
-### **Multiple Device Types on Different Nodes**
+### **Single Driver: Multiple Device Types on Different Nodes**
 ```yaml
 apiVersion: test.karpenter.sh/v1alpha1
 kind: DRAConfig
 metadata:
-  name: test.karpenter.sh
+  name: device-config
   namespace: karpenter
 spec:
   driver: test.karpenter.sh

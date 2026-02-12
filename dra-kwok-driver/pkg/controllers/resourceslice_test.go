@@ -51,7 +51,7 @@ var _ = Describe("ResourceSliceController", func() {
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 		fakeClient = fake.NewClientBuilder().WithScheme(scheme).Build()
-		resourceController = NewResourceSliceController(fakeClient, driverName, namespace)
+		resourceController = NewResourceSliceController(fakeClient, namespace)
 	})
 
 	Describe("isKWOKNode", func() {

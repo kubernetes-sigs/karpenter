@@ -66,10 +66,7 @@ spec:
               driver:
                 description: |-
                   driver specifies the DRA driver name that will manage these resources.
-                  For single-driver support (Phase 1), this must be "test.karpenter.sh".
-                  Future: Will support simulating other drivers like "gpu.nvidia.com".
-                enum:
-                - test.karpenter.sh
+                  Supports simulating multiple drivers like "gpu.nvidia.com", "fpga.intel.com", etc.
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                 type: string
               mappings:
@@ -84,7 +81,7 @@ spec:
                     name:
                       description: |-
                         name is a human-readable identifier for this mapping.
-                        Used in ResourceSlice naming: karpenter-sh-<nodename>-<mapping-name>
+                        Used in ResourceSlice naming: test-karpenter-sh-<nodename>-<mapping-name>
                       maxLength: 63
                       minLength: 1
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
