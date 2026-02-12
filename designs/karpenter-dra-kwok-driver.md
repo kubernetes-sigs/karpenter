@@ -75,10 +75,10 @@ Tests **DRA resource provisioning via strongly-typed CRD when no NodeOverlay con
 apiVersion: test.karpenter.sh/v1alpha1
 kind: DRAConfig
 metadata:
-  name: test.karpenter.sh  # One CRD per driver, this name matches driver name
+  name: gpu-config  # User-chosen name
   namespace: karpenter
 spec:
-  driver: "test.karpenter.sh"
+  driver: "test.karpenter.sh"  # Simulated driver name
   mappings:
   - name: "h100-nodes"
     nodeSelectorTerms:
@@ -130,23 +130,24 @@ spec:
 ```
 karpenter/
 ├── dra-kwok-driver/
-│   ├── main.go                        # Driver entry point
+│   ├── main.go                           # Driver entry point
 │   └── pkg/
 │       ├── apis/
-│       │   ├── v1alpha1/              # CRD Go types
-│       │   │   ├── draconfig_types.go # DRAConfig CRD types
+│       │   ├── v1alpha1/                 # CRD Go types
+│       │   │   ├── draconfig_types.go    # DRAConfig CRD types
 │       │   │   └── zz_generated.deepcopy.go
-│       │   └── crds/                  # CRD definitions
+│       │   └── crds/                     # CRD definitions
 │       │       └── test.karpenter.sh_draconfigs.yaml
-│       └── controllers/               # Controller implementations
-│           ├── resourceslice.go       # ResourceSlice lifecycle (single controller)
-│           └── resourceslice_test.go  # ResourceSlice controller tests
+│       └── controllers/               
+│           ├── resourceslice.go          # ResourceSlice lifecycle (manages all drivers)
+│           └── resourceslice_test.go     # ResourceSlice controller tests
 └── test/suites/dra/
-    ├── suite_test.go                  # Test suite setup
-    └── dra_kwok_test.go               # DRA integration tests
+    ├── suite_test.go                     # Test suite setup
+    └── dra_kwok_test.go                  # DRA integration tests
 ```
 
 **Architecture:**
-1. `main.go` starts ResourceSlice controller with driver name and namespace
-2. `resourceslice.go` polls nodes every 30 seconds, GETs the DRAConfig CRD, and uses draConfig.Spec directly to create ResourceSlices
+1. `main.go` starts ResourceSlice controller with namespace
+2. `resourceslice.go` polls nodes every 30 seconds, LISTs all DRAConfig CRDs, groups by driver, and creates ResourceSlices for each driver independently
 3. `draconfig_types.go` defines CRD types with ResourceSliceTemplate.ToResourceSliceSpec() conversion method
+4. **Multi-driver support:** Single controller manages multiple drivers dynamically (e.g., `gpu.nvidia.com`, `fpga.intel.com`)

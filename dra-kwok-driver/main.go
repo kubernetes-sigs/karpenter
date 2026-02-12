@@ -52,7 +52,7 @@ func main() {
 	ctx := context.Background()
 	logger := ctrl.Log.WithName("dra-kwok-driver")
 
-	logger.Info("Starting DRA KWOK Driver (One CRD per driver)")
+	logger.Info("Starting DRA KWOK Driver (Multi-driver support)")
 
 	// Create manager
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -77,12 +77,10 @@ func main() {
 		panic(err)
 	}
 
-	// Initialize ResourceSlice controller (single controller, no config store)
-	// CRD name must match driver name (test.karpenter.sh)
+	// Initialize ResourceSlice controller (single controller manages all drivers)
 	resourceSliceController := controllers.NewResourceSliceController(
 		mgr.GetClient(),
-		"test.karpenter.sh",
-		"karpenter",
+		"karpenter", // Just namespace
 	)
 
 	// Register controller
