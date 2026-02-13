@@ -41,10 +41,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -55,11 +57,15 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
+var clusterCost *cost.ClusterCost
 var nodeClaimController *informer.NodeClaimController
 var nodeController *informer.NodeController
 var podController *informer.PodController
 var nodePoolController *informer.NodePoolController
 var daemonsetController *informer.DaemonSetController
+var nodeOverlayStore *nodeoverlay.InstanceTypeStore
+var nodeOverlayController *nodeoverlay.Controller
+var pricingController *informer.PricingController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1.NodePool
 
@@ -79,11 +85,15 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
+	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
-	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
+	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost)
+	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
+	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
+	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 })
 
 var _ = AfterSuite(func() {
@@ -1713,7 +1723,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })
