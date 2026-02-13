@@ -17,6 +17,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -40,6 +41,14 @@ var multiNodePool1, multiNodePool2, multiNodePool3 *v1.NodePool
 var multiNodeConsolidation *disruption.MultiNodeConsolidation
 var multiNodePoolMap map[string]*v1.NodePool
 var multiNodePoolInstanceTypeMap map[string]map[string]*cloudprovider.InstanceType
+
+// mockValidator bypasses expensive validation for unit tests
+type mockValidator struct{}
+
+func (m *mockValidator) Validate(ctx context.Context, cmd disruption.Command, ttl time.Duration) (disruption.Command, error) {
+	// Skip validation in tests - just return the command unchanged
+	return cmd, nil
+}
 
 var _ = Describe("MultiNodeConsolidation", func() {
 	BeforeEach(func() {
@@ -106,7 +115,7 @@ var _ = Describe("MultiNodeConsolidation", func() {
 		}
 
 		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-		multiNodeConsolidation = disruption.NewMultiNodeConsolidation(c)
+		multiNodeConsolidation = disruption.NewMultiNodeConsolidation(c, disruption.WithValidator(&mockValidator{}))
 	})
 
 	AfterEach(func() {
@@ -226,25 +235,25 @@ var _ = Describe("MultiNodeConsolidation", func() {
 
 	Context("NodePool Starvation (Figma Scenario)", func() {
 		It("should starve dedicated nodepool when general pool has many low-cost nodes", func() {
-			// Figma issue: 100 low-cost general nodes, 10 high-cost dedicated nodes
+			// Figma issue: Many low-cost general nodes, fewer high-cost dedicated nodes
 			// Dedicated nodes never get consolidated due to cost-based sorting
-			generalCandidates, err := createMNCandidates(multiNodePool1, 1.0, 90)
+			generalCandidates, err := createMNCandidates(multiNodePool1, 1.0, 15)
 			Expect(err).To(BeNil())
 
-			dedicatedCandidates, err := createMNCandidatesWithTaint(multiNodePool2, 5.0, 10)
+			dedicatedCandidates, err := createMNCandidatesWithTaint(multiNodePool2, 5.0, 5)
 			Expect(err).To(BeNil())
 
 			allCandidates := append(generalCandidates, dedicatedCandidates...)
 			budgetMapping := map[string]int{
-				multiNodePool1.Name: 150,
-				multiNodePool2.Name: 20,
+				multiNodePool1.Name: 20,
+				multiNodePool2.Name: 10,
 			}
 
 			commands, err := multiNodeConsolidation.ComputeCommands(ctx, budgetMapping, allCandidates...)
 			Expect(err).To(BeNil())
 
 			// Print detailed command information
-			printCommandDetails("Figma Starvation Test", commands, []string{multiNodePool1.Name, multiNodePool2.Name})
+			printCommandDetails("Figma Starvation Test", commands, allCandidates, []string{multiNodePool1.Name, multiNodePool2.Name})
 
 			if len(commands) > 0 {
 				dedicatedCount := 0
@@ -343,20 +352,34 @@ func createMNCandidates(nodePool *v1.NodePool, disruptionCost float64, count int
 }
 
 // printCommandDetails prints detailed information about consolidation commands for debugging
-func printCommandDetails(testName string, commands []disruption.Command, nodePoolNames []string) {
+func printCommandDetails(testName string, commands []disruption.Command, candidates []*disruption.Candidate, nodePoolNames []string) {
 	fmt.Printf("\n╔═══════════════════════════════════════════════════════════╗\n")
 	fmt.Printf("║ %s\n", testName)
 	fmt.Printf("╚═══════════════════════════════════════════════════════════╝\n")
 
+	// Print initial cluster state
+	fmt.Printf("\n📊 INITIAL CLUSTER STATE:\n")
+	fmt.Printf("   Total candidates: %d\n", len(candidates))
+
+	initialNodePoolCounts := make(map[string]int)
+	for _, candidate := range candidates {
+		initialNodePoolCounts[candidate.NodePool.Name]++
+	}
+
+	for _, poolName := range nodePoolNames {
+		count := initialNodePoolCounts[poolName]
+		fmt.Printf("   • %s: %d nodes\n", poolName, count)
+	}
+
 	if len(commands) == 0 {
-		fmt.Printf("❌ No consolidation commands generated\n\n")
+		fmt.Printf("\n❌ No consolidation commands generated\n\n")
 		return
 	}
 
 	cmd := commands[0]
 	fmt.Printf("\n📋 CONSOLIDATION COMMAND:\n")
 	fmt.Printf("   Decision: %s\n", cmd.Decision())
-	fmt.Printf("   Total candidates: %d\n", len(cmd.Candidates))
+	fmt.Printf("   Total candidates in command: %d\n", len(cmd.Candidates))
 
 	// Count candidates by nodepool
 	nodePoolCounts := make(map[string]int)

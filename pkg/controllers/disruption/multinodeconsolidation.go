@@ -107,7 +107,9 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		return []Command{}, nil
 	}
 
+	fmt.Printf("🔧 Calling validator.Validate for %d candidates...\n", len(cmd.Candidates))
 	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
+		fmt.Printf("🔧 Validation returned with error: %v\n", err)
 		if IsValidationError(err) {
 			reason := getValidationFailureReason(err)
 			cmd.EmitRejectedEvents(m.recorder, reason)
@@ -115,6 +117,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		}
 		return []Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
+	fmt.Printf("🔧 Validation succeeded, returning command\n")
 	return []Command{cmd}, nil
 }
 
