@@ -17,20 +17,77 @@ limitations under the License.
 package performance
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/rand"
 
 	. "github.com/onsi/ginkgo/v2"
+
+	"github.com/google/pprof/profile"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
+
+// getKarpenterMemoryUsage queries the Karpenter controller pod's current memory usage in MB via pprof
+// and saves the profile to disk for later analysis
+func getKarpenterMemoryUsage(env *common.Environment, profileSuffix string) float64 {
+	pod := env.ExpectActiveKarpenterPod()
+	if pod == nil {
+		return 0
+	}
+
+	ctx, cancel := context.WithCancel(env.Context)
+	defer cancel()
+
+	localPort := rand.IntnRange(1024, 49151)
+	env.ExpectPodPortForwarded(ctx, pod, 8080, localPort)
+
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/heap", localPort))
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0
+	}
+
+	profileData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0
+	}
+
+	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
+		profileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", profileSuffix))
+		if err := os.WriteFile(profileFile, profileData, 0600); err == nil {
+			GinkgoWriter.Printf("Memory profile saved to: %s\n", profileFile)
+		}
+	}
+
+	prof, err := profile.Parse(bytes.NewReader(profileData))
+	if err != nil {
+		return 0
+	}
+
+	var totalInUse int64
+	for _, sample := range prof.Sample {
+		if len(sample.Value) > 1 {
+			totalInUse += sample.Value[1]
+		}
+	}
+	return float64(totalInUse) / (1024 * 1024)
+}
 
 // OutputPerformanceReport outputs a performance report to console and file
 func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
@@ -46,6 +103,11 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	GinkgoWriter.Printf("Efficiency Score: %.1f%%\n", report.ResourceEfficiencyScore)
 	GinkgoWriter.Printf("Pods per Node: %.1f\n", report.PodsPerNode)
 	GinkgoWriter.Printf("Rounds: %d\n", report.Rounds)
+	if report.KarpenterMemoryMB > 0 {
+		GinkgoWriter.Printf("Karpenter Memory: %.2f MB\n", report.KarpenterMemoryMB)
+	} else {
+		GinkgoWriter.Printf("Karpenter Memory: Not available (metrics not found)\n")
+	}
 
 	// File output
 	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
@@ -81,6 +143,8 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 
 	totalTime := time.Since(startTime)
 
+	memoryMB := getKarpenterMemoryUsage(env, "scale_out")
+
 	// Collect metrics
 	nodeCount := env.Monitor.CreatedNodeCount()
 	avgCPUUtil := env.Monitor.AvgUtilization(corev1.ResourceCPU)
@@ -106,6 +170,7 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
 		Rounds:                  1, // Scale-out is always 1 round
+		KarpenterMemoryMB:       memoryMB,
 		Timestamp:               time.Now(),
 	}, nil
 }
@@ -136,6 +201,8 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 
 	totalTime := time.Since(startTime)
 
+	memoryMB := getKarpenterMemoryUsage(env, "consolidation")
+
 	// Collect final metrics
 	finalNodes := env.Monitor.CreatedNodeCount()
 	avgCPUUtil := env.Monitor.AvgUtilization(corev1.ResourceCPU)
@@ -161,6 +228,7 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
 		Rounds:                  len(consolidationRounds),
+		KarpenterMemoryMB:       memoryMB,
 		Timestamp:               time.Now(),
 	}, nil
 }
