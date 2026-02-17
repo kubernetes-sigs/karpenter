@@ -32,19 +32,6 @@ import (
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
-// saveProfile saves pprof profile data to disk if OUTPUT_DIR is set
-func saveProfile(profileData []byte, suffix string) {
-	if len(profileData) == 0 {
-		return
-	}
-	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
-		profileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", suffix))
-		if err := os.WriteFile(profileFile, profileData, 0600); err == nil {
-			GinkgoWriter.Printf("Memory profile saved to: %s\n", profileFile)
-		}
-	}
-}
-
 // OutputPerformanceReport outputs a performance report to console and file
 func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	// Console output (fallback)
@@ -68,10 +55,15 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	// File output
 	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
 		reportFile := filepath.Join(outputDir, fmt.Sprintf("%s_performance_report.json", filePrefix))
-		reportJSON, err := json.MarshalIndent(report, "", "  ")
-		if err == nil {
+		if reportJSON, err := json.MarshalIndent(report, "", "  "); err == nil {
 			if err := os.WriteFile(reportFile, reportJSON, 0600); err == nil {
 				GinkgoWriter.Printf("Report written to: %s\n", reportFile)
+			}
+		}
+		if len(report.ProfileData) > 0 {
+			profileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", filePrefix))
+			if err := os.WriteFile(profileFile, report.ProfileData, 0600); err == nil {
+				GinkgoWriter.Printf("Memory profile saved to: %s\n", profileFile)
 			}
 		}
 	}
@@ -100,7 +92,6 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 
 	totalTime := time.Since(startTime)
 	peakMemoryMB, peakProfileData := memTracker.Stop()
-	saveProfile(peakProfileData, "scale_out")
 
 	// Collect metrics
 	nodeCount := env.Monitor.CreatedNodeCount()
@@ -126,9 +117,10 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 		TotalReservedMemoryUtil: avgMemUtil,
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
-		Rounds:                  1, // Scale-out is always 1 round
-		KarpenterMemoryMB:       peakMemoryMB,
+		Rounds:                  1,
 		Timestamp:               time.Now(),
+		KarpenterMemoryMB:       peakMemoryMB,
+		ProfileData:             peakProfileData,
 	}, nil
 }
 
@@ -158,7 +150,6 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 	consolidationRounds, _ := monitorConsolidationRounds(env, timeout)
 	totalTime := time.Since(startTime)
 	peakMemoryMB, peakProfileData := memTracker.Stop()
-	saveProfile(peakProfileData, "consolidation")
 
 	// Collect final metrics
 	finalNodes := env.Monitor.CreatedNodeCount()
@@ -185,8 +176,9 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
 		Rounds:                  len(consolidationRounds),
-		KarpenterMemoryMB:       peakMemoryMB,
 		Timestamp:               time.Now(),
+		KarpenterMemoryMB:       peakMemoryMB,
+		ProfileData:             peakProfileData,
 	}, nil
 }
 
@@ -255,8 +247,6 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 
 	totalTime := time.Since(startTime)
 	peakMemoryMB, peakProfileData := memTracker.Stop()
-	saveProfile(peakProfileData, "drift")
-
 	finalNodeCount := env.Monitor.CreatedNodeCount()
 
 	// Collect metrics
@@ -288,8 +278,9 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
 		Rounds:                  driftRounds,
-		KarpenterMemoryMB:       peakMemoryMB,
 		Timestamp:               time.Now(),
+		KarpenterMemoryMB:       peakMemoryMB,
+		ProfileData:             peakProfileData,
 	}, nil
 }
 
@@ -364,7 +355,6 @@ func ReportScaleOutWithOutput(env *common.Environment, testName string, expected
 	if err != nil {
 		return nil, err
 	}
-
 	OutputPerformanceReport(report, filePrefix)
 	return report, nil
 }
@@ -375,7 +365,6 @@ func ReportConsolidationWithOutput(env *common.Environment, testName string, ini
 	if err != nil {
 		return nil, err
 	}
-
 	OutputPerformanceReport(report, filePrefix)
 	return report, nil
 }
@@ -386,7 +375,6 @@ func ReportDriftWithOutput(env *common.Environment, testName string, expectedPod
 	if err != nil {
 		return nil, err
 	}
-
 	OutputPerformanceReport(report, filePrefix)
 	return report, nil
 }

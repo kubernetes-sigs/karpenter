@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request: # TODO: Remove after testing
+  workflow_run:
     workflows:
       - ApprovalComment
     types:

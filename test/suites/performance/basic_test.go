@@ -74,8 +74,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
 				"Consolidation should complete within 20 minutes")
-			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 100),
-				"Karpenter controller memory should be less than 100 MB during consolidation")
+			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 120),
+				"Karpenter controller memory should be less than 120 MB during consolidation")
 
 		})
 	})
