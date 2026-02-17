@@ -242,7 +242,7 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 	defer c.mu.Unlock()
 	for name, runTime := range c.lastRun {
 		if timeSince := c.clock.Since(runTime); timeSince > AbnormalTimeLimit {
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abnormal time between runs of %s = %s", name, timeSince))
+			log.FromContext(ctx).V(1).Info("abnormal time between runs", "name", name, "time_since", timeSince)
 		}
 	}
 }
