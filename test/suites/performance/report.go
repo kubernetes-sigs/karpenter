@@ -17,76 +17,32 @@ limitations under the License.
 package performance
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/rand"
 
 	. "github.com/onsi/ginkgo/v2"
-
-	"github.com/google/pprof/profile"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
-// getKarpenterMemoryUsage queries the Karpenter controller pod's current memory usage in MB via pprof
-// and saves the profile to disk for later analysis
-func getKarpenterMemoryUsage(env *common.Environment, profileSuffix string) float64 {
-	pod := env.ExpectActiveKarpenterPod()
-	if pod == nil {
-		return 0
+// saveProfile saves pprof profile data to disk if OUTPUT_DIR is set
+func saveProfile(profileData []byte, suffix string) {
+	if len(profileData) == 0 {
+		return
 	}
-
-	ctx, cancel := context.WithCancel(env.Context)
-	defer cancel()
-
-	localPort := rand.IntnRange(1024, 49151)
-	env.ExpectPodPortForwarded(ctx, pod, 8080, localPort)
-
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/heap", localPort))
-	if err != nil {
-		return 0
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0
-	}
-
-	profileData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0
-	}
-
 	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
-		profileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", profileSuffix))
+		profileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", suffix))
 		if err := os.WriteFile(profileFile, profileData, 0600); err == nil {
 			GinkgoWriter.Printf("Memory profile saved to: %s\n", profileFile)
 		}
 	}
-
-	prof, err := profile.Parse(bytes.NewReader(profileData))
-	if err != nil {
-		return 0
-	}
-
-	var totalInUse int64
-	for _, sample := range prof.Sample {
-		if len(sample.Value) > 1 {
-			totalInUse += sample.Value[1]
-		}
-	}
-	return float64(totalInUse) / (1024 * 1024)
 }
 
 // OutputPerformanceReport outputs a performance report to console and file
@@ -133,6 +89,7 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 //
 // Returns a PerformanceReport with scale-out metrics and timing information.
 func ReportScaleOut(env *common.Environment, testName string, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
+	memTracker := common.StartMemoryTracker(env)
 	startTime := time.Now()
 
 	// Wait for all pods to be healthy
@@ -142,8 +99,8 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 	}
 
 	totalTime := time.Since(startTime)
-
-	memoryMB := getKarpenterMemoryUsage(env, "scale_out")
+	peakMemoryMB, peakProfileData := memTracker.Stop()
+	saveProfile(peakProfileData, "scale_out")
 
 	// Collect metrics
 	nodeCount := env.Monitor.CreatedNodeCount()
@@ -170,7 +127,7 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
 		Rounds:                  1, // Scale-out is always 1 round
-		KarpenterMemoryMB:       memoryMB,
+		KarpenterMemoryMB:       peakMemoryMB,
 		Timestamp:               time.Now(),
 	}, nil
 }
@@ -188,6 +145,7 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 //
 // Returns a PerformanceReport with consolidation metrics and timing information.
 func ReportConsolidation(env *common.Environment, testName string, initialPods, finalPods, initialNodes int, timeout time.Duration) (*PerformanceReport, error) {
+	memTracker := common.StartMemoryTracker(env)
 	startTime := time.Now()
 
 	// Wait for pods to scale down first
@@ -198,10 +156,9 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 
 	// Monitor consolidation rounds
 	consolidationRounds, _ := monitorConsolidationRounds(env, timeout)
-
 	totalTime := time.Since(startTime)
-
-	memoryMB := getKarpenterMemoryUsage(env, "consolidation")
+	peakMemoryMB, peakProfileData := memTracker.Stop()
+	saveProfile(peakProfileData, "consolidation")
 
 	// Collect final metrics
 	finalNodes := env.Monitor.CreatedNodeCount()
@@ -228,7 +185,7 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
 		Rounds:                  len(consolidationRounds),
-		KarpenterMemoryMB:       memoryMB,
+		KarpenterMemoryMB:       peakMemoryMB,
 		Timestamp:               time.Now(),
 	}, nil
 }
@@ -245,6 +202,7 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 //
 // Returns a PerformanceReport with drift metrics and timing information.
 func ReportDrift(env *common.Environment, testName string, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
+	memTracker := common.StartMemoryTracker(env)
 	startTime := time.Now()
 	initialNodeCount := env.Monitor.CreatedNodeCount()
 
@@ -296,6 +254,9 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 	}
 
 	totalTime := time.Since(startTime)
+	peakMemoryMB, peakProfileData := memTracker.Stop()
+	saveProfile(peakProfileData, "drift")
+
 	finalNodeCount := env.Monitor.CreatedNodeCount()
 
 	// Collect metrics
@@ -327,6 +288,7 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
 		Rounds:                  driftRounds,
+		KarpenterMemoryMB:       peakMemoryMB,
 		Timestamp:               time.Now(),
 	}, nil
 }
