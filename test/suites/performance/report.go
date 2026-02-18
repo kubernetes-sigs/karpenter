@@ -51,6 +51,11 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	} else {
 		GinkgoWriter.Printf("Karpenter Memory: Not available\n")
 	}
+	if report.KarpenterCPUNanos > 0 {
+		GinkgoWriter.Printf("Karpenter CPU: %.2f ms\n", float64(report.KarpenterCPUNanos)/1e6)
+	} else {
+		GinkgoWriter.Printf("Karpenter CPU: Not available\n")
+	}
 
 	// File output
 	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
@@ -60,10 +65,16 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 				GinkgoWriter.Printf("Report written to: %s\n", reportFile)
 			}
 		}
-		if len(report.ProfileData) > 0 {
+		if len(report.MemoryProfileData) > 0 {
 			profileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", filePrefix))
-			if err := os.WriteFile(profileFile, report.ProfileData, 0600); err == nil {
+			if err := os.WriteFile(profileFile, report.MemoryProfileData, 0600); err == nil {
 				GinkgoWriter.Printf("Memory profile saved to: %s\n", profileFile)
+			}
+		}
+		if len(report.CPUProfileData) > 0 {
+			cpuProfileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_cpu_profile_%s.pb.gz", filePrefix))
+			if err := os.WriteFile(cpuProfileFile, report.CPUProfileData, 0600); err == nil {
+				GinkgoWriter.Printf("CPU profile saved to: %s\n", cpuProfileFile)
 			}
 		}
 	}
@@ -81,7 +92,7 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 //
 // Returns a PerformanceReport with scale-out metrics and timing information.
 func ReportScaleOut(env *common.Environment, testName string, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
-	memTracker := common.StartMemoryTracker(env)
+	profiler := common.StartKarpenterProfiler(env)
 	startTime := time.Now()
 
 	// Wait for all pods to be healthy
@@ -91,7 +102,7 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 	}
 
 	totalTime := time.Since(startTime)
-	peakMemoryMB, peakProfileData := memTracker.Stop()
+	peakMemoryMB, peakProfileData, peakCPUNanos, cpuProfileData := profiler.Stop()
 
 	// Collect metrics
 	nodeCount := env.Monitor.CreatedNodeCount()
@@ -120,7 +131,9 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 		Rounds:                  1, // Scale-out is always 1 round
 		Timestamp:               time.Now(),
 		KarpenterMemoryMB:       peakMemoryMB,
-		ProfileData:             peakProfileData,
+		KarpenterCPUNanos:       peakCPUNanos,
+		MemoryProfileData:       peakProfileData,
+		CPUProfileData:          cpuProfileData,
 	}, nil
 }
 
@@ -137,7 +150,7 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 //
 // Returns a PerformanceReport with consolidation metrics and timing information.
 func ReportConsolidation(env *common.Environment, testName string, initialPods, finalPods, initialNodes int, timeout time.Duration) (*PerformanceReport, error) {
-	memTracker := common.StartMemoryTracker(env)
+	profiler := common.StartKarpenterProfiler(env)
 	startTime := time.Now()
 
 	// Wait for pods to scale down first
@@ -149,7 +162,7 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 	// Monitor consolidation rounds
 	consolidationRounds, _ := monitorConsolidationRounds(env, timeout)
 	totalTime := time.Since(startTime)
-	peakMemoryMB, peakProfileData := memTracker.Stop()
+	peakMemoryMB, peakProfileData, peakCPUNanos, cpuProfileData := profiler.Stop()
 
 	// Collect final metrics
 	finalNodes := env.Monitor.CreatedNodeCount()
@@ -178,7 +191,9 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 		Rounds:                  len(consolidationRounds),
 		Timestamp:               time.Now(),
 		KarpenterMemoryMB:       peakMemoryMB,
-		ProfileData:             peakProfileData,
+		KarpenterCPUNanos:       peakCPUNanos,
+		MemoryProfileData:       peakProfileData,
+		CPUProfileData:          cpuProfileData,
 	}, nil
 }
 
@@ -194,7 +209,7 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 //
 // Returns a PerformanceReport with drift metrics and timing information.
 func ReportDrift(env *common.Environment, testName string, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
-	memTracker := common.StartMemoryTracker(env)
+	profiler := common.StartKarpenterProfiler(env)
 	startTime := time.Now()
 	initialNodeCount := env.Monitor.CreatedNodeCount()
 
@@ -246,7 +261,7 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 	}
 
 	totalTime := time.Since(startTime)
-	peakMemoryMB, peakProfileData := memTracker.Stop()
+	peakMemoryMB, peakProfileData, peakCPUNanos, cpuProfileData := profiler.Stop()
 	finalNodeCount := env.Monitor.CreatedNodeCount()
 
 	// Collect metrics
@@ -280,7 +295,9 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 		Rounds:                  driftRounds,
 		Timestamp:               time.Now(),
 		KarpenterMemoryMB:       peakMemoryMB,
-		ProfileData:             peakProfileData,
+		KarpenterCPUNanos:       peakCPUNanos,
+		MemoryProfileData:       peakProfileData,
+		CPUProfileData:          cpuProfileData,
 	}, nil
 }
 

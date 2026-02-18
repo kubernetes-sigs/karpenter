@@ -46,5 +46,7 @@ type PerformanceReport struct {
 	Rounds                  int           `json:"rounds"`
 	Timestamp               time.Time     `json:"timestamp"`
 	KarpenterMemoryMB       float64       `json:"karpenter_memory_mb"`
-	ProfileData             []byte        `json:"-"` // pprof heap profile at peak memory
+	KarpenterCPUNanos       int64         `json:"karpenter_cpu_nanos"`
+	MemoryProfileData       []byte        `json:"-"` // pprof heap profile at peak memory
+	CPUProfileData          []byte        `json:"-"` // pprof cpu profile at peak
 }
