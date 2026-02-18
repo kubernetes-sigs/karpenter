@@ -47,16 +47,16 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	GinkgoWriter.Printf("Pods per Node: %.1f\n", report.PodsPerNode)
 	GinkgoWriter.Printf("Rounds: %d\n", report.Rounds)
 	if report.KarpenterMemoryMB > 0 {
-		GinkgoWriter.Printf("Karpenter Memory: %.2f MB\n", report.KarpenterMemoryMB)
+		GinkgoWriter.Printf("Karpenter Peak Memory: %.2f MB\n", report.KarpenterMemoryMB)
 	} else {
-		GinkgoWriter.Printf("Karpenter Memory: Not available\n")
+		GinkgoWriter.Printf("Karpenter Peak Memory: Not available\n")
 	}
 	if report.KarpenterCPUNanos > 0 {
 		// CPU utilization % = (CPU time used / sample duration) * 100
 		cpuUtilPct := float64(report.KarpenterCPUNanos) / (common.CPUProfileSeconds * 1e9) * 100
-		GinkgoWriter.Printf("Karpenter CPU: %.1f%% (%.0f ms)\n", cpuUtilPct, float64(report.KarpenterCPUNanos)/1e6)
+		GinkgoWriter.Printf("Karpenter Peak CPU: %.1f%% (%.0f ms)\n", cpuUtilPct, float64(report.KarpenterCPUNanos)/1e6)
 	} else {
-		GinkgoWriter.Printf("Karpenter CPU: Not available\n")
+		GinkgoWriter.Printf("Karpenter Peak CPU: Not available\n")
 	}
 
 	// File output

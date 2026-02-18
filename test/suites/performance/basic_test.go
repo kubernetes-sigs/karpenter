@@ -56,6 +56,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 65%")
 			Expect(scaleOutReport.KarpenterMemoryMB).To(BeNumerically("<", 120),
 				"Karpenter controller memory should be less than 120 MB during scale-out")
+			Expect(scaleOutReport.KarpenterCPUNanos).To(BeNumerically("<", 15*1e9),
+				"Karpenter controller CPU should be less than 15s (75%) during scale-out")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Executing consolidation performance test (scaling down to 700 pods)")
@@ -76,6 +78,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Consolidation should complete within 20 minutes")
 			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 120),
 				"Karpenter controller memory should be less than 120 MB during consolidation")
+			Expect(consolidationReport.KarpenterCPUNanos).To(BeNumerically("<", 8*1e9),
+				"Karpenter controller CPU should be less than 8s (40%) during consolidation")
 
 		})
 	})
