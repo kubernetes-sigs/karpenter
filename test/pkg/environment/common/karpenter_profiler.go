@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/google/pprof/profile"
@@ -29,18 +28,17 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 )
 
-const pollInterval = 10 * time.Second
+const CPUProfileSeconds = 20
 
 // KarpenterProfiler polls pprof for Karpenter memory and CPU usage and captures profiles at peak
 type KarpenterProfiler struct {
 	env               *Environment
-	mu                sync.Mutex
 	peakMemoryMB      float64
 	peakMemoryProfile []byte
 	peakCPUNanos      int64
 	peakCPUProfile    []byte
 	cancel            context.CancelFunc
-	wg                sync.WaitGroup
+	done              chan struct{}
 	pollCount         int
 	lastError         string
 }
@@ -51,87 +49,70 @@ func StartKarpenterProfiler(env *Environment) *KarpenterProfiler {
 	kp := &KarpenterProfiler{
 		env:    env,
 		cancel: cancel,
+		done:   make(chan struct{}),
 	}
-	kp.wg.Add(1)
-	go kp.poll(ctx)
+	go kp.run(ctx)
 	return kp
 }
 
 // Stop stops the profiler and returns peak memory (MB), memory profile, peak CPU (nanoseconds), and CPU profile
 func (kp *KarpenterProfiler) Stop() (float64, []byte, int64, []byte) {
 	kp.cancel()
-	kp.wg.Wait()
-	kp.mu.Lock()
-	defer kp.mu.Unlock()
+	<-kp.done
 	GinkgoWriter.Printf("KarpenterProfiler: Stopped after %d polls, peakMemory=%.2f MB, peakCPU=%.2f ms, lastError=%s\n", kp.pollCount, kp.peakMemoryMB, float64(kp.peakCPUNanos)/1e6, kp.lastError)
 	return kp.peakMemoryMB, kp.peakMemoryProfile, kp.peakCPUNanos, kp.peakCPUProfile
 }
 
-func (kp *KarpenterProfiler) poll(ctx context.Context) {
-	defer kp.wg.Done()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+func (kp *KarpenterProfiler) run(ctx context.Context) {
+	defer close(kp.done)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			kp.mu.Lock()
-			kp.pollCount++
-			kp.mu.Unlock()
-
-			memMB, memProfile, cpuNanos, cpuProfile := kp.captureProfiles()
-
-			kp.mu.Lock()
-			if memMB > kp.peakMemoryMB {
-				kp.peakMemoryMB = memMB
-				kp.peakMemoryProfile = memProfile
-			}
-			if cpuNanos > kp.peakCPUNanos {
-				kp.peakCPUNanos = cpuNanos
-				kp.peakCPUProfile = cpuProfile
-			}
-			kp.mu.Unlock()
+		default:
 		}
+
+		kp.pollCount++
+		kp.captureProfiles(ctx)
 	}
 }
 
-func (kp *KarpenterProfiler) captureProfiles() (float64, []byte, int64, []byte) {
+func (kp *KarpenterProfiler) captureProfiles(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
-			kp.mu.Lock()
 			kp.lastError = fmt.Sprintf("captureProfiles panic: %v", r)
-			kp.mu.Unlock()
 		}
 	}()
 
 	pod := kp.env.ExpectActiveKarpenterPod()
 	if pod == nil {
-		return 0, nil, 0, nil
+		return
 	}
 
-	ctx, cancel := context.WithTimeout(kp.env.Context, 20*time.Second)
+	portCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	localPort := rand.IntnRange(1024, 49151)
-	kp.env.ExpectPodPortForwarded(ctx, pod, 8080, localPort)
+	kp.env.ExpectPodPortForwarded(portCtx, pod, 8080, localPort)
 
-	// Capture heap profile
-	memMB, memData := kp.fetchHeapProfile(localPort)
+	// Capture heap profile (instant)
+	if memMB, memData := kp.fetchHeapProfile(localPort); memMB > kp.peakMemoryMB {
+		kp.peakMemoryMB = memMB
+		kp.peakMemoryProfile = memData
+	}
 
-	// Capture CPU profile (5 second sample)
-	cpuNanos, cpuData := kp.fetchCPUProfile(localPort)
-
-	return memMB, memData, cpuNanos, cpuData
+	// Capture CPU profile (20 second sample)
+	if cpuNanos, cpuData := kp.fetchCPUProfile(localPort); cpuNanos > kp.peakCPUNanos {
+		kp.peakCPUNanos = cpuNanos
+		kp.peakCPUProfile = cpuData
+	}
 }
 
 func (kp *KarpenterProfiler) fetchHeapProfile(port int) (float64, []byte) {
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/heap", port))
 	if err != nil {
-		kp.mu.Lock()
 		kp.lastError = fmt.Sprintf("pprof heap error: %v", err)
-		kp.mu.Unlock()
 		return 0, nil
 	}
 	defer resp.Body.Close()
@@ -150,7 +131,7 @@ func (kp *KarpenterProfiler) fetchHeapProfile(port int) (float64, []byte) {
 }
 
 func (kp *KarpenterProfiler) fetchCPUProfile(port int) (int64, []byte) {
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/profile?seconds=5", port))
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/profile?seconds=%d", port, CPUProfileSeconds))
 	if err != nil {
 		return 0, nil
 	}

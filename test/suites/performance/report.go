@@ -52,7 +52,9 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 		GinkgoWriter.Printf("Karpenter Memory: Not available\n")
 	}
 	if report.KarpenterCPUNanos > 0 {
-		GinkgoWriter.Printf("Karpenter CPU: %.2f ms\n", float64(report.KarpenterCPUNanos)/1e6)
+		// CPU utilization % = (CPU time used / sample duration) * 100
+		cpuUtilPct := float64(report.KarpenterCPUNanos) / (common.CPUProfileSeconds * 1e9) * 100
+		GinkgoWriter.Printf("Karpenter CPU: %.1f%% (%.0f ms)\n", cpuUtilPct, float64(report.KarpenterCPUNanos)/1e6)
 	} else {
 		GinkgoWriter.Printf("Karpenter CPU: Not available\n")
 	}
