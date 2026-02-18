@@ -49,7 +49,7 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	if report.KarpenterMemoryMB > 0 {
 		GinkgoWriter.Printf("Karpenter Memory: %.2f MB\n", report.KarpenterMemoryMB)
 	} else {
-		GinkgoWriter.Printf("Karpenter Memory: Not available (metrics not found)\n")
+		GinkgoWriter.Printf("Karpenter Memory: Not available\n")
 	}
 
 	// File output
@@ -117,7 +117,7 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 		TotalReservedMemoryUtil: avgMemUtil,
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
-		Rounds:                  1,
+		Rounds:                  1, // Scale-out is always 1 round
 		Timestamp:               time.Now(),
 		KarpenterMemoryMB:       peakMemoryMB,
 		ProfileData:             peakProfileData,
