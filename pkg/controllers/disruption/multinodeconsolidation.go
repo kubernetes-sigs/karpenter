@@ -82,13 +82,32 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		disruptionBudgetMapping[candidate.NodePool.Name]--
 	}
 
-	// Only consider a maximum batch of 100 NodeClaims to save on computation.
-	// This could be further configurable in the future.
-	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
+	// create 1 command per node-type and az, making the checks much simpler since no candidate should get rejected
+	// and also faster since fewer candidates will be compared,
+	// and avoid issue with consolidation not working with >100 nodes
+	var cmd Command
+	var err error
+	groupedCandidates := lo.GroupBy(disruptableCandidates, func(candidate *Candidate) string {
+		return candidate.Labels()["node-type"] + "/" + candidate.Labels()["topology.kubernetes.io/zone"]
+	})
+	for group, cs := range groupedCandidates {
+		// Only consider a maximum batch of 100 NodeClaims to save on computation.
+		// This could be further configurable in the future.
+		maxParallel := lo.Clamp(len(cs), 0, 100)
+		cmd, err = m.firstNConsolidationOption(ctx, cs, maxParallel)
 
-	cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
-	if err != nil {
-		return []Command{}, err
+		// do not stop when a single group has problems, maybe others work
+		if err != nil {
+			log.FromContext(ctx).V(1).Error(err, "ignoring failed multinodeconsolidation option", "group", group)
+			continue
+		}
+
+		// if we find a good command we can stop, keep in sync with checks below
+		if cmd.Decision() != NoOpDecision {
+			if _, err = m.validator.Validate(ctx, cmd, consolidationTTL); err == nil {
+				break
+			}
+		}
 	}
 
 	if cmd.Decision() == NoOpDecision {
