@@ -62,6 +62,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
+			Expect(scaleOutReport.KarpenterMemoryMB).To(BeNumerically("<", 300),
+				"Karpenter controller memory should be less than 300 MB during scale-out")
 
 			// ========== PHASE 2: Interference Scale Out TEST ==========
 			By("Net scaling out interference test")
@@ -87,6 +89,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
+			Expect(interferenceReport.KarpenterMemoryMB).To(BeNumerically("<", 550),
+				"Karpenter controller memory should be less than 550 MB during scale-out")
 
 			// ========== PHASE 3: Interference Scale In TEST ==========
 			By("Executing interference consolidation test (small_deployment scales out to 400, large_deployment scales in to 200)")
@@ -117,6 +121,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should remain greater than 38% after consolidation")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should remain greater than 40% after consolidation")
+			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 450),
+				"Karpenter controller memory should be less than 450 MB during consolidation")
 
 		})
 	})

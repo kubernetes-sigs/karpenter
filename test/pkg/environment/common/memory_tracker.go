@@ -61,7 +61,7 @@ func (mt *MemoryTracker) Stop() (float64, []byte) {
 	mt.wg.Wait()
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
-	GinkgoWriter.Printf("[MemoryTracker] Stopped after %d polls, peak=%.2f MB, lastError=%s\n", mt.pollCount, mt.peakMemoryMB, mt.lastError)
+	GinkgoWriter.Printf("MemoryTracker: Stopped after %d polls, peak=%.2f MB, lastError=%s\n", mt.pollCount, mt.peakMemoryMB, mt.lastError)
 	return mt.peakMemoryMB, mt.peakProfileData
 }
 
@@ -88,7 +88,6 @@ func (mt *MemoryTracker) poll(ctx context.Context) {
 			if memMB > mt.peakMemoryMB {
 				mt.peakMemoryMB = memMB
 				mt.peakProfileData = profileData
-				GinkgoWriter.Printf("[MemoryTracker] New peak: %.2f MB\n", memMB)
 			}
 			mt.mu.Unlock()
 		}
