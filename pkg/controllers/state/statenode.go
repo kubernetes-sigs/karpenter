@@ -518,7 +518,7 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 				})
 				node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 			}
-			if !equality.Semantic.DeepEqual(stored, node) {
+			if !equality.Semantic.DeepEqual(stored.Spec.Taints, node.Spec.Taints) {
 				// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 				// can cause races due to the fact that it fully replaces the list on a change
 				// Here, we are updating the taint list
@@ -547,7 +547,7 @@ func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, con
 			}
 			stored := nodeClaim.DeepCopy()
 			_ = nodeClaim.StatusConditions().Clear(conditionType)
-			if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+			if !equality.Semantic.DeepEqual(stored.Status, nodeClaim.Status) {
 				return kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
 			}
 			return nil
