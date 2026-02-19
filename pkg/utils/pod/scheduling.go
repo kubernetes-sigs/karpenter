@@ -52,11 +52,13 @@ func IsReschedulable(pod *corev1.Pod) bool {
 // - Is an active pod (isn't terminal or actively terminating)
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+// - Isn't owned by a DaemonSet (DaemonSet pods will be handled by DaemonSet controller)
 // - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls)
 func IsEvictable(pod *corev1.Pod) bool {
 	return IsActive(pod) &&
 		!ToleratesDisruptedNoScheduleTaint(pod) &&
 		!IsOwnedByNode(pod) &&
+		!IsOwnedByDaemonSet(pod) &&
 		!HasDoNotDisrupt(pod)
 }
 
@@ -72,6 +74,7 @@ func IsWaitingEviction(pod *corev1.Pod, clk clock.Clock) bool {
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a pod that has been terminating past its terminationGracePeriodSeconds
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+// - Isn't owned by a DaemonSet (DaemonSet pods will be handled by DaemonSet controller)
 // Note: pods with the `karpenter.sh/do-not-disrupt` annotation are included since node drain should stall until these pods are evicted or become terminal, even though Karpenter won't orchestrate the eviction.
 func IsDrainable(pod *corev1.Pod, clk clock.Clock) bool {
 	return !ToleratesDisruptedNoScheduleTaint(pod) &&
@@ -79,7 +82,10 @@ func IsDrainable(pod *corev1.Pod, clk clock.Clock) bool {
 		// Mirror pods cannot be deleted through the API server since they are created and managed by kubelet
 		// This means they are effectively read-only and can't be controlled by API server calls
 		// https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain
-		!IsOwnedByNode(pod)
+		!IsOwnedByNode(pod) &&
+		// DaemonSet pods should not be drained during disruption as they will be automatically
+		// managed by the DaemonSet controller and recreated on other nodes when needed
+		!IsOwnedByDaemonSet(pod)
 }
 
 // IsPodEligibleForForcedEviction checks if a pod needs to be deleted with a reduced grace period ensuring that the pod:
