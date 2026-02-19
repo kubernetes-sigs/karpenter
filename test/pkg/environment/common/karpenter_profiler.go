@@ -25,7 +25,6 @@ import (
 
 	"github.com/google/pprof/profile"
 	. "github.com/onsi/ginkgo/v2"
-	"k8s.io/apimachinery/pkg/util/rand"
 )
 
 const CPUProfileSeconds = 20
@@ -93,7 +92,7 @@ func (kp *KarpenterProfiler) captureProfiles(ctx context.Context) {
 	portCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	localPort := rand.IntnRange(1024, 49151)
+	localPort := 1024
 	kp.env.ExpectPodPortForwarded(portCtx, pod, 8080, localPort)
 
 	// Capture heap profile (instant)
