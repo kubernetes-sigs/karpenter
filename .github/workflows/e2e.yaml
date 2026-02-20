@@ -82,7 +82,10 @@ jobs:
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
       with:
         name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
-        path: ${{ env.OUTPUT_DIR }}/*_performance_report.json
+        path: |
+          ${{ env.OUTPUT_DIR }}/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
+          ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
         retention-days: 30
         if-no-files-found: ignore
     - name: cleanup 
