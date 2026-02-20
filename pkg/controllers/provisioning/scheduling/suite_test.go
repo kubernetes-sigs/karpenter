@@ -3472,6 +3472,48 @@ var _ = Context("Scheduling", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
+		It("should not launch nodes for pod with bound persistentVolume that is marked for deletion", func() {
+			volumeName := "tmp-ephemeral"
+			pod := test.UnschedulablePod()
+			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: volumeName,
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								AccessModes: []corev1.PersistentVolumeAccessMode{
+									corev1.ReadWriteOnce,
+								},
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			pv := test.PersistentVolume(test.PersistentVolumeOptions{
+				Driver: "other-provider",
+			})
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: pod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+				},
+				VolumeName: pv.Name,
+			})
+			ExpectApplied(ctx, env.Client, nodePool, pvc, pv, pod)
+			ExpectDeletionTimestampSet(ctx, env.Client, pv)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+
+			var nodeList corev1.NodeList
+			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+			// no nodes should be created as the persistent volume has a deletion timestamp set
+			Expect(nodeList.Items).To(HaveLen(0))
+		})
 		It("should not launch nodes for pod with Lost persistentVolumeClaim", func() {
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{

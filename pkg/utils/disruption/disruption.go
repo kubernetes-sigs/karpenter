@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"strconv"
 
@@ -52,8 +51,8 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 	if ok {
 		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
 		if err != nil {
-			log.FromContext(ctx).Error(err, fmt.Sprintf("failed parsing %s=%s from pod %s",
-				corev1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p)))
+			log.FromContext(ctx).Error(err, "failed parsing pod deletion cost",
+				"annotation", corev1.PodDeletionCost, "value", podDeletionCostStr, "pod", client.ObjectKeyFromObject(p))
 		} else {
 			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
 			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.

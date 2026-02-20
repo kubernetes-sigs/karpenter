@@ -68,7 +68,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
 			ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: s.ConsolidationType()})
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
+			log.FromContext(ctx).V(1).Info("abandoning single-node consolidation due to timeout", "candidates_evaluated", i)
 
 			s.PreviouslyUnseenNodePools = unseenNodePools
 
@@ -151,7 +151,7 @@ func (s *SingleNodeConsolidation) shuffleCandidates(ctx context.Context, nodePoo
 	var result []*Candidate
 	// Log any timed out nodepools that we're prioritizing
 	if s.PreviouslyUnseenNodePools.Len() != 0 {
-		log.FromContext(ctx).V(1).Info(fmt.Sprintf("prioritizing nodepools that have not yet been considered due to timeouts in previous runs: %s", strings.Join(s.PreviouslyUnseenNodePools.UnsortedList(), ", ")))
+		log.FromContext(ctx).V(1).Info("prioritizing nodepools that have not yet been considered due to timeouts in previous runs", "nodepools", strings.Join(s.PreviouslyUnseenNodePools.UnsortedList(), ", "))
 	}
 	sortedNodePools := s.PreviouslyUnseenNodePools.UnsortedList()
 	sortedNodePools = append(sortedNodePools, lo.Filter(lo.Keys(nodePoolCandidates), func(nodePoolName string, _ int) bool {
