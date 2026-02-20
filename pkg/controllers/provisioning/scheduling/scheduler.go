@@ -610,11 +610,9 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
 					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
-				).Info(fmt.Sprintf(
-					"%d out of %d instance types were excluded because they would breach limits",
-					len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
-					len(s.nodeClaimTemplates[i].InstanceTypeOptions),
-				))
+				).Info("instance types were excluded because they would breach limits",
+					"excluded", len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
+					"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
 			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
