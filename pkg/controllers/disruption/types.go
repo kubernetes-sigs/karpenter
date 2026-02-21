@@ -191,6 +191,12 @@ func (c Command) SourceNodeNames() []string {
 // String returns a human-readable representation of the command
 func (c Command) String() string {
 	sources := strings.Join(c.SourceNodeNames(), ", ")
+	nodePools := strings.Join(lo.Uniq(lo.FilterMap(c.Candidates, func(candidate *Candidate, _ int) (string, bool) {
+		if candidate.NodePool == nil {
+			return "", false
+		}
+		return candidate.NodePool.Name, true
+	})), ",")
 
 	// For test commands without Method/ID set, use simple format
 	if c.Method == nil {
@@ -204,15 +210,15 @@ func (c Command) String() string {
 		return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
 	}
 
-	// Full format with reason, ID, and savings
+	// Full format with reason, ID, nodepools, and savings
 	if len(c.Replacements) > 0 {
 		plural := "replacements"
 		if len(c.Replacements) == 1 {
 			plural = "replacement"
 		}
-		return fmt.Sprintf("%s/%s: %s: [%s] -> [%d %s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, len(c.Replacements), plural, c.EstimatedSavings())
+		return fmt.Sprintf("%s/%s: %s: nodepools=[%s]: [%s] -> [%d %s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), nodePools, sources, len(c.Replacements), plural, c.EstimatedSavings())
 	}
-	return fmt.Sprintf("%s/%s: %s: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, c.EstimatedSavings())
+	return fmt.Sprintf("%s/%s: %s: nodepools=[%s]: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), nodePools, sources, c.EstimatedSavings())
 }
 
 // StringForNode returns a string representation of the command from the perspective of a single source candidate node.
