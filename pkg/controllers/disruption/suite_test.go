@@ -111,7 +111,7 @@ var _ = BeforeEach(func() {
 	recorder.Reset() // Reset the events that we captured during the run
 
 	// Ensure that we reset the disruption controller's methods after each test run
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithNopValidator()...))
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithNopValidator()...), disruption.WithPollingPeriod(options.FromContext(ctx).DisruptionPollingPeriod))
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
 	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
