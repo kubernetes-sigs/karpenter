@@ -103,9 +103,34 @@ func NewTopologyGroup(
 		selector = labels.Nothing()
 	}
 
+	// Extract pod requirements from nodeSelector and nodeAffinity
+	// This will be used to filter domains based on NodePool compatibility
+	// We need to collect all possible requirement combinations since NodeSelectorTerms are OR'd together
+	var podRequirementsList []scheduling.Requirements
+
+	baseRequirements := scheduling.NewLabelRequirements(pod.Spec.NodeSelector)
+
+	if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil &&
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil &&
+		len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) > 0 {
+		// NodeSelectorTerms are OR'd together, so we need to consider all terms
+		// A domain is valid if it's compatible with ANY of the terms
+		for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			termRequirements := scheduling.NewRequirements()
+			// Add base requirements from nodeSelector
+			termRequirements.Add(baseRequirements.Values()...)
+			// Add requirements from this specific term
+			termRequirements.Add(scheduling.NewNodeSelectorRequirements(term.MatchExpressions...).Values()...)
+			podRequirementsList = append(podRequirementsList, termRequirements)
+		}
+	} else {
+		// No node affinity, just use base requirements from nodeSelector
+		podRequirementsList = append(podRequirementsList, baseRequirements)
+	}
+
 	domains := map[string]int32{}
 	emptyDomains := sets.New[string]()
-	domainGroup.ForEachDomain(pod, nodeFilter.TaintPolicy, func(domain string) {
+	domainGroup.ForEachDomainWithMultipleRequirements(pod, podRequirementsList, nodeFilter.TaintPolicy, func(domain string) {
 		domains[domain] = 0
 		emptyDomains.Insert(domain)
 	})
