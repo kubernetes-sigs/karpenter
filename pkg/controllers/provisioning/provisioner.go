@@ -57,6 +57,7 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // LaunchOptions are the set of options that can be used to trigger certain
@@ -141,10 +142,41 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	if len(results.NewNodeClaims) == 0 {
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
+	p.forceRTypesForRPods(ctx, results.NewNodeClaims)
 	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisionedReason), RecordPodNomination); err != nil {
 		return reconciler.Result{}, err
 	}
 	return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+}
+
+func (p *Provisioner) forceRTypesForRPods(ctx context.Context, nodeClaims []*scheduler.NodeClaim) {
+	for _, nc := range nodeClaims {
+		// check that both types are still possible
+		rTypes, nonRTypes := lo.FilterReject(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) bool {
+			return strings.HasPrefix(it.Name, "r")
+		})
+		if len(nonRTypes) == 0 || len(rTypes) == 0 {
+			continue
+		}
+
+		// calculate the memory:cpu ratio
+		requests := resources.RequestsForPods(nc.Pods...)
+		requestedMemory := requests[corev1.ResourceMemory]
+		requestedCPU := requests[corev1.ResourceCPU]
+		if requestedCPU.IsZero() {
+			continue
+		}
+		memoryGB := float64(requestedMemory.Value()) / (1024 * 1024 * 1024)
+		cpuCores := float64(requestedCPU.MilliValue()) / 1000.0
+		ratio := memoryGB / cpuCores
+
+		// force r type if it makes sense
+		if ratio < 5.0 { // m nodes have a 4:1 ratio, and r nodes cost 20% more, so it is only worth it when we reach >=5:1
+			continue
+		}
+		log.FromContext(ctx).WithValues("ratio", ratio).V(1).Info("forcing r instance-types because of high memory ratio")
+		nc.InstanceTypeOptions = rTypes
+	}
 }
 
 // CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
