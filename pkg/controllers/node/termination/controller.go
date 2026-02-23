@@ -58,6 +58,7 @@ import (
 const (
 	minReconciles = 100
 	maxReconciles = 5000
+	MinDrainTime  = 5 * time.Second
 )
 
 // Controller for the resource
@@ -190,8 +191,8 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 
 type terminationFunc func(context.Context, *v1.NodeClaim, *corev1.Node, *time.Time) (reconcile.Result, error)
 
-// awaitDrain initiates the drain of the node and will continue to requeue until the node has been drained. If the
-// nodeClaim has a terminationGracePeriod set, pods will be deleted to ensure this function does not requeue past the
+// awaitDrain initiates the drain of the node and will continue to requeue until the node has been drained and the minimum drain time has passed.
+// If the nodeClaim has a terminationGracePeriod set, pods will be deleted to ensure this function does not requeue past the
 // nodeTerminationTime.
 func (c *Controller) awaitDrain(
 	ctx context.Context,
@@ -199,16 +200,27 @@ func (c *Controller) awaitDrain(
 	node *corev1.Node,
 	nodeTerminationTime *time.Time,
 ) (reconcile.Result, error) {
+	if nodeClaim != nil && nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained) == nil {
+		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
+	}
 	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-		if nodeClaim != nil {
-			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
-		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
+
+	// If the nodeclaim exists, check if minDrainTime has elapsed. If it hasn't we should requeue.
+	// This check helps to ensure that we drain pods scheduled to the Node immediately after we taint it, which
+	// can occur when the scheduler has not seen the taint yet.
+	if nodeClaim != nil {
+		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained)
+		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < MinDrainTime) {
+			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		}
+	}
+
 	if nodeClaim != nil {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrained)
 	}
