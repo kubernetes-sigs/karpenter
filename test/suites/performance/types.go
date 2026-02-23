@@ -45,4 +45,8 @@ type PerformanceReport struct {
 	PodsPerNode             float64       `json:"pods_per_node"`
 	Rounds                  int           `json:"rounds"`
 	Timestamp               time.Time     `json:"timestamp"`
+	KarpenterMemoryMB       float64       `json:"karpenter_memory_mb"`
+	KarpenterCPUNanos       int64         `json:"karpenter_cpu_nanos"`
+	MemoryProfileData       []byte        `json:"-"` // pprof heap profile at peak memory
+	CPUProfileData          []byte        `json:"-"` // pprof cpu profile at peak
 }
