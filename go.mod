@@ -24,17 +24,17 @@ require (
 	go.uber.org/zap v1.27.1
 	golang.org/x/text v0.34.0
 	golang.org/x/time v0.14.0
-	k8s.io/api v0.35.0
-	k8s.io/apiextensions-apiserver v0.35.0
-	k8s.io/apimachinery v0.35.0
-	k8s.io/client-go v0.35.0
-	k8s.io/cloud-provider v0.35.0
-	k8s.io/component-base v0.35.0
-	k8s.io/component-helpers v0.35.0
-	k8s.io/csi-translation-lib v0.35.0
+	k8s.io/api v0.35.1
+	k8s.io/apiextensions-apiserver v0.35.1
+	k8s.io/apimachinery v0.35.1
+	k8s.io/client-go v0.35.1
+	k8s.io/cloud-provider v0.35.1
+	k8s.io/component-base v0.35.1
+	k8s.io/component-helpers v0.35.1
+	k8s.io/csi-translation-lib v0.35.1
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/utils v0.0.0-20251222233032-718f0e51e6d2
-	sigs.k8s.io/controller-runtime v0.22.4
+	sigs.k8s.io/controller-runtime v0.23.1
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -95,7 +95,7 @@ require (
 	k8s.io/kube-openapi v0.0.0-20251125145642-4e65d59e963e // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
-	sigs.k8s.io/structured-merge-diff/v6 v6.3.1 // indirect
+	sigs.k8s.io/structured-merge-diff/v6 v6.3.2-0.20260122202528-d9cc6641c482 // indirect
 )
 
 retract (
