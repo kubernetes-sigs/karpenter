@@ -59,6 +59,7 @@ get-kind-image: ## Extract the actual KWOK image repository from Kind cluster
 	@echo "Using Repository: $(IMG_REPOSITORY), Tag: $(IMG_TAG)"
 
 setup-kind-dra: ## Setup Kind cluster for DRA testing
+	-kind delete cluster --name $(KIND_CLUSTER_NAME)
 	kind create cluster --image kindest/node:v1.34.0 --name $(KIND_CLUSTER_NAME)
 	KWOK_REPO=kind.local KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) $(MAKE) install-kwok
 	KWOK_REPO=kind.local KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) $(MAKE) build-with-kind

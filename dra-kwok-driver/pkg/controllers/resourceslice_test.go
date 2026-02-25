@@ -291,8 +291,8 @@ var _ = Describe("ResourceSliceController", func() {
 			// Create DRAConfig CRD
 			draConfig = &v1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      driverName, // "test.karpenter.sh"
-					Namespace: namespace,  // "karpenter"
+					Name:      "test-config",
+					Namespace: namespace,
 				},
 				Spec: v1alpha1.DRAConfigSpec{
 					Driver: driverName,
