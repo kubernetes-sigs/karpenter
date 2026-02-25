@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -40,14 +41,16 @@ type Drift struct {
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
 	recorder    events.Recorder
+	clock       clock.Clock
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
 		recorder:    recorder,
+		clock:       clk,
 	}
 }
 
@@ -62,6 +65,8 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
 	})
+
+	candidates = d.filterBySequentialTopology(candidates)
 
 	emptyCandidates, nonEmptyCandidates := lo.FilterReject(candidates, func(c *Candidate, _ int) bool {
 		return len(c.reschedulablePods) == 0
@@ -113,4 +118,112 @@ func (d *Drift) Class() string {
 
 func (d *Drift) ConsolidationType() string {
 	return ""
+}
+
+// filterBySequentialTopology restricts candidates to a single active AZ for
+// NodePools with an active Sequential topology budget.
+//
+// Algorithm:
+//  1. Group candidates by NodePool.
+//  2. For each NodePool with an active sequential topology budget:
+//     a. Scan cluster nodes to find which zones have in-flight disruptions
+//        (MarkedForDeletion nodes in this NodePool).
+//     b. If any zone has in-flight disruptions → active zone = that zone.
+//     c. If no in-flight disruptions → active zone = zone of candidates[0]
+//        (already sorted oldest-drift-first, so this is the most urgent zone).
+//     d. Count disrupting nodes in the active zone, compute remaining budget.
+//     e. Return only candidates from the active zone, capped at remaining budget.
+func (d *Drift) filterBySequentialTopology(candidates []*Candidate) []*Candidate {
+	byNodePool := lo.GroupBy(candidates, func(c *Candidate) string { return c.NodePool.Name })
+	allNodes := d.cluster.DeepCopyNodes()
+
+	var result []*Candidate
+	for npName, npCandidates := range byNodePool {
+		budget := d.findActiveSequentialBudget(npCandidates[0].NodePool)
+		if budget == nil {
+			result = append(result, npCandidates...)
+			continue
+		}
+		topologyKey := budget.TopologyKey
+
+		// Count nodes and in-flight disruptions per zone for this NodePool
+		inFlightByZone := map[string]int{}
+		numByZone := map[string]int{}
+		for _, n := range allNodes {
+			if !n.Managed() || !n.Initialized() {
+				continue
+			}
+			if n.Labels()[v1.NodePoolLabelKey] != npName {
+				continue
+			}
+			if n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+				continue
+			}
+			zone := n.Labels()[topologyKey]
+			if zone == "" {
+				continue
+			}
+			numByZone[zone]++
+			if n.MarkedForDeletion() {
+				inFlightByZone[zone]++
+			}
+		}
+
+		// Determine active zone: prefer zone with in-flight disruptions
+		activeZone := ""
+		for zone, count := range inFlightByZone {
+			if count > 0 {
+				activeZone = zone
+				break
+			}
+		}
+		if activeZone == "" && len(npCandidates) > 0 {
+			// No in-flight disruptions; start with the oldest-drifted candidate's zone
+			activeZone = npCandidates[0].zone
+		}
+		if activeZone == "" {
+			result = append(result, npCandidates...)
+			continue
+		}
+
+		// Calculate remaining per-zone budget
+		allowance, err := budget.GetAllowedDisruptions(d.clock, numByZone[activeZone])
+		if err != nil || allowance == 0 {
+			continue
+		}
+		remaining := lo.Max([]int{allowance - inFlightByZone[activeZone], 0})
+		if remaining == 0 {
+			continue
+		}
+
+		// Filter to active zone only, capped at remaining budget
+		zoneCandidates := lo.Filter(npCandidates, func(c *Candidate, _ int) bool {
+			return c.zone == activeZone
+		})
+		if len(zoneCandidates) > remaining {
+			zoneCandidates = zoneCandidates[:remaining]
+		}
+		result = append(result, zoneCandidates...)
+	}
+	return result
+}
+
+// findActiveSequentialBudget returns the first active budget with TopologyKey +
+// Sequential=true that applies to the Drifted reason. Returns nil if none.
+func (d *Drift) findActiveSequentialBudget(nodePool *v1.NodePool) *v1.Budget {
+	for i := range nodePool.Spec.Disruption.Budgets {
+		b := &nodePool.Spec.Disruption.Budgets[i]
+		if b.TopologyKey == "" || !b.Sequential {
+			continue
+		}
+		if b.Reasons != nil && !lo.Contains(b.Reasons, v1.DisruptionReasonDrifted) {
+			continue
+		}
+		active, err := b.IsActive(d.clock)
+		if err != nil || !active {
+			continue
+		}
+		return b
+	}
+	return nil
 }

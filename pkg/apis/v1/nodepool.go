@@ -105,6 +105,7 @@ type Disruption struct {
 	// the most restrictive value. If left undefined,
 	// this will default to one budget with a value to 10%.
 	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="self.all(x, has(x.schedule) == has(x.duration))"
+	// +kubebuilder:validation:XValidation:message="'sequential' requires 'topologyKey'",rule="self.all(x, !has(x.sequential) || !x.sequential || (has(x.topologyKey) && x.topologyKey != ''))"
 	// +kubebuilder:default:={{nodes: "10%"}}
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
@@ -151,6 +152,18 @@ type Budget struct {
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
+	//nolint:kubeapilinter
+	// TopologyKey, when set, scopes this budget to individual topology domains.
+	// The Nodes limit is applied per distinct value of this label key.
+	// For example, "topology.kubernetes.io/zone" enforces the limit per AZ.
+	// +optional
+	TopologyKey string `json:"topologyKey,omitempty"`
+	//nolint:kubeapilinter
+	// Sequential, when true with TopologyKey, ensures only one topology domain
+	// is disrupted at a time. Disruptions in one zone must complete before the
+	// next zone begins. Requires TopologyKey to be set.
+	// +optional
+	Sequential bool `json:"sequential,omitempty"`
 }
 
 type ConsolidationPolicy string
@@ -349,6 +362,11 @@ func (in *NodePool) GetAllowedDisruptionsByReason(c clock.Clock, numNodes int, r
 	allowedNodes := math.MaxInt32
 	var multiErr error
 	for _, budget := range in.Spec.Disruption.Budgets {
+		// Topology-scoped budgets are enforced separately inside the Drift disruption method.
+		// Skip them here so they don't artificially constrain the NodePool-level count.
+		if budget.TopologyKey != "" {
+			continue
+		}
 		val, err := budget.GetAllowedDisruptions(c, numNodes)
 		if err != nil {
 			multiErr = multierr.Append(multiErr, err)
