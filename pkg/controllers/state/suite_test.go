@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -2875,6 +2876,77 @@ var _ = Describe("NodePoolState Tracking", func() {
 			running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 			Expect(running + deleting + pendingdisruption).To(Equal(1)) // Should have exactly one NodeClaim
 		})
+	})
+})
+
+var _ = Describe("StateNode Capacity", func() {
+	It("should include resources.Node in capacity for an initialized node", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("4"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectMakeNodesInitialized(ctx, env.Client, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		stateNode := ExpectStateNodeExists(cluster, node)
+		capacity := stateNode.Capacity()
+
+		Expect(capacity[resources.Node]).To(Equal(resource.MustParse("1")))
+	})
+	It("should include resources.Node in capacity for a NodeClaim without a Node", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("4"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
+		capacity := stateNode.Capacity()
+
+		Expect(capacity[resources.Node]).To(Equal(resource.MustParse("1")))
+	})
+	It("should include resources.Node in capacity for uninitialized node with NodeClaim", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("4"),
+				},
+			},
+		})
+		// Don't initialize - leave as uninitialized
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		stateNode := ExpectStateNodeExists(cluster, node)
+		capacity := stateNode.Capacity()
+
+		Expect(capacity[resources.Node]).To(Equal(resource.MustParse("1")))
 	})
 })
 
