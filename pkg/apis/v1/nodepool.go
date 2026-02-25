@@ -299,6 +299,7 @@ type ObjectMeta struct {
 // +kubebuilder:printcolumn:name="Weight",type="integer",JSONPath=".spec.weight",priority=1,description=""
 // +kubebuilder:printcolumn:name="CPU",type="string",JSONPath=".status.resources.cpu",priority=1,description=""
 // +kubebuilder:printcolumn:name="Memory",type="string",JSONPath=".status.resources.memory",priority=1,description=""
+// +kubebuilder:printcolumn:name="DriftedNodeClaims",type="integer",JSONPath=".status.resources.driftedNodeClaims",priority=1,description=""
 // +kubebuilder:subresource:status
 // +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.nodes
 type NodePool struct {
