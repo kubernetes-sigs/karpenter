@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -49,6 +50,7 @@ var nodeClaimController *informer.NodeClaimController
 var nodeController *informer.NodeController
 var ctx context.Context
 var env *test.Environment
+var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
@@ -64,10 +66,11 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	fakeClock = clock.NewFakeClock(time.Now())
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
+	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	nodePoolInformerController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
+	nodePoolInformerController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost)
 	nodePoolController = counter.NewController(env.Client, cloudProvider, cluster)
 })
 
@@ -114,7 +117,7 @@ var _ = Describe("Counter", func() {
 		})
 		expected = counter.BaseResources.DeepCopy()
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolInformerController, client.ObjectKeyFromObject(nodePool))
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 	})
@@ -143,7 +146,7 @@ var _ = Describe("Counter", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolInformerController, client.ObjectKeyFromObject(nodePool))
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.Status.Resources).To(BeNil())
@@ -328,7 +331,7 @@ var _ = Describe("Counter", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool2)
-			ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool2)
+			ExpectReconcileSucceeded(ctx, nodePoolInformerController, client.ObjectKeyFromObject(nodePool2))
 
 			// Create nodes for first nodepool
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
@@ -384,7 +387,7 @@ var _ = Describe("Counter", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, staticNodePool)
-			ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, staticNodePool)
+			ExpectReconcileSucceeded(ctx, nodePoolInformerController, client.ObjectKeyFromObject(staticNodePool))
 
 			// Create 2 nodes for the static nodepool (less than desired replicas)
 			instanceType := cloudProvider.InstanceTypes[0]

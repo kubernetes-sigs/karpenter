@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
@@ -67,20 +68,32 @@ var (
 			metrics.NodePoolLabel,
 		},
 	)
+	ClusterCost = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodePoolSubsystem,
+			Name:      "cost_total",
+			Help:      "Total cost of the nodepool from Karpenter's perspective. Units are determined by the cloud provider. Not an authoritative source for billing. Includes modifications due to NodeOverlays",
+		},
+		[]string{metrics.NodePoolLabel},
+	)
 )
 
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	clusterCost   *cost.ClusterCost
 	metricStore   *metrics.Store
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		metricStore:   metrics.NewStore(),
+		clusterCost:   clusterCost,
 	}
 }
 
@@ -98,12 +111,18 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if !nodepoolutils.IsManaged(nodePool, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
-	c.metricStore.Update(req.String(), buildMetrics(nodePool))
+	c.metricStore.Update(req.String(), c.buildMetrics(nodePool))
 	// periodically update our metrics per nodepool even if nothing has changed
-	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
+func (c *Controller) buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
+	res = append(res, &metrics.StoreMetric{
+		GaugeMetric: ClusterCost,
+		Labels:      map[string]string{metrics.NodePoolLabel: nodePool.Name},
+		Value:       c.clusterCost.GetNodepoolCost(nodePool),
+	})
+
 	for gaugeVec, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		Usage: nodePool.Status.Resources,
 		Limit: getLimits(nodePool),
