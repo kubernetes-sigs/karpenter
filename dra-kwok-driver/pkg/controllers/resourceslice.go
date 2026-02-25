@@ -191,10 +191,7 @@ func (r *ResourceSliceController) processDriver(
 		if !r.isKWOKNode(node) {
 			continue
 		}
-		// Count KWOK nodes only once
-		if i == 0 || nodes[i].Name != nodes[i-1].Name {
-			kwokNodeCount++
-		}
+		kwokNodeCount++
 
 		// Reconcile this node with mappings from this driver's config
 		expected, err := r.reconcileNodeResourceSlicesForDriver(ctx, node, driverName, mappings)

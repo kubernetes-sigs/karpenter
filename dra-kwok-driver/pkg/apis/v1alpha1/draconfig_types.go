@@ -133,7 +133,6 @@ type DRAConfigStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=draconfig;draconfigs
 // +kubebuilder:printcolumn:name="Driver",type=string,JSONPath=`.spec.driver`
-// +kubebuilder:printcolumn:name="Mappings",type=integer,JSONPath=`.status.nodeCount`
 // +kubebuilder:printcolumn:name="Nodes",type=integer,JSONPath=`.status.nodeCount`
 // +kubebuilder:printcolumn:name="ResourceSlices",type=integer,JSONPath=`.status.resourceSliceCount`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`

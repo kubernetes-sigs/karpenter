@@ -22,9 +22,6 @@ spec:
       name: Driver
       type: string
     - jsonPath: .status.nodeCount
-      name: Mappings
-      type: integer
-    - jsonPath: .status.nodeCount
       name: Nodes
       type: integer
     - jsonPath: .status.resourceSliceCount
@@ -66,7 +63,7 @@ spec:
               driver:
                 description: |-
                   driver specifies the DRA driver name that will manage these resources.
-                  Supports simulating multiple drivers like "gpu.nvidia.com", "fpga.intel.com", etc.
+                  Supports simulating multiple drivers
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                 type: string
               mappings:
