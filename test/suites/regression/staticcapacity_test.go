@@ -328,6 +328,43 @@ var _ = Describe("StaticCapacity", func() {
 		})
 	})
 
+	Context("Node Repair", func() {
+		BeforeEach(func() {
+			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+			if env.IsDefaultNodeClassKWOK() {
+				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
+					},
+				})
+			}
+			env.ExpectCreated(nodeClass, nodePool)
+		})
+
+		It("should repair static nodes", func() {
+			// Initially should have 1 nodes
+			node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 1)
+			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
+
+			unhealthyCondition := corev1.NodeCondition{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: time.Now().Add(-31 * time.Minute)},
+			}
+			node = env.ReplaceNodeConditions(node, unhealthyCondition)
+			env.ExpectStatusUpdated(node)
+
+			env.EventuallyExpectNotFound(node)
+			env.EventuallyExpectInitializedNodeCount("==", 1)
+		})
+	})
+
 	Context("Dynamic NodeClaim Interaction", func() {
 		var dynamicNodePool *v1.NodePool
 		var label map[string]string
