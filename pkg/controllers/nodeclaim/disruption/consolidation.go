@@ -28,13 +28,14 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// Consolidation is a nodeclaim sub-controller that adds or removes status conditions on empty nodeclaims based on consolidateAfter
+// Consolidation is a nodeclaim sub-controller that adds or removes status conditions on nodeclaims based on consolidateAfter.
+// Note: The consolidationGracePeriod filtering is handled in the main disruption controller (GetCandidates and SimulateScheduling)
+// to make nodes "invisible" to consolidation when they are within their grace period after a pod event.
 type Consolidation struct {
 	kubeClient client.Client
 	clock      clock.Clock
 }
 
-//nolint:gocyclo
 func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	hasConsolidatableCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable) != nil
 
@@ -69,7 +70,8 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 		return reconcile.Result{RequeueAfter: consolidatableTime.Sub(c.clock.Now())}, nil
 	}
 
-	// 6. Otherwise, add the consolidatable status condition
+	// Otherwise, add the consolidatable status condition
+	// Note: consolidationGracePeriod filtering happens at the disruption controller level
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 	if !hasConsolidatableCondition {
 		log.FromContext(ctx).V(1).Info("marking consolidatable")

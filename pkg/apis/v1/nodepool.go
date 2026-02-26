@@ -100,6 +100,21 @@ type Disruption struct {
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
 	//nolint:kubeapilinter
+	// ConsolidationGracePeriod is the duration after a pod event (add/remove) during which
+	// the node is invisible to the consolidation algorithm.
+	// When a node has a pod added or removed, it becomes invisible to consolidation
+	// for this duration. During this time, consolidation cannot:
+	// - Move pods OUT of this node (node cannot be a consolidation source)
+	// - Move pods INTO this node (node cannot be a consolidation destination)
+	// The timer resets every time there is a pod event on the node.
+	// This prevents consolidation churn by allowing nodes to "settle" after pod movements.
+	// When replicas is set, ConsolidationGracePeriod is simply ignored
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
+	// +kubebuilder:validation:Type="string"
+	// +kubebuilder:validation:Schemaless
+	// +optional
+	ConsolidationGracePeriod NillableDuration `json:"consolidationGracePeriod,omitempty"`
+	//nolint:kubeapilinter
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,
