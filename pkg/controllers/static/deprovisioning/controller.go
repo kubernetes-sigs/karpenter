@@ -250,7 +250,7 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, treating as non-empty")
 			return false
 		}
-		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, pod.HasDoNotDisrupt)
+		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, func(p *corev1.Pod) bool { return pod.IsDoNotDisruptActive(p, c.clock) })
 	})
 
 	for _, node := range lo.Slice(emptyNodes, 0, count) {
@@ -285,7 +285,7 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 		return NonEmptyNode{
 			node:            node,
 			pods:            pods,
-			hasDoNotDisrupt: lo.SomeBy(pods, pod.HasDoNotDisrupt),
+			hasDoNotDisrupt: lo.SomeBy(pods, func(p *corev1.Pod) bool { return pod.IsDoNotDisruptActive(p, c.clock) }),
 		}, true
 	})
 
