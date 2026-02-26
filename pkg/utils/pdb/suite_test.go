@@ -222,6 +222,64 @@ var _ = Describe("CanEvictPods", func() {
 			}),
 		),
 	)
+	It("ignores PDBs with disruption-ignore annotation set to true", func() {
+		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					karpenterv1.DisruptionIgnoreAnnotationKey: "true",
+				},
+			},
+			Labels:       podLabels,
+			MinAvailable: lo.ToPtr(intstr.FromInt(1)),
+		})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+		})
+		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+
+		// set pdb status to disallow disruptions
+		podDisruptionBudget.Status.DisruptionsAllowed = 0
+		ExpectApplied(ctx, env.Client, podDisruptionBudget)
+
+		limits, err := pdb.NewLimits(ctx, env.Client)
+		Expect(err).NotTo(HaveOccurred())
+
+		// should be able to evict even though disruptionsallowed=0, because pdb is ignored through annotation
+		violatingPDBs, canEvict := limits.CanEvictPods([]*v1.Pod{pod})
+		Expect(violatingPDBs).To(HaveLen(0))
+		Expect(canEvict).To(BeTrue())
+	})
+	It("respects PDBs with disruption-ignore annotation set to false", func() {
+		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					karpenterv1.DisruptionIgnoreAnnotationKey: "false",
+				},
+			},
+			Labels:       podLabels,
+			MinAvailable: lo.ToPtr(intstr.FromInt(1)),
+		})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+		})
+		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+
+		// set pdb status to disallow disruptions
+		podDisruptionBudget.Status.DisruptionsAllowed = 0
+		ExpectApplied(ctx, env.Client, podDisruptionBudget)
+
+		limits, err := pdb.NewLimits(ctx, env.Client)
+		Expect(err).NotTo(HaveOccurred())
+
+		// should not be able to evict because annotation is not "true"
+		violatingPDBs, canEvict := limits.CanEvictPods([]*v1.Pod{pod})
+		Expect(violatingPDBs).To(HaveLen(1))
+		Expect(canEvict).To(BeFalse())
+	})
 })
 
 var _ = Describe("IsCurrentlyReschedulable", func() {
