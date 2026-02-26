@@ -53,11 +53,12 @@ func IsReschedulable(pod *corev1.Pod) bool {
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 // - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls)
-func IsEvictable(pod *corev1.Pod) bool {
+// - Is within its disruption schedule window (if one is configured)
+func IsEvictable(pod *corev1.Pod, clk clock.Clock) bool {
 	return IsActive(pod) &&
 		!ToleratesDisruptedNoScheduleTaint(pod) &&
 		!IsOwnedByNode(pod) &&
-		!HasDoNotDisrupt(pod)
+		IsDisruptable(pod, clk)
 }
 
 // IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:
@@ -105,12 +106,21 @@ func IsProvisionable(pod *corev1.Pod) bool {
 		!IsOwnedByNode(pod)
 }
 
-// IsDisruptable checks if a pod can be disrupted based on validating the `karpenter.sh/do-not-disrupt` annotation on the pod.
-// It checks whether the following is true for the pod:
-// - Has the `karpenter.sh/do-not-disrupt` annotation
-// - Is an actively running pod
-func IsDisruptable(pod *corev1.Pod) bool {
-	return !IsActive(pod) || !HasDoNotDisrupt(pod)
+// IsDisruptable checks if a pod can be disrupted based on:
+// - The pod's active/terminal state (terminal pods are always disruptable)
+// - The `karpenter.sh/do-not-disrupt` annotation (takes precedence, blocks disruption)
+// - The `karpenter.sh/disruption-schedule` annotation (if set, must be within window)
+func IsDisruptable(pod *corev1.Pod, clk clock.Clock) bool {
+	// Terminal or inactive pods are always disruptable
+	if !IsActive(pod) {
+		return true
+	}
+	// do-not-disrupt annotation takes absolute precedence
+	if HasDoNotDisrupt(pod) {
+		return false
+	}
+	// Check disruption schedule (returns true if no schedule or within window)
+	return IsWithinDisruptionSchedule(pod, clk)
 }
 
 // FailedToSchedule ensures that the kube-scheduler has seen this pod and has intentionally
