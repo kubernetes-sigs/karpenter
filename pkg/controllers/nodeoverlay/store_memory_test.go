@@ -27,8 +27,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 // Memory limits for overlay scenarios (in number of allocations)
@@ -37,34 +39,39 @@ import (
 // If these tests fail, it indicates a potential memory regression that should be investigated.
 const (
 	// MaxAllocsNoOverlays is the maximum allowed allocations when no overlays are applied.
-	// With no overlays, instance types should be returned with minimal copying.
-	// Baseline: ~72,000 allocations
+	// With no overlays and no updates, applyAll returns a singleton slice containing
+	// just the original instance type. This path has minimal allocations.
+	// Baseline: ~71,500 allocations (no caching needed - no updates exist)
 	MaxAllocsNoOverlays = 100000
 
 	// MaxAllocsPriceOverlaysOnly is the maximum allowed allocations for price-only overlays.
-	// Price overlays require copying the offerings slice but not capacity.
-	// Baseline: ~1,380,000 allocations
-	MaxAllocsPriceOverlaysOnly = 1700000
+	// With FinalizeCache(), result slices are pre-computed and cached, so applyAll
+	// returns cached slices with zero new allocations in the hot path.
+	// Baseline: ~7 allocations
+	MaxAllocsPriceOverlaysOnly = 100
 
 	// MaxAllocsCapacityOverlaysOnly is the maximum allowed allocations for capacity-only overlays.
-	// Capacity overlays require copying the capacity map but not offerings.
-	// Baseline: ~72,000 allocations
-	MaxAllocsCapacityOverlaysOnly = 100000
+	// With FinalizeCache(), result slices are pre-computed and cached, so applyAll
+	// returns cached slices with zero new allocations in the hot path.
+	// Baseline: ~7 allocations
+	MaxAllocsCapacityOverlaysOnly = 100
 
 	// MaxAllocsMixedOverlays is the maximum allowed allocations when both price and capacity overlays are applied.
-	// This is the most expensive scenario as both offerings and capacity need to be copied.
-	// Baseline: ~7,260,000 allocations (200 instance types x 5 node pools x 100 iterations)
-	MaxAllocsMixedOverlays = 8800000
+	// With FinalizeCache(), all variants and result slices are pre-computed.
+	// Baseline: ~7 allocations
+	MaxAllocsMixedOverlays = 100
 
 	// MaxAllocsPerNodePool is the maximum allowed allocations per node pool when scaling.
 	// Used to verify memory scales linearly with node pool count.
-	// Baseline: ~1,451,000 allocations per node pool
-	MaxAllocsPerNodePool = 1500000
+	// With caching, allocations are nearly zero per node pool.
+	// Baseline: ~7 allocations total for all node pools (cached path)
+	MaxAllocsPerNodePool = 100
 
 	// MaxAllocsPerInstanceType is the maximum allowed allocations per instance type when scaling.
 	// Used to verify memory scales linearly with instance type count.
-	// Baseline: ~10,150 per instance type per node pool
-	MaxAllocsPerInstanceType = 10500
+	// With caching, allocations are nearly zero per instance type.
+	// Baseline: ~0.035 per instance type (7 allocs / 200 instance types)
+	MaxAllocsPerInstanceType = 10
 )
 
 // memStats captures memory statistics for a test
@@ -133,7 +140,7 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.applyAll(np, it)
 					}
 				}
 			}
@@ -151,34 +158,35 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 		It("should have controlled allocations with price-only overlays", func() {
 			store := newInternalInstanceTypeStore()
 			store.evaluatedNodePools.Insert("default")
-
-			updates := make(map[string]map[string]*instanceTypeUpdate)
-			updates["default"] = make(map[string]*instanceTypeUpdate)
+			overlayReqs := scheduling.NewRequirements()
 
 			for _, it := range instanceTypes {
-				priceUpdates := make(map[string]*priceUpdate)
+				spotOfferings := cloudprovider.Offerings{}
 				for _, offering := range it.Offerings {
 					if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
-						priceUpdates[offering.Requirements.String()] = &priceUpdate{
-							OverlayUpdate: lo.ToPtr("-10%"),
-							lowestWeight:  lo.ToPtr(int32(10)),
-						}
+						spotOfferings = append(spotOfferings, offering)
 					}
 				}
-				if len(priceUpdates) > 0 {
-					updates["default"][it.Name] = &instanceTypeUpdate{
-						Price:    priceUpdates,
-						Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
+				if len(spotOfferings) > 0 {
+					overlay := v1alpha1.NodeOverlay{
+						Spec: v1alpha1.NodeOverlaySpec{
+							Weight:          lo.ToPtr(int32(10)),
+							PriceAdjustment: lo.ToPtr("-10%"),
+						},
 					}
+					store.updateInstanceTypeOffering("default", it.Name, overlay, spotOfferings, overlayReqs)
 				}
 			}
-			store.updates = updates
+
+			store.FinalizeCache(map[string][]*cloudprovider.InstanceType{
+				"default": instanceTypes,
+			})
 
 			ms := captureMemStats()
 
 			for i := 0; i < 100; i++ {
 				for _, it := range instanceTypes {
-					_, _ = store.apply("default", it)
+					_ = store.applyAll("default", it)
 				}
 			}
 
@@ -195,27 +203,29 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 		It("should have controlled allocations with capacity-only overlays", func() {
 			store := newInternalInstanceTypeStore()
 			store.evaluatedNodePools.Insert("default")
-
-			updates := make(map[string]map[string]*instanceTypeUpdate)
-			updates["default"] = make(map[string]*instanceTypeUpdate)
+			overlayReqs := scheduling.NewRequirements()
 
 			for _, it := range instanceTypes {
-				updates["default"][it.Name] = &instanceTypeUpdate{
-					Price: nil,
-					Capacity: &capacityUpdate{
-						OverlayUpdate: corev1.ResourceList{
+				overlay := v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Weight: lo.ToPtr(int32(10)),
+						Capacity: corev1.ResourceList{
 							"hugepages-2Mi": resource.MustParse("100Mi"),
 						},
 					},
 				}
+				store.updateInstanceTypeCapacity("default", it.Name, overlay, overlayReqs)
 			}
-			store.updates = updates
+
+			store.FinalizeCache(map[string][]*cloudprovider.InstanceType{
+				"default": instanceTypes,
+			})
 
 			ms := captureMemStats()
 
 			for i := 0; i < 100; i++ {
 				for _, it := range instanceTypes {
-					_, _ = store.apply("default", it)
+					_ = store.applyAll("default", it)
 				}
 			}
 
@@ -237,7 +247,7 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.applyAll(np, it)
 					}
 				}
 			}
@@ -273,7 +283,7 @@ var _ = Describe("Memory Usage Scale With NodePools", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.applyAll(np, it)
 					}
 				}
 			}
@@ -312,7 +322,7 @@ var _ = Describe("Memory Usage Scale With InstanceTypes", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.applyAll(np, it)
 					}
 				}
 			}
@@ -372,39 +382,43 @@ func createRealisticInstanceTypes(count int) []*cloudprovider.InstanceType {
 }
 
 // createStoreWithOverlays creates an instance type store with realistic overlays applied
+// and FinalizeCache called to pre-compute variants and result slices
 func createStoreWithOverlays(instanceTypes []*cloudprovider.InstanceType, nodePools []string) *internalInstanceTypeStore {
 	store := newInternalInstanceTypeStore()
+	overlayReqs := scheduling.NewRequirements()
 
-	updates := make(map[string]map[string]*instanceTypeUpdate)
-
+	nodePoolToInstanceTypes := make(map[string][]*cloudprovider.InstanceType)
 	for _, np := range nodePools {
 		store.evaluatedNodePools.Insert(np)
-		updates[np] = make(map[string]*instanceTypeUpdate)
+		nodePoolToInstanceTypes[np] = instanceTypes
 
 		for _, it := range instanceTypes {
 			// Apply price overlays to spot offerings
-			priceUpdates := make(map[string]*priceUpdate)
+			spotOfferings := cloudprovider.Offerings{}
 			for _, offering := range it.Offerings {
 				if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
-					priceUpdates[offering.Requirements.String()] = &priceUpdate{
-						OverlayUpdate: lo.ToPtr("-10%"),
-						lowestWeight:  lo.ToPtr(int32(10)),
-					}
+					spotOfferings = append(spotOfferings, offering)
 				}
 			}
 
-			// Add capacity overlay for hugepages
-			updates[np][it.Name] = &instanceTypeUpdate{
-				Price: priceUpdates,
-				Capacity: &capacityUpdate{
-					OverlayUpdate: corev1.ResourceList{
+			overlay := v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("-10%"),
+					Capacity: corev1.ResourceList{
 						"hugepages-2Mi": resource.MustParse("100Mi"),
 					},
 				},
 			}
+
+			if len(spotOfferings) > 0 {
+				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings, overlayReqs)
+			}
+			store.updateInstanceTypeCapacity(np, it.Name, overlay, overlayReqs)
 		}
 	}
 
-	store.updates = updates
+	store.FinalizeCache(nodePoolToInstanceTypes)
+
 	return store
 }

@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 // BenchmarkStoreApply benchmarks the memory usage of applying overlays to instance types.
@@ -54,27 +55,29 @@ func BenchmarkStoreApply(b *testing.B) {
 	// Create store with overlays applied
 	store := newInternalInstanceTypeStore()
 	store.evaluatedNodePools.Insert("default")
-	store.updates["default"] = make(map[string]*instanceTypeUpdate)
+	overlayReqs := scheduling.NewRequirements()
 
 	// Apply price overlays to spot offerings
 	for _, it := range instanceTypes {
-		priceUpdates := make(map[string]*priceUpdate)
+		spotOfferings := cloudprovider.Offerings{}
 		for _, offering := range it.Offerings {
 			if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
-				priceUpdates[offering.Requirements.String()] = &priceUpdate{
-					OverlayUpdate: lo.ToPtr("-10%"),
-					lowestWeight:  lo.ToPtr(int32(10)),
-				}
+				spotOfferings = append(spotOfferings, offering)
 			}
 		}
-		store.updates["default"][it.Name] = &instanceTypeUpdate{
-			Price: priceUpdates,
-			Capacity: &capacityUpdate{
-				OverlayUpdate: corev1.ResourceList{
+		overlay := v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Weight:          lo.ToPtr(int32(10)),
+				PriceAdjustment: lo.ToPtr("-10%"),
+				Capacity: corev1.ResourceList{
 					"hugepages-2Mi": resource.MustParse("100Mi"),
 				},
 			},
 		}
+		if len(spotOfferings) > 0 {
+			store.updateInstanceTypeOffering("default", it.Name, overlay, spotOfferings, overlayReqs)
+		}
+		store.updateInstanceTypeCapacity("default", it.Name, overlay, overlayReqs)
 	}
 
 	b.Run("selective-copy-apply", func(b *testing.B) {
@@ -82,7 +85,7 @@ func BenchmarkStoreApply(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			for _, it := range instanceTypes {
-				_, _ = store.apply("default", it)
+				_ = store.applyAll("default", it)
 			}
 		}
 	})
@@ -105,7 +108,7 @@ func BenchmarkStoreApplyNoOverlay(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, it := range instanceTypes {
-			_, _ = store.apply("default", it)
+			_ = store.applyAll("default", it)
 		}
 	}
 }
@@ -121,27 +124,23 @@ func BenchmarkStoreApplyPriceOnly(b *testing.B) {
 
 	store := newInternalInstanceTypeStore()
 	store.evaluatedNodePools.Insert("default")
-	store.updates["default"] = make(map[string]*instanceTypeUpdate)
+	overlayReqs := scheduling.NewRequirements()
 
 	for _, it := range instanceTypes {
-		priceUpdates := make(map[string]*priceUpdate)
-		for _, offering := range it.Offerings {
-			priceUpdates[offering.Requirements.String()] = &priceUpdate{
-				OverlayUpdate: lo.ToPtr("+0.01"),
-				lowestWeight:  lo.ToPtr(int32(10)),
-			}
+		overlay := v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Weight:          lo.ToPtr(int32(10)),
+				PriceAdjustment: lo.ToPtr("+0.01"),
+			},
 		}
-		store.updates["default"][it.Name] = &instanceTypeUpdate{
-			Price:    priceUpdates,
-			Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
-		}
+		store.updateInstanceTypeOffering("default", it.Name, overlay, it.Offerings, overlayReqs)
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, it := range instanceTypes {
-			_, _ = store.apply("default", it)
+			_ = store.applyAll("default", it)
 		}
 	}
 }
@@ -157,24 +156,25 @@ func BenchmarkStoreApplyCapacityOnly(b *testing.B) {
 
 	store := newInternalInstanceTypeStore()
 	store.evaluatedNodePools.Insert("default")
-	store.updates["default"] = make(map[string]*instanceTypeUpdate)
+	overlayReqs := scheduling.NewRequirements()
 
 	for _, it := range instanceTypes {
-		store.updates["default"][it.Name] = &instanceTypeUpdate{
-			Price: nil,
-			Capacity: &capacityUpdate{
-				OverlayUpdate: corev1.ResourceList{
+		overlay := v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Weight: lo.ToPtr(int32(10)),
+				Capacity: corev1.ResourceList{
 					"hugepages-2Mi": resource.MustParse("100Mi"),
 				},
 			},
 		}
+		store.updateInstanceTypeCapacity("default", it.Name, overlay, overlayReqs)
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, it := range instanceTypes {
-			_, _ = store.apply("default", it)
+			_ = store.applyAll("default", it)
 		}
 	}
 }
@@ -190,31 +190,27 @@ func BenchmarkStoreApplyBothOverlays(b *testing.B) {
 
 	store := newInternalInstanceTypeStore()
 	store.evaluatedNodePools.Insert("default")
-	store.updates["default"] = make(map[string]*instanceTypeUpdate)
+	overlayReqs := scheduling.NewRequirements()
 
 	for _, it := range instanceTypes {
-		priceUpdates := make(map[string]*priceUpdate)
-		for _, offering := range it.Offerings {
-			priceUpdates[offering.Requirements.String()] = &priceUpdate{
-				OverlayUpdate: lo.ToPtr("+0.01"),
-				lowestWeight:  lo.ToPtr(int32(10)),
-			}
-		}
-		store.updates["default"][it.Name] = &instanceTypeUpdate{
-			Price: priceUpdates,
-			Capacity: &capacityUpdate{
-				OverlayUpdate: corev1.ResourceList{
+		overlay := v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Weight:          lo.ToPtr(int32(10)),
+				PriceAdjustment: lo.ToPtr("+0.01"),
+				Capacity: corev1.ResourceList{
 					"hugepages-2Mi": resource.MustParse("100Mi"),
 				},
 			},
 		}
+		store.updateInstanceTypeOffering("default", it.Name, overlay, it.Offerings, overlayReqs)
+		store.updateInstanceTypeCapacity("default", it.Name, overlay, overlayReqs)
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, it := range instanceTypes {
-			_, _ = store.apply("default", it)
+			_ = store.applyAll("default", it)
 		}
 	}
 }
@@ -242,26 +238,22 @@ func BenchmarkStoreApplyAllScenario(b *testing.B) {
 
 	// Setup overlays for 5 node pools
 	nodePools := []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}
+	overlayReqs := scheduling.NewRequirements()
 	for _, np := range nodePools {
 		internalStore.evaluatedNodePools.Insert(np)
-		internalStore.updates[np] = make(map[string]*instanceTypeUpdate)
 
 		for _, it := range instanceTypes {
-			priceUpdates := make(map[string]*priceUpdate)
-			for _, offering := range it.Offerings {
-				priceUpdates[offering.Requirements.String()] = &priceUpdate{
-					OverlayUpdate: lo.ToPtr("-5%"),
-					lowestWeight:  lo.ToPtr(int32(10)),
-				}
-			}
-			internalStore.updates[np][it.Name] = &instanceTypeUpdate{
-				Price: priceUpdates,
-				Capacity: &capacityUpdate{
-					OverlayUpdate: corev1.ResourceList{
+			overlay := v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("-5%"),
+					Capacity: corev1.ResourceList{
 						"hugepages-2Mi": resource.MustParse("100Mi"),
 					},
 				},
 			}
+			internalStore.updateInstanceTypeOffering(np, it.Name, overlay, it.Offerings, overlayReqs)
+			internalStore.updateInstanceTypeCapacity(np, it.Name, overlay, overlayReqs)
 		}
 	}
 
@@ -285,10 +277,10 @@ func setupNodeOverlayBenchmarkStore(instanceTypes []*cloudprovider.InstanceType,
 	}
 
 	store := newInternalInstanceTypeStore()
+	overlayReqs := scheduling.NewRequirements()
 
 	for _, np := range nodePools {
 		store.evaluatedNodePools.Insert(np)
-		store.updates[np] = make(map[string]*instanceTypeUpdate)
 
 		for _, it := range instanceTypes {
 			// Apply overlay to spot offerings only
@@ -299,7 +291,7 @@ func setupNodeOverlayBenchmarkStore(instanceTypes []*cloudprovider.InstanceType,
 				}
 			}
 			if len(spotOfferings) > 0 {
-				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings)
+				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings, overlayReqs)
 			}
 		}
 	}
@@ -338,7 +330,7 @@ func BenchmarkNodeOverlayControllerScenario(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, np := range nodePools {
 			for _, it := range instanceTypes {
-				_, _ = store.apply(np, it)
+				_ = store.applyAll(np, it)
 			}
 		}
 	}

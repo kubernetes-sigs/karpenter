@@ -82,8 +82,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	temporaryStore := newInternalInstanceTypeStore()
 	nodePoolToInstanceTypes := map[string][]*cloudprovider.InstanceType{}
 
+	// Use skip context to get raw instance types without overlays applied
+	// This prevents circular dependency: nodeoverlay controller needs raw types to evaluate overlays
+	skipCtx := cloudprovider.WithSkipNodeOverlay(ctx)
 	for i := range nodePoolList.Items {
-		its, err := c.cloudProvider.GetInstanceTypes(ctx, &nodePoolList.Items[i])
+		its, err := c.cloudProvider.GetInstanceTypes(skipCtx, &nodePoolList.Items[i])
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("listing instance types, %w", err)
 		}
@@ -113,6 +116,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{}, fmt.Errorf("updating nodeoverlay statuses, %w", err)
 	}
 
+	// Pre-compute and cache instance type variants to avoid repeated allocations
+	// during scheduling when applyAll is called
+	temporaryStore.FinalizeCache(nodePoolToInstanceTypes)
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
 
@@ -172,8 +178,8 @@ func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeSt
 			continue
 		}
 
-		conflictingPriceOverlay := c.isPriceUpdatesConflicting(store, nodePool.Name, it.Name, offerings, overlay)
-		conflictingCapacityOverlay := c.isCapacityUpdatesConflicting(store, nodePool.Name, it.Name, overlay)
+		conflictingPriceOverlay := c.isPriceUpdatesConflicting(store, nodePool.Name, it.Name, offerings, overlay, overlayRequirements)
+		conflictingCapacityOverlay := c.isCapacityUpdatesConflicting(store, nodePool.Name, it.Name, overlay, overlayRequirements)
 		// When we find an instance type that is matches a set offering, we will track that based on the
 		// overlay that is applied
 		if conflictingPriceOverlay || conflictingCapacityOverlay {
@@ -197,8 +203,8 @@ func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstance
 			continue
 		}
 
-		store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings)
-		store.updateInstanceTypeCapacity(nodePool.Name, it.Name, overlay)
+		store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings, overlayRequirements)
+		store.updateInstanceTypeCapacity(nodePool.Name, it.Name, overlay, overlayRequirements)
 	}
 }
 
@@ -217,31 +223,38 @@ func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, 
 	instanceTypeRequirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.ObjectMeta.Labels).Values()...)
 	instanceTypeRequirements.Add(it.Requirements.Values()...)
 
+	for _, req := range nodePool.Spec.Template.Spec.Requirements {
+		if v1.WellKnownLabels.Has(req.Key) {
+			continue
+		}
+		instanceTypeRequirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(req).Values()...)
+	}
+
 	if !instanceTypeRequirements.IsCompatible(overlayReq) {
 		return nil
 	}
 	return it.Offerings.Compatible(overlayReq)
 }
 
-func (c *Controller) isPriceUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) bool {
+func (c *Controller) isPriceUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay, overlayReqs scheduling.Requirements) bool {
 	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil {
 		return false
 	}
 
 	for _, of := range offerings {
-		if foundConflict := store.isOfferingUpdateConflicting(nodePoolName, instanceTypeName, of, overlay); foundConflict {
+		if foundConflict := store.isOfferingUpdateConflicting(nodePoolName, instanceTypeName, of, overlay, overlayReqs); foundConflict {
 			return true
 		}
 	}
 	return false
 }
 
-func (c *Controller) isCapacityUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, overlay v1alpha1.NodeOverlay) bool {
+func (c *Controller) isCapacityUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, overlay v1alpha1.NodeOverlay, overlayReqs scheduling.Requirements) bool {
 	if overlay.Spec.Capacity == nil {
 		return false
 	}
 
-	if foundConflict := store.isCapacityUpdateConflicting(nodePoolName, instanceTypeName, overlay); foundConflict {
+	if foundConflict := store.isCapacityUpdateConflicting(nodePoolName, instanceTypeName, overlay, overlayReqs); foundConflict {
 		return true
 	}
 	return false

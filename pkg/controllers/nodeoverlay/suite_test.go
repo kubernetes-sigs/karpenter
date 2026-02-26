@@ -1189,9 +1189,18 @@ var _ = Describe("Instance Type Controller", func() {
 					instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
 					Expect(err).To(BeNil())
 
-					Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-					Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-					Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", expectedValue))
+					Expect(len(instanceTypeList)).To(BeNumerically("==", 2))
+					overlayApplied := lo.Filter(instanceTypeList, func(it *cloudprovider.InstanceType, _ int) bool {
+						return it.IsPricingOverlayApplied()
+					})
+					Expect(len(overlayApplied)).To(BeNumerically("==", 1))
+					Expect(len(overlayApplied[0].Offerings)).To(BeNumerically("==", 1))
+					Expect(overlayApplied[0].Offerings[0].Price).To(BeNumerically("==", expectedValue))
+					base := lo.Filter(instanceTypeList, func(it *cloudprovider.InstanceType, _ int) bool {
+						return !it.IsPricingOverlayApplied()
+					})
+					Expect(len(base)).To(BeNumerically("==", 1))
+					Expect(base[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
 				},
 				Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("13234.223")}}, 13234.223),
 				Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}}, 1001.020),
@@ -1947,11 +1956,20 @@ var _ = Describe("Instance Type Controller", func() {
 				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
 				Expect(err).ToNot(HaveOccurred())
 
-				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-				resource, exist := instanceTypeList[0].Capacity.Name(corev1.ResourceName("smarter-devices/fuse"), resource.DecimalSI).AsInt64()
+				Expect(len(instanceTypeList)).To(BeNumerically("==", 2))
+				overlayApplied := lo.Filter(instanceTypeList, func(it *cloudprovider.InstanceType, _ int) bool {
+					return it.IsCapacityOverlayApplied()
+				})
+				Expect(len(overlayApplied)).To(BeNumerically("==", 1))
+				Expect(len(overlayApplied[0].Offerings)).To(BeNumerically("==", 1))
+				resource, exist := overlayApplied[0].Capacity.Name(corev1.ResourceName("smarter-devices/fuse"), resource.DecimalSI).AsInt64()
 				Expect(exist).To(BeTrue())
 				Expect(resource).To(BeNumerically("==", 1))
+				base := lo.Filter(instanceTypeList, func(it *cloudprovider.InstanceType, _ int) bool {
+					return !it.IsCapacityOverlayApplied()
+				})
+				Expect(len(base)).To(BeNumerically("==", 1))
+				Expect(lo.Keys(base[0].Capacity)).ToNot(ContainElement("smarter-devices/fuse"))
 			})
 		})
 		It("should not apply capacity adjustments for invalid overlay", func() {
@@ -2664,5 +2682,74 @@ var _ = Describe("Instance Type Controller", func() {
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodePoolLabelKey))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind())))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElements(lo.Keys(nodePool.Spec.Template.Labels)))
+	})
+	It("should apply overlay when NodePool uses Exists operator and overlay uses In operator with matching value", func() {
+		testNodePool := test.NodePool(v1.NodePool{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-nodepool-with-exists",
+			},
+		})
+		testNodePool = test.ReplaceRequirements(testNodePool, v1.NodeSelectorRequirementWithMinValues{
+			Key:      "company.com/team",
+			Operator: corev1.NodeSelectorOpExists,
+		})
+		ExpectApplied(ctx, env.Client, testNodePool)
+
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, testNodePool)
+		Expect(err).To(BeNil())
+		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
+
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      "company.com/team",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"team-a"},
+					},
+				},
+				PriceAdjustment: lo.ToPtr("+100"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+		instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, testNodePool)
+		Expect(err).To(BeNil())
+
+		instanceTypeListResult, err := store.ApplyAll(testNodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeListResult)).To(BeNumerically(">=", 1))
+
+		var teamAVariant *cloudprovider.InstanceType
+		for _, it := range instanceTypeListResult {
+			teamReq := it.Requirements.Get("company.com/team")
+			if teamReq != nil && teamReq.Has("team-a") {
+				teamAVariant = it
+				break
+			}
+		}
+		Expect(teamAVariant).ToNot(BeNil(), "expected to find a variant with company.com/team=team-a requirement")
+
+		Expect(len(teamAVariant.Offerings)).To(BeNumerically(">=", 1))
+		priceTeamA := teamAVariant.Offerings[0].Price
+		Expect(priceTeamA).To(BeNumerically("==", 101.020),
+			fmt.Sprintf("Expected price to be 101.020 (overlay applied) for team-a variant, but got %f", priceTeamA))
+
+		podReqsTeamA := scheduling.NewRequirements(
+			scheduling.NewRequirement("company.com/team", corev1.NodeSelectorOpIn, "team-a"),
+		)
+		Expect(teamAVariant.Requirements.IsCompatible(podReqsTeamA)).To(BeTrue(),
+			"pod requesting team-a should be compatible with team-a variant")
+
+		podReqsTeamB := scheduling.NewRequirements(
+			scheduling.NewRequirement("company.com/team", corev1.NodeSelectorOpIn, "team-b"),
+		)
+		Expect(teamAVariant.Requirements.IsCompatible(podReqsTeamB)).To(BeFalse(),
+			"pod requesting team-b should NOT be compatible with team-a variant")
 	})
 })
