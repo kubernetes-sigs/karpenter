@@ -1,0 +1,68 @@
+---
+# Example DRAConfig for testing GPU devices
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: gpu-config
+  namespace: karpenter
+spec:
+  driver: test.karpenter.sh
+  mappings:
+    - name: nvidia-h100
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+                - g5.48xlarge
+                - p4d.24xlarge
+      resourceSlice:
+        pool:
+          name: gpu-pool
+          resourceSliceCount: 1
+          generation: 0
+        devices:
+          - name: nvidia-h100-0
+            basic:
+              attributes:
+                type:
+                  stringValue: nvidia-h100
+                memory:
+                  stringValue: "80Gi"
+              capacity:
+                gpu:
+                  quantity: "1"
+
+---
+# Example DRAConfig for testing FPGA devices
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: fpga-config
+  namespace: karpenter
+spec:
+  driver: test.karpenter.sh
+  mappings:
+    - name: xilinx-fpga
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+                - f1.2xlarge
+      resourceSlice:
+        pool:
+          name: fpga-pool
+          resourceSliceCount: 1
+          generation: 0
+        devices:
+          - name: xilinx-u250-0
+            basic:
+              attributes:
+                type:
+                  stringValue: xilinx-u250
+                memory:
+                  stringValue: "16Gi"
+              capacity:
+                fpga:
+                  quantity: "1"
