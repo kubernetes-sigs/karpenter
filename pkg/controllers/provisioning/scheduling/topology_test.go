@@ -2162,6 +2162,167 @@ var _ = Describe("Topology", func() {
 				Expect(node.Labels[corev1.LabelTopologyZone]).To(BeElementOf("test-zone-1", "test-zone-2"))
 			}
 		})
+
+		// Issue #2623: https://github.com/kubernetes-sigs/karpenter/issues/2623
+		// Validates the scenario where a pod uses nodeSelector with a custom NodePool label
+		// (not zone-based selection) and the topology spread should only consider domains
+		// from the compatible NodePool.
+		It("should only consider domains from NodePool matching pod's custom label nodeSelector (Issue #2623)", func() {
+			if env.Version.Minor() < 26 {
+				Skip("NodeAffinityPolicy/NodeTaintsPolicy only enabled by default for K8s >= 1.26.x")
+			}
+
+			// Use zone-based topology since the default instance types have zone offerings.
+			// This test validates the real Issue #2623 scenario:
+			// - NodePool A (isolated): tainted, custom label, restricted to zone-1 only
+			// - NodePool B (shared): no taint, different label, zones 2 and 3
+			// - Pod targets NodePool A via nodeSelector on the custom label
+			isolatedNodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "isolated"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								"workload-group": "isolated-app",
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{
+								{
+									Key:    "workload-group",
+									Value:  "isolated-app",
+									Effect: corev1.TaintEffectNoSchedule,
+								},
+							},
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-1"},
+								},
+								{
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpExists,
+								},
+							},
+						},
+					},
+				},
+			})
+
+			sharedNodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "shared"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								"workload-group": "shared-apps",
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-2", "test-zone-3"},
+								},
+								{
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpExists,
+								},
+							},
+						},
+					},
+				},
+			})
+
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:        corev1.LabelTopologyZone,
+				WhenUnsatisfiable:  corev1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            1,
+				NodeTaintsPolicy:   lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+			}}
+
+			ExpectApplied(ctx, env.Client, isolatedNodePool, sharedNodePool)
+
+			// Pod targets isolated NodePool via nodeSelector on "workload-group" label
+			// + tolerates its taint.
+			// Before fix: Karpenter would see zones 1-3 from all NodePools and fail because
+			// the pod can only schedule to zone-1 but maxSkew=1 requires spreading across
+			// all 3 zones.
+			// After fix: Karpenter only sees zone-1 from the compatible NodePool.
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector:              map[string]string{"workload-group": "isolated-app"},
+				Tolerations: []corev1.Toleration{
+					{
+						Key:      "workload-group",
+						Value:    "isolated-app",
+						Effect:   corev1.TaintEffectNoSchedule,
+						Operator: corev1.TolerationOpEqual,
+					},
+				},
+			}, 3)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			// All pods should successfully schedule to zone-1
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// All pods in the single zone
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3))
+
+			// Verify all pods were scheduled in test-zone-1
+			nodes := &corev1.NodeList{}
+			Expect(env.Client.List(ctx, nodes)).To(Succeed())
+			for _, node := range nodes.Items {
+				Expect(node.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-1"))
+			}
+		})
+
+		// Issue #2785: https://github.com/kubernetes-sigs/karpenter/issues/2785
+		// Regression test: Ensure that NodePools with zero active nodes still register
+		// domains correctly so that minDomains can be satisfied. This was the root cause
+		// of the revert of PR #2639.
+		It("should register domains from NodePools with zero active nodes when minDomains is set", func() {
+			if env.Version.Minor() < 24 {
+				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
+			}
+
+			var minDomains int32 = 2
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+				MinDomains:        &minDomains,
+			}}
+
+			// Both NodePools have zero active nodes initially.
+			// Before the #2639 revert: this would fail because zero-node NodePools
+			// didn't register their domains, causing minDomains to be unsatisfied.
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+			}, 4)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			// All pods should successfully schedule
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// Pods should be spread across available zones
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 1, 1))
+		})
 	})
 
 	Context("Pod Affinity/Anti-Affinity", func() {
