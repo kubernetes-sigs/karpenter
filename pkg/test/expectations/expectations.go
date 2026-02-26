@@ -20,7 +20,6 @@ package expectations
 import (
 	"context"
 	"fmt"
-	"log"
 	"reflect"
 	"regexp"
 	"strings"
@@ -298,7 +297,8 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 
 func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
 	GinkgoHelper()
-	bindings := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
+	bindings, err := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
+	Expect(err).ToNot(HaveOccurred())
 	podKeys := sets.NewString(lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
 	for pod, binding := range bindings {
 		// Only bind the pods that are passed through
@@ -319,24 +319,21 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 }
 
 //nolint:gocyclo
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) (Bindings, error) {
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
 		ExpectApplied(ctx, c, pod)
 	}
-	// TODO: Check the error on the provisioner scheduling round
 	results, err := provisioner.Schedule(ctx)
-	bindings := Bindings{}
 	if err != nil {
-		log.Printf("error provisioning in test, %s", err)
-		return bindings
+		return nil, fmt.Errorf("provisioner scheduling failed: %w", err)
 	}
+	bindings := Bindings{}
 	for _, m := range results.NewNodeClaims {
-		// TODO: Check the error on the provisioner launch
 		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
 		if err != nil {
-			return bindings
+			return nil, fmt.Errorf("provisioner create failed: %w", err)
 		}
 		nodeClaim := &v1.NodeClaim{}
 		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
@@ -360,7 +357,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 			}
 		}
 	}
-	return bindings
+	return bindings, nil
 }
 
 func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) scheduling.Results {
