@@ -1,7 +1,7 @@
 module tools
 
 // Tool dependencies isolated from main module to avoid conflicts.
-// Usage: go tool -modfile=go.tools.mod <toolname>
+// Usage: go tool -modfile=tools/go.mod <toolname>
 
 go 1.25.5
 

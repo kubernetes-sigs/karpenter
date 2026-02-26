@@ -88,7 +88,7 @@ benchmark: ## Run benchmark tests for node overlay store
 	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
-	go tool -modfile=go.tools.mod ginkgo \
+	go tool -modfile=tools/go.mod ginkgo \
 		--race \
 		--focus="${FOCUS}" \
 		--timeout=20m \
@@ -98,10 +98,10 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		./pkg/...
 
 vulncheck: ## Verify code vulnerabilities
-	@go tool -modfile=go.tools.mod govulncheck ./pkg/...
+	@go tool -modfile=tools/go.mod govulncheck ./pkg/...
 
 licenses: download ## Verifies dependency licenses
-	! go tool -modfile=go.tools.mod go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
+	! go tool -modfile=tools/go.mod go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
 
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
@@ -116,16 +116,16 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
-	go tool -modfile=go.tools.mod nwa config -c add
+	go tool -modfile=tools/go.mod nwa config -c add
 	go vet ./...
-	go tool -modfile=go.tools.mod golangci-lint-kube-api-linter run
-	cd kwok/charts && go tool -modfile=../../go.tools.mod helm-docs
+	go tool -modfile=tools/go.mod golangci-lint-kube-api-linter run
+	cd kwok/charts && go tool -modfile=../../tools/go.mod helm-docs
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
 		if [ "${CI}" = true ]; then\
 			exit 1;\
 		fi;}
-	go tool -modfile=go.tools.mod actionlint -oneline
+	go tool -modfile=tools/go.mod actionlint -oneline
 
 download: ## Recursively "go mod download" on all directories where go.mod exists
 	$(foreach dir,$(MOD_DIRS),cd $(dir) && go mod download $(newline))
