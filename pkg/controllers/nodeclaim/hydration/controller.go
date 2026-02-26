@@ -67,7 +67,7 @@ func (c *Controller) Reconcile(ctx context.Context, nc *v1.NodeClaim) (reconcile
 	nc.Labels = lo.Assign(nc.Labels, map[string]string{
 		v1.NodeClassLabelKey(nc.Spec.NodeClassRef.GroupKind()): nc.Spec.NodeClassRef.Name,
 	})
-	if !equality.Semantic.DeepEqual(stored, nc) {
+	if !equality.Semantic.DeepEqual(stored.Labels, nc.Labels) {
 		if err := c.kubeClient.Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}

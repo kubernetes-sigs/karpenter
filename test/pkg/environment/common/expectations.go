@@ -333,7 +333,7 @@ func (env *Environment) ExpectSettingsReplaced(vars ...corev1.EnvVar) {
 	stored := d.DeepCopy()
 	d.Spec.Template.Spec.Containers[0].Env = vars
 
-	if !equality.Semantic.DeepEqual(d, stored) {
+	if !equality.Semantic.DeepEqual(d.Spec.Template.Spec.Containers, stored.Spec.Template.Spec.Containers) {
 		By("replacing environment variables for karpenter deployment")
 		Expect(env.Client.Patch(env.Context, d, client.StrategicMergeFrom(stored))).To(Succeed())
 		env.EventuallyExpectKarpenterRestarted()
@@ -357,7 +357,7 @@ func (env *Environment) ExpectSettingsOverridden(vars ...corev1.EnvVar) {
 			d.Spec.Template.Spec.Containers[0].Env = append(d.Spec.Template.Spec.Containers[0].Env, v)
 		}
 	}
-	if !equality.Semantic.DeepEqual(d, stored) {
+	if !equality.Semantic.DeepEqual(d.Spec.Template.Spec.Containers, stored.Spec.Template.Spec.Containers) {
 		By("overriding environment variables for karpenter deployment")
 		Expect(env.Client.Patch(env.Context, d, client.StrategicMergeFrom(stored))).To(Succeed())
 		env.EventuallyExpectKarpenterRestarted()
@@ -377,7 +377,7 @@ func (env *Environment) ExpectSettingsRemoved(vars ...corev1.EnvVar) {
 	d.Spec.Template.Spec.Containers[0].Env = lo.Reject(d.Spec.Template.Spec.Containers[0].Env, func(v corev1.EnvVar, _ int) bool {
 		return varNames.Has(v.Name)
 	})
-	if !equality.Semantic.DeepEqual(d, stored) {
+	if !equality.Semantic.DeepEqual(d.Spec.Template.Spec.Containers, stored.Spec.Template.Spec.Containers) {
 		By("removing environment variables for karpenter deployment")
 		Expect(env.Client.Patch(env.Context, d, client.StrategicMergeFrom(stored))).To(Succeed())
 		env.EventuallyExpectKarpenterRestarted()
@@ -406,7 +406,7 @@ func (env *Environment) ExpectConfigMapDataReplaced(key types.NamespacedName, da
 	cm.Data = lo.Assign(data...) // Completely replace the data
 
 	// If the data hasn't changed, we can just return and not update anything
-	if equality.Semantic.DeepEqual(stored, cm) {
+	if equality.Semantic.DeepEqual(stored.Data, cm.Data) {
 		return false
 	}
 	// Update the configMap to update the settings
@@ -429,7 +429,7 @@ func (env *Environment) ExpectConfigMapDataOverridden(key types.NamespacedName, 
 	cm.Data = lo.Assign(append([]map[string]string{cm.Data}, data...)...)
 
 	// If the data hasn't changed, we can just return and not update anything
-	if equality.Semantic.DeepEqual(stored, cm) {
+	if equality.Semantic.DeepEqual(stored.Data, cm.Data) {
 		return false
 	}
 	// Update the configMap to update the settings
