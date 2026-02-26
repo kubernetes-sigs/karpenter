@@ -124,7 +124,7 @@ func NewScheduler(
 	daemonSetPods []*corev1.Pod,
 	recorder events.Recorder,
 	clock clock.Clock,
-	volumeReqsByPod map[types.UID]scheduling.Requirements,
+	volumeReqsByPod map[types.UID][]scheduling.Requirements,
 	opts ...Options,
 ) *Scheduler {
 	minValuesPolicy := option.Resolve(opts...).minValuesPolicy
@@ -188,7 +188,7 @@ type PodData struct {
 	Requirements             scheduling.Requirements
 	StrictRequirements       scheduling.Requirements
 	HasResourceClaimRequests bool
-	VolumeRequirements       scheduling.Requirements // Volume topology requirements
+	VolumeRequirements       []scheduling.Requirements // Volume topology requirement alternatives
 }
 
 type Scheduler struct {
@@ -199,8 +199,8 @@ type Scheduler struct {
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead          map[*NodeClaimTemplate]corev1.ResourceList
 	daemonHostPortUsage     map[*NodeClaimTemplate]*scheduling.HostPortUsage
-	cachedPodData           map[types.UID]*PodData                // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
-	volumeReqsByPod         map[types.UID]scheduling.Requirements // Volume topology requirements per pod
+	cachedPodData           map[types.UID]*PodData                  // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
+	volumeReqsByPod         map[types.UID][]scheduling.Requirements // Volume topology requirement alternatives per pod
 	preferences             *Preferences
 	topology                *Topology
 	cluster                 *state.Cluster
