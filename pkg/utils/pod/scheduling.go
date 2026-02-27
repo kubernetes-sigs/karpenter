@@ -24,6 +24,7 @@ import (
 	"k8s.io/utils/clock"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -53,11 +54,11 @@ func IsReschedulable(pod *corev1.Pod) bool {
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 // - Does not have an active "karpenter.sh/do-not-disrupt" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls)
-func IsEvictable(pod *corev1.Pod, clk clock.Clock) bool {
+func IsEvictable(pod *corev1.Pod, clk clock.Clock, recorder events.Recorder) bool {
 	return IsActive(pod) &&
 		!ToleratesDisruptedNoScheduleTaint(pod) &&
 		!IsOwnedByNode(pod) &&
-		!IsDoNotDisruptActive(pod, clk)
+		!IsDoNotDisruptActive(pod, clk, recorder)
 }
 
 // IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:
@@ -108,11 +109,16 @@ func IsProvisionable(pod *corev1.Pod) bool {
 // IsDisruptable checks if a pod can be disrupted using clock-aware logic for time-based do-not-disrupt annotations
 // It considers both boolean ("true") and duration-based values (e.g., "5m", "1h")
 // For duration-based values, it checks if the pod has been running longer than the specified duration
+// Invalid annotation formats are treated as if the annotation doesn't exist and an event is emitted
 // It checks whether the following is true for the pod:
 // - Has the `karpenter.sh/do-not-disrupt` annotation
 // - Is an actively running pod
-func IsDisruptable(pod *corev1.Pod, clk clock.Clock) bool {
-	return !IsActive(pod) || !IsDoNotDisruptActive(pod, clk)
+func IsDisruptable(pod *corev1.Pod, clk clock.Clock, recorder events.Recorder) bool {
+	if !IsActive(pod) {
+		return true
+	}
+
+	return !IsDoNotDisruptActive(pod, clk, recorder)
 }
 
 // FailedToSchedule ensures that the kube-scheduler has seen this pod and has intentionally
@@ -184,32 +190,37 @@ func IsOwnedBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
 	return false
 }
 
-// ParseDoNotDisrupt parses the do-not-disrupt annotation value
-// Returns (indefinite, duration) where indefinite=true means permanent protection
-// Invalid formats, zero, or negative durations are treated as indefinite (fail-safe)
-func ParseDoNotDisrupt(value string) (indefinite bool, duration time.Duration) {
+// parseDoNotDisrupt parses the do-not-disrupt annotation value
+// Returns (valid, indefinite, duration) where:
+// - valid=false means the annotation format is invalid (not "true" and not a valid duration)
+// - indefinite=true means permanent protection (value is "true")
+// - duration is the parsed time duration for valid duration strings
+// Invalid formats, zero, or negative durations return valid=false
+func parseDoNotDisrupt(value string) (valid bool, indefinite bool, duration time.Duration) {
 	if value == "true" {
-		return true, 0
+		return true, true, 0
 	}
 
 	d, err := time.ParseDuration(value)
 	if err != nil {
-		// Invalid format - treat as indefinite (fail-safe)
-		return true, 0
+		// Invalid format - not valid
+		return false, false, 0
 	}
 
 	if d <= 0 {
-		// Zero or negative - treat as indefinite (fail-safe)
-		return true, 0
+		// Zero or negative - not valid
+		return false, false, 0
 	}
 
-	return false, d
+	return true, false, d
 }
 
 // IsDoNotDisruptActive checks if the do-not-disrupt protection is still active for a pod
 // It considers both boolean ("true") and duration-based values (e.g., "5m", "1h")
 // For duration-based values, it checks if the pod has been running longer than the specified duration
-func IsDoNotDisruptActive(pod *corev1.Pod, clk clock.Clock) bool {
+// Invalid annotation formats are treated as if the annotation doesn't exist (returns false)
+// and an event is emitted if a recorder is provided
+func IsDoNotDisruptActive(pod *corev1.Pod, clk clock.Clock, recorder events.Recorder) bool {
 	if pod.Annotations == nil {
 		return false
 	}
@@ -219,7 +230,15 @@ func IsDoNotDisruptActive(pod *corev1.Pod, clk clock.Clock) bool {
 		return false
 	}
 
-	indefinite, duration := ParseDoNotDisrupt(value)
+	valid, indefinite, duration := parseDoNotDisrupt(value)
+	if !valid {
+		// Invalid format - emit event and treat as if annotation doesn't exist
+		if recorder != nil {
+			recorder.Publish(InvalidDoNotDisruptAnnotationEvent(pod, value))
+		}
+		return false
+	}
+
 	if indefinite {
 		return true
 	}
@@ -230,7 +249,20 @@ func IsDoNotDisruptActive(pod *corev1.Pod, clk clock.Clock) bool {
 	}
 
 	podAge := clk.Now().Sub(pod.Status.StartTime.Time)
-	return podAge < duration
+	isActive := podAge < duration
+
+	if recorder != nil {
+		if isActive {
+			// Emit event when duration-based protection is still active
+			disruptableAt := pod.Status.StartTime.Add(duration).Format(time.RFC3339)
+			recorder.Publish(DoNotDisruptUntilEvent(pod, disruptableAt))
+		} else {
+			// Emit event when grace period has elapsed
+			recorder.Publish(DoNotDisruptGracePeriodElapsedEvent(pod))
+		}
+	}
+
+	return isActive
 }
 
 // ToleratesDisruptedNoScheduleTaint returns true if the pod tolerates karpenter.sh/disruption:NoSchedule taint
