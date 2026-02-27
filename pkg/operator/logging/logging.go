@@ -46,6 +46,7 @@ func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 		// Webhooks are deprecated, so support for changing their log level is also deprecated
 		logLevel = lo.Must(zap.ParseAtomicLevel(l))
 	}
+	logEncoding := lo.Ternary(options.FromContext(ctx).LogEncoding != "console", "json", "console")
 	return zap.Config{
 		Level:             logLevel,
 		Development:       false,
@@ -55,7 +56,7 @@ func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 			Initial:    100,
 			Thereafter: 100,
 		},
-		Encoding: "json",
+		Encoding: logEncoding,
 		EncoderConfig: zapcore.EncoderConfig{
 			MessageKey:     "message",
 			LevelKey:       "level",
