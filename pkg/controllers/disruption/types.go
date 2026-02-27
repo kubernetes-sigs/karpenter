@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -121,6 +122,16 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 			return nil, err
+		}
+	}
+	// Skip nodes that are above the utilization threshold when they still have significant lifetime
+	// remaining and are not drifted. This prevents unnecessary churn of well-utilized nodes.
+	if threshold := options.FromContext(ctx).ScaleDownUtilizationThreshold; threshold < 1.0 {
+		if disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim) > 0.1 &&
+			node.Utilization() > threshold &&
+			node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted) == nil {
+			return nil, fmt.Errorf("node utilization %.0f%% exceeds threshold %.0f%%",
+				node.Utilization()*100, threshold*100)
 		}
 	}
 	return &Candidate{
