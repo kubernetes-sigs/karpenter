@@ -103,21 +103,12 @@ func NewTopologyGroup(
 		selector = labels.Nothing()
 	}
 
-	// Extract pod requirements from nodeSelector and nodeAffinity
-	// This will be used to filter domains based on NodePool compatibility
-	podRequirements := scheduling.NewLabelRequirements(pod.Spec.NodeSelector)
-	if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil &&
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil &&
-		len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) > 0 {
-		// Take the first term. Terms are OR'd together, but we use the first as the primary constraint
-		// for domain filtering. This matches how Kubernetes scheduler handles node affinity.
-		term := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0]
-		podRequirements.Add(scheduling.NewNodeSelectorRequirements(term.MatchExpressions...).Values()...)
-	}
-
 	domains := map[string]int32{}
 	emptyDomains := sets.New[string]()
-	domainGroup.ForEachDomain(pod, podRequirements, nodeFilter.TaintPolicy, func(domain string) {
+	// Use nodeFilter.Requirements which already handles all NodeSelectorTerms (OR'd together)
+	// combined with nodeSelector labels. This is consistent with how TopologyNodeFilter works
+	// for existing node filtering.
+	domainGroup.ForEachDomain(pod, nodeFilter.Requirements, nodeFilter.TaintPolicy, func(domain string) {
 		domains[domain] = 0
 		emptyDomains.Insert(domain)
 	})

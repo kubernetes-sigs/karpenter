@@ -92,36 +92,45 @@ func (t TopologyDomainGroup) Insert(domain string, nodePoolRequirements scheduli
 
 // ForEachDomain calls f on each domain tracked by the topology group that is compatible with the pod's requirements.
 // It filters domains based on:
-// 1. Pod's requirements don't conflict with NodePool requirements
-// 2. Pod's tolerations tolerate the NodePool's taints (if taintHonorPolicy is honor)
-func (t TopologyDomainGroup) ForEachDomain(pod *v1.Pod, podRequirements scheduling.Requirements, taintHonorPolicy v1.NodeInclusionPolicy, f func(domain string)) {
+//  1. Pod's requirements (from nodeSelector and any nodeAffinity term) don't conflict with NodePool requirements.
+//     podRequirementSets contains one Requirements per nodeAffinity term (OR'd together), each combined with nodeSelector.
+//     A domain is compatible if ANY of these requirement sets intersects with the NodePool.
+//  2. Pod's tolerations tolerate the NodePool's taints (if taintHonorPolicy is honor)
+func (t TopologyDomainGroup) ForEachDomain(pod *v1.Pod, podRequirementSets []scheduling.Requirements, taintHonorPolicy v1.NodeInclusionPolicy, f func(domain string)) {
 	for domain, sources := range t.domains {
-		// Check if any source for this domain is compatible with the pod
-		isCompatible := false
-
-		for _, source := range sources {
-			// Check if pod requirements don't conflict with NodePool requirements
-			// We use Intersects to check if they can coexist (no conflicts)
-			if err := source.NodePoolRequirements.Intersects(podRequirements); err != nil {
-				continue
-			}
-
-			// If taint policy is ignore, we don't need to check taints
-			if taintHonorPolicy == v1.NodeInclusionPolicyIgnore {
-				isCompatible = true
-				break
-			}
-
-			// Check if pod tolerates this NodePool's taints
-			if err := scheduling.Taints(source.Taints).ToleratesPod(pod); err == nil {
-				isCompatible = true
-				break
-			}
-		}
-
-		if isCompatible {
+		if t.isDomainCompatible(pod, sources, podRequirementSets, taintHonorPolicy) {
 			f(domain)
-			continue
 		}
 	}
+}
+
+// isDomainCompatible checks if any source for a domain is compatible with any of the pod's requirement sets.
+func (t TopologyDomainGroup) isDomainCompatible(pod *v1.Pod, sources []DomainSource, podRequirementSets []scheduling.Requirements, taintHonorPolicy v1.NodeInclusionPolicy) bool {
+	for _, source := range sources {
+		// Check if any of the pod's requirement sets (OR'd nodeAffinity terms) intersects
+		// with this NodePool's requirements. If podRequirementSets is empty (e.g., for pod
+		// affinity/anti-affinity where no nodeFilter is applied), skip the requirements check
+		// and consider all domains as compatible from a requirements perspective.
+		requirementsMatch := len(podRequirementSets) == 0
+		for _, podReqs := range podRequirementSets {
+			if err := source.NodePoolRequirements.Intersects(podReqs); err == nil {
+				requirementsMatch = true
+				break
+			}
+		}
+		if !requirementsMatch {
+			continue
+		}
+
+		// If taint policy is ignore, we don't need to check taints
+		if taintHonorPolicy == v1.NodeInclusionPolicyIgnore {
+			return true
+		}
+
+		// Check if pod tolerates this NodePool's taints
+		if err := scheduling.Taints(source.Taints).ToleratesPod(pod); err == nil {
+			return true
+		}
+	}
+	return false
 }
