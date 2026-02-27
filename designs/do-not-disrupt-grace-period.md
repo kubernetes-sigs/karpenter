@@ -26,7 +26,7 @@ While this might appear to be a concern for higher-level abstractions (PodDisrup
 2. **Separation of Concerns**: This feature addresses **two distinct disruption scenarios** ([#752](https://github.com/kubernetes-sigs/karpenter/issues/752#issuecomment-2109882683)):
    - **Cost-optimization disruptions** (consolidation): Workload owners should have full control to block these
    - **Mandatory maintenance disruptions** (security updates, node replacements): Cluster administrators need eventual override capability
-   
+
    The grace period provides workload owners with a way to declare maximum protection time, preventing indefinite blocking while still allowing necessary protection during normal execution.
 
 3. **Beyond Job Abstractions**: Many workloads requiring protection are **not Kubernetes Jobs**:
@@ -79,7 +79,7 @@ Extend the existing `karpenter.sh/do-not-disrupt` annotation to accept duration 
 #### Annotation Values
 
 - `"true"`: Indefinite protection (existing behavior, backward compatible)
-- Duration string: Protection for the specified duration from pod creation time (e.g., `"4h"`, `"30m"`, `"1h30m"`)
+- Duration string: Protection for the specified duration from pod binding time (e.g., `"4h"`, `"30m"`, `"1h30m"`)
   - Follows Go's `time.Duration` format
   - Common examples: `"30m"`, `"1h"`, `"4h"`, `"24h"`, `"1h30m"`
 
@@ -100,7 +100,7 @@ spec:
 
 1. **Indefinite Protection**: If `karpenter.sh/do-not-disrupt: "true"` is set, the behavior remains the same as today - indefinite protection (backward compatible)
 2. **Time-Limited Protection**: If set to a duration value (e.g., `"4h"`):
-   - The pod is protected from disruption for the specified duration starting from the pod's creation time
+   - The pod is protected from disruption for the specified duration starting from the pod's binding time
    - After the grace period expires, the pod is treated as if it doesn't have the do-not-disrupt annotation
    - The node becomes eligible for disruption if no other constraints prevent it
 3. **Invalid Values**: If the value cannot be parsed as either `"true"` or a valid duration, it is treated as indefinite protection (backward compatible, fail-safe behavior)
@@ -109,10 +109,10 @@ spec:
 
 The grace period expiration time is calculated as:
 ```
-expiration_time = pod.CreationTimestamp + parsed_duration
+expiration_time = pod.BoundTimestamp + parsed_duration
 ```
 
-For example, if a pod is created at `2024-01-01T10:00:00Z` with `karpenter.sh/do-not-disrupt: "4h"`, it will be protected until `2024-01-01T14:00:00Z`.
+For example, if a pod is bound at `2024-01-01T10:00:00Z` with `karpenter.sh/do-not-disrupt: "4h"`, it will be protected until `2024-01-01T14:00:00Z`.
 
 ### Implementation Details
 
@@ -124,18 +124,18 @@ func parseDoNotDisrupt(value string) (indefinite bool, duration time.Duration, e
     if value == "true" {
         return true, 0, nil
     }
-    
+
     d, err := time.ParseDuration(value)
     if err != nil {
         // Invalid format - treat as indefinite (fail-safe)
         return true, 0, nil
     }
-    
+
     if d <= 0 {
         // Zero or negative - treat as indefinite (fail-safe)
         return true, 0, nil
     }
-    
+
     return false, d, nil
 }
 ```
@@ -175,7 +175,7 @@ spec:
 ```
 
 **Behavior**:
-- For the first 2 hours after pod creation, the node hosting this job will not be disrupted
+- For the first 2 hours after pod binding, the node hosting this job will not be disrupted
 - After 2 hours, if the job hasn't completed, the node becomes eligible for disruption
 - This provides protection for normal execution while ensuring the node can eventually be disrupted
 
@@ -249,11 +249,11 @@ This feature is complementary to, but distinct from, NodeClaim's `spec.terminati
 | Feature | Scope | Purpose | Set By | Behavior |
 |---------|-------|---------|--------|----------|
 | `karpenter.sh/do-not-disrupt: "4h"` | **Pod-level** | Self-expiring protection | Workload owner | "Protect this specific pod for 4 hours, then allow disruption" |
-| `spec.terminationGracePeriod` | **NodeClaim-level** | Eventual disruption guarantee | Cluster admin | "Disrupt this node after N hours regardless of pods" |
+| `spec.terminationGracePeriod` | **NodeClaim-level** | Eventual disruption guarantee | Cluster admin | "Terminate this node after N hours regardless of pods" |
 
 **Key Differences**:
 
-1. **Granularity**: 
+1. **Granularity**:
    - `do-not-disrupt` duration: Per-pod protection with automatic expiration
    - `terminationGracePeriod`: Global override affecting all pods on a node
 
@@ -270,6 +270,18 @@ This feature is complementary to, but distinct from, NodeClaim's `spec.terminati
 When both mechanisms are active:
 1. Pod-level protection expires first → Node becomes eligible for disruption if no other blocking pods
 2. NodeClaim termination grace period expires → Node is forcefully disrupted even with blocking pods (eventual disruption mode)
+
+**Eventual Disruption Interaction:**
+
+To ensure drift operations are not indefinitely blocked by application constraints, drift is considered an "eventual
+disruption type". What this means is that nodes with blocking PDBs or `do-not-disrupt` annotations **will** be
+considered valid disruption candidates if `terminationGracePeriod` is configured. This behavior will remain unchanged
+by this RFC.
+
+If a pod with a time-bound `do-not-disrupt` annotation is present on a draining node, that pod will not be drained until
+one of two conditions are met:
+- The pod's `do-not-disrupt` period elapses
+- The node's `terminationGracePeriod` elapses
 
 **Example Scenario**:
 ```yaml
@@ -289,9 +301,13 @@ metadata:
 ```
 
 Timeline:
-- **0-4 hours**: Pod is protected, node cannot be disrupted
-- **4-72 hours**: Pod protection expired, node eligible for disruption (respects PDBs in graceful mode)
-- **After 72 hours**: Node forcefully disrupted regardless of pods (eventual disruption mode)
+
+| t (hours) | Description|
+|-|-|
+|0|Pod is scheduled, pod will be protected until t=4.|
+|2|The node is disrupted by drift.|
+|4|The pod's grace period elapses and the pod is drained.|
+|4-72|Remaining pods are drained and the node is terminated. If all pods can not be gracefully drained by t=72, they are forcibly drained and the node is terminated.|
 
 This layered approach provides:
 - **Workload owners**: Ability to protect their workloads during expected execution
@@ -316,7 +332,7 @@ The annotation controls **when** a pod can be disrupted. Pod's `terminationGrace
 
 Users can determine the grace period status by:
 1. Checking pod annotations for the grace period value
-2. Comparing current time against `pod.CreationTimestamp + grace_period`
+2. Comparing current time against `pod.BindingTimestamp + grace_period`
 3. Observing Karpenter events when nodes become eligible for disruption
 
 Potential future enhancements:
@@ -329,7 +345,7 @@ Potential future enhancements:
 
 Set grace period at the node level instead of pod level.
 
-**Rejected because**: 
+**Rejected because**:
 - Less granular control
 - Doesn't align with the pod-level nature of do-not-disrupt annotation
 - Multiple pods on a node may have different requirements
@@ -362,6 +378,8 @@ Have a controller automatically remove the do-not-disrupt annotation after a per
 - Modifying user-defined annotations can be confusing
 - Doesn't preserve the original intent in pod spec
 - More complex implementation
+
+Of course, users are still able to perform this type of orchestration if they have more complex disruption requirements.
 
 ### Alternative 5: Rely on Higher-Level Abstractions
 
