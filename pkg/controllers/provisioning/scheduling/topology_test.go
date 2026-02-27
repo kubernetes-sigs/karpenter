@@ -141,7 +141,8 @@ var _ = Describe("Topology", func() {
 		})
 		It("should respect NodePool zonal constraints", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}},
+			}
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -156,7 +157,8 @@ var _ = Describe("Topology", func() {
 		})
 		It("should respect NodePool zonal constraints (subset) with requirements", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}},
+			}
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -203,7 +205,8 @@ var _ = Describe("Topology", func() {
 		})
 		It("should respect NodePool zonal constraints (subset) with labels across NodePools", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}},
+			}
 			nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{corev1.LabelTopologyZone: "test-zone-1"})
 			nodePool2 := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
@@ -238,7 +241,8 @@ var _ = Describe("Topology", func() {
 					corev1.ResourceCPU: resource.MustParse("1.1"),
 				},
 			}
-			pod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:           metav1.ObjectMeta{Labels: labels},
 				ResourceRequirements: rr,
 				NodeSelector: map[string]string{
 					corev1.LabelTopologyZone: "test-zone-3",
@@ -248,7 +252,8 @@ var _ = Describe("Topology", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}},
+			}
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -277,29 +282,38 @@ var _ = Describe("Topology", func() {
 			}
 			// force this pod onto zone-1
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 
 			// force this pod onto zone-2
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1))
 
 			// now only allow scheduling pods on zone-3
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}, 10)...,
+				test.UnschedulablePods(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}, 10)...,
 			)
 
 			// max skew of 5, so test-zone-1/2 will have 1 pod each, test-zone-3 will have 6, and the rest will fail to schedule
@@ -320,8 +334,10 @@ var _ = Describe("Topology", func() {
 			createPods := func(count int) []*corev1.Pod {
 				var pods []*corev1.Pod
 				for i := 0; i < count; i++ {
-					pods = append(pods, test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-						ResourceRequirements: rr, TopologySpreadConstraints: topology}))
+					pods = append(pods, test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+						ResourceRequirements: rr, TopologySpreadConstraints: topology,
+					}))
 				}
 				return pods
 			}
@@ -358,20 +374,26 @@ var _ = Describe("Topology", func() {
 			}
 			// force this pod onto zone-1
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 
 			// now only allow scheduling pods on zone-2 and zone-3
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}, 10)...,
+				test.UnschedulablePods(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}, 10)...,
 			)
 
 			// max skew of 1, so test-zone-2/3 will have 2 nodes each and the rest of the pods will fail to schedule
@@ -391,18 +413,22 @@ var _ = Describe("Topology", func() {
 			}
 			// force this pod onto zone-1
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, ResourceRequirements: rr}))
 
 			// now only allow scheduling pods on zone-2 and zone-3
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					TopologySpreadConstraints: topology, ResourceRequirements: rr}, 10)...,
+				test.UnschedulablePods(test.PodOptions{
+					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+					TopologySpreadConstraints: topology, ResourceRequirements: rr,
+				}, 10)...,
 			)
 
 			// max skew of 1, so test-zone-2/3 will have 2 nodes each and the rest of the pods will fail to schedule since
@@ -485,7 +511,8 @@ var _ = Describe("Topology", func() {
 			}
 			var minDomains int32 = 3
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}},
+			}
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -505,7 +532,8 @@ var _ = Describe("Topology", func() {
 			}
 			var minDomains int32 = 3
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}},
+			}
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -525,7 +553,8 @@ var _ = Describe("Topology", func() {
 			}
 			var minDomains int32 = 2
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}},
+			}
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -665,7 +694,8 @@ var _ = Describe("Topology", func() {
 		})
 		It("should respect NodePool capacity type constraints", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand}}}
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand}},
+			}
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       v1.CapacityTypeLabelKey,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -694,20 +724,26 @@ var _ = Describe("Topology", func() {
 			}
 			// force this pod onto spot
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot}}}
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 
 			// now only allow scheduling pods on on-demand
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}}}
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}, 5)...,
+				test.UnschedulablePods(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}, 5)...,
 			)
 
 			// max skew of 1, so on-demand will have 2 pods and the rest of the pods will fail to schedule
@@ -726,19 +762,25 @@ var _ = Describe("Topology", func() {
 				},
 			}
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot}}}
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}}}
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}},
+			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					ResourceRequirements: rr, TopologySpreadConstraints: topology}, 5)...,
+				test.UnschedulablePods(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels},
+					ResourceRequirements: rr, TopologySpreadConstraints: topology,
+				}, 5)...,
 			)
 
 			// max skew of 1, on-demand will end up with 5 pods even though spot has a single pod
@@ -921,7 +963,8 @@ var _ = Describe("Topology", func() {
 
 			// limit our nodePool to only creating arm64 nodes
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"arm64"}}}
+				{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"arm64"}},
+			}
 
 			// since there is no node selector on this pod, the topology can see the single arm64 node that already
 			// exists and that limits us to scheduling 2 more spot pods before we would violate max-skew
@@ -1059,7 +1102,8 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}},
+			}
 
 			// create a second nodePool that can't provision at all
 			nodePoolB := test.NodePool(v1.NodePool{
@@ -1194,7 +1238,6 @@ var _ = Describe("Topology", func() {
 		})
 
 		It("should balance pods across a label (NodeTaintsPolicy=ignore)", func() {
-
 			const spreadLabel = "fake-label"
 			nodePool.Spec.Template.Labels = map[string]string{
 				spreadLabel: "baz",
@@ -1214,7 +1257,8 @@ var _ = Describe("Topology", func() {
 				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("100m"),
-				}})
+				},
+			})
 
 			node2 := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1231,7 +1275,8 @@ var _ = Describe("Topology", func() {
 				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("100m"),
-				}})
+				},
+			})
 			ExpectApplied(ctx, env.Client, nodePool, node1, node2)
 
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -1284,7 +1329,8 @@ var _ = Describe("Topology", func() {
 				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("100m"),
-				}})
+				},
+			})
 
 			node2 := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1301,7 +1347,8 @@ var _ = Describe("Topology", func() {
 				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("100m"),
-				}})
+				},
+			})
 			ExpectApplied(ctx, env.Client, nodePool, node1, node2)
 
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -1545,7 +1592,8 @@ var _ = Describe("Topology", func() {
 				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("100m"),
-				}})
+				},
+			})
 
 			node2 := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1556,7 +1604,8 @@ var _ = Describe("Topology", func() {
 				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("100m"),
-				}})
+				},
+			})
 			ExpectApplied(ctx, env.Client, nodePool, node1, node2)
 
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -1612,7 +1661,8 @@ var _ = Describe("Topology", func() {
 				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("100m"),
-				}})
+				},
+			})
 
 			node2 := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1623,7 +1673,8 @@ var _ = Describe("Topology", func() {
 				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("100m"),
-				}})
+				},
+			})
 			ExpectApplied(ctx, env.Client, nodePool, node1, node2)
 
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -1806,7 +1857,8 @@ var _ = Describe("Topology", func() {
 
 			// open the nodePool back to up so it can see all zones again
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}},
+			}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, test.UnschedulablePod(test.PodOptions{
@@ -1922,6 +1974,357 @@ var _ = Describe("Topology", func() {
 		})
 	})
 
+	// Issue #2227: https://github.com/kubernetes-sigs/karpenter/issues/2227
+	// Test that topology spread constraints only consider domains from NodePools compatible with pod requirements
+	Context("NodePool Domain Filtering (Issue #2227)", func() {
+		var restrictedNodePool, unrestrictedNodePool *v1.NodePool
+
+		BeforeEach(func() {
+			// NodePool with specific zone restrictions (zone-1 and zone-2 only)
+			restrictedNodePool = test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "restricted"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-1", "test-zone-2"},
+								},
+							},
+						},
+					},
+				},
+			})
+
+			// NodePool with only zone-3 available
+			// This creates a clear distinction: pods targeting zone-1/2 use restrictedNodePool,
+			// pods targeting zone-3 use unrestrictedNodePool
+			unrestrictedNodePool = test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "unrestricted"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-3"},
+								},
+							},
+						},
+					},
+				},
+			})
+		})
+
+		It("should only consider zones from NodePool matching pod's nodeSelector", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			// Pods with nodeSelector targeting zone-2
+			// Both NodePools have zone-2, but the test demonstrates that topology
+			// spread only considers zones from NodePools compatible with the pod
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector:              map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+			}, 2)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// All pods are in zone-2 because of nodeSelector
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
+
+			// Verify all pods were scheduled in test-zone-2
+			nodes := &corev1.NodeList{}
+			Expect(env.Client.List(ctx, nodes)).To(Succeed())
+			for _, node := range nodes.Items {
+				Expect(node.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-2"))
+			}
+		})
+
+		It("should only consider zones from NodePool matching pod's nodeAffinity", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			// Pods with nodeAffinity targeting zone-1 or zone-2 will select restrictedNodePool
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1", "test-zone-2"},
+					},
+				},
+			}, 4)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// Verify pods are spread across only zone-1 and zone-2
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
+		})
+
+		It("should handle pods without NodePool restrictions using all zones", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			// Pods targeting zone-3 will use unrestrictedNodePool
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector:              map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+			}, 2)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// All pods should be in zone-3
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
+		})
+
+		It("should not fail due to zones outside NodePool scope", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			// This test verifies the fix for Issue #2227:
+			// Before fix: Karpenter evaluated all cluster zones (zone-1, 2, 3) even though
+			//             the pod targets restrictedNodePool which only has zone-1 and zone-2.
+			//             This caused unnecessary scheduling failures.
+			// After fix:  Karpenter only evaluates zones available in the targeted NodePool.
+			//
+			// Setup: restrictedNodePool has zone-1, zone-2; unrestrictedNodePool has zone-3
+			// Pod targets zone-1 or zone-2, which only matches restrictedNodePool
+			// With maxSkew=1 and 3 pods across 2 zones: 2-1 distribution is valid
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1", "test-zone-2"},
+					},
+				},
+			}, 3)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			// All pods should successfully schedule
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// Verify the spread is 2-1 across the two zones (zone-1 and zone-2)
+			// This would have failed before the fix if Karpenter incorrectly
+			// tried to evaluate zone-3 as well
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 1))
+
+			// Verify no pods were scheduled in test-zone-3
+			nodes := &corev1.NodeList{}
+			Expect(env.Client.List(ctx, nodes)).To(Succeed())
+			for _, node := range nodes.Items {
+				Expect(node.Labels[corev1.LabelTopologyZone]).To(BeElementOf("test-zone-1", "test-zone-2"))
+			}
+		})
+
+		// Issue #2623: https://github.com/kubernetes-sigs/karpenter/issues/2623
+		// Validates the scenario where a pod uses nodeSelector with a custom NodePool label
+		// (not zone-based selection) and the topology spread should only consider domains
+		// from the compatible NodePool.
+		It("should only consider domains from NodePool matching pod's custom label nodeSelector (Issue #2623)", func() {
+			if env.Version.Minor() < 26 {
+				Skip("NodeAffinityPolicy/NodeTaintsPolicy only enabled by default for K8s >= 1.26.x")
+			}
+
+			// Use zone-based topology since the default instance types have zone offerings.
+			// This test validates the real Issue #2623 scenario:
+			// - NodePool A (isolated): tainted, custom label, restricted to zone-1 only
+			// - NodePool B (shared): no taint, different label, zones 2 and 3
+			// - Pod targets NodePool A via nodeSelector on the custom label
+			isolatedNodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "isolated"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								"workload-group": "isolated-app",
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{
+								{
+									Key:    "workload-group",
+									Value:  "isolated-app",
+									Effect: corev1.TaintEffectNoSchedule,
+								},
+							},
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-1"},
+								},
+								{
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpExists,
+								},
+							},
+						},
+					},
+				},
+			})
+
+			sharedNodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "shared"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								"workload-group": "shared-apps",
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-2", "test-zone-3"},
+								},
+								{
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpExists,
+								},
+							},
+						},
+					},
+				},
+			})
+
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:        corev1.LabelTopologyZone,
+				WhenUnsatisfiable:  corev1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            1,
+				NodeTaintsPolicy:   lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+			}}
+
+			ExpectApplied(ctx, env.Client, isolatedNodePool, sharedNodePool)
+
+			// Pod targets isolated NodePool via nodeSelector on "workload-group" label
+			// + tolerates its taint.
+			// Before fix: Karpenter would see zones 1-3 from all NodePools and fail because
+			// the pod can only schedule to zone-1 but maxSkew=1 requires spreading across
+			// all 3 zones.
+			// After fix: Karpenter only sees zone-1 from the compatible NodePool.
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector:              map[string]string{"workload-group": "isolated-app"},
+				Tolerations: []corev1.Toleration{
+					{
+						Key:      "workload-group",
+						Value:    "isolated-app",
+						Effect:   corev1.TaintEffectNoSchedule,
+						Operator: corev1.TolerationOpEqual,
+					},
+				},
+			}, 3)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			// All pods should successfully schedule to zone-1
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// All pods in the single zone
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3))
+
+			// Verify all pods were scheduled in test-zone-1
+			nodes := &corev1.NodeList{}
+			Expect(env.Client.List(ctx, nodes)).To(Succeed())
+			for _, node := range nodes.Items {
+				Expect(node.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-1"))
+			}
+		})
+
+		// Issue #2785: https://github.com/kubernetes-sigs/karpenter/issues/2785
+		// Regression test: Ensure that NodePools with zero active nodes still register
+		// domains correctly so that minDomains can be satisfied. This was the root cause
+		// of the revert of PR #2639.
+		It("should register domains from NodePools with zero active nodes when minDomains is set", func() {
+			if env.Version.Minor() < 24 {
+				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
+			}
+
+			var minDomains int32 = 2
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+				MinDomains:        &minDomains,
+			}}
+
+			// Both NodePools have zero active nodes initially.
+			// Before the #2639 revert: this would fail because zero-node NodePools
+			// didn't register their domains, causing minDomains to be unsatisfied.
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+			}, 4)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			// All pods should successfully schedule
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// Pods should be spread across available zones
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 1, 1))
+		})
+	})
+
 	Context("Pod Affinity/Anti-Affinity", func() {
 		It("should schedule a pod with empty pod affinity and anti-affinity", func() {
 			ExpectApplied(ctx, env.Client)
@@ -1984,7 +2387,8 @@ var _ = Describe("Topology", func() {
 				},
 				NodeSelector: map[string]string{
 					corev1.LabelArchStable: "arm64",
-				}})
+				},
+			})
 			// affPod2 will try to get scheduled with affPod1
 			affPod2 := test.UnschedulablePod(test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: affLabels},
@@ -1997,7 +2401,8 @@ var _ = Describe("Topology", func() {
 						MatchLabels: affLabels,
 					},
 					TopologyKey: corev1.LabelArchStable,
-				}}})
+				}},
+			})
 
 			pods := []*corev1.Pod{affPod1, affPod2}
 
@@ -2259,7 +2664,6 @@ var _ = Describe("Topology", func() {
 			// should be scheduled as the pod it has affinity to doesn't exist, but it's only a preference and not a
 			// hard constraints
 			ExpectScheduled(ctx, env.Client, affPod2)
-
 		})
 		It("should allow violation of preferred pod anti-affinity", func() {
 			affPods := test.UnschedulablePods(test.PodOptions{PodAntiPreferences: []corev1.WeightedPodAffinityTerm{
@@ -2292,7 +2696,6 @@ var _ = Describe("Topology", func() {
 			for _, aff := range affPods {
 				ExpectScheduled(ctx, env.Client, aff)
 			}
-
 		})
 		It("should separate nodes using simple pod anti-affinity on hostname", func() {
 			affLabels := map[string]string{"security": "s2"}
@@ -2323,19 +2726,22 @@ var _ = Describe("Topology", func() {
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")},
 				},
-				NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-1"}})
+				NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+			})
 			zone2Pod := test.UnschedulablePod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: affLabels},
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")},
 				},
-				NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"}})
+				NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+			})
 			zone3Pod := test.UnschedulablePod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: affLabels},
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")},
 				},
-				NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-3"}})
+				NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+			})
 
 			affPod := test.UnschedulablePod(test.PodOptions{
 				PodAntiRequirements: []corev1.PodAffinityTerm{{
@@ -2343,7 +2749,8 @@ var _ = Describe("Topology", func() {
 						MatchLabels: affLabels,
 					},
 					TopologyKey: corev1.LabelTopologyZone,
-				}}})
+				}},
+			})
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pod, zone3Pod, affPod)
@@ -2361,14 +2768,16 @@ var _ = Describe("Topology", func() {
 				ObjectMeta: metav1.ObjectMeta{Labels: affLabels},
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")},
-				}})
+				},
+			})
 			affPod := test.UnschedulablePod(test.PodOptions{
 				PodAntiRequirements: []corev1.PodAffinityTerm{{
 					LabelSelector: &metav1.LabelSelector{
 						MatchLabels: affLabels,
 					},
 					TopologyKey: corev1.LabelTopologyZone,
-				}}})
+				}},
+			})
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod, affPod)
@@ -2394,7 +2803,8 @@ var _ = Describe("Topology", func() {
 				},
 				NodeSelector: map[string]string{
 					corev1.LabelArchStable: "arm64",
-				}})
+				},
+			})
 
 			// affPod2 will try to get scheduled on a node with a different archi from affPod1. Due to resource
 			// requests we try to schedule it last
@@ -2409,7 +2819,8 @@ var _ = Describe("Topology", func() {
 						MatchLabels: affLabels,
 					},
 					TopologyKey: corev1.LabelArchStable,
-				}}})
+				}},
+			})
 
 			pods := []*corev1.Pod{affPod1, affPod2}
 
@@ -2439,15 +2850,18 @@ var _ = Describe("Topology", func() {
 			zone1Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiPreferences:   anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+			})
 			zone2Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiPreferences:   anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-2"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+			})
 			zone3Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiPreferences:   anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-3"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+			})
 
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
@@ -2474,15 +2888,18 @@ var _ = Describe("Topology", func() {
 			zone1Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiRequirements:  anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+			})
 			zone2Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiRequirements:  anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-2"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+			})
 			zone3Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiRequirements:  anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-3"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+			})
 
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
@@ -2541,15 +2958,18 @@ var _ = Describe("Topology", func() {
 			zone1Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiRequirements:  anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+			})
 			zone2Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiRequirements:  anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-2"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+			})
 			zone3Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiRequirements:  anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-3"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+			})
 
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
@@ -2596,15 +3016,18 @@ var _ = Describe("Topology", func() {
 			zone1Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiPreferences:   anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+			})
 			zone2Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiPreferences:   anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-2"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+			})
 			zone3Pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: rr,
 				PodAntiPreferences:   anti,
-				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-3"}})
+				NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+			})
 
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
@@ -2651,7 +3074,8 @@ var _ = Describe("Topology", func() {
 						},
 						TopologyKey: corev1.LabelHostname,
 					},
-				}}}, 3)
+				}},
+			}, 3)
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := append(affPods, affPod1)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -2674,7 +3098,8 @@ var _ = Describe("Topology", func() {
 							MatchLabels: affLabels,
 						},
 						TopologyKey: corev1.LabelTopologyZone,
-					}}}, 3)
+					}},
+				}, 3)
 			}
 
 			top := &corev1.TopologySpreadConstraint{TopologyKey: corev1.LabelTopologyZone}
@@ -2715,7 +3140,8 @@ var _ = Describe("Topology", func() {
 						MatchLabels: affLabels,
 					},
 					TopologyKey: corev1.LabelTopologyZone,
-				}}}, 10)
+				}},
+			}, 10)
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, affPods...)
@@ -2737,7 +3163,8 @@ var _ = Describe("Topology", func() {
 						MatchLabels: affLabels,
 					},
 					TopologyKey: corev1.LabelTopologyZone,
-				}}}, 10)
+				}},
+			}, 10)
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, append(affPods, targetPod)...)
@@ -2761,14 +3188,16 @@ var _ = Describe("Topology", func() {
 			affLabels := map[string]string{"security": "s2"}
 
 			// the pod that the others have an affinity to
-			affPod1 := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels},
+			affPod1 := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: affLabels},
 				NodeRequirements: []corev1.NodeSelectorRequirement{
 					{
 						Key:      corev1.LabelTopologyZone,
 						Operator: corev1.NodeSelectorOpIn,
 						Values:   []string{"test-zone-1"},
 					},
-				}})
+				},
+			})
 
 			// affPods will all be scheduled in the same zone as affPod1
 			affPods := test.UnschedulablePods(test.PodOptions{
@@ -2777,7 +3206,8 @@ var _ = Describe("Topology", func() {
 						MatchLabels: affLabels,
 					},
 					TopologyKey: corev1.LabelTopologyZone,
-				}}}, 10)
+				}},
+			}, 10)
 
 			affPods = append(affPods, affPod1)
 
@@ -2796,22 +3226,33 @@ var _ = Describe("Topology", func() {
 				// we have to schedule DB -> Web -> Cache -> UI in that order or else there are pod affinity violations
 				pods := []*corev1.Pod{
 					test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: dbLabels}}),
-					test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: webLabels},
-						PodRequirements: []corev1.PodAffinityTerm{{
-							LabelSelector: &metav1.LabelSelector{MatchLabels: dbLabels},
-							TopologyKey:   corev1.LabelHostname},
-						}}),
-					test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: cacheLabels},
-						PodRequirements: []corev1.PodAffinityTerm{{
-							LabelSelector: &metav1.LabelSelector{MatchLabels: webLabels},
-							TopologyKey:   corev1.LabelHostname},
-						}}),
-					test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: uiLabels},
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{Labels: webLabels},
+						PodRequirements: []corev1.PodAffinityTerm{
+							{
+								LabelSelector: &metav1.LabelSelector{MatchLabels: dbLabels},
+								TopologyKey:   corev1.LabelHostname,
+							},
+						},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{Labels: cacheLabels},
+						PodRequirements: []corev1.PodAffinityTerm{
+							{
+								LabelSelector: &metav1.LabelSelector{MatchLabels: webLabels},
+								TopologyKey:   corev1.LabelHostname,
+							},
+						},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{Labels: uiLabels},
 						PodRequirements: []corev1.PodAffinityTerm{
 							{
 								LabelSelector: &metav1.LabelSelector{MatchLabels: cacheLabels},
-								TopologyKey:   corev1.LabelHostname},
-						}}),
+								TopologyKey:   corev1.LabelHostname,
+							},
+						},
+					}),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 				for i := range pods {
@@ -2827,13 +3268,15 @@ var _ = Describe("Topology", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			// this pods wants to schedule with a non-existent pod, this test just ensures that the scheduling loop
 			// doesn't infinite loop
-			pod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: dbLabels},
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: dbLabels},
 				PodRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: webLabels},
 						TopologyKey:   corev1.LabelHostname,
 					},
-				}})
+				},
+			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})

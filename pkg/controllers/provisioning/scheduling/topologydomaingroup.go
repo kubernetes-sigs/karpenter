@@ -17,56 +17,120 @@ limitations under the License.
 package scheduling
 
 import (
+	"strings"
+
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-// TopologyDomainGroup tracks the domains for a single topology. Additionally, it tracks the taints associated with
-// each of these domains. This enables us to determine which domains should be considered by a pod if its
-// NodeTaintPolicy is honor.
-type TopologyDomainGroup map[string][][]v1.Taint
+// DomainSource tracks the requirements and taints for a specific domain provided by a NodePool.
+// This allows us to determine if a pod can use this domain based on its nodeSelector and nodeAffinity.
+type DomainSource struct {
+	// NodePoolRequirements contains the combined requirements from the NodePool's labels and requirements.
+	// This includes both user-defined labels and instance type requirements (e.g., karpenter.k8s.aws/instance-size).
+	NodePoolRequirements scheduling.Requirements
+	// Taints are the taints associated with this domain from the NodePool.
+	Taints []v1.Taint
+}
+
+// TopologyDomainGroup tracks the domains for a single topology. Additionally, it tracks the requirements and taints
+// associated with each of these domains from the NodePools that provide them. This enables us to determine which
+// domains should be considered by a pod based on its nodeSelector, nodeAffinity, and tolerations.
+type TopologyDomainGroup struct {
+	// domains maps each domain to the list of NodePool sources that can provide it
+	domains map[string][]DomainSource
+}
 
 func NewTopologyDomainGroup() TopologyDomainGroup {
-	return map[string][][]v1.Taint{}
+	return TopologyDomainGroup{
+		domains: map[string][]DomainSource{},
+	}
 }
 
-// Insert either adds a new domain to the TopologyDomainGroup or updates an existing domain.
-func (t TopologyDomainGroup) Insert(domain string, taints ...v1.Taint) {
-	// If the domain is not currently tracked, insert it with the associated taints. Additionally, if there are no taints
-	// provided, override the taints associated with the domain. Generally, we could remove any sets of taints for which
-	// the provided set is a proper subset. This is because if a pod tolerates the supersets, it will also tolerate the
-	// proper subset, and removing the superset reduces the number of taint sets we need to traverse. For now we only
-	// implement the simplest case, the empty set, but we could do additional performance testing to determine if
-	// implementing the general case is worth the precomputation cost.
-	if _, ok := t[domain]; !ok || len(taints) == 0 {
-		t[domain] = [][]v1.Taint{taints}
-		return
-	}
-	if len(t[domain][0]) == 0 {
-		// This is the base case, where we're already tracking the empty set of taints for the domain. Pods will always
-		// be eligible for NodeClaims with this domain (based on taints), so there is no need to track additional taints.
-		return
-	}
-	t[domain] = append(t[domain], taints)
-}
-
-// ForEachDomain calls f on each domain tracked by the topology group. If the taintHonorPolicy is honor, only domains
-// available on nodes tolerated by the provided pod will be included.
-func (t TopologyDomainGroup) ForEachDomain(pod *v1.Pod, taintHonorPolicy v1.NodeInclusionPolicy, f func(domain string)) {
-	for domain, taintGroups := range t {
-		if taintHonorPolicy == v1.NodeInclusionPolicyIgnore {
-			f(domain)
-			continue
+func domainSourceKey(requirements scheduling.Requirements, taints []v1.Taint) string {
+	var b strings.Builder
+	b.WriteString(requirements.String())
+	b.WriteString("|taints=")
+	for i := range taints {
+		if i > 0 {
+			b.WriteString(",")
 		}
-		// Since the taint policy is honor, we should only call f if there is a set of taints associated with the domain which
-		// the pod tolerates.
-		// Perf Note: We could consider hashing the pod's tolerations and using that to look up a set of tolerated domains.
-		for _, taints := range taintGroups {
-			if err := scheduling.Taints(taints).ToleratesPod(pod); err == nil {
-				f(domain)
+		b.WriteString(taints[i].Key)
+		b.WriteString("=")
+		b.WriteString(taints[i].Value)
+		b.WriteString(":")
+		b.WriteString(string(taints[i].Effect))
+	}
+	return b.String()
+}
+
+// Insert adds a domain to the TopologyDomainGroup with its associated NodePool requirements and taints.
+// This tracks which NodePools can provide this domain, allowing us to filter domains based on pod requirements.
+func (t TopologyDomainGroup) Insert(domain string, nodePoolRequirements scheduling.Requirements, taints ...v1.Taint) {
+	if t.domains[domain] == nil {
+		t.domains[domain] = []DomainSource{}
+	}
+
+	// Create a new domain source for this NodePool
+	source := DomainSource{
+		NodePoolRequirements: nodePoolRequirements,
+		Taints:               taints,
+	}
+
+	// NOTE: We must not optimize/override sources based solely on taints.
+	// Even if a NodePool has no taints, it may be incompatible with a pod's nodeSelector/nodeAffinity.
+	// Keeping all sources ensures we can correctly include a domain if *any* NodePool providing it is compatible.
+	key := domainSourceKey(nodePoolRequirements, taints)
+	for _, existing := range t.domains[domain] {
+		if domainSourceKey(existing.NodePoolRequirements, existing.Taints) == key {
+			return
+		}
+	}
+	t.domains[domain] = append(t.domains[domain], source)
+}
+
+// ForEachDomain calls f on each domain tracked by the topology group that is compatible with the pod's requirements.
+// It filters domains based on:
+//  1. Pod's requirements (from nodeSelector and any nodeAffinity term) don't conflict with NodePool requirements.
+//     podRequirementSets contains one Requirements per nodeAffinity term (OR'd together), each combined with nodeSelector.
+//     A domain is compatible if ANY of these requirement sets intersects with the NodePool.
+//  2. Pod's tolerations tolerate the NodePool's taints (if taintHonorPolicy is honor)
+func (t TopologyDomainGroup) ForEachDomain(pod *v1.Pod, podRequirementSets []scheduling.Requirements, taintHonorPolicy v1.NodeInclusionPolicy, f func(domain string)) {
+	for domain, sources := range t.domains {
+		if t.isDomainCompatible(pod, sources, podRequirementSets, taintHonorPolicy) {
+			f(domain)
+		}
+	}
+}
+
+// isDomainCompatible checks if any source for a domain is compatible with any of the pod's requirement sets.
+func (t TopologyDomainGroup) isDomainCompatible(pod *v1.Pod, sources []DomainSource, podRequirementSets []scheduling.Requirements, taintHonorPolicy v1.NodeInclusionPolicy) bool {
+	for _, source := range sources {
+		// Check if any of the pod's requirement sets (OR'd nodeAffinity terms) intersects
+		// with this NodePool's requirements. If podRequirementSets is empty (e.g., for pod
+		// affinity/anti-affinity where no nodeFilter is applied), skip the requirements check
+		// and consider all domains as compatible from a requirements perspective.
+		requirementsMatch := len(podRequirementSets) == 0
+		for _, podReqs := range podRequirementSets {
+			if err := source.NodePoolRequirements.Intersects(podReqs); err == nil {
+				requirementsMatch = true
 				break
 			}
 		}
+		if !requirementsMatch {
+			continue
+		}
+
+		// If taint policy is ignore, we don't need to check taints
+		if taintHonorPolicy == v1.NodeInclusionPolicyIgnore {
+			return true
+		}
+
+		// Check if pod tolerates this NodePool's taints
+		if err := scheduling.Taints(source.Taints).ToleratesPod(pod); err == nil {
+			return true
+		}
 	}
+	return false
 }
