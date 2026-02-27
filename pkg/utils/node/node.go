@@ -28,11 +28,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/klog/v2"
+
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sigs.k8s.io/karpenter/pkg/events"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -148,7 +151,7 @@ func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (
 }
 
 // GetCurrentlyReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
-func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, clk clock.Clock, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
+func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, clk clock.Clock, recorder events.Recorder, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
 	pods, err := GetPods(ctx, kubeClient, nodes...)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
@@ -160,7 +163,7 @@ func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client
 	}
 
 	return lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return pdbs.IsCurrentlyReschedulable(p, clk)
+		return pdbs.IsCurrentlyReschedulable(p, clk, recorder)
 	}), nil
 }
 
