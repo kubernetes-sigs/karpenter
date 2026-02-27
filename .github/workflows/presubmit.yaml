@@ -28,4 +28,5 @@ jobs:
       if: matrix.k8sVersion == '1.35.x'
       env:
         COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: go tool -modfile=go.tools.mod goveralls -coverprofile=coverage.out -service=github
+      # ignore failures to avoid disruption of CI workflows on coveralls outages
+      run: go tool -modfile=go.tools.mod goveralls -coverprofile=coverage.out -service=github || true
