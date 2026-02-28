@@ -105,12 +105,20 @@ type Operator struct {
 
 type Options struct {
 	LeaderElectionLabels map[string]string
+	LeaderElectionConfig *rest.Config // Optional separate config for leader election
 }
 
 // Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
 func WithLeaderElectionLabels(labels map[string]string) option.Function[Options] {
 	return func(opts *Options) {
 		opts.LeaderElectionLabels = labels
+	}
+}
+
+// Adds LeaderElectionConfig to the underlying manager's LeaderElectionOptions allowing for custom client config
+func WithLeaderElectionConfig(config *rest.Config) option.Function[Options] {
+	return func(opts *Options) {
+		opts.LeaderElectionConfig = config
 	}
 }
 
@@ -145,6 +153,11 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	// limiting on the regular config would also cause client-side rate limiting on the leader election client,
 	// often leading to leader loss during large scale-ups or periods of high churn
 	leaderConfig := rest.CopyConfig(config)
+
+	if opts.LeaderElectionConfig != nil {
+		leaderConfig = opts.LeaderElectionConfig
+	}
+
 	config.QPS = float32(options.FromContext(ctx).KubeClientQPS)
 	config.Burst = options.FromContext(ctx).KubeClientBurst
 	config.UserAgent = fmt.Sprintf("%s/%s", AppName, Version)
