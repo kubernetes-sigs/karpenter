@@ -127,10 +127,10 @@ func (d *Drift) ConsolidationType() string {
 //  1. Group candidates by NodePool.
 //  2. For each NodePool with an active sequential topology budget:
 //     a. Scan cluster nodes to find which zones have in-flight disruptions
-//        (MarkedForDeletion nodes in this NodePool).
+//     (MarkedForDeletion nodes in this NodePool).
 //     b. If any zone has in-flight disruptions → active zone = that zone.
 //     c. If no in-flight disruptions → active zone = zone of candidates[0]
-//        (already sorted oldest-drift-first, so this is the most urgent zone).
+//     (already sorted oldest-drift-first, so this is the most urgent zone).
 //     d. Count disrupting nodes in the active zone, compute remaining budget.
 //     e. Return only candidates from the active zone, capped at remaining budget.
 func (d *Drift) filterBySequentialTopology(candidates []*Candidate) []*Candidate {
@@ -144,49 +144,13 @@ func (d *Drift) filterBySequentialTopology(candidates []*Candidate) []*Candidate
 			result = append(result, npCandidates...)
 			continue
 		}
-		topologyKey := budget.TopologyKey
-
-		// Count nodes and in-flight disruptions per zone for this NodePool
-		inFlightByZone := map[string]int{}
-		numByZone := map[string]int{}
-		for _, n := range allNodes {
-			if !n.Managed() || !n.Initialized() {
-				continue
-			}
-			if n.Labels()[v1.NodePoolLabelKey] != npName {
-				continue
-			}
-			if n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
-				continue
-			}
-			zone := n.Labels()[topologyKey]
-			if zone == "" {
-				continue
-			}
-			numByZone[zone]++
-			if n.MarkedForDeletion() {
-				inFlightByZone[zone]++
-			}
-		}
-
-		// Determine active zone: prefer zone with in-flight disruptions
-		activeZone := ""
-		for zone, count := range inFlightByZone {
-			if count > 0 {
-				activeZone = zone
-				break
-			}
-		}
-		if activeZone == "" && len(npCandidates) > 0 {
-			// No in-flight disruptions; start with the oldest-drifted candidate's zone
-			activeZone = npCandidates[0].zone
-		}
+		numByZone, inFlightByZone := d.scanNodesByZone(allNodes, npName, budget.TopologyKey)
+		activeZone := pickActiveZone(inFlightByZone, npCandidates)
 		if activeZone == "" {
 			result = append(result, npCandidates...)
 			continue
 		}
 
-		// Calculate remaining per-zone budget
 		allowance, err := budget.GetAllowedDisruptions(d.clock, numByZone[activeZone])
 		if err != nil || allowance == 0 {
 			continue
@@ -196,7 +160,6 @@ func (d *Drift) filterBySequentialTopology(candidates []*Candidate) []*Candidate
 			continue
 		}
 
-		// Filter to active zone only, capped at remaining budget
 		zoneCandidates := lo.Filter(npCandidates, func(c *Candidate, _ int) bool {
 			return c.zone == activeZone
 		})
@@ -206,6 +169,48 @@ func (d *Drift) filterBySequentialTopology(candidates []*Candidate) []*Candidate
 		result = append(result, zoneCandidates...)
 	}
 	return result
+}
+
+// scanNodesByZone counts total and in-flight (MarkedForDeletion) nodes per topology
+// zone for the given NodePool, excluding terminating nodes.
+func (d *Drift) scanNodesByZone(allNodes state.StateNodes, npName, topologyKey string) (numByZone, inFlightByZone map[string]int) {
+	numByZone = map[string]int{}
+	inFlightByZone = map[string]int{}
+	for _, n := range allNodes {
+		if !n.Managed() || !n.Initialized() {
+			continue
+		}
+		if n.Labels()[v1.NodePoolLabelKey] != npName {
+			continue
+		}
+		if n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+			continue
+		}
+		zone := n.Labels()[topologyKey]
+		if zone == "" {
+			continue
+		}
+		numByZone[zone]++
+		if n.MarkedForDeletion() {
+			inFlightByZone[zone]++
+		}
+	}
+	return numByZone, inFlightByZone
+}
+
+// pickActiveZone returns the zone that should be disrupted next.
+// If any zone already has in-flight disruptions, that zone is continued.
+// Otherwise the zone of the first (oldest-drifted) candidate is chosen.
+func pickActiveZone(inFlightByZone map[string]int, candidates []*Candidate) string {
+	for zone, count := range inFlightByZone {
+		if count > 0 {
+			return zone
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0].zone
+	}
+	return ""
 }
 
 // findActiveSequentialBudget returns the first active budget with TopologyKey +
