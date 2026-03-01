@@ -272,4 +272,53 @@ var _ = Describe("Budgets", func() {
 			Expect(err).To(MatchError(ContainSubstring("beginning of range (2) beyond end of range (1)")))
 		})
 	})
+
+	Context("Sequential Topology Budgets", func() {
+		It("should fail validation when sequential is true but topologyKey is not set", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:      "1",
+					Sequential: true,
+				},
+			}
+			err := nodePool.RuntimeValidate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("'sequential' requires 'topologyKey'"))
+		})
+		It("should fail validation when topologyKey is not a valid qualified name", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:       "1",
+					TopologyKey: "not valid!",
+				},
+			}
+			err := nodePool.RuntimeValidate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("invalid topologyKey"))
+		})
+		It("should pass validation for a valid sequential topology budget", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:       "1",
+					TopologyKey: "topology.kubernetes.io/zone",
+					Sequential:  true,
+				},
+			}
+			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+		})
+		It("should return MaxInt32 from GetAllowedDisruptionsByReason when only topology budgets exist", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:       "1",
+					TopologyKey: "topology.kubernetes.io/zone",
+					Sequential:  true,
+				},
+			}
+			for _, reason := range allKnownDisruptionReasons {
+				allowedDisruption, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, reason)
+				Expect(err).To(BeNil())
+				Expect(allowedDisruption).To(Equal(math.MaxInt32))
+			}
+		})
+	})
 })
