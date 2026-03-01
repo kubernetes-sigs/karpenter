@@ -1,21 +1,18 @@
-# AZ-Sequential Disruption Budget for Drift
+# Sequential Topology Disruption Budget for Drift
 
 ## Motivation
 
 Karpenter's existing disruption budgets control how many nodes can be terminating simultaneously
 across a NodePool, but they have no awareness of topology. When a NodePool spans multiple
-availability zones (or any topology domain), all zones can be disrupted concurrently. This is
-acceptable for consolidation, but it creates availability risk for Drift — when a new node image
-or configuration rolls out, every zone can begin cycling nodes at the same time.
+topology domains (availability zones, regions, racks, or any other label-based grouping), all
+domains can be disrupted concurrently. This is acceptable for consolidation, but it creates
+availability risk for Drift — when a new node image or configuration rolls out, every topology
+domain can begin cycling nodes at the same time.
 
-Operators running stateful or zone-sensitive workloads need a way to roll drifted nodes
-**one zone at a time**, verifying that the first zone stabilises before the next one begins.
-This mirrors how rolling deployments work but applied at the node level and scoped to topology
-domains.
-
-Related issues:
-- https://github.com/kubernetes-sigs/karpenter/issues/924
-- https://github.com/kubernetes-sigs/karpenter/issues/753
+Operators running stateful or topology-sensitive workloads need a way to roll drifted nodes
+**one topology domain at a time**, verifying that the first domain stabilises before the next
+one begins. This mirrors how rolling deployments work but applied at the node level and scoped
+to arbitrary topology domains.
 
 ## API Design
 
