@@ -246,7 +246,100 @@ var _ = Describe("Drift", Ordered, func() {
 			env.ExpectNodeClaimCount("==", 5)
 			env.ExpectNodeCount("==", 5)
 		})
-		It("should not allow drift if the budget is fully blocking", func() {
+		It("should only disrupt nodes in one topology zone at a time with a sequential budget", func() {
+		// Create one pod per zone via zone anti-affinity, so each zone gets exactly one node.
+		numPods = 3
+		dep = test.Deployment(test.DeploymentOptions{
+			Replicas: int32(numPods),
+			PodOptions: test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: label,
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+				PodAntiRequirements: []corev1.PodAffinityTerm{{
+					TopologyKey: corev1.LabelTopologyZone,
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: label,
+					},
+				}},
+			},
+		})
+		selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+
+		// Sequential budget: roll one zone at a time, allow up to 100% of that zone's nodes.
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+			Nodes:       "100%",
+			TopologyKey: corev1.LabelTopologyZone,
+			Sequential:  true,
+			Reasons:     []v1.DisruptionReason{v1.DisruptionReasonDrifted},
+		}}
+
+		env.ExpectCreated(nodeClass, nodePool, dep)
+		nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", numPods)
+		nodes := env.EventuallyExpectCreatedNodeCount("==", numPods)
+		env.EventuallyExpectHealthyPodCount(selector, numPods)
+
+		// Add finalizers to freeze nodes in the disrupting state so we can observe zone isolation.
+		By("adding finalizers to nodes to prevent termination")
+		for _, node := range nodes {
+			Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
+			node.Finalizers = append(node.Finalizers, common.TestingFinalizer)
+			env.ExpectUpdated(node)
+		}
+
+		By("removing do-not-disrupt annotations to allow disruption")
+		pods := env.EventuallyExpectHealthyPodCount(selector, numPods)
+		for _, pod := range pods {
+			delete(pod.Annotations, v1.DoNotDisruptAnnotationKey)
+			env.ExpectUpdated(pod)
+		}
+
+		By("drifting all nodes via NodePool annotation change")
+		nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
+		env.ExpectUpdated(nodePool)
+		env.EventuallyExpectDrifted(nodeClaims...)
+
+		By("waiting for disruption to begin")
+		env.EventuallyExpectTaintedNodeCount(">=", 1)
+
+		By("verifying that only nodes from a single zone are disrupted at a time")
+		Consistently(func(g Gomega) {
+			nodeList := &corev1.NodeList{}
+			g.Expect(env.Client.List(env, nodeList, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+
+			taintedNodes := lo.Filter(nodeList.Items, func(n corev1.Node, _ int) bool {
+				_, ok := lo.Find(n.Spec.Taints, func(t corev1.Taint) bool {
+					return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
+				})
+				return ok
+			})
+			if len(taintedNodes) == 0 {
+				return
+			}
+
+			zones := lo.Uniq(lo.Map(taintedNodes, func(n corev1.Node, _ int) string {
+				return n.Labels[corev1.LabelTopologyZone]
+			}))
+			g.Expect(zones).To(HaveLen(1),
+				fmt.Sprintf("expected disruptions to be confined to a single zone, observed zones: %v", zones))
+		}, 3*time.Minute).Should(Succeed())
+
+		By("removing finalizers to allow the rollout to complete")
+		for _, node := range nodes {
+			Expect(env.ExpectTestingFinalizerRemoved(node)).To(Succeed())
+		}
+		for _, nodeClaim := range nodeClaims {
+			Expect(env.ExpectTestingFinalizerRemoved(nodeClaim)).To(Succeed())
+		}
+
+		env.EventuallyExpectNotFound(lo.Map(nodes, func(n *corev1.Node, _ int) client.Object { return n })...)
+		env.EventuallyExpectNotFound(lo.Map(nodeClaims, func(n *v1.NodeClaim, _ int) client.Object { return n })...)
+		env.ExpectNodeClaimCount("==", numPods)
+		env.ExpectNodeCount("==", numPods)
+	})
+	It("should not allow drift if the budget is fully blocking", func() {
 			// We're going to define a budget that doesn't allow any drift to happen
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{
 				Nodes: "0",
