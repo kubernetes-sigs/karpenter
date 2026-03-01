@@ -117,7 +117,16 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 
-	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
+	// Get NodePool for optional repair configuration overrides
+	var nodePool *v1.NodePool
+	if nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]; found {
+		nodePool = &v1.NodePool{}
+		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+			nodePool = nil
+		}
+	}
+
+	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node, nodePool)
 	if unhealthyNodeCondition == nil {
 		return reconcile.Result{}, nil
 	}
@@ -186,23 +195,46 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 }
 
 // Find a node with a condition that matches one of the unhealthy conditions defined by the cloud provider
-// If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration
-func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.NodeCondition, cpTerminationDuration time.Duration) {
+// If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration.
+// The NodePool's repair configuration can override the CloudProvider's TolerationDuration.
+func (c *Controller) findUnhealthyConditions(node *corev1.Node, nodePool *v1.NodePool) (nc *corev1.NodeCondition, terminationDuration time.Duration) {
 	requeueTime := time.Time{}
 	for _, policy := range c.cloudProvider.RepairPolicies() {
 		// check the status and the type on the condition
 		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
 		if nodeCondition.Status == policy.ConditionStatus {
-			terminationTime := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration)
-			// Determine requeue time
+			duration := c.resolveTolerationDuration(policy, nodePool)
+			terminationTime := nodeCondition.LastTransitionTime.Add(duration)
+			// Determine requeue time - find the condition with the earliest termination time
 			if requeueTime.IsZero() || requeueTime.After(terminationTime) {
 				nc = lo.ToPtr(nodeCondition)
-				cpTerminationDuration = policy.TolerationDuration
+				terminationDuration = duration
 				requeueTime = terminationTime
 			}
 		}
 	}
-	return nc, cpTerminationDuration
+	return nc, terminationDuration
+}
+
+// resolveTolerationDuration resolves the toleration duration in order of priority:
+// 1. NodePool-specific repair policy for the condition type and status
+// 2. NodePool's DefaultTolerationDuration
+// 3. CloudProvider's TolerationDuration from the RepairPolicy
+func (c *Controller) resolveTolerationDuration(policy cloudprovider.RepairPolicy, nodePool *v1.NodePool) time.Duration {
+	if nodePool != nil && nodePool.Spec.Repair != nil {
+		// Check for condition-specific policy override in NodePool
+		for _, npPolicy := range nodePool.Spec.Repair.Policies {
+			if npPolicy.ConditionType == policy.ConditionType && npPolicy.ConditionStatus == policy.ConditionStatus {
+				return npPolicy.TolerationDuration.Duration
+			}
+		}
+		// Check for default duration override in NodePool
+		if nodePool.Spec.Repair.DefaultTolerationDuration != nil {
+			return nodePool.Spec.Repair.DefaultTolerationDuration.Duration
+		}
+	}
+	// Fallback to CloudProvider's TolerationDuration
+	return policy.TolerationDuration
 }
 
 func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeClaim *v1.NodeClaim) error {
