@@ -170,10 +170,13 @@ const (
 // This allows users to override the CloudProvider's default TolerationDuration
 // for specific node conditions or set a default for all conditions.
 type RepairSpec struct {
+	//nolint:kubeapilinter
 	// Policies defines the repair policies for different node conditions.
 	// These policies override the CloudProvider's default TolerationDuration.
+	// +listType=atomic
 	// +optional
 	Policies []NodePoolRepairPolicy `json:"policies,omitempty"`
+	//nolint:kubeapilinter
 	// DefaultTolerationDuration is the default duration to wait before repairing
 	// nodes for any condition not explicitly configured in Policies.
 	// If not specified, uses the CloudProvider's default TolerationDuration.
@@ -185,14 +188,15 @@ type RepairSpec struct {
 
 // NodePoolRepairPolicy defines a repair policy for a specific node condition.
 type NodePoolRepairPolicy struct {
-	// ConditionType specifies the node condition to monitor, e.g. "Ready", "DiskPressure".
+	// conditionType specifies the node condition to monitor, e.g. "Ready", "DiskPressure".
 	// Must match a ConditionType defined in the CloudProvider's RepairPolicies.
 	// +required
-	ConditionType v1.NodeConditionType `json:"conditionType"`
-	// ConditionStatus specifies the condition status that indicates unhealthy state,
+	ConditionType v1.NodeConditionType `json:"conditionType,omitempty"`
+	// conditionStatus specifies the condition status that indicates unhealthy state,
 	// e.g. "False", "True", or "Unknown".
 	// +required
-	ConditionStatus v1.ConditionStatus `json:"conditionStatus"`
+	ConditionStatus v1.ConditionStatus `json:"conditionStatus,omitempty"`
+	//nolint:kubeapilinter
 	// TolerationDuration is the duration to wait before attempting to terminate
 	// nodes that match this repair policy. Overrides the CloudProvider's
 	// TolerationDuration for this specific condition.

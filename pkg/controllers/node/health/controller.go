@@ -117,15 +117,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 
-	// Get NodePool for optional repair configuration overrides
-	var nodePool *v1.NodePool
-	if nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]; found {
-		nodePool = &v1.NodePool{}
-		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-			nodePool = nil
-		}
-	}
-
+	nodePool := c.getNodePool(ctx, nodeClaim)
 	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node, nodePool)
 	if unhealthyNodeCondition == nil {
 		return reconcile.Result{}, nil
@@ -138,36 +130,56 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
 	}
 
-	// If a nodeclaim does have a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
-	// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
-	// to repair the nodes
-	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
-	if found {
-		nodePoolHealthy, err := c.isNodePoolHealthy(ctx, nodePoolName)
-		if err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-		if !nodePoolHealthy {
-			if err := c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName); err != nil {
-				return reconcile.Result{}, err
-			}
-			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
-		}
-	} else {
-		clusterHealthy, err := c.isClusterHealthy(ctx)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-		if !clusterHealthy {
-			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
-			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
-		}
+	if result, err := c.checkHealthThresholds(ctx, node, nodeClaim); result != nil {
+		return *result, err
 	}
+
 	// For unhealthy past the tolerationDisruption window we can forcefully terminate the node
 	if err := c.annotateTerminationGracePeriod(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	return c.deleteNodeClaim(ctx, nodeClaim, node, unhealthyNodeCondition)
+}
+
+// getNodePool retrieves the NodePool for a NodeClaim, returning nil if not found.
+func (c *Controller) getNodePool(ctx context.Context, nodeClaim *v1.NodeClaim) *v1.NodePool {
+	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if !found {
+		return nil
+	}
+	nodePool := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		return nil
+	}
+	return nodePool
+}
+
+// checkHealthThresholds validates that the cluster/nodepool is healthy enough to proceed with repair.
+// Returns a non-nil result if repair should be blocked, nil if repair can proceed.
+func (c *Controller) checkHealthThresholds(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim) (*reconcile.Result, error) {
+	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if found {
+		nodePoolHealthy, err := c.isNodePoolHealthy(ctx, nodePoolName)
+		if err != nil {
+			return &reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+		if !nodePoolHealthy {
+			if err := c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName); err != nil {
+				return &reconcile.Result{}, err
+			}
+			return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+		}
+	} else {
+		clusterHealthy, err := c.isClusterHealthy(ctx)
+		if err != nil {
+			return &reconcile.Result{}, err
+		}
+		if !clusterHealthy {
+			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
+			return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+		}
+	}
+	return nil, nil
 }
 
 // deleteNodeClaim removes the NodeClaim from the api-server
