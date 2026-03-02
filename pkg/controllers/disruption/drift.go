@@ -120,95 +120,119 @@ func (d *Drift) ConsolidationType() string {
 	return ""
 }
 
-// filterBySequentialTopology restricts candidates to a single active AZ for
-// NodePools with an active Sequential topology budget.
+// filterBySequentialTopology restricts candidates to a single active topology domain
+// for NodePools with an active Sequential topology budget.
 //
 // Algorithm:
 //  1. Group candidates by NodePool.
-//  2. For each NodePool with an active sequential topology budget:
-//     a. Scan cluster nodes to find which zones have in-flight disruptions
-//     (MarkedForDeletion nodes in this NodePool).
-//     b. If any zone has in-flight disruptions → active zone = that zone.
-//     c. If no in-flight disruptions → active zone = zone of candidates[0]
-//     (already sorted oldest-drift-first, so this is the most urgent zone).
-//     d. Count disrupting nodes in the active zone, compute remaining budget.
-//     e. Return only candidates from the active zone, capped at remaining budget.
+//  2. Pre-resolve each NodePool's active sequential budget.
+//  3. Build per-(NodePool, domain) node counts in a single pass over all cluster nodes.
+//  4. For each NodePool with an active sequential topology budget:
+//     a. If any domain has in-flight disruptions → active domain = that domain
+//     (chosen deterministically by sorted key).
+//     b. If no in-flight disruptions → active domain = domain of candidates[0]
+//     (already sorted oldest-drift-first, so this is the most urgent domain).
+//     c. Count disrupting nodes in the active domain, compute remaining budget.
+//     d. Return only candidates from the active domain, capped at remaining budget.
 func (d *Drift) filterBySequentialTopology(candidates []*Candidate) []*Candidate {
 	byNodePool := lo.GroupBy(candidates, func(c *Candidate) string { return c.NodePool.Name })
 	allNodes := d.cluster.DeepCopyNodes()
 
+	// Pre-resolve active sequential budgets so we know which topology keys to index.
+	activeBudgets := make(map[string]*v1.Budget, len(byNodePool))
+	for npName, npCandidates := range byNodePool {
+		activeBudgets[npName] = d.findActiveSequentialBudget(npCandidates[0].NodePool)
+	}
+
+	// Build per-(NodePool, domain) counts in a single pass over all cluster nodes.
+	numByDomain, inFlightByDomain := d.buildTopologyIndex(allNodes, activeBudgets)
+
 	var result []*Candidate
 	for npName, npCandidates := range byNodePool {
-		budget := d.findActiveSequentialBudget(npCandidates[0].NodePool)
+		budget := activeBudgets[npName]
 		if budget == nil {
 			result = append(result, npCandidates...)
 			continue
 		}
-		numByZone, inFlightByZone := d.scanNodesByZone(allNodes, npName, budget.TopologyKey)
-		activeZone := pickActiveZone(inFlightByZone, npCandidates)
-		if activeZone == "" {
+		activeDomain := pickActiveDomain(inFlightByDomain[npName], npCandidates, budget.TopologyKey)
+		if activeDomain == "" {
 			result = append(result, npCandidates...)
 			continue
 		}
 
-		allowance, err := budget.GetAllowedDisruptions(d.clock, numByZone[activeZone])
+		allowance, err := budget.GetAllowedDisruptions(d.clock, numByDomain[npName][activeDomain])
 		if err != nil || allowance == 0 {
 			continue
 		}
-		remaining := lo.Max([]int{allowance - inFlightByZone[activeZone], 0})
+		remaining := lo.Max([]int{allowance - inFlightByDomain[npName][activeDomain], 0})
 		if remaining == 0 {
 			continue
 		}
 
-		zoneCandidates := lo.Filter(npCandidates, func(c *Candidate, _ int) bool {
-			return c.zone == activeZone
+		domainCandidates := lo.Filter(npCandidates, func(c *Candidate, _ int) bool {
+			return c.Labels()[budget.TopologyKey] == activeDomain
 		})
-		if len(zoneCandidates) > remaining {
-			zoneCandidates = zoneCandidates[:remaining]
+		if len(domainCandidates) > remaining {
+			domainCandidates = domainCandidates[:remaining]
 		}
-		result = append(result, zoneCandidates...)
+		result = append(result, domainCandidates...)
 	}
 	return result
 }
 
-// scanNodesByZone counts total and in-flight (MarkedForDeletion) nodes per topology
-// zone for the given NodePool, excluding terminating nodes.
-func (d *Drift) scanNodesByZone(allNodes state.StateNodes, npName, topologyKey string) (numByZone, inFlightByZone map[string]int) {
-	numByZone = map[string]int{}
-	inFlightByZone = map[string]int{}
+// buildTopologyIndex counts total and in-flight (MarkedForDeletion) nodes per
+// (NodePool, topology domain) in a single pass over all cluster nodes.
+// Only NodePools present in activeBudgets with a non-nil budget are indexed.
+func (d *Drift) buildTopologyIndex(allNodes state.StateNodes, activeBudgets map[string]*v1.Budget) (numByDomain, inFlightByDomain map[string]map[string]int) {
+	numByDomain = make(map[string]map[string]int)
+	inFlightByDomain = make(map[string]map[string]int)
 	for _, n := range allNodes {
 		if !n.Managed() || !n.Initialized() {
 			continue
 		}
-		if n.Labels()[v1.NodePoolLabelKey] != npName {
+		npName := n.Labels()[v1.NodePoolLabelKey]
+		budget, ok := activeBudgets[npName]
+		if !ok || budget == nil {
 			continue
 		}
 		if n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
 			continue
 		}
-		zone := n.Labels()[topologyKey]
-		if zone == "" {
+		domain := n.Labels()[budget.TopologyKey]
+		if domain == "" {
 			continue
 		}
-		numByZone[zone]++
+		if numByDomain[npName] == nil {
+			numByDomain[npName] = make(map[string]int)
+			inFlightByDomain[npName] = make(map[string]int)
+		}
+		numByDomain[npName][domain]++
 		if n.MarkedForDeletion() {
-			inFlightByZone[zone]++
+			inFlightByDomain[npName][domain]++
 		}
 	}
-	return numByZone, inFlightByZone
+	return numByDomain, inFlightByDomain
 }
 
-// pickActiveZone returns the zone that should be disrupted next.
-// If any zone already has in-flight disruptions, that zone is continued.
-// Otherwise the zone of the first (oldest-drifted) candidate is chosen.
-func pickActiveZone(inFlightByZone map[string]int, candidates []*Candidate) string {
-	for zone, count := range inFlightByZone {
-		if count > 0 {
-			return zone
+// pickActiveDomain returns the topology domain that should be disrupted next.
+// If any domain already has in-flight disruptions, that domain is continued;
+// the domain is chosen deterministically by sorted key.
+// Otherwise the domain of the first (oldest-drifted) candidate is chosen.
+func pickActiveDomain(inFlightByDomain map[string]int, candidates []*Candidate, topologyKey string) string {
+	if len(inFlightByDomain) > 0 {
+		domains := make([]string, 0, len(inFlightByDomain))
+		for domain := range inFlightByDomain {
+			domains = append(domains, domain)
+		}
+		sort.Strings(domains)
+		for _, domain := range domains {
+			if inFlightByDomain[domain] > 0 {
+				return domain
+			}
 		}
 	}
 	if len(candidates) > 0 {
-		return candidates[0].zone
+		return candidates[0].Labels()[topologyKey]
 	}
 	return ""
 }

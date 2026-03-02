@@ -363,8 +363,9 @@ func (in *NodePool) GetAllowedDisruptionsByReason(c clock.Clock, numNodes int, r
 	var multiErr error
 	for _, budget := range in.Spec.Disruption.Budgets {
 		// Topology-scoped budgets are enforced separately inside the Drift disruption method.
-		// Skip them here so they don't artificially constrain the NodePool-level count.
-		if budget.TopologyKey != "" {
+		// Skip them here so they don't artificially constrain the NodePool-level count for Drift.
+		// For other disruption reasons, topology budgets apply as regular NodePool-level budgets.
+		if budget.TopologyKey != "" && reason == DisruptionReasonDrifted {
 			continue
 		}
 		val, err := budget.GetAllowedDisruptions(c, numNodes)

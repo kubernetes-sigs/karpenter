@@ -306,7 +306,7 @@ var _ = Describe("Budgets", func() {
 			}
 			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
 		})
-		It("should return MaxInt32 from GetAllowedDisruptionsByReason when only topology budgets exist", func() {
+		It("should return MaxInt32 for Drifted reason and apply the budget for other reasons when only topology budgets exist", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
 					Nodes:       "1",
@@ -314,10 +314,20 @@ var _ = Describe("Budgets", func() {
 					Sequential:  true,
 				},
 			}
+			// Topology budgets are handled inside the Drift method, so they are skipped
+			// at the NodePool level for the Drifted reason.
+			allowedDisruption, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, DisruptionReasonDrifted)
+			Expect(err).To(BeNil())
+			Expect(allowedDisruption).To(Equal(math.MaxInt32))
+
+			// For other disruption reasons, topology budgets apply as regular NodePool-level budgets.
 			for _, reason := range allKnownDisruptionReasons {
-				allowedDisruption, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, reason)
+				if reason == DisruptionReasonDrifted {
+					continue
+				}
+				allowedDisruption, err = nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, reason)
 				Expect(err).To(BeNil())
-				Expect(allowedDisruption).To(Equal(math.MaxInt32))
+				Expect(allowedDisruption).To(Equal(1))
 			}
 		})
 	})
