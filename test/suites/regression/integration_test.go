@@ -423,4 +423,276 @@ var _ = Describe("Integration", func() {
 			})
 		})
 	})
+	Describe("DoNotDisrupt", func() {
+		Context("Grace Period", func() {
+			var dep *appsv1.Deployment
+			var selector labels.Selector
+			var numPods int
+
+			BeforeEach(func() {
+				numPods = 1
+			})
+
+			It("should respect grace period and block consolidation until expired", func() {
+				// Create a large pod without protection and a small pod with 2-minute grace period
+				largePod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "large"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("1Gi"),
+						},
+					},
+				})
+
+				smallPod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "small"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "2m",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("10m"),
+							corev1.ResourceMemory: resource.MustParse("10Mi"),
+						},
+					},
+				})
+
+				env.ExpectCreated(nodeClass, nodePool, largePod, smallPod)
+
+				// Both pods should be scheduled to the same node
+				node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(largePod.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(smallPod.Labels), 1)
+
+				// Delete the large pod to trigger consolidation
+				env.ExpectDeleted(largePod)
+
+				// Node should remain because small pod has grace period protection
+				Consistently(func(g Gomega) {
+					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
+					g.Expect(node.DeletionTimestamp.IsZero()).To(BeTrue())
+				}, "90s").Should(Succeed())
+
+				// After grace period expires (2 minutes), node should be disrupted
+				Eventually(func(g Gomega) {
+					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
+					g.Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
+				}, "3m").Should(Succeed())
+
+				// Small pod should be rescheduled
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(smallPod.Labels), 1)
+			})
+
+			It("should respect grace period and block drift until expired", func() {
+				dep = test.Deployment(test.DeploymentOptions{
+					Replicas: int32(numPods),
+					PodOptions: test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{"app": "test-app"},
+							Annotations: map[string]string{
+								v1.DoNotDisruptAnnotationKey: "2m",
+							},
+						},
+						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+					},
+				})
+				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+
+				env.ExpectCreated(nodeClass, nodePool, dep)
+
+				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+				node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+				env.EventuallyExpectHealthyPodCount(selector, numPods)
+
+				// Drift the node
+				nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
+				env.ExpectUpdated(nodePool)
+
+				env.EventuallyExpectDrifted(nodeClaim)
+
+				// Node should not be disrupted while grace period is active
+				Consistently(func(g Gomega) {
+					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
+					g.Expect(node.DeletionTimestamp.IsZero()).To(BeTrue())
+				}, "90s").Should(Succeed())
+
+				// After grace period expires, node should be disrupted
+				Eventually(func(g Gomega) {
+					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
+					g.Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
+				}, "3m").Should(Succeed())
+
+				env.EventuallyExpectHealthyPodCount(selector, numPods)
+			})
+
+			It("should allow disruption immediately when grace period format is invalid", func() {
+				dep = test.Deployment(test.DeploymentOptions{
+					Replicas: int32(numPods),
+					PodOptions: test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{"app": "test-app"},
+							Annotations: map[string]string{
+								v1.DoNotDisruptAnnotationKey: "invalid-format",
+							},
+						},
+						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+					},
+				})
+				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+
+				env.ExpectCreated(nodeClass, nodePool, dep)
+
+				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+				node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+				env.EventuallyExpectHealthyPodCount(selector, numPods)
+
+				// Drift the node
+				nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
+				env.ExpectUpdated(nodePool)
+
+				env.EventuallyExpectDrifted(nodeClaim)
+
+				// Node should be disrupted immediately (invalid format is treated as no annotation)
+				Eventually(func(g Gomega) {
+					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
+					g.Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
+				}, "2m").Should(Succeed())
+
+				env.EventuallyExpectHealthyPodCount(selector, numPods)
+			})
+
+			It("should block disruption indefinitely with 'true' annotation", func() {
+				dep = test.Deployment(test.DeploymentOptions{
+					Replicas: int32(numPods),
+					PodOptions: test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{"app": "test-app"},
+							Annotations: map[string]string{
+								v1.DoNotDisruptAnnotationKey: "true",
+							},
+						},
+						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+					},
+				})
+				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+
+				env.ExpectCreated(nodeClass, nodePool, dep)
+
+				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+				env.EventuallyExpectCreatedNodeCount("==", 1)
+				env.EventuallyExpectHealthyPodCount(selector, numPods)
+
+				// Drift the node
+				nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
+				env.ExpectUpdated(nodePool)
+
+				env.EventuallyExpectDrifted(nodeClaim)
+
+				// Node should not be disrupted (indefinite protection)
+				env.ConsistentlyExpectNoDisruptions(1, 2*time.Minute)
+			})
+
+			It("should handle multiple pods with different grace periods", func() {
+				// Create pods with different grace periods
+				pod1 := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "pod1"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "1m",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10m"),
+						},
+					},
+				})
+
+				pod2 := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "pod2"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "3m",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10m"),
+						},
+					},
+				})
+
+				env.ExpectCreated(nodeClass, nodePool, pod1, pod2)
+
+				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+				env.EventuallyExpectCreatedNodeCount("==", 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(pod1.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(pod2.Labels), 1)
+
+				// Drift the node
+				nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
+				env.ExpectUpdated(nodePool)
+
+				env.EventuallyExpectDrifted(nodeClaim)
+
+				// Node should not be disrupted while any pod has active grace period
+				// pod2 has 3m grace period, so node should remain for at least 2 minutes
+				env.ConsistentlyExpectNoDisruptions(1, 2*time.Minute)
+
+				// After longest grace period expires (3 minutes), node should be disrupted
+				env.EventuallyExpectNotFound(nodeClaim)
+
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(pod1.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(pod2.Labels), 1)
+			})
+
+			It("should respect grace period with expiration", func() {
+				// Set a short expiration time
+				if env.IsDefaultNodeClassKWOK() {
+					nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
+				} else {
+					nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("3m")
+				}
+
+				dep = test.Deployment(test.DeploymentOptions{
+					Replicas: int32(numPods),
+					PodOptions: test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{"app": "test-app"},
+							Annotations: map[string]string{
+								v1.DoNotDisruptAnnotationKey: "2m",
+							},
+						},
+						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+					},
+				})
+				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+
+				env.ExpectCreated(nodeClass, nodePool, dep)
+
+				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+				node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+				env.EventuallyExpectHealthyPodCount(selector, numPods)
+
+				// Disable expiration so newly created node won't terminate
+				nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{}
+				env.ExpectUpdated(nodePool)
+
+				// Node should not be disrupted while grace period is active
+				Consistently(func(g Gomega) {
+					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
+					g.Expect(node.DeletionTimestamp.IsZero()).To(BeTrue())
+				}, "90s").Should(Succeed())
+
+				// After grace period expires, node should be disrupted by expiration
+				env.EventuallyExpectNotFound(nodeClaim, node)
+				env.EventuallyExpectHealthyPodCount(selector, numPods)
+			})
+		})
+	})
 })
