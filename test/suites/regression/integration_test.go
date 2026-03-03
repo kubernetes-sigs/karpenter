@@ -431,61 +431,89 @@ var _ = Describe("Integration", func() {
 
 			BeforeEach(func() {
 				numPods = 1
+				// Enable consolidation so we can test grace period blocking
+				nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
+				nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 			})
 
 			It("should respect grace period and block consolidation until expired", func() {
 				// Create a large pod without protection and a small pod with 2-minute grace period
-				largePod := test.Pod(test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{"app": "large"},
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("1"),
-							corev1.ResourceMemory: resource.MustParse("1Gi"),
+				largeDep := test.Deployment(test.DeploymentOptions{
+					Replicas: 1,
+					PodOptions: test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{"app": "large"},
 						},
+						ResourceRequirements: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("1"),
+								corev1.ResourceMemory: resource.MustParse("1Gi"),
+							},
+						},
+						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
 					},
 				})
-
-				smallPod := test.Pod(test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{"app": "small"},
-						Annotations: map[string]string{
-							v1.DoNotDisruptAnnotationKey: "2m",
+				smallDep := test.Deployment(test.DeploymentOptions{
+					Replicas: 1,
+					PodOptions: test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{"app": "small"},
+							Annotations: map[string]string{
+								v1.DoNotDisruptAnnotationKey: "2m",
+							},
 						},
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("10m"),
-							corev1.ResourceMemory: resource.MustParse("10Mi"),
+						ResourceRequirements: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("10m"),
+								corev1.ResourceMemory: resource.MustParse("10Mi"),
+							},
 						},
+						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
 					},
 				})
-
-				env.ExpectCreated(nodeClass, nodePool, largePod, smallPod)
+				largeSelector := labels.SelectorFromSet(largeDep.Spec.Selector.MatchLabels)
+				smallSelector := labels.SelectorFromSet(smallDep.Spec.Selector.MatchLabels)
+				env.ExpectCreated(nodeClass, nodePool, largeDep, smallDep)
 
 				// Both pods should be scheduled to the same node
-				node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
-				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(largePod.Labels), 1)
-				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(smallPod.Labels), 1)
+				env.EventuallyExpectCreatedNodeCount("==", 1)
+				_ = env.EventuallyExpectHealthyPodCount(largeSelector, 1)
+				smallPods := env.EventuallyExpectHealthyPodCount(smallSelector, 1)
 
-				// Delete the large pod to trigger consolidation
-				env.ExpectDeleted(largePod)
+				// Delete the large deployment to trigger consolidation
+				env.ExpectDeleted(largeDep)
+
+				// Verify grace period event is emitted
+				Eventually(func(g Gomega) {
+					eventList := &corev1.EventList{}
+					g.Expect(env.Client.List(env.Context, eventList, client.MatchingFields{"involvedObject.kind": "Pod"})).To(Succeed())
+					events := lo.Filter(eventList.Items, func(e corev1.Event, _ int) bool {
+						return e.InvolvedObject.Name == smallPods[0].Name && e.Reason == "DoNotDisruptUntil"
+					})
+					g.Expect(events).ToNot(BeEmpty())
+				}).Should(Succeed())
+
+				// Get the nodeclaim to track
+				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
 
 				// Node should remain because small pod has grace period protection
-				Consistently(func(g Gomega) {
-					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
-					g.Expect(node.DeletionTimestamp.IsZero()).To(BeTrue())
-				}, "90s").Should(Succeed())
+				env.ConsistentlyExpectNoDisruptions(1, 90*time.Second)
 
 				// After grace period expires (2 minutes), node should be disrupted
+				env.EventuallyExpectNotFound(nodeClaim)
+
+				// Verify grace period elapsed event is emitted
 				Eventually(func(g Gomega) {
-					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
-					g.Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
-				}, "3m").Should(Succeed())
+					eventList := &corev1.EventList{}
+					g.Expect(env.Client.List(env.Context, eventList, client.MatchingFields{"involvedObject.kind": "Pod"})).To(Succeed())
+					events := lo.Filter(eventList.Items, func(e corev1.Event, _ int) bool {
+						return e.InvolvedObject.Name == smallPods[0].Name && e.Reason == "DoNotDisruptGracePeriodElapsed"
+					})
+					g.Expect(events).ToNot(BeEmpty())
+				}).Should(Succeed())
 
 				// Small pod should be rescheduled
-				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(smallPod.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(smallSelector, 1)
 			})
 
 			It("should respect grace period and block drift until expired", func() {
@@ -502,30 +530,41 @@ var _ = Describe("Integration", func() {
 					},
 				})
 				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
-
 				env.ExpectCreated(nodeClass, nodePool, dep)
-
 				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
-				node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
-				env.EventuallyExpectHealthyPodCount(selector, numPods)
+				env.EventuallyExpectCreatedNodeCount("==", 1)
+				pods := env.EventuallyExpectHealthyPodCount(selector, numPods)
 
-				// Drift the node
+				// Trigger drift
 				nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
 				env.ExpectUpdated(nodePool)
-
 				env.EventuallyExpectDrifted(nodeClaim)
 
-				// Node should not be disrupted while grace period is active
-				Consistently(func(g Gomega) {
-					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
-					g.Expect(node.DeletionTimestamp.IsZero()).To(BeTrue())
-				}, "90s").Should(Succeed())
-
-				// After grace period expires, node should be disrupted
+				// Verify grace period event is emitted
 				Eventually(func(g Gomega) {
-					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
-					g.Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
-				}, "3m").Should(Succeed())
+					eventList := &corev1.EventList{}
+					g.Expect(env.Client.List(env.Context, eventList, client.MatchingFields{"involvedObject.kind": "Pod"})).To(Succeed())
+					events := lo.Filter(eventList.Items, func(e corev1.Event, _ int) bool {
+						return e.InvolvedObject.Name == pods[0].Name && e.Reason == "DoNotDisruptUntil"
+					})
+					g.Expect(events).ToNot(BeEmpty())
+				}).Should(Succeed())
+
+				// Node should not be disrupted while grace period is active
+				env.ConsistentlyExpectNoDisruptions(1, 90*time.Second)
+
+				// After grace period expires, nodeclaim should be disrupted
+				env.EventuallyExpectNotFound(nodeClaim)
+
+				// Verify grace period elapsed event is emitted
+				Eventually(func(g Gomega) {
+					eventList := &corev1.EventList{}
+					g.Expect(env.Client.List(env.Context, eventList, client.MatchingFields{"involvedObject.kind": "Pod"})).To(Succeed())
+					events := lo.Filter(eventList.Items, func(e corev1.Event, _ int) bool {
+						return e.InvolvedObject.Name == pods[0].Name && e.Reason == "DoNotDisruptGracePeriodElapsed"
+					})
+					g.Expect(events).ToNot(BeEmpty())
+				}).Should(Succeed())
 
 				env.EventuallyExpectHealthyPodCount(selector, numPods)
 			})
@@ -544,25 +583,28 @@ var _ = Describe("Integration", func() {
 					},
 				})
 				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
-
 				env.ExpectCreated(nodeClass, nodePool, dep)
-
 				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
-				node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
-				env.EventuallyExpectHealthyPodCount(selector, numPods)
+				env.EventuallyExpectCreatedNodeCount("==", 1)
+				pods := env.EventuallyExpectHealthyPodCount(selector, numPods)
 
-				// Drift the node
+				// Verify invalid annotation event is emitted
+				Eventually(func(g Gomega) {
+					eventList := &corev1.EventList{}
+					g.Expect(env.Client.List(env.Context, eventList, client.MatchingFields{"involvedObject.kind": "Pod"})).To(Succeed())
+					events := lo.Filter(eventList.Items, func(e corev1.Event, _ int) bool {
+						return e.InvolvedObject.Name == pods[0].Name && e.Reason == "InvalidDoNotDisruptAnnotation"
+					})
+					g.Expect(events).ToNot(BeEmpty())
+				}).Should(Succeed())
+
+				// Trigger drift
 				nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
 				env.ExpectUpdated(nodePool)
-
 				env.EventuallyExpectDrifted(nodeClaim)
 
-				// Node should be disrupted immediately (invalid format is treated as no annotation)
-				Eventually(func(g Gomega) {
-					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
-					g.Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
-				}, "2m").Should(Succeed())
-
+				// Nodeclaim should be disrupted quickly since invalid annotation is ignored
+				env.EventuallyExpectNotFound(nodeClaim)
 				env.EventuallyExpectHealthyPodCount(selector, numPods)
 			})
 
@@ -580,85 +622,95 @@ var _ = Describe("Integration", func() {
 					},
 				})
 				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
-
 				env.ExpectCreated(nodeClass, nodePool, dep)
-
 				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
 				env.EventuallyExpectCreatedNodeCount("==", 1)
 				env.EventuallyExpectHealthyPodCount(selector, numPods)
 
-				// Drift the node
+				// Trigger drift
 				nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
 				env.ExpectUpdated(nodePool)
-
 				env.EventuallyExpectDrifted(nodeClaim)
 
-				// Node should not be disrupted (indefinite protection)
+				// Node should never be disrupted with indefinite protection
 				env.ConsistentlyExpectNoDisruptions(1, 2*time.Minute)
 			})
 
 			It("should handle multiple pods with different grace periods", func() {
-				// Create pods with different grace periods
-				pod1 := test.Pod(test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{"app": "pod1"},
-						Annotations: map[string]string{
-							v1.DoNotDisruptAnnotationKey: "1m",
+				dep1 := test.Deployment(test.DeploymentOptions{
+					Replicas: 1,
+					PodOptions: test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{"app": "pod1"},
+							Annotations: map[string]string{
+								v1.DoNotDisruptAnnotationKey: "1m",
+							},
 						},
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU: resource.MustParse("10m"),
+						ResourceRequirements: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU: resource.MustParse("10m"),
+							},
 						},
-					},
-				})
-
-				pod2 := test.Pod(test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{"app": "pod2"},
-						Annotations: map[string]string{
-							v1.DoNotDisruptAnnotationKey: "3m",
-						},
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU: resource.MustParse("10m"),
-						},
+						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
 					},
 				})
-
-				env.ExpectCreated(nodeClass, nodePool, pod1, pod2)
-
+				dep2 := test.Deployment(test.DeploymentOptions{
+					Replicas: 1,
+					PodOptions: test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{"app": "pod2"},
+							Annotations: map[string]string{
+								v1.DoNotDisruptAnnotationKey: "3m",
+							},
+						},
+						ResourceRequirements: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU: resource.MustParse("10m"),
+							},
+						},
+						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+					},
+				})
+				selector1 := labels.SelectorFromSet(dep1.Spec.Selector.MatchLabels)
+				selector2 := labels.SelectorFromSet(dep2.Spec.Selector.MatchLabels)
+				env.ExpectCreated(nodeClass, nodePool, dep1, dep2)
 				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
 				env.EventuallyExpectCreatedNodeCount("==", 1)
-				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(pod1.Labels), 1)
-				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(pod2.Labels), 1)
+				pods1 := env.EventuallyExpectHealthyPodCount(selector1, 1)
+				pods2 := env.EventuallyExpectHealthyPodCount(selector2, 1)
 
-				// Drift the node
+				// Verify grace period events are emitted for both pods
+				Eventually(func(g Gomega) {
+					eventList := &corev1.EventList{}
+					g.Expect(env.Client.List(env.Context, eventList, client.MatchingFields{"involvedObject.kind": "Pod"})).To(Succeed())
+					pod1Events := lo.Filter(eventList.Items, func(e corev1.Event, _ int) bool {
+						return e.InvolvedObject.Name == pods1[0].Name && e.Reason == "DoNotDisruptUntil"
+					})
+					pod2Events := lo.Filter(eventList.Items, func(e corev1.Event, _ int) bool {
+						return e.InvolvedObject.Name == pods2[0].Name && e.Reason == "DoNotDisruptUntil"
+					})
+					g.Expect(pod1Events).ToNot(BeEmpty())
+					g.Expect(pod2Events).ToNot(BeEmpty())
+				}).Should(Succeed())
+
+				// Trigger drift
 				nodePool.Spec.Template.Annotations = map[string]string{"test": "drift"}
 				env.ExpectUpdated(nodePool)
-
 				env.EventuallyExpectDrifted(nodeClaim)
 
-				// Node should not be disrupted while any pod has active grace period
-				// pod2 has 3m grace period, so node should remain for at least 2 minutes
+				// Node should remain protected by pod2's longer grace period
 				env.ConsistentlyExpectNoDisruptions(1, 2*time.Minute)
-
-				// After longest grace period expires (3 minutes), node should be disrupted
 				env.EventuallyExpectNotFound(nodeClaim)
-
-				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(pod1.Labels), 1)
-				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(pod2.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(selector1, 1)
+				env.EventuallyExpectHealthyPodCount(selector2, 1)
 			})
 
 			It("should respect grace period with expiration", func() {
-				// Set a short expiration time
 				if env.IsDefaultNodeClassKWOK() {
 					nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
 				} else {
 					nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("3m")
 				}
-
 				dep = test.Deployment(test.DeploymentOptions{
 					Replicas: int32(numPods),
 					PodOptions: test.PodOptions{
@@ -672,25 +724,20 @@ var _ = Describe("Integration", func() {
 					},
 				})
 				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
-
 				env.ExpectCreated(nodeClass, nodePool, dep)
-
 				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
-				node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+				env.EventuallyExpectCreatedNodeCount("==", 1)
 				env.EventuallyExpectHealthyPodCount(selector, numPods)
 
-				// Disable expiration so newly created node won't terminate
+				// Remove expiration to trigger expiration-based disruption
 				nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{}
 				env.ExpectUpdated(nodePool)
 
 				// Node should not be disrupted while grace period is active
-				Consistently(func(g Gomega) {
-					g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).To(Succeed())
-					g.Expect(node.DeletionTimestamp.IsZero()).To(BeTrue())
-				}, "90s").Should(Succeed())
+				env.ConsistentlyExpectNoDisruptions(1, 90*time.Second)
 
-				// After grace period expires, node should be disrupted by expiration
-				env.EventuallyExpectNotFound(nodeClaim, node)
+				// After grace period expires, nodeclaim should be disrupted by expiration
+				env.EventuallyExpectNotFound(nodeClaim)
 				env.EventuallyExpectHealthyPodCount(selector, numPods)
 			})
 		})
