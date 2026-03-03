@@ -169,6 +169,7 @@ var _ = Describe("Node Health", func() {
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
+			Expect(nodeClaim.Status.TerminationTime).ToNot(BeNil())
 		})
 		It("should not respect termination grace period if set on the nodepool", func() {
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(120 * time.Minute).Format(time.RFC3339)})
@@ -185,6 +186,7 @@ var _ = Describe("Node Health", func() {
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
+			Expect(nodeClaim.Status.TerminationTime).ToNot(BeNil())
 		})
 		It("should not update termination grace period if set before the current time", func() {
 			terminationTime := fakeClock.Now().Add(-3 * time.Minute).Format(time.RFC3339)
