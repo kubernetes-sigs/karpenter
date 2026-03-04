@@ -121,6 +121,9 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 					domainGroups[topologyKey] = NewTopologyDomainGroup()
 				}
 				for _, domain := range requirement.Values() {
+					if domain == "" {
+						continue
+					}
 					domainGroups[topologyKey].Insert(domain, np.Spec.Template.Spec.Taints...)
 				}
 			}

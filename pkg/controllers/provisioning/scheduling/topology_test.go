@@ -30,7 +30,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -3114,5 +3116,70 @@ var _ = Describe("Topology with Volume Requirements", func() {
 
 		// Verify final skew: should be 2,1,1 (zone-1 has 2 pods now)
 		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
+	})
+	It("should not include empty string domains when building topology domain groups", func() {
+		// Some cloud providers (e.g. Azure) return offerings with an empty zone string for
+		// non-zonal instance types. Empty domain strings should be excluded from topology
+		// domain groups so they don't interfere with topology spread decisions.
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "instance-with-empty-zone",
+				Offerings: []*cloudprovider.Offering{
+					{
+						Available: true,
+						Requirements: pscheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "",
+						}),
+						Price: 1.0,
+					},
+				},
+			}),
+			fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "instance-with-real-zones",
+				Offerings: []*cloudprovider.Offering{
+					{
+						Available: true,
+						Requirements: pscheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "test-zone-1",
+						}),
+						Price: 1.0,
+					},
+					{
+						Available: true,
+						Requirements: pscheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "test-zone-2",
+						}),
+						Price: 1.0,
+					},
+					{
+						Available: true,
+						Requirements: pscheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "test-zone-3",
+						}),
+						Price: 1.0,
+					},
+				},
+			}),
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		topology := []corev1.TopologySpreadConstraint{{
+			TopologyKey:       corev1.LabelTopologyZone,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+			MaxSkew:           1,
+		}}
+		pods := test.UnschedulablePods(test.PodOptions{
+			ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+			TopologySpreadConstraints: topology,
+		}, 4)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+		for _, pod := range pods {
+			ExpectScheduled(ctx, env.Client, pod)
+		}
+		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 1, 1))
 	})
 })
