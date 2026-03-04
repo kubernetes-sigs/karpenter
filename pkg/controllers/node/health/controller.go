@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -221,6 +222,15 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 			return err
 		}
 		log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
+
+		// Mirror the termination time into status for observability
+		if t, err := time.Parse(time.RFC3339, terminationTime); err == nil {
+			statusCopy := nodeClaim.DeepCopy()
+			nodeClaim.Status.TerminationTime = &metav1.Time{Time: t}
+			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(statusCopy)); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
