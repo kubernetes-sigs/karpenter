@@ -82,9 +82,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "gpu-t4-mapping",
+							Name: "gpu-t4-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -96,26 +96,20 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "t4-gpu-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "nvidia-t4-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-											"memory":             {StringValue: lo.ToPtr("16Gi")},
-											"compute_capability": {StringValue: lo.ToPtr("7.5")},
-											"cuda_cores":         {StringValue: lo.ToPtr("2560")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "nvidia-t4-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+										"memory":             {StringValue: lo.ToPtr("16Gi")},
+										"compute_capability": {StringValue: lo.ToPtr("7.5")},
+										"cuda_cores":         {StringValue: lo.ToPtr("2560")},
 									},
 								},
-							},
+							}}},
 						},
 						{
-							Name: "gpu-v100-mapping",
+							Name: "gpu-v100-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -127,24 +121,18 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "v100-gpu-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "nvidia-v100-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":               {StringValue: lo.ToPtr("nvidia-tesla-v100")},
-											"memory":             {StringValue: lo.ToPtr("32Gi")},
-											"compute_capability": {StringValue: lo.ToPtr("7.0")},
-											"cuda_cores":         {StringValue: lo.ToPtr("5120")},
-											"nvlink":             {StringValue: lo.ToPtr("true")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "nvidia-v100-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":               {StringValue: lo.ToPtr("nvidia-tesla-v100")},
+										"memory":             {StringValue: lo.ToPtr("32Gi")},
+										"compute_capability": {StringValue: lo.ToPtr("7.0")},
+										"cuda_cores":         {StringValue: lo.ToPtr("5120")},
+										"nvlink":             {StringValue: lo.ToPtr("true")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -251,6 +239,8 @@ var _ = Describe("DRA KWOK Driver", func() {
 			// Verify ResourceSlice has correct driver and devices
 			Expect(resourceSlice.Spec.Driver).To(Equal("test.karpenter.sh"))
 			Expect(resourceSlice.Spec.Devices).To(HaveLen(1))
+			// Pool name is auto-generated as <driver>/<node>
+			Expect(resourceSlice.Spec.Pool.Name).To(Equal(fmt.Sprintf("test.karpenter.sh/%s", node.Name)))
 
 			device := resourceSlice.Spec.Devices[0]
 			switch node.Labels["node.kubernetes.io/instance-type"] {
@@ -333,10 +323,10 @@ var _ = Describe("DRA KWOK Driver", func() {
 					return err
 				}
 
-				// Update with additional devices
-				latest.Spec.Mappings = []drav1alpha1.Mapping{
+				// Update with additional devices for c-4x pool
+				latest.Spec.Pools = []drav1alpha1.Pool{
 					{
-						Name: "gpu-t4-updated-mapping",
+						Name: "gpu-t4-pool-updated",
 						NodeSelectorTerms: []corev1.NodeSelectorTerm{
 							{
 								MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -348,30 +338,24 @@ var _ = Describe("DRA KWOK Driver", func() {
 								},
 							},
 						},
-						ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-							Pool: resourcev1.ResourcePool{
-								Name:               "t4-gpu-pool-updated",
-								ResourceSliceCount: 1,
-							},
-							Devices: []resourcev1.Device{
-								{
-									Name: "nvidia-t4-0",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-										"memory":             {StringValue: lo.ToPtr("16Gi")},
-										"compute_capability": {StringValue: lo.ToPtr("7.5")},
-									},
-								},
-								{
-									Name: "nvidia-t4-1",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-										"memory":             {StringValue: lo.ToPtr("16Gi")},
-										"compute_capability": {StringValue: lo.ToPtr("7.5")},
-									},
+						ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+							{
+								Name: "nvidia-t4-0",
+								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+									"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+									"memory":             {StringValue: lo.ToPtr("16Gi")},
+									"compute_capability": {StringValue: lo.ToPtr("7.5")},
 								},
 							},
-						},
+							{
+								Name: "nvidia-t4-1",
+								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+									"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+									"memory":             {StringValue: lo.ToPtr("16Gi")},
+									"compute_capability": {StringValue: lo.ToPtr("7.5")},
+								},
+							},
+						}}},
 					},
 				}
 
@@ -408,9 +392,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "fpga-c4x-mapping",
+							Name: "fpga-c4x-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -422,26 +406,20 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "fpga-c4x-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "xilinx-u250-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":       {StringValue: lo.ToPtr("xilinx-alveo-u250")},
-											"memory":     {StringValue: lo.ToPtr("32Gi")},
-											"dsp_slices": {StringValue: lo.ToPtr("6144")},
-											"interface":  {StringValue: lo.ToPtr("pcie-gen3")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "xilinx-u250-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":       {StringValue: lo.ToPtr("xilinx-alveo-u250")},
+										"memory":     {StringValue: lo.ToPtr("32Gi")},
+										"dsp_slices": {StringValue: lo.ToPtr("6144")},
+										"interface":  {StringValue: lo.ToPtr("pcie-gen3")},
 									},
 								},
-							},
+							}}},
 						},
 						{
-							Name: "fpga-m8x-mapping",
+							Name: "fpga-m8x-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -453,23 +431,17 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "fpga-m8x-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "xilinx-u250-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":       {StringValue: lo.ToPtr("xilinx-alveo-u250")},
-											"memory":     {StringValue: lo.ToPtr("64Gi")},
-											"dsp_slices": {StringValue: lo.ToPtr("12288")},
-											"interface":  {StringValue: lo.ToPtr("pcie-gen3")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "xilinx-u250-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":       {StringValue: lo.ToPtr("xilinx-alveo-u250")},
+										"memory":     {StringValue: lo.ToPtr("64Gi")},
+										"dsp_slices": {StringValue: lo.ToPtr("12288")},
+										"interface":  {StringValue: lo.ToPtr("pcie-gen3")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -559,9 +531,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "gpu-mapping-c4x-slice1",
+							Name: "gpu-pool-c4x",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -573,33 +545,27 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "multi-device-pool",
-									ResourceSliceCount: 2,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "nvidia-t4-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":         {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-											"memory":       {StringValue: lo.ToPtr("16Gi")},
-											"device_class": {StringValue: lo.ToPtr("gpu")},
-										},
-									},
-									{
-										Name: "nvidia-t4-1",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":         {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-											"memory":       {StringValue: lo.ToPtr("16Gi")},
-											"device_class": {StringValue: lo.ToPtr("gpu")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "nvidia-t4-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":         {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+										"memory":       {StringValue: lo.ToPtr("16Gi")},
+										"device_class": {StringValue: lo.ToPtr("gpu")},
 									},
 								},
-							},
+								{
+									Name: "nvidia-t4-1",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":         {StringValue: lo.ToPtr("nvidia-tesla-t4")},
+										"memory":       {StringValue: lo.ToPtr("16Gi")},
+										"device_class": {StringValue: lo.ToPtr("gpu")},
+									},
+								},
+							}}},
 						},
 						{
-							Name: "gpu-mapping-c4x-slice2",
+							Name: "fpga-pool-c4x",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -611,22 +577,16 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "multi-device-pool",
-									ResourceSliceCount: 2,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "xilinx-u250-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":         {StringValue: lo.ToPtr("xilinx-alveo-u250")},
-											"memory":       {StringValue: lo.ToPtr("32Gi")},
-											"device_class": {StringValue: lo.ToPtr("fpga")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "xilinx-u250-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":         {StringValue: lo.ToPtr("xilinx-alveo-u250")},
+										"memory":       {StringValue: lo.ToPtr("32Gi")},
+										"device_class": {StringValue: lo.ToPtr("fpga")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -746,6 +706,11 @@ var _ = Describe("DRA KWOK Driver", func() {
 			By("Confirming both ResourceSlices reference same node")
 			Expect(*gpuSlice.Spec.NodeName).To(Equal(node.Name))
 			Expect(*fpgaSlice.Spec.NodeName).To(Equal(node.Name))
+
+			By("Confirming both ResourceSlices share the same auto-generated pool name")
+			expectedPoolName := fmt.Sprintf("test.karpenter.sh/%s", node.Name)
+			Expect(gpuSlice.Spec.Pool.Name).To(Equal(expectedPoolName))
+			Expect(fpgaSlice.Spec.Pool.Name).To(Equal(expectedPoolName))
 		})
 	})
 
@@ -757,8 +722,8 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Name: "test.karpenter.sh",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
-					Driver:   "invalid driver name!",  // Invalid: contains spaces
-					Mappings: []drav1alpha1.Mapping{}, // Invalid: empty mappings
+					Driver: "invalid driver name!", // Invalid: contains spaces
+					Pools:  []drav1alpha1.Pool{},   // Invalid: empty pools
 				},
 			}
 
@@ -774,8 +739,8 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Name: "invalid-config-2",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
-					Driver:   "", // Empty driver
-					Mappings: []drav1alpha1.Mapping{},
+					Driver: "", // Empty driver
+					Pools:  []drav1alpha1.Pool{},
 				},
 			}
 			err = env.Client.Create(env.Context, invalidConfig2)
@@ -851,9 +816,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "gpu-scheduling-mapping",
+							Name: "gpu-scheduling-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -865,21 +830,15 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "test-gpu-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "nvidia-test-gpu",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":   {StringValue: lo.ToPtr("nvidia-test-gpu")},
-											"memory": {StringValue: lo.ToPtr("8Gi")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "nvidia-test-gpu",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":   {StringValue: lo.ToPtr("nvidia-test-gpu")},
+										"memory": {StringValue: lo.ToPtr("8Gi")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -1068,9 +1027,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "status-mapping",
+							Name: "status-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -1082,20 +1041,14 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "status-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "test-device-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type": {StringValue: lo.ToPtr("test-gpu")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "test-device-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type": {StringValue: lo.ToPtr("test-gpu")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -1188,9 +1141,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "gpu.nvidia.com",
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "h100-mapping",
+							Name: "h100-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -1202,21 +1155,15 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "nvidia-gpu-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "h100-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":   {StringValue: lo.ToPtr("nvidia-h100")},
-											"memory": {StringValue: lo.ToPtr("80Gi")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "h100-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":   {StringValue: lo.ToPtr("nvidia-h100")},
+										"memory": {StringValue: lo.ToPtr("80Gi")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -1229,9 +1176,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "fpga.intel.com",
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "arria-mapping",
+							Name: "arria-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -1243,20 +1190,14 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "intel-fpga-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "arria-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type": {StringValue: lo.ToPtr("intel-arria10")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "arria-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type": {StringValue: lo.ToPtr("intel-arria10")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -1318,6 +1259,11 @@ var _ = Describe("DRA KWOK Driver", func() {
 
 				// Verify they're for the same node
 				g.Expect(*gpuSlices[0].Spec.NodeName).To(Equal(*fpgaSlices[0].Spec.NodeName))
+
+				// Pool names are auto-generated as <driver>/<node>
+				nodeName := *gpuSlices[0].Spec.NodeName
+				g.Expect(gpuSlices[0].Spec.Pool.Name).To(Equal(fmt.Sprintf("gpu.nvidia.com/%s", nodeName)))
+				g.Expect(fpgaSlices[0].Spec.Pool.Name).To(Equal(fmt.Sprintf("fpga.intel.com/%s", nodeName)))
 			}).WithTimeout(2 * time.Minute).Should(Succeed())
 
 			// Cleanup
@@ -1333,9 +1279,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "gpu.nvidia.com",
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "h100-mapping",
+							Name: "h100-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -1347,20 +1293,14 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "gpu-pool-1",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "h100-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type": {StringValue: lo.ToPtr("nvidia-h100")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "h100-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type": {StringValue: lo.ToPtr("nvidia-h100")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -1372,9 +1312,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "gpu.nvidia.com", // Same driver!
-					Mappings: []drav1alpha1.Mapping{
+					Pools: []drav1alpha1.Pool{
 						{
-							Name: "a100-mapping",
+							Name: "a100-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -1386,20 +1326,14 @@ var _ = Describe("DRA KWOK Driver", func() {
 									},
 								},
 							},
-							ResourceSlice: drav1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "gpu-pool-2",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "a100-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type": {StringValue: lo.ToPtr("nvidia-a100")},
-										},
+							ResourceSlices: []drav1alpha1.ResourceSliceTemplate{{Devices: []resourcev1.Device{
+								{
+									Name: "a100-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type": {StringValue: lo.ToPtr("nvidia-a100")},
 									},
 								},
-							},
+							}}},
 						},
 					},
 				},
@@ -1453,8 +1387,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 
 				// Should have slices from first config only (config1 is alphabetically first)
 				g.Expect(gpuSlices).ToNot(BeEmpty())
-				// Verify it's using pool-1 (from first config)
-				g.Expect(gpuSlices[0].Spec.Pool.Name).To(Equal("gpu-pool-1"))
+				// Verify pool name is auto-generated as <driver>/<node>
+				nodeName := *gpuSlices[0].Spec.NodeName
+				g.Expect(gpuSlices[0].Spec.Pool.Name).To(Equal(fmt.Sprintf("gpu.nvidia.com/%s", nodeName)))
 			}).WithTimeout(2 * time.Minute).Should(Succeed())
 
 			// Cleanup

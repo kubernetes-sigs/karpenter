@@ -89,13 +89,13 @@ var _ = Describe("ResourceSliceController", func() {
 		})
 	})
 
-	Describe("findMatchingMappings", func() {
-		var mappings []v1alpha1.Mapping
+	Describe("findMatchingPools", func() {
+		var pools []v1alpha1.Pool
 
 		BeforeEach(func() {
-			mappings = []v1alpha1.Mapping{
+			pools = []v1alpha1.Pool{
 				{
-					Name: "gpu-mapping",
+					Name: "gpu-pool",
 					NodeSelectorTerms: []corev1.NodeSelectorTerm{
 						{
 							MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -107,18 +107,12 @@ var _ = Describe("ResourceSliceController", func() {
 							},
 						},
 					},
-					ResourceSlice: v1alpha1.ResourceSliceTemplate{
-						Pool: resourcev1.ResourcePool{
-							Name:               "test-pool",
-							ResourceSliceCount: 1,
-						},
-						Devices: []resourcev1.Device{
-							{Name: "device-0"},
-						},
+					ResourceSlices: []v1alpha1.ResourceSliceTemplate{
+						{Devices: []resourcev1.Device{{Name: "device-0"}}},
 					},
 				},
 				{
-					Name: "cpu-mapping",
+					Name: "cpu-pool",
 					NodeSelectorTerms: []corev1.NodeSelectorTerm{
 						{
 							MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -130,20 +124,14 @@ var _ = Describe("ResourceSliceController", func() {
 							},
 						},
 					},
-					ResourceSlice: v1alpha1.ResourceSliceTemplate{
-						Pool: resourcev1.ResourcePool{
-							Name:               "cpu-pool",
-							ResourceSliceCount: 1,
-						},
-						Devices: []resourcev1.Device{
-							{Name: "cpu-0"},
-						},
+					ResourceSlices: []v1alpha1.ResourceSliceTemplate{
+						{Devices: []resourcev1.Device{{Name: "cpu-0"}}},
 					},
 				},
 			}
 		})
 
-		It("should find matching mappings for a node", func() {
+		It("should find matching pools for a node", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -152,12 +140,12 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 			}
 
-			matches := resourceController.findMatchingMappings(node, mappings)
+			matches := resourceController.findMatchingPools(node, pools)
 			Expect(matches).To(HaveLen(1))
-			Expect(matches[0].Name).To(Equal("gpu-mapping"))
+			Expect(matches[0].Name).To(Equal("gpu-pool"))
 		})
 
-		It("should find no mappings for non-matching nodes", func() {
+		It("should find no pools for non-matching nodes", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -166,12 +154,12 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 			}
 
-			matches := resourceController.findMatchingMappings(node, mappings)
+			matches := resourceController.findMatchingPools(node, pools)
 			Expect(matches).To(BeEmpty())
 		})
 
-		It("should find multiple mappings when node matches multiple selectors", func() {
-			mappings = append(mappings, v1alpha1.Mapping{
+		It("should find multiple pools when node matches multiple selectors", func() {
+			pools = append(pools, v1alpha1.Pool{
 				Name: "all-nodes",
 				NodeSelectorTerms: []corev1.NodeSelectorTerm{
 					{
@@ -183,14 +171,8 @@ var _ = Describe("ResourceSliceController", func() {
 						},
 					},
 				},
-				ResourceSlice: v1alpha1.ResourceSliceTemplate{
-					Pool: resourcev1.ResourcePool{
-						Name:               "all-pool",
-						ResourceSliceCount: 1,
-					},
-					Devices: []resourcev1.Device{
-						{Name: "generic-0"},
-					},
+				ResourceSlices: []v1alpha1.ResourceSliceTemplate{
+					{Devices: []resourcev1.Device{{Name: "generic-0"}}},
 				},
 			})
 
@@ -203,14 +185,14 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 			}
 
-			matches := resourceController.findMatchingMappings(node, mappings)
+			matches := resourceController.findMatchingPools(node, pools)
 			Expect(matches).To(HaveLen(2))
 			names := []string{matches[0].Name, matches[1].Name}
-			Expect(names).To(ConsistOf("gpu-mapping", "all-nodes"))
+			Expect(names).To(ConsistOf("gpu-pool", "all-nodes"))
 		})
 
 		It("should handle OR logic with multiple NodeSelectorTerms", func() {
-			multiTermMapping := v1alpha1.Mapping{
+			multiTermPool := v1alpha1.Pool{
 				Name: "multi-term",
 				NodeSelectorTerms: []corev1.NodeSelectorTerm{
 					{
@@ -232,14 +214,8 @@ var _ = Describe("ResourceSliceController", func() {
 						},
 					},
 				},
-				ResourceSlice: v1alpha1.ResourceSliceTemplate{
-					Pool: resourcev1.ResourcePool{
-						Name:               "multi-pool",
-						ResourceSliceCount: 1,
-					},
-					Devices: []resourcev1.Device{
-						{Name: "zone-device"},
-					},
+				ResourceSlices: []v1alpha1.ResourceSliceTemplate{
+					{Devices: []resourcev1.Device{{Name: "zone-device"}}},
 				},
 			}
 
@@ -251,7 +227,7 @@ var _ = Describe("ResourceSliceController", func() {
 					},
 				},
 			}
-			matches := resourceController.findMatchingMappings(node1, []v1alpha1.Mapping{multiTermMapping})
+			matches := resourceController.findMatchingPools(node1, []v1alpha1.Pool{multiTermPool})
 			Expect(matches).To(HaveLen(1))
 
 			// Node matching second term
@@ -262,7 +238,7 @@ var _ = Describe("ResourceSliceController", func() {
 					},
 				},
 			}
-			matches = resourceController.findMatchingMappings(node2, []v1alpha1.Mapping{multiTermMapping})
+			matches = resourceController.findMatchingPools(node2, []v1alpha1.Pool{multiTermPool})
 			Expect(matches).To(HaveLen(1))
 		})
 	})
@@ -294,9 +270,9 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 				Spec: v1alpha1.DRAConfigSpec{
 					Driver: driverName,
-					Mappings: []v1alpha1.Mapping{
+					Pools: []v1alpha1.Pool{
 						{
-							Name: "gpu-mapping",
+							Name: "gpu-pool",
 							NodeSelectorTerms: []corev1.NodeSelectorTerm{
 								{
 									MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -308,17 +284,15 @@ var _ = Describe("ResourceSliceController", func() {
 									},
 								},
 							},
-							ResourceSlice: v1alpha1.ResourceSliceTemplate{
-								Pool: resourcev1.ResourcePool{
-									Name:               "test-gpu-pool",
-									ResourceSliceCount: 1,
-								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "nvidia-gpu-0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											"type":   {StringValue: lo.ToPtr("nvidia-tesla-v100")},
-											"memory": {StringValue: lo.ToPtr("32Gi")},
+							ResourceSlices: []v1alpha1.ResourceSliceTemplate{
+								{
+									Devices: []resourcev1.Device{
+										{
+											Name: "nvidia-gpu-0",
+											Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+												"type":   {StringValue: lo.ToPtr("nvidia-tesla-v100")},
+												"memory": {StringValue: lo.ToPtr("32Gi")},
+											},
 										},
 									},
 								},
@@ -344,19 +318,22 @@ var _ = Describe("ResourceSliceController", func() {
 			Expect(resourceSlices.Items).To(HaveLen(1))
 
 			rs := &resourceSlices.Items[0]
-			// Naming: <sanitized-driver>-<node-name>-<mapping-name>
-			Expect(rs.Name).To(Equal("test-karpenter-sh-kwok-node-1-gpu-mapping"))
+			// Naming: <sanitized-driver>-<node-name>-<pool-name>
+			Expect(rs.Name).To(Equal("test-karpenter-sh-kwok-node-1-gpu-pool"))
 			Expect(rs.Labels["kwok.x-k8s.io/managed-by"]).To(Equal("dra-kwok-driver"))
 			Expect(rs.Labels["kwok.x-k8s.io/node"]).To(Equal("kwok-node-1"))
 			Expect(rs.Spec.Devices).To(HaveLen(1))
 			Expect(*rs.Spec.NodeName).To(Equal("kwok-node-1"))
+			// Pool name is auto-generated as <driver>/<node>
+			Expect(rs.Spec.Pool.Name).To(Equal("test.karpenter.sh/kwok-node-1"))
+			Expect(rs.Spec.Pool.ResourceSliceCount).To(Equal(int64(1)))
 		})
 
 		It("should not create ResourceSlices for non-matching nodes", func() {
 			// Create DRAConfig
 			Expect(fakeClient.Create(ctx, draConfig)).To(Succeed())
 
-			// Modify node to not match any mappings
+			// Modify node to not match any pools
 			node.Labels["node.kubernetes.io/instance-type"] = "t3.micro"
 			Expect(fakeClient.Create(ctx, node)).To(Succeed())
 
@@ -472,8 +449,8 @@ var _ = Describe("ResourceSliceController", func() {
 				sliceNames = append(sliceNames, rs.Name)
 			}
 			Expect(sliceNames).To(ConsistOf(
-				"test-karpenter-sh-kwok-node-1-gpu-mapping",
-				"test-karpenter-sh-kwok-node-2-gpu-mapping",
+				"test-karpenter-sh-kwok-node-1-gpu-pool",
+				"test-karpenter-sh-kwok-node-2-gpu-pool",
 			))
 		})
 
@@ -491,8 +468,8 @@ var _ = Describe("ResourceSliceController", func() {
 			Expect(resourceSlices.Items[0].Spec.Devices).To(HaveLen(1))
 
 			// Update DRAConfig with more devices
-			draConfig.Spec.Mappings[0].ResourceSlice.Devices = append(
-				draConfig.Spec.Mappings[0].ResourceSlice.Devices,
+			draConfig.Spec.Pools[0].ResourceSlices[0].Devices = append(
+				draConfig.Spec.Pools[0].ResourceSlices[0].Devices,
 				resourcev1.Device{
 					Name: "nvidia-gpu-1",
 					Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{

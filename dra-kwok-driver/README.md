@@ -50,17 +50,17 @@ Sets up the controller-runtime manager and initializes the ResourceSlice control
 ### **`pkg/apis/v1alpha1/draconfig_types.go`** - CRD Types
 Defines the DRAConfig CRD types used for configuration.
 **Key Structures:**
-- **DRAConfig**: CRD resource containing driver name and device mappings
-- **Mapping**: Links node selectors to ResourceSlice templates
-- **ResourceSliceTemplate**: Template for creating ResourceSlices, with ToResourceSliceSpec() conversion method
+- **DRAConfig**: CRD resource containing driver name and device pools
+- **Pool**: Defines device groups for nodes matching node selectors. Pool names in ResourceSlices are auto-generated as `<driver>/<node>`.
+- **ResourceSliceTemplate**: Defines the devices for a single ResourceSlice. Multiple entries in a pool create multiple ResourceSlices per node.
 
 ### **`pkg/controllers/resourceslice.go`** - ResourceSlice Lifecycle
-Periodically polls nodes and DRAConfigs (every 30 seconds), discovers drivers dynamically, matches nodes against mappings, and manages ResourceSlice CRUD operations.
+Periodically polls nodes and DRAConfigs (every 30 seconds), discovers drivers dynamically, matches nodes against pools, and manages ResourceSlice CRUD operations.
 - **Polling Loop**: Runs every 30 seconds to reconcile all nodes and configurations, ensuring eventual consistency
 - **Multi-Driver Discovery**: LISTs all DRAConfig CRDs, groups by driver name, warns on duplicates
 - **Node Filtering**: Only processes nodes with `kwok.x-k8s.io/node` annotation (Karpenter KWOK nodes)
-- **Label Matching**: Uses Kubernetes label selectors to find configuration mappings for each node
-- **ResourceSlice Management**: Creates, updates, or deletes ResourceSlices to match desired state using ToResourceSliceSpec()
+- **Label Matching**: Uses Kubernetes label selectors to find matching pools for each node
+- **ResourceSlice Management**: Creates, updates, or deletes ResourceSlices to match desired state. Each resourceSlice entry in a pool becomes one ResourceSlice per matching node.
 - **Error Handling**: Continues processing other nodes/drivers if one fails; failed ones are retried in the next cycle
 - **Cleanup**: Removes ResourceSlices that shouldn't exist (orphaned slices, deleted nodes, deleted CRD)
 
@@ -89,10 +89,10 @@ Every 30 seconds, the ResourceSliceController:
 4. Lists all nodes in the cluster
 5. For each driver:
    - For each KWOK node (has `kwok.x-k8s.io/node` annotation):
-     - Iterates through driver's mappings to find matching nodeSelectors
-     - If match found: Uses ResourceSliceTemplate.ToResourceSliceSpec() to create or update ResourceSlice
-     - ResourceSlice naming: `<driver-sanitized>-<node>-<mapping>`
-       - Example: `gpu-nvidia-com-node1-h100-mapping`
+     - Iterates through driver's pools to find matching nodeSelectors
+     - If match found: creates or updates ResourceSlices with auto-generated pool name `<driver>/<node>`. Each resourceSlice entry becomes one ResourceSlice.
+     - ResourceSlice naming: `<driver-sanitized>-<node>-<pool-name>` (single group) or `<driver-sanitized>-<node>-<pool-name>-<index>` (multiple groups)
+       - Example: `gpu-nvidia-com-node1-h100-pool` or `gpu-nvidia-com-node1-h100-pool-0`, `gpu-nvidia-com-node1-h100-pool-1`
 6. Cleans up any orphaned ResourceSlices (nodes deleted, configs deleted, etc.)
 7. Logs summary of reconciliation (drivers, nodes processed, errors encountered)
 
@@ -101,9 +101,9 @@ This polling approach ensures eventual consistency - any changes to nodes or con
 ### **Cleanup**
 ResourceSlices are automatically cleaned up when:
 - KWOK node is deleted (detected in next polling cycle)
-- Node no longer matches any configuration mapping (labels changed)
+- Node no longer matches any configuration pool (labels changed)
 - DRAConfig CRD is deleted
-- Mapping is removed from DRAConfig CRD
+- Pool is removed from DRAConfig CRD
 - Driver is changed in DRAConfig (old driver's slices cleaned up)
 
 ## DRAConfig CRD Examples
@@ -120,22 +120,19 @@ metadata:
   namespace: karpenter
 spec:
   driver: gpu.nvidia.com  # Simulated driver name
-  mappings:
-    - name: h100-mapping
+  pools:
+    - name: h100-pool
       nodeSelectorTerms:
         - matchExpressions:
             - key: node.kubernetes.io/instance-type
               operator: In
               values: ["g5.xlarge"]
-      resourceSlice:
-        pool:
-          name: nvidia-gpu-pool
-          resourceSliceCount: 1
-        devices:
-          - name: h100-0
-            attributes:
-              type: {stringValue: "nvidia-h100"}
-              memory: {stringValue: "80Gi"}
+      resourceSlices:
+        - devices:
+            - name: h100-0
+              attributes:
+                type: {stringValue: "nvidia-h100"}
+                memory: {stringValue: "80Gi"}
 
 ---
 # FPGA driver simulation
@@ -146,26 +143,23 @@ metadata:
   namespace: karpenter
 spec:
   driver: fpga.intel.com  # Different driver
-  mappings:
-    - name: arria-mapping
+  pools:
+    - name: arria-pool
       nodeSelectorTerms:
         - matchExpressions:
             - key: node.kubernetes.io/instance-type
               operator: In
               values: ["g5.xlarge"]  # Same instance type as above
-      resourceSlice:
-        pool:
-          name: intel-fpga-pool
-          resourceSliceCount: 1
-        devices:
-          - name: arria-0
-            attributes:
-              type: {stringValue: "intel-arria10"}
+      resourceSlices:
+        - devices:
+            - name: arria-0
+              attributes:
+                type: {stringValue: "intel-arria10"}
 ```
 
-**Result:** A single `g5.xlarge` node will have ResourceSlices from both drivers:
-- `gpu-nvidia-com-node1-h100-mapping` (driver: `gpu.nvidia.com`)
-- `fpga-intel-com-node1-arria-mapping` (driver: `fpga.intel.com`)
+**Result:** A single `g5.xlarge` node will have ResourceSlices from both drivers (pool names auto-generated as `<driver>/<node>`):
+- `gpu-nvidia-com-node1-h100-pool` (driver: `gpu.nvidia.com`, pool: `gpu.nvidia.com/node1`)
+- `fpga-intel-com-node1-arria-pool` (driver: `fpga.intel.com`, pool: `fpga.intel.com/node1`)
 
 ### **Basic: Single Driver, Single Device Type**
 ```yaml
@@ -176,22 +170,19 @@ metadata:
   namespace: karpenter
 spec:
   driver: test.karpenter.sh
-  mappings:
-    - name: gpu-mapping
+  pools:
+    - name: gpu-pool
       nodeSelectorTerms:
         - matchExpressions:
             - key: node.kubernetes.io/instance-type
               operator: In
               values: ["g5.xlarge"]
-      resourceSlice:
-        pool:
-          name: gpu-pool
-          resourceSliceCount: 1
-        devices:
-          - name: nvidia-a10g-0
-            attributes:
-              type: {stringValue: "nvidia-a10g"}
-              memory: {stringValue: "24Gi"}
+      resourceSlices:
+        - devices:
+            - name: nvidia-a10g-0
+              attributes:
+                type: {stringValue: "nvidia-a10g"}
+                memory: {stringValue: "24Gi"}
 ```
 
 ### **Single Driver: Multiple Device Types on Different Nodes**
@@ -203,42 +194,36 @@ metadata:
   namespace: karpenter
 spec:
   driver: test.karpenter.sh
-  mappings:
+  pools:
     # GPUs on GPU instance types
-    - name: gpu-mapping
+    - name: gpu-pool
       nodeSelectorTerms:
         - matchExpressions:
             - key: node.kubernetes.io/instance-type
               operator: In
               values: ["g5.xlarge", "g5.2xlarge"]
-      resourceSlice:
-        pool:
-          name: gpu-pool
-          resourceSliceCount: 1
-        devices:
-          - name: nvidia-a10g-0
-            attributes:
-              type: {stringValue: "nvidia-a10g"}
+      resourceSlices:
+        - devices:
+            - name: nvidia-a10g-0
+              attributes:
+                type: {stringValue: "nvidia-a10g"}
 
     # FPGAs on FPGA instance types
-    - name: fpga-mapping
+    - name: fpga-pool
       nodeSelectorTerms:
         - matchExpressions:
             - key: node.kubernetes.io/instance-type
               operator: In
               values: ["f1.2xlarge"]
-      resourceSlice:
-        pool:
-          name: fpga-pool
-          resourceSliceCount: 1
-        devices:
-          - name: xilinx-fpga-0
-            attributes:
-              type: {stringValue: "xilinx-fpga"}
+      resourceSlices:
+        - devices:
+            - name: xilinx-fpga-0
+              attributes:
+                type: {stringValue: "xilinx-fpga"}
 ```
 
 ### **Multiple ResourceSlices Per Node**
-Same node matches multiple mappings → creates multiple ResourceSlices per node.
+Same node matches multiple pools or a pool has multiple resourceSlice entries → creates multiple ResourceSlices per node.
 ```yaml
 apiVersion: test.karpenter.sh/v1alpha1
 kind: DRAConfig
@@ -247,38 +232,24 @@ metadata:
   namespace: karpenter
 spec:
   driver: test.karpenter.sh
-  mappings:
-    # GPU mapping
-    - name: gpu-mapping
+  pools:
+    - name: accelerator-pool
       nodeSelectorTerms:
         - matchExpressions:
             - key: accelerator-type
               operator: In
               values: ["mixed"]
-      resourceSlice:
-        pool:
-          name: gpu-pool
-          resourceSliceCount: 1
-        devices:
-          - name: nvidia-gpu-0
-            attributes:
-              type: {stringValue: "nvidia-t4"}
-
-    # FPGA mapping - same selector!
-    - name: fpga-mapping
-      nodeSelectorTerms:
-        - matchExpressions:
-            - key: accelerator-type
-              operator: In
-              values: ["mixed"]  # Matches same nodes as above
-      resourceSlice:
-        pool:
-          name: fpga-pool
-          resourceSliceCount: 1
-        devices:
-          - name: fpga-0
-            attributes:
-              type: {stringValue: "intel-fpga"}
+      resourceSlices:
+        # First ResourceSlice: GPU
+        - devices:
+            - name: nvidia-gpu-0
+              attributes:
+                type: {stringValue: "nvidia-t4"}
+        # Second ResourceSlice: FPGA
+        - devices:
+            - name: fpga-0
+              attributes:
+                type: {stringValue: "intel-fpga"}
 ```
 
 ## Test Coverage
@@ -291,10 +262,10 @@ spec:
   - Should not identify non-KWOK nodes
   - Should not identify nodes with other KWOK-like labels
 
-- **findMatchingMappings**
-  - Should find single matching mapping by node label
-  - Should find no mappings for non-matching nodes
-  - Should find multiple mappings when node matches multiple selectors
+- **findMatchingPools**
+  - Should find single matching pool by node label
+  - Should find no pools for non-matching nodes
+  - Should find multiple pools when node matches multiple selectors
   - Should handle OR logic with multiple NodeSelectorTerms
 
 - **reconcileAllNodes**
@@ -394,7 +365,7 @@ make e2etest-dra        # Runs full test suite (does all steps below automatical
 - GPU device configuration and ResourceSlice creation
 - Dynamic DRAConfig updates
 - FPGA device types
-- Multiple ResourceSlices per node (multiple mappings)
+- Multiple ResourceSlices per node (multiple pools)
 - Invalid config rejection (API server validation)
 - DRA pod scheduling (ignored by default)
 - DRA infrastructure readiness for future Karpenter integration

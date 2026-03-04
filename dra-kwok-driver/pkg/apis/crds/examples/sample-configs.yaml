@@ -6,7 +6,7 @@ metadata:
   name: gpu-config
 spec:
   driver: test.karpenter.sh
-  mappings:
+  pools:
     - name: nvidia-h100
       nodeSelectorTerms:
         - matchExpressions:
@@ -15,22 +15,17 @@ spec:
               values:
                 - g5.48xlarge
                 - p4d.24xlarge
-      resourceSlice:
-        pool:
-          name: gpu-pool
-          resourceSliceCount: 1
-          generation: 0
-        devices:
-          - name: nvidia-h100-0
-            basic:
-              attributes:
-                type:
-                  stringValue: nvidia-h100
-                memory:
-                  stringValue: "80Gi"
-              capacity:
-                gpu:
-                  quantity: "1"
+      devices:
+        - name: nvidia-h100-0
+          basic:
+            attributes:
+              type:
+                stringValue: nvidia-h100
+              memory:
+                stringValue: "80Gi"
+            capacity:
+              gpu:
+                quantity: "1"
 
 ---
 # Example DRAConfig for testing FPGA devices
@@ -40,7 +35,7 @@ metadata:
   name: fpga-config
 spec:
   driver: test.karpenter.sh
-  mappings:
+  pools:
     - name: xilinx-fpga
       nodeSelectorTerms:
         - matchExpressions:
@@ -48,19 +43,63 @@ spec:
               operator: In
               values:
                 - f1.2xlarge
-      resourceSlice:
-        pool:
-          name: fpga-pool
-          resourceSliceCount: 1
-          generation: 0
-        devices:
-          - name: xilinx-u250-0
-            basic:
-              attributes:
-                type:
-                  stringValue: xilinx-u250
-                memory:
-                  stringValue: "16Gi"
-              capacity:
-                fpga:
-                  quantity: "1"
+      devices:
+        - name: xilinx-u250-0
+          basic:
+            attributes:
+              type:
+                stringValue: xilinx-u250
+              memory:
+                stringValue: "16Gi"
+            capacity:
+              fpga:
+                quantity: "1"
+
+---
+# Example: Multiple drivers simultaneously
+# GPU driver
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: my-gpu-config
+spec:
+  driver: gpu.nvidia.com
+  pools:
+    - name: h100-pool
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+                - g5.48xlarge
+      devices:
+        - name: h100-0
+          basic:
+            attributes:
+              type:
+                stringValue: nvidia-h100
+              memory:
+                stringValue: "80Gi"
+
+---
+# FPGA driver (different driver name, same cluster)
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: my-fpga-config
+spec:
+  driver: fpga.intel.com
+  pools:
+    - name: arria-pool
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+                - f1.2xlarge
+      devices:
+        - name: arria-0
+          basic:
+            attributes:
+              type:
+                stringValue: intel-arria10

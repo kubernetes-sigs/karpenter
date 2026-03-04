@@ -32,20 +32,23 @@ type DRAConfigSpec struct {
 	// +kubebuilder:validation:Pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
 	Driver string `json:"driver"`
 
-	// mappings defines how KWOK nodes map to ResourceSlices.
-	// Each mapping specifies node selectors and the ResourceSlice configuration to create.
-	// Multiple mappings allow different device configurations for different node types.
+	// pools defines how KWOK nodes map to ResourceSlices.
+	// Each pool specifies node selectors and the devices to expose on matching nodes.
+	// Multiple pools allow different device configurations for different node types.
+	// Pool names are auto-generated as <driver>/<node> to prevent overlap across nodes.
 	//
 	// +kubebuilder:validation:MinItems=1
 	// +required
 	// +listType=atomic
-	Mappings []Mapping `json:"mappings,omitempty"`
+	Pools []Pool `json:"pools,omitempty"`
 }
 
-// Mapping defines a mapping from node selector to ResourceSlice configuration
-type Mapping struct {
-	// name is a human-readable identifier for this mapping.
-	// Used in ResourceSlice naming: test-karpenter-sh-<nodename>-<mapping-name>
+// Pool defines a pool of devices for nodes matching the selector.
+// Each resourceSlice entry within a pool becomes one ResourceSlice per matching node.
+// All ResourceSlices in a pool share the same auto-generated pool name <driver>/<node>.
+type Pool struct {
+	// name is a human-readable identifier for this pool.
+	// Used in ResourceSlice naming: <driver-sanitized>-<nodename>-<pool-name>[-<index>]
 	//
 	// +required
 	// +kubebuilder:validation:MinLength=1
@@ -53,7 +56,7 @@ type Mapping struct {
 	// +kubebuilder:validation:Pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
 	Name string `json:"name,omitempty"`
 
-	// nodeSelectorTerms determines which nodes this mapping applies to.
+	// nodeSelectorTerms determines which nodes this pool applies to.
 	// Multiple terms are ORed together (node matches if ANY term matches).
 	// Within a term, all requirements must be satisfied (AND logic).
 	// Follows standard Kubernetes NodeSelectorTerm format.
@@ -63,39 +66,22 @@ type Mapping struct {
 	// +listType=atomic
 	NodeSelectorTerms []corev1.NodeSelectorTerm `json:"nodeSelectorTerms,omitempty"`
 
-	// resourceSlice defines the ResourceSlice template to create for matching nodes.
-	// The driver will create a ResourceSlice using this template, filling in:
-	// - metadata.name (generated from node name and mapping name)
-	// - spec.nodeName (from the matching node)
-	// - spec.driver (from DRAConfigSpec.Driver)
+	// resourceSlices defines one or more ResourceSlice templates for this pool.
+	// Each entry becomes a separate ResourceSlice on each matching node.
+	// This allows splitting devices across multiple ResourceSlices within the same pool,
+	// which is useful for simulating real drivers that partition devices across slices.
+	// All entries share the same auto-generated pool name with ResourceSliceCount
+	// set to the total number of entries.
 	//
 	// +required
-	ResourceSlice ResourceSliceTemplate `json:"resourceSlice,omitzero"`
+	// +kubebuilder:validation:MinItems=1
+	// +listType=atomic
+	ResourceSlices []ResourceSliceTemplate `json:"resourceSlices,omitempty"`
 }
 
-// ResourceSliceTemplate is a template for creating ResourceSlices.
-// It's based on resourcev1.ResourceSliceSpec but excludes fields that are auto-populated:
-// - nodeName (filled from matching node)
-// - driver (filled from DRAConfigSpec.Driver)
+// ResourceSliceTemplate defines the devices that will be placed into a single ResourceSlice.
 type ResourceSliceTemplate struct {
-	// nodeSelector is copied directly to ResourceSlice if provided.
-	// If omitted, the mapping's NodeSelectorTerms will be used.
-	//
-	// +optional
-	NodeSelector *corev1.NodeSelector `json:"nodeSelector,omitempty"`
-
-	// pool describes the pool that this ResourceSlice belongs to.
-	//
-	// +required
-	Pool resourcev1.ResourcePool `json:"pool,omitempty"`
-
-	// allNodes indicates whether all nodes have access to the devices in this pool.
-	// Exactly one of NodeSelector or AllNodes must be set.
-	//
-	// +optional
-	AllNodes *bool `json:"allNodes,omitempty"`
-
-	// devices lists the devices available in this ResourceSlice.
+	// devices lists the devices for this ResourceSlice.
 	//
 	// +required
 	// +kubebuilder:validation:MinItems=1
@@ -123,7 +109,7 @@ type DRAConfigStatus struct {
 	// +optional
 	ResourceSliceCount *int32 `json:"resourceSliceCount,omitempty"`
 
-	// nodeCount is the number of nodes currently matched by this config's mappings.
+	// nodeCount is the number of nodes currently matched by this config's pools.
 	//
 	// +optional
 	NodeCount *int32 `json:"nodeCount,omitempty"`
@@ -161,20 +147,6 @@ type DRAConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []DRAConfig `json:"items"`
-}
-
-// ToResourceSliceSpec converts a ResourceSliceTemplate to a resourcev1.ResourceSliceSpec
-// The driver and nodeName fields are filled in by the caller
-func (t *ResourceSliceTemplate) ToResourceSliceSpec(driver string) resourcev1.ResourceSliceSpec {
-	spec := resourcev1.ResourceSliceSpec{
-		Driver:       driver,
-		NodeSelector: t.NodeSelector,
-		Pool:         t.Pool,
-		Devices:      t.Devices,
-		AllNodes:     t.AllNodes,
-	}
-
-	return spec
 }
 
 func init() {

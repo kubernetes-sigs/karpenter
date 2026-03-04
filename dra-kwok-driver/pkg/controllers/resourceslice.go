@@ -178,8 +178,8 @@ func (r *ResourceSliceController) processDriver(
 	errorCount := 0
 	kwokNodeCount := 0
 
-	// Use mappings directly from this driver's config
-	mappings := cfg.Spec.Mappings
+	// Use pools directly from this driver's config
+	pools := cfg.Spec.Pools
 
 	// Process each node for this driver
 	for i := range nodes {
@@ -189,8 +189,8 @@ func (r *ResourceSliceController) processDriver(
 		}
 		kwokNodeCount++
 
-		// Reconcile this node with mappings from this driver's config
-		expected, err := r.reconcileNodeResourceSlicesForDriver(ctx, node, driverName, mappings)
+		// Reconcile this node with pools from this driver's config
+		expected, err := r.reconcileNodeResourceSlicesForDriver(ctx, node, driverName, pools)
 		if err != nil {
 			logger.Error(err, "failed to reconcile node", "node", node.Name, "driver", driverName)
 			errorCount++
@@ -204,7 +204,7 @@ func (r *ResourceSliceController) processDriver(
 		"driver", driverName,
 		"config", cfg.Name,
 		"kwok_nodes", kwokNodeCount,
-		"mappings", len(mappings))
+		"pools", len(pools))
 
 	return expectedNames, errorCount
 }
@@ -214,95 +214,120 @@ func (r *ResourceSliceController) reconcileNodeResourceSlicesForDriver(
 	ctx context.Context,
 	node *corev1.Node,
 	driverName string,
-	mappings []v1alpha1.Mapping,
+	pools []v1alpha1.Pool,
 ) ([]string, error) {
 	logger := log.FromContext(ctx).WithName("resourceslice").WithValues("node", node.Name, "driver", driverName)
 
-	// Find all matching mappings for this node
-	matchingMappings := r.findMatchingMappings(node, mappings)
+	// Find all matching pools for this node
+	matchingPools := r.findMatchingPools(node, pools)
 
-	if len(matchingMappings) == 0 {
-		logger.V(1).Info("no matching mappings found for node")
+	if len(matchingPools) == 0 {
+		logger.V(1).Info("no matching pools found for node")
 		return nil, nil
 	}
 
-	logger.V(1).Info("found matching mappings", "count", len(matchingMappings))
+	logger.V(1).Info("found matching pools", "count", len(matchingPools))
 
 	var expectedNames []string
 
-	// Process each mapping
-	for _, mapping := range matchingMappings {
-		// ResourceSlice naming: <driver-sanitized>-<nodename>-<mapping-name>
+	// Process each pool. Each pool may have multiple resourceSlice templates,
+	// and each template becomes one ResourceSlice per matching node.
+	// All ResourceSlices in a pool share the same pool name and ResourceSliceCount.
+	for _, pool := range matchingPools {
 		driverSanitized := sanitizeDriverName(driverName)
-		resourceSliceName := fmt.Sprintf("%s-%s-%s", driverSanitized, node.Name, mapping.Name)
-		expectedNames = append(expectedNames, resourceSliceName)
 
-		// Check if ResourceSlice exists
-		existing := &resourcev1.ResourceSlice{}
-		err := r.kubeClient.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing)
+		// Pool name is auto-generated as <driver>/<node> to prevent overlap across nodes
+		poolName := fmt.Sprintf("%s/%s", driverName, node.Name)
 
-		if err == nil {
-			// ResourceSlice exists - check if update is needed
-			if !r.resourceSliceNeedsUpdate(existing, &mapping.ResourceSlice) {
-				continue
+		sliceCount := int64(len(pool.ResourceSlices))
+
+		for sliceIndex, sliceTemplate := range pool.ResourceSlices {
+			// ResourceSlice naming: <driver-sanitized>-<nodename>-<pool-name> (single entry)
+			// or <driver-sanitized>-<nodename>-<pool-name>-<index> (multiple entries)
+			resourceSliceName := fmt.Sprintf("%s-%s-%s", driverSanitized, node.Name, pool.Name)
+			if sliceCount > 1 {
+				resourceSliceName = fmt.Sprintf("%s-%d", resourceSliceName, sliceIndex)
 			}
+			expectedNames = append(expectedNames, resourceSliceName)
 
-			// Update needed - bump generation and update in place
-			oldGeneration := existing.Spec.Pool.Generation
-			newGeneration := oldGeneration + 1
+			// Check if ResourceSlice exists
+			existing := &resourcev1.ResourceSlice{}
+			err := r.kubeClient.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing)
 
-			existing.Spec = mapping.ResourceSlice.ToResourceSliceSpec(driverName)
-			existing.Spec.NodeName = &node.Name
-			existing.Spec.Pool.Generation = newGeneration
+			if err == nil {
+				// ResourceSlice exists - check if update is needed
+				if !r.resourceSliceNeedsUpdate(existing, sliceTemplate.Devices, sliceCount) {
+					continue
+				}
 
-			logger.Info("updating resourceslice",
-				"resourceslice", resourceSliceName,
-				"old_generation", oldGeneration,
-				"new_generation", newGeneration,
-				"devices", len(existing.Spec.Devices),
-			)
+				// Update needed - bump generation and update in place
+				oldGeneration := existing.Spec.Pool.Generation
+				newGeneration := oldGeneration + 1
 
-			if err := r.kubeClient.Update(ctx, existing); err != nil {
-				return nil, serrors.Wrap(fmt.Errorf("updating resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
-			}
-		} else if errors.IsNotFound(err) {
-			// ResourceSlice doesn't exist - create it
-			desired := &resourcev1.ResourceSlice{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceSliceName,
-					Labels: map[string]string{
-						"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
-						"kwok.x-k8s.io/node":       node.Name,
-						"kwok.x-k8s.io/mapping":    mapping.Name,
-						"kwok.x-k8s.io/driver":     driverName,
-					},
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion: "v1",
-							Kind:       "Node",
-							Name:       node.Name,
-							UID:        node.UID,
+				existing.Spec.Devices = sliceTemplate.Devices
+				existing.Spec.Pool = resourcev1.ResourcePool{
+					Name:               poolName,
+					ResourceSliceCount: sliceCount,
+					Generation:         newGeneration,
+				}
+
+				logger.Info("updating resourceslice",
+					"resourceslice", resourceSliceName,
+					"old_generation", oldGeneration,
+					"new_generation", newGeneration,
+					"devices", len(existing.Spec.Devices),
+					"slice_count", sliceCount,
+				)
+
+				if err := r.kubeClient.Update(ctx, existing); err != nil {
+					return nil, serrors.Wrap(fmt.Errorf("updating resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
+				}
+			} else if errors.IsNotFound(err) {
+				// ResourceSlice doesn't exist - create it
+				desired := &resourcev1.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: resourceSliceName,
+						Labels: map[string]string{
+							"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
+							"kwok.x-k8s.io/node":       node.Name,
+							"kwok.x-k8s.io/pool":       pool.Name,
+							"kwok.x-k8s.io/driver":     driverName,
+						},
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion: "v1",
+								Kind:       "Node",
+								Name:       node.Name,
+								UID:        node.UID,
+							},
 						},
 					},
-				},
-				Spec: mapping.ResourceSlice.ToResourceSliceSpec(driverName),
-			}
+					Spec: resourcev1.ResourceSliceSpec{
+						Driver:   driverName,
+						NodeName: &node.Name,
+						Pool: resourcev1.ResourcePool{
+							Name:               poolName,
+							ResourceSliceCount: sliceCount,
+							Generation:         0,
+						},
+						Devices: sliceTemplate.Devices,
+					},
+				}
 
-			desired.Spec.NodeName = &node.Name
-			desired.Spec.Pool.Generation = 0
-
-			logger.Info("creating resourceslice",
-				"resourceslice", desired.Name,
-				"mapping", desired.Labels["kwok.x-k8s.io/mapping"],
-				"driver", driverName,
-				"generation", 0,
-				"devices", len(desired.Spec.Devices),
-			)
-			if err := r.kubeClient.Create(ctx, desired); err != nil {
-				return nil, serrors.Wrap(fmt.Errorf("creating resourceslice, %w", err), "ResourceSlice", klog.KRef("", desired.Name))
+				logger.Info("creating resourceslice",
+					"resourceslice", desired.Name,
+					"pool", desired.Labels["kwok.x-k8s.io/pool"],
+					"driver", driverName,
+					"pool_name", poolName,
+					"devices", len(desired.Spec.Devices),
+					"slice_count", sliceCount,
+				)
+				if err := r.kubeClient.Create(ctx, desired); err != nil {
+					return nil, serrors.Wrap(fmt.Errorf("creating resourceslice, %w", err), "ResourceSlice", klog.KRef("", desired.Name))
+				}
+			} else {
+				return nil, serrors.Wrap(fmt.Errorf("getting resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
 			}
-		} else {
-			return nil, serrors.Wrap(fmt.Errorf("getting resourceslice, %w", err), "ResourceSlice", klog.KRef("", resourceSliceName))
 		}
 	}
 
@@ -319,13 +344,13 @@ func (r *ResourceSliceController) isKWOKNode(node *corev1.Node) bool {
 	return hasKWOKAnnotation
 }
 
-// findMatchingMappings returns all mappings that match the given node
-func (r *ResourceSliceController) findMatchingMappings(node *corev1.Node, mappings []v1alpha1.Mapping) []v1alpha1.Mapping {
-	var matches []v1alpha1.Mapping
+// findMatchingPools returns all pools that match the given node
+func (r *ResourceSliceController) findMatchingPools(node *corev1.Node, pools []v1alpha1.Pool) []v1alpha1.Pool {
+	var matches []v1alpha1.Pool
 
-	for _, mapping := range mappings {
-		if r.nodeSelectorMatches(node, mapping.NodeSelectorTerms) {
-			matches = append(matches, mapping)
+	for _, pool := range pools {
+		if r.nodeSelectorMatches(node, pool.NodeSelectorTerms) {
+			matches = append(matches, pool)
 		}
 	}
 
@@ -429,17 +454,10 @@ func (r *ResourceSliceController) nodeMatchesFieldExpression(node *corev1.Node, 
 	return requirement.Matches(fieldSet)
 }
 
-// resourceSliceNeedsUpdate checks if an existing ResourceSlice needs to be updated based on device count or pool configuration changes
-func (r *ResourceSliceController) resourceSliceNeedsUpdate(existing *resourcev1.ResourceSlice, desired *v1alpha1.ResourceSliceTemplate) bool {
-	if len(existing.Spec.Devices) != len(desired.Devices) {
-		return true
-	}
-
-	if existing.Spec.Pool.Name != desired.Pool.Name {
-		return true
-	}
-
-	return false
+// resourceSliceNeedsUpdate checks if an existing ResourceSlice needs to be updated
+// based on device count or slice count changes
+func (r *ResourceSliceController) resourceSliceNeedsUpdate(existing *resourcev1.ResourceSlice, desiredDevices []resourcev1.Device, desiredSliceCount int64) bool {
+	return len(existing.Spec.Devices) != len(desiredDevices) || existing.Spec.Pool.ResourceSliceCount != desiredSliceCount
 }
 
 // cleanupOrphanedResourceSlices removes ALL ResourceSlices managed by this driver
