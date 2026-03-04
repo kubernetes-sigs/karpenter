@@ -48,30 +48,55 @@ type VolumeTopology struct {
 	kubeClient client.Client
 }
 
-// GetRequirements returns the volume topology requirements for the pod.
+// GetRequirements returns the volume topology requirements for the pod as a list of alternatives.
+// Each alternative is a scheduling.Requirements representing one valid combination of volume zone constraints.
+// When a volume has multiple allowed zones (OR'd NodeSelectorTerms or AllowedTopologies), each zone
+// option becomes a separate alternative. For pods with multiple volumes, the cross product of all
+// per-volume alternatives is computed.
 //
 // These requirements should be:
 //   - Added to nodeRequirements (for NodeClaim zone selection)
 //   - NOT added to pod's NodeAffinity (to preserve correct TSC counting)
-func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) (scheduling.Requirements, error) {
-	var requirements []v1.NodeSelectorRequirement
-	for _, volume := range pod.Spec.Volumes {
-		req, err := v.getRequirements(ctx, pod, volume)
+func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]scheduling.Requirements, error) {
+	// Start with a single empty alternative (matches everything)
+	alternatives := []scheduling.Requirements{nil}
+
+	for _, vol := range pod.Spec.Volumes {
+		volAlts, err := v.getRequirements(ctx, pod, vol)
 		if err != nil {
 			return nil, err
 		}
-		requirements = append(requirements, req...)
+		if len(volAlts) == 0 {
+			continue
+		}
+
+		// Cross product: alternatives = alternatives X volAlts
+		var newAlts []scheduling.Requirements
+		for _, existing := range alternatives {
+			for _, volReq := range volAlts {
+				merged := scheduling.NewRequirements()
+				if existing != nil {
+					merged.Add(existing.Values()...)
+				}
+				merged.Add(volReq.Values()...)
+				newAlts = append(newAlts, merged)
+			}
+		}
+		alternatives = newAlts
 	}
-	if len(requirements) == 0 {
+
+	// If we still have just the initial empty alternative, there are no volume requirements
+	if len(alternatives) == 1 && alternatives[0] == nil {
 		return nil, nil
 	}
+
 	log.FromContext(ctx).
-		WithValues("Pod", klog.KObj(pod), "requirements", requirements).
+		WithValues("Pod", klog.KObj(pod), "alternatives", len(alternatives)).
 		V(1).Info("getting requirements from pod volumes")
-	return scheduling.NewNodeSelectorRequirements(requirements...), nil
+	return alternatives, nil
 }
 
-func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]scheduling.Requirements, error) {
 	pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, volume)
 	if err != nil {
 		return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
@@ -100,45 +125,50 @@ func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volum
 	return nil, nil
 }
 
-func (v *VolumeTopology) getStorageClassRequirements(ctx context.Context, storageClassName string) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) getStorageClassRequirements(ctx context.Context, storageClassName string) ([]scheduling.Requirements, error) {
 	storageClass := &storagev1.StorageClass{}
 	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
 		return nil, serrors.Wrap(fmt.Errorf("getting storage class, %w", err), "StorageClass", klog.KRef("", storageClassName))
 	}
-	var requirements []v1.NodeSelectorRequirement
-	if len(storageClass.AllowedTopologies) > 0 {
-		// Terms are ORed, only use the first term
-		for _, requirement := range storageClass.AllowedTopologies[0].MatchLabelExpressions {
+	var alternatives []scheduling.Requirements
+	// Each TopologySelectorTerm is OR'd — each becomes a separate alternative
+	for _, topology := range storageClass.AllowedTopologies {
+		var requirements []v1.NodeSelectorRequirement
+		for _, requirement := range topology.MatchLabelExpressions {
 			requirements = append(requirements, v1.NodeSelectorRequirement{Key: requirement.Key, Operator: v1.NodeSelectorOpIn, Values: requirement.Values})
 		}
+		if len(requirements) > 0 {
+			alternatives = append(alternatives, scheduling.NewNodeSelectorRequirements(requirements...))
+		}
 	}
-	return requirements, nil
+	return alternatives, nil
 }
 
-func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, pod *v1.Pod, volumeName string) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, pod *v1.Pod, volumeName string) ([]scheduling.Requirements, error) {
 	pv := &v1.PersistentVolume{}
 	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volumeName, Namespace: pod.Namespace}, pv); err != nil {
 		return nil, serrors.Wrap(fmt.Errorf("getting persistent volume, %w", err), "PersistentVolume", klog.KRef("", volumeName))
 	}
-	if pv.Spec.NodeAffinity == nil {
+	if pv.Spec.NodeAffinity == nil || pv.Spec.NodeAffinity.Required == nil {
 		return nil, nil
 	}
-	if pv.Spec.NodeAffinity.Required == nil {
-		return nil, nil
-	}
-	var requirements []v1.NodeSelectorRequirement
-	if len(pv.Spec.NodeAffinity.Required.NodeSelectorTerms) > 0 {
-		// Terms are ORed, only use the first term
-		requirements = pv.Spec.NodeAffinity.Required.NodeSelectorTerms[0].MatchExpressions
+
+	var alternatives []scheduling.Requirements
+	// Each NodeSelectorTerm is OR'd — each becomes a separate alternative
+	for _, term := range pv.Spec.NodeAffinity.Required.NodeSelectorTerms {
+		requirements := term.MatchExpressions
 		// If we are using a Local volume or a HostPath volume, then we should ignore the Hostname affinity
 		// on it because re-scheduling this pod to a new node means not using the same Hostname affinity that we currently have
 		if pv.Spec.Local != nil || pv.Spec.HostPath != nil {
-			requirements = lo.Reject(requirements, func(n v1.NodeSelectorRequirement, _ int) bool {
-				return n.Key == v1.LabelHostname
+			requirements = lo.Reject(requirements, func(req v1.NodeSelectorRequirement, _ int) bool {
+				return req.Key == v1.LabelHostname
 			})
 		}
+		if len(requirements) > 0 {
+			alternatives = append(alternatives, scheduling.NewNodeSelectorRequirements(requirements...))
+		}
 	}
-	return requirements, nil
+	return alternatives, nil
 }
 
 // ValidatePersistentVolumeClaims returns an error if the pod doesn't appear to be valid with respect to
