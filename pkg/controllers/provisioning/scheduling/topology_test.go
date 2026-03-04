@@ -2286,42 +2286,116 @@ var _ = Describe("Topology", func() {
 		})
 
 		// Issue #2785: https://github.com/kubernetes-sigs/karpenter/issues/2785
-		// Regression test: Ensure that NodePools with zero active nodes still register
-		// domains correctly so that minDomains can be satisfied. This was the root cause
-		// of the revert of PR #2639.
-		It("should register domains from NodePools with zero active nodes when minDomains is set", func() {
-			if env.Version.Minor() < 24 {
-				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
+		// Regression test: The actual #2785 failure involved karpenter.sh/nodepool selection +
+		// taints + minDomains + 0 active nodes. Since karpenter.sh/nodepool is injected later
+		// (nodeclaimtemplate.go:70-72), we use a custom label to exercise the same filtering path.
+		// This test mirrors the #2623 pattern with tainted NodePool + custom label selection,
+		// adding minDomains and zero active nodes to reproduce the #2785 failure scenario.
+		It("should register domains from zero-node tainted NodePools with minDomains and Honor policies (Issue #2785)", func() {
+			if env.Version.Minor() < 26 {
+				Skip("NodeAffinityPolicy/NodeTaintsPolicy only enabled by default for K8s >= 1.26.x")
 			}
 
-			var minDomains int32 = 2
+			// NodePool "gha-runners": tainted, custom label, all 3 zones, zero active nodes
+			ghaNodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "gha-runners"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								"workload-group": "gha-runners",
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{
+								{
+									Key:    "gha-linux",
+									Value:  "true",
+									Effect: corev1.TaintEffectNoSchedule,
+								},
+							},
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+								},
+								{
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpExists,
+								},
+							},
+						},
+					},
+				},
+			})
+
+			// NodePool "shared": no taint, different label, zone-3 only
+			sharedNodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "shared"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								"workload-group": "shared-apps",
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-zone-3"},
+								},
+								{
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpExists,
+								},
+							},
+						},
+					},
+				},
+			})
+
+			var minDomains int32 = 3
 			topology := []corev1.TopologySpreadConstraint{{
-				TopologyKey:       corev1.LabelTopologyZone,
-				WhenUnsatisfiable: corev1.DoNotSchedule,
-				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
-				MaxSkew:           1,
-				MinDomains:        &minDomains,
+				TopologyKey:        corev1.LabelTopologyZone,
+				WhenUnsatisfiable:  corev1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            2,
+				MinDomains:         &minDomains,
+				NodeTaintsPolicy:   lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 			}}
 
 			// Both NodePools have zero active nodes initially.
-			// Before the #2639 revert: this would fail because zero-node NodePools
-			// didn't register their domains, causing minDomains to be unsatisfied.
-			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+			// Before fix: zero-node tainted NodePools didn't register their domains,
+			// causing minDomains to be unsatisfied with "unsatisfiable topology constraint".
+			ExpectApplied(ctx, env.Client, ghaNodePool, sharedNodePool)
 
 			pods := test.UnschedulablePods(test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
-			}, 4)
+				NodeSelector:              map[string]string{"workload-group": "gha-runners"},
+				Tolerations: []corev1.Toleration{
+					{
+						Key:      "gha-linux",
+						Value:    "true",
+						Effect:   corev1.TaintEffectNoSchedule,
+						Operator: corev1.TolerationOpEqual,
+					},
+				},
+			}, 6)
 
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
-			// All pods should successfully schedule
+			// All pods should successfully schedule despite zero initial nodes
 			for _, pod := range pods {
 				ExpectScheduled(ctx, env.Client, pod)
 			}
 
-			// Pods should be spread across available zones
-			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 1, 1))
+			// Pods should be spread across all 3 zones (minDomains=3, maxSkew=2)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2, 2))
 		})
 	})
 
