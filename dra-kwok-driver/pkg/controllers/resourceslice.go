@@ -42,14 +42,12 @@ import (
 // ResourceSliceController manages ResourceSlice lifecycle based on periodic polling of nodes and DRAConfig CRD
 type ResourceSliceController struct {
 	kubeClient client.Client
-	namespace  string // Namespace where DRAConfig CRD is located
 }
 
 // NewResourceSliceController creates a new ResourceSlice controller
-func NewResourceSliceController(kubeClient client.Client, namespace string) *ResourceSliceController {
+func NewResourceSliceController(kubeClient client.Client) *ResourceSliceController {
 	return &ResourceSliceController{
 		kubeClient: kubeClient,
-		namespace:  namespace,
 	}
 }
 
@@ -92,11 +90,9 @@ func (r *ResourceSliceController) startPollingLoop(ctx context.Context) {
 func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("resourceslice")
 
-	// List all DRAConfig CRDs
+	// List all DRAConfig CRDs (cluster-scoped, no namespace filter)
 	draConfigs := &v1alpha1.DRAConfigList{}
-	err := r.kubeClient.List(ctx, draConfigs, &client.ListOptions{
-		Namespace: r.namespace,
-	})
+	err := r.kubeClient.List(ctx, draConfigs)
 	if err != nil {
 		return fmt.Errorf("listing DRAConfigs: %w", err)
 	}

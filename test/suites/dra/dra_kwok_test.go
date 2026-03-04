@@ -78,8 +78,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 			// Create DRAConfig CRD with GPU configuration
 			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test.karpenter.sh",
-					Namespace: "karpenter",
+					Name: "test.karpenter.sh",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
@@ -405,8 +404,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 		It("should support FPGA device types", func() {
 			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test.karpenter.sh",
-					Namespace: "karpenter",
+					Name: "test.karpenter.sh",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
@@ -557,8 +555,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 		It("should support multiple ResourceSlices for single instance type", func() {
 			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test.karpenter.sh",
-					Namespace: "karpenter",
+					Name: "test.karpenter.sh",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
@@ -757,8 +754,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 			// With CRD, invalid configs are rejected at creation time by API server
 			invalidConfig := &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test.karpenter.sh",
-					Namespace: "karpenter",
+					Name: "test.karpenter.sh",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver:   "invalid driver name!",  // Invalid: contains spaces
@@ -775,8 +771,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 			By("Creating valid config with empty driver should also fail")
 			invalidConfig2 := &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "invalid-config-2",
-					Namespace: "karpenter",
+					Name: "invalid-config-2",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver:   "", // Empty driver
@@ -852,8 +847,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 			// Create DRAConfig with device configuration
 			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test.karpenter.sh",
-					Namespace: "karpenter",
+					Name: "test.karpenter.sh",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
@@ -1070,8 +1064,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 			By("Creating DRAConfig")
 			draDriverConfig = &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test.karpenter.sh",
-					Namespace: "karpenter",
+					Name: "test.karpenter.sh",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "test.karpenter.sh",
@@ -1191,8 +1184,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 			// GPU driver config
 			gpuConfig := &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "gpu-config",
-					Namespace: "karpenter",
+					Name: "gpu-config",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "gpu.nvidia.com",
@@ -1233,8 +1225,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 			// FPGA driver config
 			fpgaConfig := &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "fpga-config",
-					Namespace: "karpenter",
+					Name: "fpga-config",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "fpga.intel.com",
@@ -1338,8 +1329,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 
 			config1 := &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "gpu-config-1",
-					Namespace: "karpenter",
+					Name: "gpu-config-1",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "gpu.nvidia.com",
@@ -1378,8 +1368,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 
 			config2 := &drav1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "gpu-config-2",
-					Namespace: "karpenter",
+					Name: "gpu-config-2",
 				},
 				Spec: drav1alpha1.DRAConfigSpec{
 					Driver: "gpu.nvidia.com", // Same driver!

@@ -80,7 +80,6 @@ func main() {
 	// Initialize ResourceSlice controller (single controller manages all drivers)
 	resourceSliceController := controllers.NewResourceSliceController(
 		mgr.GetClient(),
-		"karpenter", // Just namespace
 	)
 
 	// Register controller

@@ -40,7 +40,6 @@ var _ = Describe("ResourceSliceController", func() {
 		fakeClient         client.Client
 		scheme             *runtime.Scheme
 		driverName         = "test.karpenter.sh"
-		namespace          = "karpenter"
 	)
 
 	BeforeEach(func() {
@@ -51,7 +50,7 @@ var _ = Describe("ResourceSliceController", func() {
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 		fakeClient = fake.NewClientBuilder().WithScheme(scheme).Build()
-		resourceController = NewResourceSliceController(fakeClient, namespace)
+		resourceController = NewResourceSliceController(fakeClient)
 	})
 
 	Describe("isKWOKNode", func() {
@@ -291,8 +290,7 @@ var _ = Describe("ResourceSliceController", func() {
 			// Create DRAConfig CRD
 			draConfig = &v1alpha1.DRAConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-config",
-					Namespace: namespace,
+					Name: "test-config",
 				},
 				Spec: v1alpha1.DRAConfigSpec{
 					Driver: driverName,

@@ -15,7 +15,7 @@ spec:
     - draconfig
     - draconfigs
     singular: draconfig
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.driver

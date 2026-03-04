@@ -123,14 +123,14 @@ test-dra: ## Run DRA KWOK driver unit tests
 
 e2etest-dra: ## Run DRA e2e integration tests
 	kubectl apply -f dra-kwok-driver/pkg/apis/crds/test.karpenter.sh_draconfigs.yaml
-	-kubectl delete draconfigs --all -n karpenter --ignore-not-found=true
+	-kubectl delete draconfigs --all --ignore-not-found=true
 	-kubectl delete resourceslices --all --ignore-not-found=true
 	-pkill -f dra-kwok-driver || true
 	cd dra-kwok-driver && go build -o dra-kwok-driver main.go
 	cd dra-kwok-driver && ./dra-kwok-driver > /tmp/dra-driver.log 2>&1 & echo $$! > /tmp/dra-driver.pid
 	sleep 2
 	TEST_SUITE=dra $(MAKE) e2etests
-	-kubectl delete draconfigs --all -n karpenter --ignore-not-found=true
+	-kubectl delete draconfigs --all --ignore-not-found=true
 	-kubectl delete resourceslices --all --ignore-not-found=true
 	-kill $$(cat /tmp/dra-driver.pid) 2>/dev/null || true
 	-rm -f /tmp/dra-driver.pid

@@ -4,7 +4,6 @@ apiVersion: test.karpenter.sh/v1alpha1
 kind: DRAConfig
 metadata:
   name: gpu-config
-  namespace: karpenter
 spec:
   driver: test.karpenter.sh
   mappings:
@@ -39,7 +38,6 @@ apiVersion: test.karpenter.sh/v1alpha1
 kind: DRAConfig
 metadata:
   name: fpga-config
-  namespace: karpenter
 spec:
   driver: test.karpenter.sh
   mappings:

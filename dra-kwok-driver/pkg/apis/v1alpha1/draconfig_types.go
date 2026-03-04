@@ -131,7 +131,7 @@ type DRAConfigStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Namespaced,shortName=draconfig;draconfigs
+// +kubebuilder:resource:scope=Cluster,shortName=draconfig;draconfigs
 // +kubebuilder:printcolumn:name="Driver",type=string,JSONPath=`.spec.driver`
 // +kubebuilder:printcolumn:name="Nodes",type=integer,JSONPath=`.status.nodeCount`
 // +kubebuilder:printcolumn:name="ResourceSlices",type=integer,JSONPath=`.status.resourceSliceCount`
