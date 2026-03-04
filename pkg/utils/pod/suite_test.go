@@ -69,79 +69,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeTrue())
 	})
 
-	It("should return true when duration has not expired", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "15m"},
-			},
-			Status: corev1.PodStatus{
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)}, // Pod started 10 minutes ago
-			},
-		}
-		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeTrue()) // 15m grace period not expired
-	})
-
-	It("should return false when duration has expired", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "5m"},
-			},
-			Status: corev1.PodStatus{
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)}, // Pod started 10 minutes ago
-			},
-		}
-		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeFalse()) // 5m grace period expired
-	})
-
-	It("should fail safe when start time is nil", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "5m"},
-			},
-			Status: corev1.PodStatus{
-				StartTime: nil,
-			},
-		}
-		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeTrue()) // Fail safe when start time unknown
-	})
-
-	It("should return false for invalid duration format", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "invalid"},
-			},
-			Status: corev1.PodStatus{
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeFalse()) // Invalid duration treated as non-existent
-	})
-
-	It("should return false for zero duration", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "0s"},
-			},
-			Status: corev1.PodStatus{
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeFalse()) // Zero duration treated as invalid
-	})
-
-	It("should return false for negative duration", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "-5m"},
-			},
-			Status: corev1.PodStatus{
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeFalse()) // Negative duration treated as invalid
-	})
-
-	It("should emit event for invalid duration format", func() {
+	It("should return false and emit event for invalid duration format", func() {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        "test-pod",
@@ -156,7 +84,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: failed to parse %q as a duration: time: invalid duration %q, ignoring annotation", "invalid-format", "invalid-format"))).To(BeTrue())
 	})
 
-	It("should emit event for zero duration", func() {
+	It("should return false and emit event for zero duration", func() {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        "test-pod",
@@ -171,7 +99,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: duration %q must be positive, ignoring annotation", "0s"))).To(BeTrue())
 	})
 
-	It("should emit event for negative duration", func() {
+	It("should return false and emit event for negative duration", func() {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        "test-pod",
@@ -186,7 +114,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: duration %q must be positive, ignoring annotation", "-5m"))).To(BeTrue())
 	})
 
-	It("should emit event when duration-based protection is active", func() {
+	It("should return true and emit disruptable-at event when duration has not expired", func() {
 		startTime := fakeClock.Now().Add(-10 * time.Minute)
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -203,7 +131,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 		Expect(recorder.DetectedEvent(fmt.Sprintf("The karpenter.sh/do-not-disrupt grace period will elapse at %s", expectedTime))).To(BeTrue())
 	})
 
-	It("should not emit disruptable-at event when duration has expired", func() {
+	It("should return false and emit grace period elapsed event when duration has expired", func() {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        "test-pod",
@@ -217,6 +145,18 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeFalse())
 		Expect(recorder.DetectedEvent("The karpenter.sh/do-not-disrupt grace period will elapse at")).To(BeFalse())
 		Expect(recorder.DetectedEvent("The karpenter.sh/do-not-disrupt grace period has elapsed, pod is now disruptable")).To(BeTrue())
+	})
+
+	It("should fail safe when start time is nil", func() {
+		p := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "5m"},
+			},
+			Status: corev1.PodStatus{
+				StartTime: nil,
+			},
+		}
+		Expect(pod.IsDoNotDisruptActive(p, fakeClock, nil)).To(BeTrue())
 	})
 
 	It("should not emit disruptable-at event for indefinite protection", func() {
@@ -233,22 +173,6 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeTrue())
 		Expect(recorder.DetectedEvent("The karpenter.sh/do-not-disrupt grace period will elapse at")).To(BeFalse())
 	})
-
-	It("should emit grace period elapsed event when duration has expired", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "test-pod",
-				Namespace:   "default",
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "5m"},
-			},
-			Status: corev1.PodStatus{
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeFalse())
-		// Should emit the grace period elapsed event
-		Expect(recorder.DetectedEvent("The karpenter.sh/do-not-disrupt grace period has elapsed, pod is now disruptable")).To(BeTrue())
-	})
 })
 
 var _ = Describe("IsDisruptable", func() {
@@ -262,107 +186,7 @@ var _ = Describe("IsDisruptable", func() {
 		Expect(pod.IsDisruptable(p, fakeClock, nil)).To(BeTrue())
 	})
 
-	It("should not be disruptable for active pod with 'true' annotation", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"},
-			},
-			Status: corev1.PodStatus{
-				Phase:     corev1.PodRunning,
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDisruptable(p, fakeClock, nil)).To(BeFalse())
-	})
-
-	It("should be disruptable for active pod with expired duration", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "5m"},
-			},
-			Status: corev1.PodStatus{
-				Phase:     corev1.PodRunning,
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)}, // Started 10 minutes ago
-			},
-		}
-		Expect(pod.IsDisruptable(p, fakeClock, nil)).To(BeTrue()) // Grace period expired
-	})
-
-	It("should not be disruptable for active pod with non-expired duration", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "15m"},
-			},
-			Status: corev1.PodStatus{
-				Phase:     corev1.PodRunning,
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)}, // Started 10 minutes ago
-			},
-		}
-		Expect(pod.IsDisruptable(p, fakeClock, nil)).To(BeFalse()) // Grace period not expired
-	})
-
-	It("should be disruptable for terminal pod even with annotation", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"},
-			},
-			Status: corev1.PodStatus{
-				Phase:     corev1.PodSucceeded,
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDisruptable(p, fakeClock, nil)).To(BeTrue()) // Not active
-	})
-
-	It("should emit event for invalid do-not-disrupt annotation format", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "test-pod",
-				Namespace:   "default",
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "invalid-format"},
-			},
-			Status: corev1.PodStatus{
-				Phase:     corev1.PodRunning,
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue())
-		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: failed to parse %q as a duration: time: invalid duration %q, ignoring annotation", "invalid-format", "invalid-format"))).To(BeTrue())
-	})
-
-	It("should emit event for zero duration do-not-disrupt annotation", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "test-pod",
-				Namespace:   "default",
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "0s"},
-			},
-			Status: corev1.PodStatus{
-				Phase:     corev1.PodRunning,
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue())
-		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: duration %q must be positive, ignoring annotation", "0s"))).To(BeTrue())
-	})
-
-	It("should emit event for negative duration do-not-disrupt annotation", func() {
-		p := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "test-pod",
-				Namespace:   "default",
-				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "-5m"},
-			},
-			Status: corev1.PodStatus{
-				Phase:     corev1.PodRunning,
-				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
-			},
-		}
-		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue())
-		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: duration %q must be positive, ignoring annotation", "-5m"))).To(BeTrue())
-	})
-
-	It("should not emit event for valid 'true' annotation", func() {
+	It("should not be disruptable for active pod with 'true' annotation and not emit invalid annotation event", func() {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        "test-pod",
@@ -378,7 +202,7 @@ var _ = Describe("IsDisruptable", func() {
 		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation")).To(BeFalse())
 	})
 
-	It("should not emit event for valid duration annotation", func() {
+	It("should be disruptable for active pod with expired duration and not emit invalid annotation event", func() {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        "test-pod",
@@ -392,5 +216,31 @@ var _ = Describe("IsDisruptable", func() {
 		}
 		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue())
 		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation")).To(BeFalse())
+	})
+
+	It("should not be disruptable for active pod with non-expired duration", func() {
+		p := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "15m"},
+			},
+			Status: corev1.PodStatus{
+				Phase:     corev1.PodRunning,
+				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
+			},
+		}
+		Expect(pod.IsDisruptable(p, fakeClock, nil)).To(BeFalse())
+	})
+
+	It("should be disruptable for terminal pod even with annotation", func() {
+		p := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"},
+			},
+			Status: corev1.PodStatus{
+				Phase:     corev1.PodSucceeded,
+				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
+			},
+		}
+		Expect(pod.IsDisruptable(p, fakeClock, nil)).To(BeTrue())
 	})
 })
