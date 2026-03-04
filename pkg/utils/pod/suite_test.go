@@ -153,7 +153,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 			},
 		}
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeFalse())
-		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation value \"invalid-format\", ignoring annotation. Use 'true' or a duration like '5m', '1h'")).To(BeTrue())
+		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: failed to parse %q as a duration: time: invalid duration %q, ignoring annotation", "invalid-format", "invalid-format"))).To(BeTrue())
 	})
 
 	It("should emit event for zero duration", func() {
@@ -168,7 +168,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 			},
 		}
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeFalse())
-		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation value \"0s\", ignoring annotation. Use 'true' or a duration like '5m', '1h'")).To(BeTrue())
+		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: duration %q must be positive, ignoring annotation", "0s"))).To(BeTrue())
 	})
 
 	It("should emit event for negative duration", func() {
@@ -183,7 +183,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 			},
 		}
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeFalse())
-		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation value \"-5m\", ignoring annotation. Use 'true' or a duration like '5m', '1h'")).To(BeTrue())
+		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: duration %q must be positive, ignoring annotation", "-5m"))).To(BeTrue())
 	})
 
 	It("should emit event when duration-based protection is active", func() {
@@ -199,9 +199,8 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 			},
 		}
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeTrue())
-		// Calculate expected disruptable time
 		expectedTime := startTime.Add(15 * time.Minute).Format(time.RFC3339)
-		Expect(recorder.DetectedEvent(fmt.Sprintf("Pod will be disruptable at %s", expectedTime))).To(BeTrue())
+		Expect(recorder.DetectedEvent(fmt.Sprintf("The karpenter.sh/do-not-disrupt grace period will elapse at %s", expectedTime))).To(BeTrue())
 	})
 
 	It("should not emit disruptable-at event when duration has expired", func() {
@@ -216,9 +215,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 			},
 		}
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeFalse())
-		// Should not emit the disruptable-at event since duration has expired
-		Expect(recorder.DetectedEvent("Pod will be disruptable at")).To(BeFalse())
-		// Should emit the grace period elapsed event instead
+		Expect(recorder.DetectedEvent("The karpenter.sh/do-not-disrupt grace period will elapse at")).To(BeFalse())
 		Expect(recorder.DetectedEvent("The karpenter.sh/do-not-disrupt grace period has elapsed, pod is now disruptable")).To(BeTrue())
 	})
 
@@ -234,8 +231,7 @@ var _ = Describe("IsDoNotDisruptActive", func() {
 			},
 		}
 		Expect(pod.IsDoNotDisruptActive(p, fakeClock, recorder)).To(BeTrue())
-		// Should not emit the disruptable-at event for indefinite protection
-		Expect(recorder.DetectedEvent("Pod will be disruptable at")).To(BeFalse())
+		Expect(recorder.DetectedEvent("The karpenter.sh/do-not-disrupt grace period will elapse at")).To(BeFalse())
 	})
 
 	It("should emit grace period elapsed event when duration has expired", func() {
@@ -330,10 +326,8 @@ var _ = Describe("IsDisruptable", func() {
 				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
 			},
 		}
-		// Call IsDisruptable with the recorder
-		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue()) // Invalid annotation treated as non-existent, so disruptable
-		// Verify the event was emitted
-		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation value \"invalid-format\", ignoring annotation. Use 'true' or a duration like '5m', '1h'")).To(BeTrue())
+		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue())
+		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: failed to parse %q as a duration: time: invalid duration %q, ignoring annotation", "invalid-format", "invalid-format"))).To(BeTrue())
 	})
 
 	It("should emit event for zero duration do-not-disrupt annotation", func() {
@@ -348,8 +342,8 @@ var _ = Describe("IsDisruptable", func() {
 				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
 			},
 		}
-		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue()) // Invalid annotation treated as non-existent, so disruptable
-		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation value \"0s\", ignoring annotation. Use 'true' or a duration like '5m', '1h'")).To(BeTrue())
+		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue())
+		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: duration %q must be positive, ignoring annotation", "0s"))).To(BeTrue())
 	})
 
 	It("should emit event for negative duration do-not-disrupt annotation", func() {
@@ -364,8 +358,8 @@ var _ = Describe("IsDisruptable", func() {
 				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
 			},
 		}
-		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue()) // Invalid annotation treated as non-existent, so disruptable
-		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation value \"-5m\", ignoring annotation. Use 'true' or a duration like '5m', '1h'")).To(BeTrue())
+		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue())
+		Expect(recorder.DetectedEvent(fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: duration %q must be positive, ignoring annotation", "-5m"))).To(BeTrue())
 	})
 
 	It("should not emit event for valid 'true' annotation", func() {
@@ -381,8 +375,7 @@ var _ = Describe("IsDisruptable", func() {
 			},
 		}
 		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeFalse())
-		// Should not emit any event for valid annotation
-		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation value")).To(BeFalse())
+		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation")).To(BeFalse())
 	})
 
 	It("should not emit event for valid duration annotation", func() {
@@ -397,8 +390,7 @@ var _ = Describe("IsDisruptable", func() {
 				StartTime: &metav1.Time{Time: fakeClock.Now().Add(-10 * time.Minute)},
 			},
 		}
-		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue()) // Duration expired
-		// Should not emit any event for valid annotation
-		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation value")).To(BeFalse())
+		Expect(pod.IsDisruptable(p, fakeClock, recorder)).To(BeTrue())
+		Expect(recorder.DetectedEvent("Invalid karpenter.sh/do-not-disrupt annotation")).To(BeFalse())
 	})
 })

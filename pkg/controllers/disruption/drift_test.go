@@ -425,7 +425,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
+		It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation set to true", func() {
 			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
@@ -497,7 +497,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
-		It("should not create replacements for drifted nodes that have pods with the karpenter.sh/do-not-disrupt annotation", func() {
+		It("should not create replacements for drifted nodes that have pods with the karpenter.sh/do-not-disrupt annotation set to true", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
@@ -518,7 +518,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		It("should not create replacements for drifted nodes that have pods with the karpenter.sh/do-not-disrupt annotation when the NodePool's TerminationGracePeriod is not nil", func() {
+		It("should not create replacements for drifted nodes that have pods with the karpenter.sh/do-not-disrupt annotation set to true when the NodePool's TerminationGracePeriod is not nil", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
@@ -565,6 +565,140 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should not drift nodes with pods that have a duration-based do-not-disrupt annotation that is still active", func() {
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "2m",
+					},
+				},
+			})
+			pod.Status.StartTime = &metav1.Time{Time: fakeClock.Now()}
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Grace period is still active, so drift should be blocked
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+
+			// Advance clock past the 2m grace period
+			fakeClock.Step(3 * time.Minute)
+
+			// Re-update state and reconcile - drift should now proceed
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// The drifted node should now be disrupted since the grace period expired
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("should drift nodes with pods that have an invalid do-not-disrupt annotation format", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "invalid-format",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					},
+				},
+			})
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, nodeClaim2, node, node2, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// Invalid annotation format should not block drift
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("should not drift nodes until the longest duration-based do-not-disrupt grace period expires across multiple pods", func() {
+			pod1 := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "1m",
+					},
+				},
+			})
+			pod1.Status.StartTime = &metav1.Time{Time: fakeClock.Now()}
+
+			pod2 := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "3m",
+					},
+				},
+			})
+			pod2.Status.StartTime = &metav1.Time{Time: fakeClock.Now()}
+
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod1, pod2)
+			ExpectManualBinding(ctx, env.Client, pod1, node)
+			ExpectManualBinding(ctx, env.Client, pod2, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Both pods still within grace period, drift should be blocked
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+
+			// Advance past the 1m grace period but not the 3m one
+			fakeClock.Step(2 * time.Minute)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// pod2 still has active grace period, drift should still be blocked
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+
+			// Advance past the 3m grace period
+			fakeClock.Step(2 * time.Minute)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// All grace periods expired, drift should now proceed
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 		})
 		It("should replace drifted nodes", func() {
 			labels := map[string]string{

@@ -17,6 +17,7 @@ limitations under the License.
 package pod
 
 import (
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -106,10 +107,11 @@ func IsProvisionable(pod *corev1.Pod) bool {
 		!IsOwnedByNode(pod)
 }
 
-// IsDisruptable checks if a pod can be disrupted based on validating the `karpenter.sh/do-not-disrupt` annotation on the pod.
-// It checks whether the following is true for the pod:
-// - Has an active `karpenter.sh/do-not-disrupt` annotation
-// - Is an actively running pod
+// IsDisruptable checks if a pod can be disrupted using clock-aware logic for time-based do-not-disrupt annotations.
+// It considers both boolean ("true") and duration-based values (e.g., "5m", "1h").
+// For duration-based values, it checks if the pod has been running longer than the specified duration.
+// Invalid annotation formats are treated as if the annotation doesn't exist and an event is emitted.
+// Non-active pods are always considered disruptable.
 func IsDisruptable(pod *corev1.Pod, clk clock.Clock, recorder events.Recorder) bool {
 	return !IsActive(pod) || !IsDoNotDisruptActive(pod, clk, recorder)
 }
@@ -183,23 +185,17 @@ func IsOwnedBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
 	return false
 }
 
-// parseDoNotDisrupt parses the do-not-disrupt annotation value
-// Returns (valid, indefinite, duration) where:
-// - valid=false means the annotation format is invalid (not "true" and not a valid duration)
-// - indefinite=true means permanent protection (value is "true")
-// - duration is the parsed time duration for valid duration strings
-func parseDoNotDisrupt(value string) (valid bool, indefinite bool, duration time.Duration) {
-	if value == "true" {
-		return true, true, 0
-	}
-
+// parseDoNotDisrupt parses the do-not-disrupt annotation value as a duration.
+// Returns the parsed duration or an error if the value is not a valid positive duration.
+func parseDoNotDisrupt(value string) (time.Duration, error) {
 	d, err := time.ParseDuration(value)
-	if err != nil || d <= 0 {
-		// Invalid format
-		return false, false, 0
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse %q as a duration: %w", value, err)
 	}
-
-	return true, false, d
+	if d <= 0 {
+		return 0, fmt.Errorf("duration %q must be positive", value)
+	}
+	return d, nil
 }
 
 // IsDoNotDisruptActive checks if the do-not-disrupt protection is still active for a pod
@@ -212,22 +208,22 @@ func IsDoNotDisruptActive(pod *corev1.Pod, clk clock.Clock, recorder events.Reco
 		return false
 	}
 
-	value, exists := pod.Annotations[v1.DoNotDisruptAnnotationKey]
-	if !exists {
+	value, ok := pod.Annotations[v1.DoNotDisruptAnnotationKey]
+	if !ok {
 		return false
 	}
 
-	valid, indefinite, duration := parseDoNotDisrupt(value)
-	if !valid {
+	if value == "true" {
+		return true
+	}
+
+	duration, err := parseDoNotDisrupt(value)
+	if err != nil {
 		// Invalid format - emit event and treat as if annotation doesn't exist
 		if recorder != nil {
-			recorder.Publish(InvalidDoNotDisruptAnnotationEvent(pod, value))
+			recorder.Publish(InvalidDoNotDisruptAnnotationEvent(pod, err.Error()))
 		}
 		return false
-	}
-
-	if indefinite {
-		return true
 	}
 
 	// Check if the pod has been running longer than the grace period
@@ -241,8 +237,7 @@ func IsDoNotDisruptActive(pod *corev1.Pod, clk clock.Clock, recorder events.Reco
 	if recorder != nil {
 		if isActive {
 			// Emit event when duration-based protection is still active
-			disruptableAt := pod.Status.StartTime.Add(duration).Format(time.RFC3339)
-			recorder.Publish(DoNotDisruptUntilEvent(pod, disruptableAt))
+			recorder.Publish(DoNotDisruptUntilEvent(pod, pod.Status.StartTime.Add(duration)))
 		} else {
 			// Emit event when grace period has elapsed
 			recorder.Publish(DoNotDisruptGracePeriodElapsedEvent(pod))

@@ -18,29 +18,30 @@ package pod
 
 import (
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
-func InvalidDoNotDisruptAnnotationEvent(pod *corev1.Pod, value string) events.Event {
+func InvalidDoNotDisruptAnnotationEvent(pod *corev1.Pod, message string) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
 		Type:           corev1.EventTypeWarning,
 		Reason:         "InvalidDoNotDisruptAnnotation",
-		Message:        fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation value %q, ignoring annotation. Use 'true' or a duration like '5m', '1h'", value),
-		DedupeValues:   []string{string(pod.UID), value},
+		Message:        fmt.Sprintf("Invalid karpenter.sh/do-not-disrupt annotation: %s, ignoring annotation", message),
+		DedupeValues:   []string{string(pod.UID), message},
 	}
 }
 
-func DoNotDisruptUntilEvent(pod *corev1.Pod, disruptableAt string) events.Event {
+func DoNotDisruptUntilEvent(pod *corev1.Pod, disruptableAt time.Time) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
 		Type:           corev1.EventTypeNormal,
 		Reason:         "DoNotDisruptUntil",
-		Message:        fmt.Sprintf("Pod will be disruptable at %s", disruptableAt),
-		DedupeValues:   []string{string(pod.UID), disruptableAt},
+		Message:        fmt.Sprintf("The karpenter.sh/do-not-disrupt grace period will elapse at %s", disruptableAt.Format(time.RFC3339)),
+		DedupeValues:   []string{string(pod.UID), disruptableAt.Format(time.RFC3339)},
 	}
 }
 
