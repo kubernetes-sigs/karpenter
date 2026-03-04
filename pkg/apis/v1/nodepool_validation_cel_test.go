@@ -145,6 +145,81 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
+		DescribeTable("should succeed with valid ConsolidateWhen values", func(policy ConsolidateWhenPolicy) {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			nodePool.Spec.Disruption.ConsolidateWhen = policy
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		},
+			Entry("WhenEmpty", ConsolidateWhenEmpty),
+			Entry("WhenEmptyOrUnderutilized", ConsolidateWhenEmptyOrUnderutilized),
+			Entry("WhenCostJustifiesDisruption", ConsolidateWhenCostJustifiesDisruption),
+		)
+		It("should fail with invalid ConsolidateWhen value", func() {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			lo.Must0(unstructured.SetNestedField(u, "InvalidPolicy", "spec", "disruption", "consolidateWhen"))
+			obj := &unstructured.Unstructured{}
+			obj.SetGroupVersionKind(nodePool.GroupVersionKind())
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).ToNot(Succeed())
+		})
+		It("should default to WhenEmptyOrUnderutilized when ConsolidateWhen is not specified", func() {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			// Don't set ConsolidateWhen, let it use the default
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			// Verify the default was applied
+			Expect(nodePool.Spec.Disruption.ConsolidateWhen).To(Equal(ConsolidateWhenEmptyOrUnderutilized))
+		})
+		It("should succeed when setting consolidateWhen with consolidationPolicy", func() {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			nodePool.Spec.Disruption.ConsolidateAfter = MustParseNillableDuration("30s")
+			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
+			nodePool.Spec.Disruption.ConsolidateWhen = ConsolidateWhenCostJustifiesDisruption
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		DescribeTable("should succeed with valid DecisionRatioThreshold values", func(threshold float64) {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			nodePool.Spec.Disruption.DecisionRatioThreshold = &threshold
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		},
+			Entry("threshold 0.001", 0.001),
+			Entry("threshold 0.5", 0.5),
+			Entry("threshold 1.0", 1.0),
+			Entry("threshold 1.5", 1.5),
+			Entry("threshold 2.0", 2.0),
+			Entry("threshold 100.0", 100.0),
+			Entry("threshold 1000.0", 1000.0),
+		)
+		It("should fail when DecisionRatioThreshold is zero with clear error message", func() {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			threshold := 0.0
+			nodePool.Spec.Disruption.DecisionRatioThreshold = &threshold
+			err := env.Client.Create(ctx, nodePool)
+			Expect(err).ToNot(Succeed())
+			Expect(err.Error()).To(ContainSubstring("spec.disruption.decisionRatioThreshold"))
+		})
+		It("should fail when DecisionRatioThreshold is negative with clear error message", func() {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			threshold := -1.0
+			nodePool.Spec.Disruption.DecisionRatioThreshold = &threshold
+			err := env.Client.Create(ctx, nodePool)
+			Expect(err).ToNot(Succeed())
+			Expect(err.Error()).To(ContainSubstring("spec.disruption.decisionRatioThreshold"))
+		})
+		It("should fail when DecisionRatioThreshold is a small negative value with clear error message", func() {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			threshold := -0.5
+			nodePool.Spec.Disruption.DecisionRatioThreshold = &threshold
+			err := env.Client.Create(ctx, nodePool)
+			Expect(err).ToNot(Succeed())
+			Expect(err.Error()).To(ContainSubstring("spec.disruption.decisionRatioThreshold"))
+		})
+		It("should succeed when DecisionRatioThreshold is not specified", func() {
+			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
+			// DecisionRatioThreshold is nil by default, should use default value of 1.0
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
 		It("should fail when creating a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",

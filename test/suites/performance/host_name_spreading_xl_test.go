@@ -49,7 +49,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			env.ExpectCreated(smallDeployment, largeDeployment)
 
 			By("Monitoring XL scale-out performance with hostname spreading (2000 pods)")
-			scaleOutReport, err := ReportScaleOutWithOutput(env, "XL Host Name Spreading Performance Test", 2000, 25*time.Minute, "hostname_spread_xl_scale_out")
+			consolidateWhen, decisionRatio := getConsolidationSettings()
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "XL Host Name Spreading Performance Test", 2000, 25*time.Minute, "hostname_spread_xl_scale_out", 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "XL scale-out should execute successfully")
 
 			By("Validating XL scale-out performance with hostname spreading")
@@ -74,7 +75,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring XL consolidation performance")
-			consolidationReport, err := ReportConsolidationWithOutput(env, "XL Hostname Spread Consolidation Test", 2000, 1400, initialNodes, 25*time.Minute, "hostname_spread_xl_consolidation")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "XL Hostname Spread Consolidation Test", 2000, 1400, initialNodes, 25*time.Minute, "hostname_spread_xl_consolidation", 0, 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "XL consolidation should execute successfully")
 
 			By("Validating XL consolidation performance")

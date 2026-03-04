@@ -139,10 +139,19 @@ func (s *SingleNodeConsolidation) ConsolidationType() string {
 // that timed out in previous runs
 func (s *SingleNodeConsolidation) SortCandidates(ctx context.Context, candidates []*Candidate) []*Candidate {
 
-	// First sort by disruption cost as the base ordering
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].DisruptionCost < candidates[j].DisruptionCost
-	})
+	// Sort by decision ratio (descending) if policy is WhenCostJustifiesDisruption,
+	// otherwise sort by disruption cost (ascending) as before
+	if len(candidates) > 0 && candidates[0].NodePool.Spec.Disruption.ConsolidateWhen == v1.ConsolidateWhenCostJustifiesDisruption {
+		// Sort by decision ratio in descending order (highest ratio first)
+		sort.Slice(candidates, func(i int, j int) bool {
+			return candidates[i].decisionRatio > candidates[j].decisionRatio
+		})
+	} else {
+		// Default: sort by disruption cost in ascending order (lowest cost first)
+		sort.Slice(candidates, func(i int, j int) bool {
+			return candidates[i].DisruptionCost < candidates[j].DisruptionCost
+		})
+	}
 
 	return s.shuffleCandidates(ctx, lo.GroupBy(candidates, func(c *Candidate) string { return c.NodePool.Name }))
 }

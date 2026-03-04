@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -31,6 +32,20 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
+
+// getPodsDisruptedCount fetches the total pod disruption count from Prometheus metrics
+func getPodsDisruptedCount(env *common.Environment) int {
+	metrics := env.ExpectPodMetrics()
+	disruptionMetrics := lo.Filter(metrics, func(m common.PrometheusMetric, _ int) bool {
+		return m.Name == "karpenter_voluntary_disruption_pods_disrupted_total"
+	})
+
+	totalDisrupted := 0
+	for _, metric := range disruptionMetrics {
+		totalDisrupted += int(metric.Value)
+	}
+	return totalDisrupted
+}
 
 // OutputPerformanceReport outputs a performance report to console and file
 func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
@@ -41,11 +56,26 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	GinkgoWriter.Printf("Total Time: %v\n", report.TotalTime)
 	GinkgoWriter.Printf("Total Pods: %d (Net Change: %+d)\n", report.TotalPods, report.PodsNetChange)
 	GinkgoWriter.Printf("Total Nodes: %d (Net Change: %+d)\n", report.TotalNodes, report.NodesNetChange)
+	GinkgoWriter.Printf("Pods Disrupted: %d\n", report.PodsDisrupted)
 	GinkgoWriter.Printf("CPU Utilization: %.2f%%\n", report.TotalReservedCPUUtil*100)
 	GinkgoWriter.Printf("Memory Utilization: %.2f%%\n", report.TotalReservedMemoryUtil*100)
 	GinkgoWriter.Printf("Efficiency Score: %.1f%%\n", report.ResourceEfficiencyScore)
 	GinkgoWriter.Printf("Pods per Node: %.1f\n", report.PodsPerNode)
 	GinkgoWriter.Printf("Rounds: %d\n", report.Rounds)
+	if report.SizeClassLockThreshold > 0 {
+		GinkgoWriter.Printf("Size Class Lock Threshold: %d\n", report.SizeClassLockThreshold)
+	} else {
+		GinkgoWriter.Printf("Size Class Lock Threshold: disabled\n")
+	}
+	if report.PodDeletionCostEnabled {
+		GinkgoWriter.Printf("Pod Deletion Cost: enabled\n")
+		GinkgoWriter.Printf("  Ranking Strategy: %s\n", report.PodDeletionCostRankingStrategy)
+		GinkgoWriter.Printf("  Change Detection: %v\n", report.PodDeletionCostChangeDetection)
+	} else {
+		GinkgoWriter.Printf("Pod Deletion Cost: disabled\n")
+	}
+	GinkgoWriter.Printf("Consolidate When: %s\n", report.ConsolidateWhen)
+	GinkgoWriter.Printf("Decision Ratio Threshold: %.2f\n", report.DecisionRatioThreshold)
 
 	// File output
 	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
@@ -68,10 +98,16 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 //   - testName: Name of the test for reporting
 //   - expectedPods: Expected number of healthy pods
 //   - timeout: Maximum time to wait for scale-out completion
+//   - sizeClassLockThreshold: The size class lock threshold setting (0 = disabled)
+//   - consolidateWhen: The consolidation policy (e.g., "WhenEmptyOrUnderutilized", "WhenCostJustifiesDisruption")
+//   - decisionRatioThreshold: The decision ratio threshold value
 //
 // Returns a PerformanceReport with scale-out metrics and timing information.
-func ReportScaleOut(env *common.Environment, testName string, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
+func ReportScaleOut(env *common.Environment, testName string, expectedPods int, timeout time.Duration, sizeClassLockThreshold int, consolidateWhen string, decisionRatioThreshold float64) (*PerformanceReport, error) {
 	startTime := time.Now()
+
+	// Capture baseline pod disruption count at start of test
+	baselinePodsDisrupted := getPodsDisruptedCount(env)
 
 	// Wait for all pods to be healthy
 	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
@@ -85,6 +121,8 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 	nodeCount := env.Monitor.CreatedNodeCount()
 	avgCPUUtil := env.Monitor.AvgUtilization(corev1.ResourceCPU)
 	avgMemUtil := env.Monitor.AvgUtilization(corev1.ResourceMemory)
+	// Calculate delta: only count disruptions during this test
+	podsDisrupted := getPodsDisruptedCount(env) - baselinePodsDisrupted
 
 	// Calculate derived metrics
 	resourceEfficiencyScore := (avgCPUUtil*90 + avgMemUtil*10)
@@ -94,19 +132,26 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 	}
 
 	return &PerformanceReport{
-		TestName:                testName,
-		TestType:                "scale-out",
-		TotalPods:               expectedPods,
-		TotalNodes:              nodeCount,
-		TotalTime:               totalTime,
-		PodsNetChange:           expectedPods,
-		NodesNetChange:          nodeCount,
-		TotalReservedCPUUtil:    avgCPUUtil,
-		TotalReservedMemoryUtil: avgMemUtil,
-		ResourceEfficiencyScore: resourceEfficiencyScore,
-		PodsPerNode:             podsPerNode,
-		Rounds:                  1, // Scale-out is always 1 round
-		Timestamp:               time.Now(),
+		TestName:                       testName,
+		TestType:                       "scale-out",
+		TotalPods:                      expectedPods,
+		TotalNodes:                     nodeCount,
+		TotalTime:                      totalTime,
+		PodsNetChange:                  expectedPods,
+		NodesNetChange:                 nodeCount,
+		PodsDisrupted:                  podsDisrupted,
+		TotalReservedCPUUtil:           avgCPUUtil,
+		TotalReservedMemoryUtil:        avgMemUtil,
+		ResourceEfficiencyScore:        resourceEfficiencyScore,
+		PodsPerNode:                    podsPerNode,
+		Rounds:                         1, // Scale-out is always 1 round
+		SizeClassLockThreshold:         sizeClassLockThreshold,
+		PodDeletionCostEnabled:         podDeletionCostEnabled,
+		PodDeletionCostRankingStrategy: podDeletionCostRankingStrategy,
+		PodDeletionCostChangeDetection: podDeletionCostChangeDetection,
+		ConsolidateWhen:                consolidateWhen,
+		DecisionRatioThreshold:         decisionRatioThreshold,
+		Timestamp:                      time.Now(),
 	}, nil
 }
 
@@ -120,10 +165,19 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 //   - finalPods: Expected final number of pods after consolidation
 //   - initialNodes: Initial number of nodes before consolidation
 //   - timeout: Maximum time to wait for consolidation completion
+//   - sizeClassLockThreshold: The size class lock threshold setting (0 = disabled)
+//   - baselineDisruptions: Additional disruptions to exclude from the report (typically 0, as the function
+//     captures its own baseline at start). Only use this if you need to exclude disruptions that occurred
+//     BEFORE calling this function but AFTER the previous test's baseline was captured.
+//   - consolidateWhen: The consolidation policy (e.g., "WhenEmptyOrUnderutilized", "WhenCostJustifiesDisruption")
+//   - decisionRatioThreshold: The decision ratio threshold value
 //
 // Returns a PerformanceReport with consolidation metrics and timing information.
-func ReportConsolidation(env *common.Environment, testName string, initialPods, finalPods, initialNodes int, timeout time.Duration) (*PerformanceReport, error) {
+func ReportConsolidation(env *common.Environment, testName string, initialPods, finalPods, initialNodes int, timeout time.Duration, sizeClassLockThreshold int, baselineDisruptions int, consolidateWhen string, decisionRatioThreshold float64) (*PerformanceReport, error) {
 	startTime := time.Now()
+
+	// Capture baseline pod disruption count at start of test
+	baselinePodsDisrupted := getPodsDisruptedCount(env)
 
 	// Wait for pods to scale down first
 	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
@@ -140,6 +194,8 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 	finalNodes := env.Monitor.CreatedNodeCount()
 	avgCPUUtil := env.Monitor.AvgUtilization(corev1.ResourceCPU)
 	avgMemUtil := env.Monitor.AvgUtilization(corev1.ResourceMemory)
+	// Calculate delta: only count disruptions during this test, excluding baseline disruptions
+	podsDisrupted := getPodsDisruptedCount(env) - baselinePodsDisrupted - baselineDisruptions
 
 	// Calculate derived metrics
 	resourceEfficiencyScore := (avgCPUUtil*90 + avgMemUtil*10)
@@ -149,19 +205,26 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 	}
 
 	return &PerformanceReport{
-		TestName:                testName,
-		TestType:                "consolidation",
-		TotalPods:               finalPods,
-		TotalNodes:              finalNodes,
-		TotalTime:               totalTime,
-		PodsNetChange:           finalPods - initialPods,
-		NodesNetChange:          finalNodes - initialNodes,
-		TotalReservedCPUUtil:    avgCPUUtil,
-		TotalReservedMemoryUtil: avgMemUtil,
-		ResourceEfficiencyScore: resourceEfficiencyScore,
-		PodsPerNode:             podsPerNode,
-		Rounds:                  len(consolidationRounds),
-		Timestamp:               time.Now(),
+		TestName:                       testName,
+		TestType:                       "consolidation",
+		TotalPods:                      finalPods,
+		TotalNodes:                     finalNodes,
+		TotalTime:                      totalTime,
+		PodsNetChange:                  finalPods - initialPods,
+		NodesNetChange:                 finalNodes - initialNodes,
+		PodsDisrupted:                  podsDisrupted,
+		TotalReservedCPUUtil:           avgCPUUtil,
+		TotalReservedMemoryUtil:        avgMemUtil,
+		ResourceEfficiencyScore:        resourceEfficiencyScore,
+		PodsPerNode:                    podsPerNode,
+		Rounds:                         len(consolidationRounds),
+		SizeClassLockThreshold:         sizeClassLockThreshold,
+		PodDeletionCostEnabled:         podDeletionCostEnabled,
+		PodDeletionCostRankingStrategy: podDeletionCostRankingStrategy,
+		PodDeletionCostChangeDetection: podDeletionCostChangeDetection,
+		ConsolidateWhen:                consolidateWhen,
+		DecisionRatioThreshold:         decisionRatioThreshold,
+		Timestamp:                      time.Now(),
 	}, nil
 }
 
@@ -179,6 +242,9 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 func ReportDrift(env *common.Environment, testName string, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
 	startTime := time.Now()
 	initialNodeCount := env.Monitor.CreatedNodeCount()
+
+	// Capture baseline pod disruption count at start of test
+	baselinePodsDisrupted := getPodsDisruptedCount(env)
 
 	// Track node replacement during drift
 	driftRounds := 0
@@ -233,6 +299,8 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 	// Collect metrics
 	avgCPUUtil := env.Monitor.AvgUtilization(corev1.ResourceCPU)
 	avgMemUtil := env.Monitor.AvgUtilization(corev1.ResourceMemory)
+	// Calculate delta: only count disruptions during this test
+	podsDisrupted := getPodsDisruptedCount(env) - baselinePodsDisrupted
 
 	// Calculate derived metrics
 	resourceEfficiencyScore := (avgCPUUtil*90 + avgMemUtil*10)
@@ -247,19 +315,23 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 	}
 
 	return &PerformanceReport{
-		TestName:                testName,
-		TestType:                "drift",
-		TotalPods:               expectedPods,
-		TotalNodes:              finalNodeCount,
-		TotalTime:               totalTime,
-		PodsNetChange:           0,                                 // Pods don't change in drift
-		NodesNetChange:          finalNodeCount - initialNodeCount, // Net change in nodes (should be ~0 for drift)
-		TotalReservedCPUUtil:    avgCPUUtil,
-		TotalReservedMemoryUtil: avgMemUtil,
-		ResourceEfficiencyScore: resourceEfficiencyScore,
-		PodsPerNode:             podsPerNode,
-		Rounds:                  driftRounds,
-		Timestamp:               time.Now(),
+		TestName:                       testName,
+		TestType:                       "drift",
+		TotalPods:                      expectedPods,
+		TotalNodes:                     finalNodeCount,
+		TotalTime:                      totalTime,
+		PodsNetChange:                  0,                                 // Pods don't change in drift
+		NodesNetChange:                 finalNodeCount - initialNodeCount, // Net change in nodes (should be ~0 for drift)
+		PodsDisrupted:                  podsDisrupted,
+		TotalReservedCPUUtil:           avgCPUUtil,
+		TotalReservedMemoryUtil:        avgMemUtil,
+		ResourceEfficiencyScore:        resourceEfficiencyScore,
+		PodsPerNode:                    podsPerNode,
+		Rounds:                         driftRounds,
+		PodDeletionCostEnabled:         podDeletionCostEnabled,
+		PodDeletionCostRankingStrategy: podDeletionCostRankingStrategy,
+		PodDeletionCostChangeDetection: podDeletionCostChangeDetection,
+		Timestamp:                      time.Now(),
 	}, nil
 }
 
@@ -329,8 +401,8 @@ func monitorConsolidationRounds(env *common.Environment, timeout time.Duration) 
 // Convenience functions for common monitoring patterns
 
 // ReportScaleOutWithOutput monitors scale-out and automatically outputs the report
-func ReportScaleOutWithOutput(env *common.Environment, testName string, expectedPods int, timeout time.Duration, filePrefix string) (*PerformanceReport, error) {
-	report, err := ReportScaleOut(env, testName, expectedPods, timeout)
+func ReportScaleOutWithOutput(env *common.Environment, testName string, expectedPods int, timeout time.Duration, filePrefix string, sizeClassLockThreshold int, consolidateWhen string, decisionRatioThreshold float64) (*PerformanceReport, error) {
+	report, err := ReportScaleOut(env, testName, expectedPods, timeout, sizeClassLockThreshold, consolidateWhen, decisionRatioThreshold)
 	if err != nil {
 		return nil, err
 	}
@@ -340,8 +412,8 @@ func ReportScaleOutWithOutput(env *common.Environment, testName string, expected
 }
 
 // ReportConsolidationWithOutput monitors consolidation and automatically outputs the report
-func ReportConsolidationWithOutput(env *common.Environment, testName string, initialPods, finalPods, initialNodes int, timeout time.Duration, filePrefix string) (*PerformanceReport, error) {
-	report, err := ReportConsolidation(env, testName, initialPods, finalPods, initialNodes, timeout)
+func ReportConsolidationWithOutput(env *common.Environment, testName string, initialPods, finalPods, initialNodes int, timeout time.Duration, filePrefix string, sizeClassLockThreshold int, baselineDisruptions int, consolidateWhen string, decisionRatioThreshold float64) (*PerformanceReport, error) {
+	report, err := ReportConsolidation(env, testName, initialPods, finalPods, initialNodes, timeout, sizeClassLockThreshold, baselineDisruptions, consolidateWhen, decisionRatioThreshold)
 	if err != nil {
 		return nil, err
 	}

@@ -53,7 +53,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			env.ExpectCreated(smallDeployment, largeDeployment, protectedDeployment)
 
 			By("Monitoring scale-out performance with do-not-disrupt protection (1100 pods)")
-			scaleOutReport, err := ReportScaleOutWithOutput(env, "Do Not Disrupt Performance Test", 1100, 15*time.Minute, "do_not_disrupt_scale_out")
+			consolidateWhen, decisionRatio := getConsolidationSettings()
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Do Not Disrupt Performance Test", 1100, 15*time.Minute, "do_not_disrupt_scale_out", 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "Scale-out should execute successfully")
 
 			By("Validating scale-out performance with do-not-disrupt protection")
@@ -93,7 +94,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring consolidation with disruption protection")
-			consolidationReport, err := ReportConsolidationWithOutput(env, "Do Not Disrupt Consolidation Test", 1100, 600, initialNodes, 25*time.Minute, "do_not_disrupt_consolidation")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Do Not Disrupt Consolidation Test", 1100, 600, initialNodes, 25*time.Minute, "do_not_disrupt_consolidation", 0, 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "Consolidation should execute successfully")
 
 			By("Validating disruption protection during consolidation")

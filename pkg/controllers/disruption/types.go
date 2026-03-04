@@ -79,6 +79,12 @@ type Candidate struct {
 	capacityType      string
 	DisruptionCost    float64
 	reschedulablePods []*corev1.Pod
+
+	// Decision ratio fields for consolidation cost-benefit analysis
+	normalizedCost       float64 // Node cost / Total nodepool cost
+	normalizedDisruption float64 // Node disruption / Total nodepool disruption
+	decisionRatio        float64 // normalizedCost / normalizedDisruption
+	deleteRatio          float64 // Upper bound ratio for delete moves
 }
 
 func (c *Candidate) OwnedByStaticNodePool() bool {
@@ -130,8 +136,9 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
 		zone:              node.Labels()[corev1.LabelTopologyZone],
 		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
-		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
+		// Compute disruption cost using the new decision ratio computation that includes
+		// baseline node cost and clamps negative eviction costs, then apply lifetime weighting
+		DisruptionCost: ComputeNodeDisruptionCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 	}, nil
 }
 
@@ -160,6 +167,11 @@ type Command struct {
 	Results      scheduling.Results
 	Candidates   []*Candidate
 	Replacements []*Replacement
+
+	// DecisionRatio represents the cost-benefit ratio for this consolidation command.
+	// It is the ratio of normalized cost savings to normalized disruption cost.
+	// A ratio >= 1.0 indicates cost savings exceed disruption cost.
+	DecisionRatio float64
 }
 
 type Decision string

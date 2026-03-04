@@ -37,6 +37,7 @@ import (
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
@@ -51,26 +52,30 @@ const MinInstanceTypesForSpotToSpotConsolidation = 15
 // consolidation methods.
 type consolidation struct {
 	// Consolidation needs to be aware of the queue for validation
-	queue                  *Queue
-	clock                  clock.Clock
-	cluster                *state.Cluster
-	kubeClient             client.Client
-	provisioner            *provisioning.Provisioner
-	cloudProvider          cloudprovider.CloudProvider
-	recorder               events.Recorder
-	lastConsolidationState time.Time
+	queue                   *Queue
+	clock                   clock.Clock
+	cluster                 *state.Cluster
+	kubeClient              client.Client
+	provisioner             *provisioning.Provisioner
+	cloudProvider           cloudprovider.CloudProvider
+	recorder                events.Recorder
+	lastConsolidationState  time.Time
+	decisionRatioCalculator *DecisionRatioCalculator
+	policyEvaluator         *PolicyEvaluator
 }
 
 func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) consolidation {
 	return consolidation{
-		queue:         queue,
-		clock:         clock,
-		cluster:       cluster,
-		kubeClient:    kubeClient,
-		provisioner:   provisioner,
-		cloudProvider: cloudProvider,
-		recorder:      recorder,
+		queue:                   queue,
+		clock:                   clock,
+		cluster:                 cluster,
+		kubeClient:              kubeClient,
+		provisioner:             provisioner,
+		cloudProvider:           cloudProvider,
+		recorder:                recorder,
+		decisionRatioCalculator: NewDecisionRatioCalculator(clock),
+		policyEvaluator:         &PolicyEvaluator{},
 	}
 }
 
@@ -135,6 +140,94 @@ func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
 // nolint:gocyclo
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	var err error
+
+	// Compute nodepool-wide metrics for decision ratio calculation
+	totalCost, totalDisruption := c.decisionRatioCalculator.ComputeNodePoolMetrics(ctx, candidates)
+
+	// Skip consolidation if total cost is zero (no pricing data available)
+	if totalCost == 0 {
+		return Command{}, nil
+	}
+
+	// Retrieve the decision ratio threshold from the NodePool
+	// All candidates in a single consolidation pass belong to the same NodePool
+	threshold := 1.0
+	if len(candidates) > 0 && candidates[0].NodePool != nil {
+		threshold = candidates[0].NodePool.Spec.Disruption.GetDecisionRatioThreshold()
+	}
+
+	// Compute decision ratios for each candidate
+	for _, candidate := range candidates {
+		c.decisionRatioCalculator.ComputeDecisionRatio(ctx, candidate, totalCost, totalDisruption)
+
+		// Emit decision ratio metric
+		if candidate.NodePool != nil {
+			policy := string(candidate.NodePool.Spec.Disruption.ConsolidateWhen)
+			if policy == "" {
+				policy = string(v1.ConsolidateWhenEmptyOrUnderutilized)
+			}
+
+			// Determine move type (delete vs replace will be determined later, use "evaluated" for now)
+			moveType := "evaluated"
+
+			DecisionRatioHistogram.Observe(candidate.decisionRatio, map[string]string{
+				metrics.NodePoolLabel: candidate.NodePool.Name,
+				"policy":              policy,
+				"threshold":           fmt.Sprintf("%.2f", threshold),
+				"move_type":           moveType,
+			})
+
+			// Increment threshold counters
+			if candidate.decisionRatio >= threshold {
+				MovesAboveThresholdCounter.Inc(map[string]string{
+					metrics.NodePoolLabel: candidate.NodePool.Name,
+					"policy":              policy,
+					"threshold":           fmt.Sprintf("%.2f", threshold),
+				})
+			} else {
+				MovesBelowThresholdCounter.Inc(map[string]string{
+					metrics.NodePoolLabel: candidate.NodePool.Name,
+					"policy":              policy,
+					"threshold":           fmt.Sprintf("%.2f", threshold),
+				})
+			}
+		}
+	}
+
+	// Apply delete ratio filtering optimization for WhenCostJustifiesDisruption policy
+	// This skips expensive move generation for candidates that cannot produce worthwhile moves
+	if len(candidates) > 0 && candidates[0].NodePool.Spec.Disruption.ConsolidateWhen == v1.ConsolidateWhenCostJustifiesDisruption {
+		filteredCandidates := make([]*Candidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			// Compute delete ratio (upper bound for any move from this candidate)
+			deleteRatio := c.decisionRatioCalculator.ComputeDeleteRatio(ctx, candidate, totalCost, totalDisruption)
+
+			// If delete ratio is below threshold, skip this candidate entirely
+			if deleteRatio < threshold {
+				// Emit metric for skipped candidate
+				if candidate.NodePool != nil {
+					policy := string(candidate.NodePool.Spec.Disruption.ConsolidateWhen)
+					MovesSkippedByDeleteRatioCounter.Inc(map[string]string{
+						metrics.NodePoolLabel: candidate.NodePool.Name,
+						"policy":              policy,
+						"threshold":           fmt.Sprintf("%.2f", threshold),
+					})
+				}
+				// Skip this candidate - even the best possible move (delete) wouldn't meet the threshold
+				continue
+			}
+
+			filteredCandidates = append(filteredCandidates, candidate)
+		}
+
+		// If all candidates were filtered out, return empty command
+		if len(filteredCandidates) == 0 {
+			return Command{}, nil
+		}
+
+		candidates = filteredCandidates
+	}
+
 	// Run scheduling simulation to compute consolidation option
 	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
 	if err != nil {
@@ -156,10 +249,18 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	// were we able to schedule all the pods on the inflight candidates?
 	if len(results.NewNodeClaims) == 0 {
-		return Command{
-			Candidates: candidates,
-			Results:    results,
-		}, nil
+		cmd := Command{
+			Candidates:    candidates,
+			Results:       results,
+			DecisionRatio: getCommandDecisionRatio(candidates),
+		}
+
+		// Apply policy filtering - check if this command should be executed
+		if !c.shouldExecuteCommand(cmd, threshold) {
+			return Command{}, nil
+		}
+
+		return cmd, nil
 	}
 
 	// we're not going to turn a single node into multiple candidates
@@ -219,10 +320,17 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	cmd := Command{
-		Candidates:   candidates,
-		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
-		Results:      results,
+		Candidates:    candidates,
+		Replacements:  replacementsFromNodeClaims(results.NewNodeClaims...),
+		Results:       results,
+		DecisionRatio: getCommandDecisionRatio(candidates),
 	}
+
+	// Apply policy filtering - check if this command should be executed
+	if !c.shouldExecuteCommand(cmd, threshold) {
+		return Command{}, nil
+	}
+
 	cmd.EmitCandidateEvents(c.recorder)
 
 	return cmd, nil
@@ -233,6 +341,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 //  2. For single-node consolidation:
 //     a. There are at least 15 cheapest instance type replacement options to consolidate.
 //     b. The current candidate is NOT part of the first 15 cheapest instance types inorder to avoid repeated consolidation.
+//
+//nolint:gocyclo
 func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, candidates []*Candidate, results pscheduling.Results, candidatePrice float64) (Command, error) {
 
 	// Spot consolidation is turned off.
@@ -267,11 +377,24 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	// For multi-node consolidation:
 	// We don't have any requirement to check the remaining instance type flexibility, so exit early in this case.
 	if len(candidates) > 1 {
-		cmd := Command{
-			Candidates:   candidates,
-			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
-			Results:      results,
+		// Retrieve the threshold from the NodePool
+		threshold := 1.0
+		if len(candidates) > 0 && candidates[0].NodePool != nil {
+			threshold = candidates[0].NodePool.Spec.Disruption.GetDecisionRatioThreshold()
 		}
+
+		cmd := Command{
+			Candidates:    candidates,
+			Replacements:  replacementsFromNodeClaims(results.NewNodeClaims...),
+			Results:       results,
+			DecisionRatio: getCommandDecisionRatio(candidates),
+		}
+
+		// Apply policy filtering - check if this command should be executed
+		if !c.shouldExecuteCommand(cmd, threshold) {
+			return Command{}, nil
+		}
+
 		cmd.EmitCandidateEvents(c.recorder)
 
 		return cmd, nil
@@ -305,14 +428,78 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		results.NewNodeClaims[0].InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].InstanceTypeOptions, 0, MinInstanceTypesForSpotToSpotConsolidation)
 	}
 
-	cmd := Command{
-		Candidates:   candidates,
-		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
-		Results:      results,
+	// Retrieve the threshold from the NodePool
+	threshold := 1.0
+	if len(candidates) > 0 && candidates[0].NodePool != nil {
+		threshold = candidates[0].NodePool.Spec.Disruption.GetDecisionRatioThreshold()
 	}
+
+	cmd := Command{
+		Candidates:    candidates,
+		Replacements:  replacementsFromNodeClaims(results.NewNodeClaims...),
+		Results:       results,
+		DecisionRatio: getCommandDecisionRatio(candidates),
+	}
+
+	// Apply policy filtering - check if this command should be executed
+	if !c.shouldExecuteCommand(cmd, threshold) {
+		return Command{}, nil
+	}
+
 	cmd.EmitCandidateEvents(c.recorder)
 
 	return cmd, nil
+}
+
+// getCommandDecisionRatio returns the decision ratio for a command.
+// For single-candidate commands, returns the candidate's decision ratio.
+// For multi-candidate commands, returns the minimum decision ratio among all candidates
+// (the weakest link in the consolidation).
+func getCommandDecisionRatio(candidates []*Candidate) float64 {
+	if len(candidates) == 0 {
+		return 0.0
+	}
+
+	// For single candidate, return its decision ratio
+	if len(candidates) == 1 {
+		return candidates[0].decisionRatio
+	}
+
+	// For multiple candidates, return the minimum decision ratio
+	// This represents the "weakest link" in the consolidation
+	minRatio := candidates[0].decisionRatio
+	for _, candidate := range candidates[1:] {
+		if candidate.decisionRatio < minRatio {
+			minRatio = candidate.decisionRatio
+		}
+	}
+	return minRatio
+}
+
+// shouldExecuteCommand checks if a consolidation command should be executed based on the policy.
+// It uses the PolicyEvaluator to determine if the command meets the policy requirements.
+func (c *consolidation) shouldExecuteCommand(cmd Command, threshold float64) bool {
+	// If there are no candidates, don't execute
+	if len(cmd.Candidates) == 0 {
+		return false
+	}
+
+	// Get the policy from the first candidate's NodePool
+	// All candidates in a command belong to the same NodePool
+	policy := v1.ConsolidateWhenEmptyOrUnderutilized
+	if cmd.Candidates[0].NodePool != nil {
+		policy = cmd.Candidates[0].NodePool.Spec.Disruption.ConsolidateWhen
+	}
+
+	// Check each candidate against the policy
+	// All candidates must pass the policy check for the command to execute
+	for _, candidate := range cmd.Candidates {
+		if !c.policyEvaluator.ShouldConsolidate(policy, candidate, candidate.decisionRatio, threshold) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates

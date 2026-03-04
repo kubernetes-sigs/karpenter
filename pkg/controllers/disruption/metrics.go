@@ -128,4 +128,55 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
+	PodsDisruptedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "pods_disrupted_total",
+			Help:      "Number of pods disrupted in total by Karpenter disruption actions. Labeled by disruption reason and nodepool.",
+		},
+		[]string{metrics.ReasonLabel, metrics.NodePoolLabel},
+	)
+	DecisionRatioHistogram = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "decision_ratio",
+			Help:      "Decision ratio for evaluated consolidation moves. Labeled by nodepool, policy, threshold, and move type.",
+			Buckets:   []float64{0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 5.0, 10.0},
+		},
+		[]string{metrics.NodePoolLabel, "policy", "threshold", "move_type"},
+	)
+	MovesAboveThresholdCounter = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "moves_above_threshold_total",
+			Help:      "Count of consolidation moves with decision ratio >= threshold. Labeled by nodepool, policy, and threshold.",
+		},
+		[]string{metrics.NodePoolLabel, "policy", "threshold"},
+	)
+	MovesBelowThresholdCounter = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "moves_below_threshold_total",
+			Help:      "Count of consolidation moves with decision ratio < threshold. Labeled by nodepool, policy, and threshold.",
+		},
+		[]string{metrics.NodePoolLabel, "policy", "threshold"},
+	)
+	MovesSkippedByDeleteRatioCounter = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "moves_skipped_by_delete_ratio_total",
+			Help:      "Count of consolidation moves skipped due to low delete ratio. Labeled by nodepool, policy, and threshold.",
+		},
+		[]string{metrics.NodePoolLabel, "policy", "threshold"},
+	)
 )

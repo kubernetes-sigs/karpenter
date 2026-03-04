@@ -166,7 +166,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			}
 
 			By("Monitoring wide scale-out performance (30 deployments, 1000 pods)")
-			scaleOutReport, err := ReportScaleOutWithOutput(env, "Wide Deployments Performance Test", 1000, 20*time.Minute, "wide_deployments_scale_out")
+			consolidateWhen, decisionRatio := getConsolidationSettings()
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Wide Deployments Performance Test", 1000, 20*time.Minute, "wide_deployments_scale_out", 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "Wide scale-out should execute successfully")
 
 			By("Validating wide scale-out performance")
@@ -193,7 +194,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			}
 
 			By("Monitoring wide consolidation performance")
-			consolidationReport, err := ReportConsolidationWithOutput(env, "Wide Deployments Consolidation Test", 1000, 700, initialNodes, 30*time.Minute, "wide_deployments_consolidation")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Wide Deployments Consolidation Test", 1000, 700, initialNodes, 30*time.Minute, "wide_deployments_consolidation", 0, 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "Wide consolidation should execute successfully")
 
 			By("Validating wide consolidation performance")

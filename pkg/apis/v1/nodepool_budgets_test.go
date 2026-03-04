@@ -272,4 +272,45 @@ var _ = Describe("Budgets", func() {
 			Expect(err).To(MatchError(ContainSubstring("beginning of range (2) beyond end of range (1)")))
 		})
 	})
+
+	Context("GetDecisionRatioThreshold", func() {
+		It("should return 1.0 when DecisionRatioThreshold is nil", func() {
+			disruption := Disruption{
+				DecisionRatioThreshold: nil,
+			}
+			Expect(disruption.GetDecisionRatioThreshold()).To(Equal(1.0))
+		})
+
+		It("should return the configured value when DecisionRatioThreshold is set", func() {
+			threshold := 1.5
+			disruption := Disruption{
+				DecisionRatioThreshold: &threshold,
+			}
+			Expect(disruption.GetDecisionRatioThreshold()).To(Equal(1.5))
+		})
+
+		It("should return 0.5 when DecisionRatioThreshold is set to 0.5", func() {
+			threshold := 0.5
+			disruption := Disruption{
+				DecisionRatioThreshold: &threshold,
+			}
+			Expect(disruption.GetDecisionRatioThreshold()).To(Equal(0.5))
+		})
+
+		It("should return 1.0 when DecisionRatioThreshold is explicitly set to 1.0", func() {
+			threshold := 1.0
+			disruption := Disruption{
+				DecisionRatioThreshold: &threshold,
+			}
+			Expect(disruption.GetDecisionRatioThreshold()).To(Equal(1.0))
+		})
+
+		It("should return 2.0 when DecisionRatioThreshold is set to 2.0", func() {
+			threshold := 2.0
+			disruption := Disruption{
+				DecisionRatioThreshold: &threshold,
+			}
+			Expect(disruption.GetDecisionRatioThreshold()).To(Equal(2.0))
+		})
+	})
 })

@@ -18,6 +18,8 @@ package performance
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -34,6 +36,38 @@ import (
 var nodePool *v1.NodePool
 var nodeClass *unstructured.Unstructured
 var env *common.Environment
+
+// decisionRatioThreshold controls the minimum decision ratio for consolidation
+// when using WhenCostJustifiesDisruption policy. Default is 1.0 (break-even).
+// Can be overridden via DECISION_RATIO_THRESHOLD environment variable.
+var decisionRatioThreshold float64 = 1.0
+
+// consolidateWhenPolicy controls the ConsolidateWhen policy for performance tests.
+// Can be overridden via CONSOLIDATE_WHEN environment variable.
+var consolidateWhenPolicy = v1.ConsolidateWhenEmptyOrUnderutilized
+
+func init() {
+	// Initialize decision ratio threshold from environment variable if set
+	if val := os.Getenv("DECISION_RATIO_THRESHOLD"); val != "" {
+		if threshold, err := strconv.ParseFloat(val, 64); err == nil && threshold > 0 {
+			decisionRatioThreshold = threshold
+			fmt.Printf("=== Decision Ratio Threshold set to %.2f from environment ===\n", decisionRatioThreshold)
+		} else {
+			fmt.Printf("WARNING: Invalid DECISION_RATIO_THRESHOLD value '%s', using default %.2f\n", val, decisionRatioThreshold)
+		}
+	}
+
+	// Initialize ConsolidateWhen policy from environment variable if set
+	if val := os.Getenv("CONSOLIDATE_WHEN"); val != "" {
+		switch v1.ConsolidateWhenPolicy(val) {
+		case v1.ConsolidateWhenEmpty, v1.ConsolidateWhenEmptyOrUnderutilized, v1.ConsolidateWhenCostJustifiesDisruption:
+			consolidateWhenPolicy = v1.ConsolidateWhenPolicy(val)
+			fmt.Printf("=== ConsolidateWhen policy set to %s from environment ===\n", val)
+		default:
+			fmt.Printf("WARNING: Invalid CONSOLIDATE_WHEN value '%s', using default %s\n", val, consolidateWhenPolicy)
+		}
+	}
+}
 
 func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -62,9 +96,20 @@ var _ = BeforeEach(func() {
 	nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
 	nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+
+	// Configure consolidation policy and decision ratio threshold
+	nodePool.Spec.Disruption.ConsolidateWhen = consolidateWhenPolicy
+	nodePool.Spec.Disruption.DecisionRatioThreshold = &decisionRatioThreshold
 })
 
 var _ = AfterEach(func() {
 	env.Cleanup()
 	env.AfterEach()
 })
+
+// getConsolidationSettings returns the current consolidation policy and decision ratio threshold
+func getConsolidationSettings() (string, float64) {
+	consolidateWhen := string(nodePool.Spec.Disruption.ConsolidateWhen)
+	decisionRatio := nodePool.Spec.Disruption.GetDecisionRatioThreshold()
+	return consolidateWhen, decisionRatio
+}

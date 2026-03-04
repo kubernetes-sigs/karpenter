@@ -148,6 +148,22 @@ spec:
                         When replicas is set, ConsolidateAfter is simply ignored
                       pattern: ^(([0-9]+(s|m|h))+|Never)$
                       type: string
+                    consolidateWhen:
+                      allOf:
+                        - enum:
+                            - WhenEmpty
+                            - WhenEmptyOrUnderutilized
+                            - WhenCostJustifiesDisruption
+                        - enum:
+                            - WhenEmpty
+                            - WhenEmptyOrUnderutilized
+                            - WhenCostJustifiesDisruption
+                      default: WhenEmptyOrUnderutilized
+                      description: |-
+                        ConsolidateWhen describes when Karpenter can consolidate nodes based on cost-benefit analysis.
+                        This policy defaults to "WhenEmptyOrUnderutilized" if not specified for backward compatibility.
+                        When replicas is set, ConsolidateWhen is simply ignored
+                      type: string
                     consolidationPolicy:
                       default: WhenEmptyOrUnderutilized
                       description: |-
@@ -158,6 +174,25 @@ spec:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
                       type: string
+                    decisionRatioThreshold:
+                      default: 1
+                      description: |-
+                        DecisionRatioThreshold is the minimum decision ratio required for consolidation
+                        when ConsolidateWhen is set to WhenCostJustifiesDisruption.
+                        The decision ratio compares normalized cost savings to normalized disruption cost.
+                        A threshold of 1.0 represents the break-even point where cost savings equal disruption cost.
+                        Values greater than 1.0 make consolidation more conservative (require higher cost savings).
+                        For example, a threshold of 1.5 means consolidation only occurs when cost savings are at least
+                        1.5 times the disruption cost, suitable for latency-sensitive workloads.
+                        Values less than 1.0 make consolidation more aggressive (allow lower cost savings).
+                        For example, a threshold of 0.5 allows consolidation when cost savings are at least half
+                        the disruption cost, suitable for cost-sensitive batch workloads.
+                        This field only applies when ConsolidateWhen is WhenCostJustifiesDisruption.
+                        When ConsolidateWhen is WhenEmpty or WhenEmptyOrUnderutilized, this field is ignored.
+                        This field defaults to 1.0 for backward compatibility.
+                      exclusiveMinimum: true
+                      minimum: 0
+                      type: number
                   required:
                     - consolidateAfter
                   type: object

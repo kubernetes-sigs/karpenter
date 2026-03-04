@@ -100,6 +100,33 @@ type Disruption struct {
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
 	//nolint:kubeapilinter
+	// ConsolidateWhen describes when Karpenter can consolidate nodes based on cost-benefit analysis.
+	// This policy defaults to "WhenEmptyOrUnderutilized" if not specified for backward compatibility.
+	// When replicas is set, ConsolidateWhen is simply ignored
+	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
+	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized,WhenCostJustifiesDisruption}
+	// +optional
+	ConsolidateWhen ConsolidateWhenPolicy `json:"consolidateWhen,omitempty"`
+	//nolint:kubeapilinter
+	// DecisionRatioThreshold is the minimum decision ratio required for consolidation
+	// when ConsolidateWhen is set to WhenCostJustifiesDisruption.
+	// The decision ratio compares normalized cost savings to normalized disruption cost.
+	// A threshold of 1.0 represents the break-even point where cost savings equal disruption cost.
+	// Values greater than 1.0 make consolidation more conservative (require higher cost savings).
+	// For example, a threshold of 1.5 means consolidation only occurs when cost savings are at least
+	// 1.5 times the disruption cost, suitable for latency-sensitive workloads.
+	// Values less than 1.0 make consolidation more aggressive (allow lower cost savings).
+	// For example, a threshold of 0.5 allows consolidation when cost savings are at least half
+	// the disruption cost, suitable for cost-sensitive batch workloads.
+	// This field only applies when ConsolidateWhen is WhenCostJustifiesDisruption.
+	// When ConsolidateWhen is WhenEmpty or WhenEmptyOrUnderutilized, this field is ignored.
+	// This field defaults to 1.0 for backward compatibility.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:ExclusiveMinimum=true
+	// +kubebuilder:default:=1.0
+	// +optional
+	DecisionRatioThreshold *float64 `json:"decisionRatioThreshold,omitempty"`
+	//nolint:kubeapilinter
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,
@@ -109,6 +136,16 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+}
+
+// GetDecisionRatioThreshold returns the configured decision ratio threshold or the default value of 1.0.
+// This method provides a consistent way to retrieve the threshold, handling the nil pointer case
+// where the field is not set (which should default to 1.0 for backward compatibility).
+func (d *Disruption) GetDecisionRatioThreshold() float64 {
+	if d.DecisionRatioThreshold == nil {
+		return 1.0
+	}
+	return *d.DecisionRatioThreshold
 }
 
 // Budget defines when Karpenter will restrict the
@@ -158,6 +195,19 @@ type ConsolidationPolicy string
 const (
 	ConsolidationPolicyWhenEmpty                ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenEmptyOrUnderutilized ConsolidationPolicy = "WhenEmptyOrUnderutilized"
+)
+
+// ConsolidateWhenPolicy describes when Karpenter can consolidate nodes based on cost-benefit analysis.
+// +kubebuilder:validation:Enum={WhenEmpty,WhenEmptyOrUnderutilized,WhenCostJustifiesDisruption}
+type ConsolidateWhenPolicy string
+
+const (
+	// ConsolidateWhenEmpty means Karpenter will only consolidate nodes that have zero pods
+	ConsolidateWhenEmpty ConsolidateWhenPolicy = "WhenEmpty"
+	// ConsolidateWhenEmptyOrUnderutilized means Karpenter will consolidate any underutilized node regardless of decision ratio
+	ConsolidateWhenEmptyOrUnderutilized ConsolidateWhenPolicy = "WhenEmptyOrUnderutilized"
+	// ConsolidateWhenCostJustifiesDisruption means Karpenter will only consolidate when the decision ratio is >= 1.0
+	ConsolidateWhenCostJustifiesDisruption ConsolidateWhenPolicy = "WhenCostJustifiesDisruption"
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.

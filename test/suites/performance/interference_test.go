@@ -48,7 +48,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			env.ExpectCreated(smallDeployment)
 
 			By("Monitoring scale-out performance with self anti-affinity (500 pods)")
-			scaleOutReport, err := ReportScaleOutWithOutput(env, "Self Anti-Affinity Performance Test", 500, 15*time.Minute, "self_antiaffinity_scale_out_small")
+			consolidateWhen, decisionRatio := getConsolidationSettings()
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Self Anti-Affinity Performance Test", 500, 15*time.Minute, "self_antiaffinity_scale_out_small", 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "Scale-out should execute successfully")
 
 			By("Validating scale-out performance with self anti-affinity")
@@ -73,7 +74,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			env.ExpectCreated(largeDeployment)
 
 			By("Monitoring scale out performance")
-			interferenceReport, err := ReportScaleOutWithOutput(env, "Self Anti-Affinity scale out Test", 750, 5*time.Minute, "self_antiaffinity_interference")
+			interferenceReport, err := ReportScaleOutWithOutput(env, "Self Anti-Affinity scale out Test", 750, 5*time.Minute, "self_antiaffinity_interference", 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "Scale out interference test should execute successfully")
 
 			By("Validating scale out performance")
@@ -102,7 +103,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring consolidation activity during mixed scaling operations")
-			consolidationReport, err := ReportConsolidationWithOutput(env, "Interference Consolidation Test", 750, 600, initialNodes, 15*time.Minute, "self_antiaffinity_interference_consolidation")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Interference Consolidation Test", 750, 600, initialNodes, 15*time.Minute, "self_antiaffinity_interference_consolidation", 0, 0, consolidateWhen, decisionRatio)
 			Expect(err).ToNot(HaveOccurred(), "Interference consolidation test should execute successfully")
 
 			By("Validating consolidation performance during interference")
