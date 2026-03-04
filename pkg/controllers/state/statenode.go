@@ -383,6 +383,30 @@ func (in *StateNode) Allocatable() corev1.ResourceList {
 	return in.Node.Status.Allocatable
 }
 
+// Utilization returns the average ratio of requested resources to allocatable resources
+// across CPU and memory. Returns 0.0 if no pod requests exist or allocatable is zero.
+func (in *StateNode) Utilization() float64 {
+	allocatable, requests := in.Allocatable(), in.PodRequests()
+	if len(requests) == 0 {
+		return 0
+	}
+	utilization := 0.0
+	counted := 0
+	for _, rn := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+		alloc := allocatable[rn]
+		if alloc.IsZero() {
+			continue
+		}
+		req := requests[rn]
+		utilization += float64(req.MilliValue()) / float64(alloc.MilliValue())
+		counted++
+	}
+	if counted == 0 {
+		return 0
+	}
+	return utilization / float64(counted)
+}
+
 // Available is allocatable minus anything allocated to pods.
 func (in *StateNode) Available() corev1.ResourceList {
 	return resources.Subtract(in.Allocatable(), in.PodRequests())
