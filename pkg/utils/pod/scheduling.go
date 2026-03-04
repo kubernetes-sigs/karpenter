@@ -106,19 +106,12 @@ func IsProvisionable(pod *corev1.Pod) bool {
 		!IsOwnedByNode(pod)
 }
 
-// IsDisruptable checks if a pod can be disrupted using clock-aware logic for time-based do-not-disrupt annotations
-// It considers both boolean ("true") and duration-based values (e.g., "5m", "1h")
-// For duration-based values, it checks if the pod has been running longer than the specified duration
-// Invalid annotation formats are treated as if the annotation doesn't exist and an event is emitted
+// IsDisruptable checks if a pod can be disrupted based on validating the `karpenter.sh/do-not-disrupt` annotation on the pod.
 // It checks whether the following is true for the pod:
-// - Has the `karpenter.sh/do-not-disrupt` annotation
+// - Has an active `karpenter.sh/do-not-disrupt` annotation
 // - Is an actively running pod
 func IsDisruptable(pod *corev1.Pod, clk clock.Clock, recorder events.Recorder) bool {
-	if !IsActive(pod) {
-		return true
-	}
-
-	return !IsDoNotDisruptActive(pod, clk, recorder)
+	return !IsActive(pod) || !IsDoNotDisruptActive(pod, clk, recorder)
 }
 
 // FailedToSchedule ensures that the kube-scheduler has seen this pod and has intentionally
@@ -195,20 +188,14 @@ func IsOwnedBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
 // - valid=false means the annotation format is invalid (not "true" and not a valid duration)
 // - indefinite=true means permanent protection (value is "true")
 // - duration is the parsed time duration for valid duration strings
-// Invalid formats, zero, or negative durations return valid=false
 func parseDoNotDisrupt(value string) (valid bool, indefinite bool, duration time.Duration) {
 	if value == "true" {
 		return true, true, 0
 	}
 
 	d, err := time.ParseDuration(value)
-	if err != nil {
-		// Invalid format - not valid
-		return false, false, 0
-	}
-
-	if d <= 0 {
-		// Zero or negative - not valid
+	if err != nil || d <= 0 {
+		// Invalid format
 		return false, false, 0
 	}
 
