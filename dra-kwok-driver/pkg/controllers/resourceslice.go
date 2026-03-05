@@ -102,11 +102,11 @@ func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 		return r.cleanupOrphanedResourceSlices(ctx)
 	}
 
-	// Group configs by driver name
-	configsByDriver := r.groupConfigsByDriver(logger, draConfigs.Items)
+	// Group pools by driver name (merging pools from multiple configs)
+	poolsByDriver := r.groupPoolsByDriver(draConfigs.Items)
 
 	logger.Info("discovered drivers from DRAConfigs",
-		"driver_count", len(configsByDriver),
+		"driver_count", len(poolsByDriver),
 		"config_count", len(draConfigs.Items))
 
 	// List all nodes once
@@ -120,8 +120,8 @@ func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 	errorCount := 0
 
 	// Process each driver independently
-	for driverName, cfg := range configsByDriver {
-		expected, errs := r.processDriver(ctx, logger, driverName, cfg, nodes.Items)
+	for driverName, pools := range poolsByDriver {
+		expected, errs := r.processDriver(ctx, logger, driverName, pools, nodes.Items)
 		errorCount += errs
 		for _, name := range expected {
 			expectedResourceSlices[name] = true
@@ -135,7 +135,7 @@ func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 	}
 
 	logger.Info("completed reconciliation cycle",
-		"drivers", len(configsByDriver),
+		"drivers", len(poolsByDriver),
 		"errors", errorCount,
 		"expected_slices", len(expectedResourceSlices),
 	)
@@ -146,22 +146,13 @@ func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 	return nil
 }
 
-// groupConfigsByDriver groups DRAConfigs by their driver name, warning about duplicates
-func (r *ResourceSliceController) groupConfigsByDriver(logger logr.Logger, configs []v1alpha1.DRAConfig) map[string]v1alpha1.DRAConfig {
-	configsByDriver := make(map[string]v1alpha1.DRAConfig)
+// groupPoolsByDriver merges pools from all DRAConfigs by their driver name
+func (r *ResourceSliceController) groupPoolsByDriver(configs []v1alpha1.DRAConfig) map[string][]v1alpha1.Pool {
+	poolsByDriver := make(map[string][]v1alpha1.Pool)
 	for _, cfg := range configs {
-		driverName := cfg.Spec.Driver
-		if existingCfg, exists := configsByDriver[driverName]; exists {
-			// Duplicate driver! Log warning and skip
-			logger.Info("WARNING: Multiple DRAConfigs found for same driver, using first one",
-				"driver", driverName,
-				"first_config", existingCfg.Name,
-				"duplicate_config", cfg.Name)
-			continue
-		}
-		configsByDriver[driverName] = cfg
+		poolsByDriver[cfg.Spec.Driver] = append(poolsByDriver[cfg.Spec.Driver], cfg.Spec.Pools...)
 	}
-	return configsByDriver
+	return poolsByDriver
 }
 
 // processDriver processes all nodes for a single driver, returning expected ResourceSlice names and error count
@@ -169,17 +160,14 @@ func (r *ResourceSliceController) processDriver(
 	ctx context.Context,
 	logger logr.Logger,
 	driverName string,
-	cfg v1alpha1.DRAConfig,
+	pools []v1alpha1.Pool,
 	nodes []corev1.Node,
 ) ([]string, int) {
-	logger.V(1).Info("reconciling driver", "driver", driverName, "config", cfg.Name)
+	logger.V(1).Info("reconciling driver", "driver", driverName)
 
 	var expectedNames []string
 	errorCount := 0
 	kwokNodeCount := 0
-
-	// Use pools directly from this driver's config
-	pools := cfg.Spec.Pools
 
 	// Process each node for this driver
 	for i := range nodes {
@@ -189,7 +177,7 @@ func (r *ResourceSliceController) processDriver(
 		}
 		kwokNodeCount++
 
-		// Reconcile this node with pools from this driver's config
+		// Reconcile this node with merged pools for this driver
 		expected, err := r.reconcileNodeResourceSlicesForDriver(ctx, node, driverName, pools)
 		if err != nil {
 			logger.Error(err, "failed to reconcile node", "node", node.Name, "driver", driverName)
@@ -202,7 +190,6 @@ func (r *ResourceSliceController) processDriver(
 
 	logger.Info("completed driver reconciliation",
 		"driver", driverName,
-		"config", cfg.Name,
 		"kwok_nodes", kwokNodeCount,
 		"pools", len(pools))
 
