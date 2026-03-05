@@ -320,8 +320,8 @@ var _ = Describe("ResourceSliceController", func() {
 			rs := &resourceSlices.Items[0]
 			// Naming: <sanitized-driver>-<node-name>-<pool-name>
 			Expect(rs.Name).To(Equal("test-karpenter-sh-kwok-node-1-gpu-pool"))
-			Expect(rs.Labels["kwok.x-k8s.io/managed-by"]).To(Equal("dra-kwok-driver"))
-			Expect(rs.Labels["kwok.x-k8s.io/node"]).To(Equal("kwok-node-1"))
+			Expect(rs.Labels["test.karpenter.sh/managed-by"]).To(Equal("dra-kwok-driver"))
+			Expect(rs.Labels["test.karpenter.sh/node"]).To(Equal("kwok-node-1"))
 			Expect(rs.Spec.Devices).To(HaveLen(1))
 			Expect(*rs.Spec.NodeName).To(Equal("kwok-node-1"))
 			// Pool name is auto-generated as <driver>/<node>

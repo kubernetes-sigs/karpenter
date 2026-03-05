@@ -288,10 +288,10 @@ func (r *ResourceSliceController) reconcileNodeResourceSlicesForDriver(
 					ObjectMeta: metav1.ObjectMeta{
 						Name: resourceSliceName,
 						Labels: map[string]string{
-							"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
-							"kwok.x-k8s.io/node":       node.Name,
-							"kwok.x-k8s.io/pool":       pool.Name,
-							"kwok.x-k8s.io/driver":     driverName,
+							"test.karpenter.sh/managed-by": "dra-kwok-driver",
+							"test.karpenter.sh/node":       node.Name,
+							"test.karpenter.sh/pool":       pool.Name,
+							"test.karpenter.sh/driver":     driverName,
 						},
 						OwnerReferences: []metav1.OwnerReference{
 							{
@@ -316,7 +316,7 @@ func (r *ResourceSliceController) reconcileNodeResourceSlicesForDriver(
 
 				logger.Info("creating resourceslice",
 					"resourceslice", desired.Name,
-					"pool", desired.Labels["kwok.x-k8s.io/pool"],
+					"pool", desired.Labels["test.karpenter.sh/pool"],
 					"driver", driverName,
 					"pool_name", poolName,
 					"devices", len(desired.Spec.Devices),
@@ -467,7 +467,7 @@ func (r *ResourceSliceController) cleanupOrphanedResourceSlices(ctx context.Cont
 	// List all ResourceSlices with our management label
 	resourceSlices := &resourcev1.ResourceSliceList{}
 	managedByLabel := labels.SelectorFromSet(labels.Set{
-		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
+		"test.karpenter.sh/managed-by": "dra-kwok-driver",
 	})
 
 	if err := r.kubeClient.List(ctx, resourceSlices, &client.ListOptions{
@@ -495,7 +495,7 @@ func (r *ResourceSliceController) cleanupUnexpectedResourceSlices(ctx context.Co
 	// List all ResourceSlices with our management label
 	resourceSlices := &resourcev1.ResourceSliceList{}
 	managedByLabel := labels.SelectorFromSet(labels.Set{
-		"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
+		"test.karpenter.sh/managed-by": "dra-kwok-driver",
 	})
 
 	if err := r.kubeClient.List(ctx, resourceSlices, &client.ListOptions{
