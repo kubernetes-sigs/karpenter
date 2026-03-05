@@ -169,6 +169,9 @@ func NewScheduler(
 		volumeReqsByPod:     volumeReqsByPod,          // Volume requirements per pod
 		recorder:            recorder,
 		preferences:         &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
+		nodePools: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) {
+			return np.Name, np
+		}),
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
@@ -196,6 +199,7 @@ type Scheduler struct {
 	newNodeClaims           []*NodeClaim
 	existingNodes           []*ExistingNode
 	nodeClaimTemplates      []*NodeClaimTemplate
+	nodePools               map[string]*v1.NodePool        // NodePool name -> NodePool for size class threshold lookup
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead          map[*NodeClaimTemplate]corev1.ResourceList
 	daemonHostPortUsage     map[*NodeClaimTemplate]*scheduling.HostPortUsage
@@ -563,8 +567,49 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	var updatedInstanceTypes []*cloudprovider.InstanceType
 	var offeringsToReserve []*cloudprovider.Offering
 	parallelizeUntil(s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) bool {
-		r, its, ofr, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], false)
+		nodeClaim := s.newNodeClaims[i]
+
+		// Check if size class locking should be applied
+		threshold := getSizeClassLockThreshold(s.getNodePoolForNodeClaim(nodeClaim))
+		shouldLockSizeClass := threshold >= 0 && len(nodeClaim.Pods) >= threshold
+
+		// Apply size class filtering if threshold is exceeded
+		instanceTypesToCheck := nodeClaim.InstanceTypeOptions
+		if shouldLockSizeClass {
+			// Determine and lock the size class if not already locked
+			if nodeClaim.lockedSizeClass == nil {
+				sizeClass := determineNodeClaimSizeClass(nodeClaim)
+				nodeClaim.lockedSizeClass = &sizeClass
+			}
+
+			// Filter instance types to only those in the locked size class
+			instanceTypesToCheck = filterInstanceTypesBySizeClass(nodeClaim.InstanceTypeOptions, *nodeClaim.lockedSizeClass)
+
+			// If no instance types remain in the locked size class, this NodeClaim can't accept more pods
+			if len(instanceTypesToCheck) == 0 {
+				return true
+			}
+		}
+
+		// Temporarily replace instance types for the CanAdd check
+		originalInstanceTypes := nodeClaim.InstanceTypeOptions
+		nodeClaim.InstanceTypeOptions = instanceTypesToCheck
+
+		r, its, ofr, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], false)
+
+		// Restore original instance types
+		nodeClaim.InstanceTypeOptions = originalInstanceTypes
+
 		if err == nil {
+			// If size class locking is active, ensure the returned instance types are also filtered
+			if shouldLockSizeClass {
+				its = filterInstanceTypesBySizeClass(its, *nodeClaim.lockedSizeClass)
+				if len(its) == 0 {
+					// Pod won't fit in the locked size class
+					return true
+				}
+			}
+
 			mu.Lock()
 			defer mu.Unlock()
 
@@ -572,7 +617,7 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 			if i >= idx {
 				return false
 			}
-			inflightNodeClaim = s.newNodeClaims[i]
+			inflightNodeClaim = nodeClaim
 			updatedRequirements = r
 			updatedInstanceTypes = its
 			offeringsToReserve = ofr
@@ -867,4 +912,76 @@ func filterByRemainingResources(instanceTypes []*cloudprovider.InstanceType, rem
 		}
 	}
 	return filtered
+}
+
+// getSizeClassFromCPU returns a size class (1-5) based on vCPU count
+func getSizeClassFromCPU(cpuCount int64) int {
+	if cpuCount <= 2 {
+		return 1
+	} else if cpuCount <= 4 {
+		return 2
+	} else if cpuCount <= 8 {
+		return 3
+	} else if cpuCount <= 16 {
+		return 4
+	}
+	return 5
+}
+
+// determineNodeClaimSizeClass determines the size class based on total CPU requested by pods.
+// It rounds UP to the next power-of-2 boundary to allow room for growth within that size class.
+// Returns the size class number (1-5) based on the locked CPU capacity.
+func determineNodeClaimSizeClass(nodeClaim *NodeClaim) int {
+	// Get the total CPU requested by all pods scheduled to this NodeClaim
+	totalCPU := nodeClaim.Spec.Resources.Requests.Cpu().MilliValue()
+
+	// Convert to whole CPUs (rounding up)
+	cpuCount := (totalCPU + 999) / 1000
+
+	// Find the next power-of-2 that can hold this CPU count
+	// This gives us room to add more pods within the locked size class
+	var nextPowerOf2 int64 = 2
+	for nextPowerOf2 < cpuCount {
+		nextPowerOf2 *= 2
+	}
+
+	// Return the size class for this CPU boundary
+	return getSizeClassFromCPU(nextPowerOf2)
+}
+
+// filterInstanceTypesBySizeClass filters instance types to only those within the specified size class
+func filterInstanceTypesBySizeClass(instanceTypes []*cloudprovider.InstanceType, sizeClass int) []*cloudprovider.InstanceType {
+	var filtered []*cloudprovider.InstanceType
+	for _, it := range instanceTypes {
+		cpu := it.Capacity.Cpu().Value()
+		if getSizeClassFromCPU(cpu) == sizeClass {
+			filtered = append(filtered, it)
+		}
+	}
+	return filtered
+}
+
+// getSizeClassLockThreshold reads the size class lock threshold from NodePool annotations.
+// Returns the threshold value, or -1 if not set (feature disabled).
+func getSizeClassLockThreshold(nodePool *v1.NodePool) int {
+	if nodePool == nil || nodePool.Annotations == nil {
+		return -1
+	}
+	thresholdStr, ok := nodePool.Annotations[v1.NodeClaimSizeClassLockThresholdAnnotationKey]
+	if !ok {
+		return -1
+	}
+	threshold := 0
+	if _, err := fmt.Sscanf(thresholdStr, "%d", &threshold); err != nil {
+		return -1
+	}
+	if threshold < 0 {
+		return -1
+	}
+	return threshold
+}
+
+// getNodePoolForNodeClaim returns the NodePool for a given NodeClaim by matching NodePoolName
+func (s *Scheduler) getNodePoolForNodeClaim(nodeClaim *NodeClaim) *v1.NodePool {
+	return s.nodePools[nodeClaim.NodePoolName]
 }
