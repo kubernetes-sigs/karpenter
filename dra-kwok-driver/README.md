@@ -33,7 +33,6 @@ The DRA KWOK driver uses a **single-controller architecture** that manages multi
 - One DRAConfig per driver (e.g., `gpu-config` for `gpu.nvidia.com`)
 - Single controller discovers and manages all drivers automatically
 - Dynamic driver discovery - no restart needed when adding/removing drivers
-- Warns when multiple DRAConfigs use the same driver (uses first one alphabetically)
 
 **CRD-based configuration** provides API server validation and structured types without YAML parsing.
 
@@ -51,13 +50,13 @@ Sets up the controller-runtime manager and initializes the ResourceSlice control
 Defines the DRAConfig CRD types used for configuration.
 **Key Structures:**
 - **DRAConfig**: CRD resource containing driver name and device pools
-- **Pool**: Defines device groups for nodes matching node selectors. Pool names in ResourceSlices are auto-generated as `<driver>/<node>`.
+- **Pool**: Defines ResourceSlice templates for nodes matching node selectors. Pool names in ResourceSlices are auto-generated as `<driver>/<node>`.
 - **ResourceSliceTemplate**: Defines the devices for a single ResourceSlice. Multiple entries in a pool create multiple ResourceSlices per node.
 
 ### **`pkg/controllers/resourceslice.go`** - ResourceSlice Lifecycle
-Periodically polls nodes and DRAConfigs (every 30 seconds), discovers drivers dynamically, matches nodes against pools, and manages ResourceSlice CRUD operations.
-- **Polling Loop**: Runs every 30 seconds to reconcile all nodes and configurations, ensuring eventual consistency
-- **Multi-Driver Discovery**: LISTs all DRAConfig CRDs, groups by driver name, warns on duplicates
+Periodically reconciles nodes and DRAConfigs (every 30 seconds) using the singleton reconciler pattern, discovers drivers dynamically, matches nodes against pools, and manages ResourceSlice CRUD operations.
+- **Singleton Reconciler**: Uses controller-runtime's reconciliation loop with `RequeueAfter: 30s`, providing automatic error backoff and standard lifecycle management
+- **Multi-Driver Discovery**: LISTs all DRAConfig CRDs, merges pools by driver name
 - **Node Filtering**: Only processes nodes with `kwok.x-k8s.io/node` annotation (Karpenter KWOK nodes)
 - **Label Matching**: Uses Kubernetes label selectors to find matching pools for each node
 - **ResourceSlice Management**: Creates, updates, or deletes ResourceSlices to match desired state. Each resourceSlice entry in a pool becomes one ResourceSlice per matching node.
@@ -68,30 +67,29 @@ Periodically polls nodes and DRAConfigs (every 30 seconds), discovers drivers dy
 
 ### **Initialization**
 1. **main.go** creates controller-runtime manager with Kubernetes client
-2. **ResourceSliceController** is initialized with namespace (`karpenter`)
-3. **ResourceSliceController** registers and starts polling loop (30-second interval)
-4. Manager starts, controller begins discovering drivers and reconciling nodes
+2. **ResourceSliceController** is registered with the manager using the singleton reconciler pattern
+3. Manager starts, controller begins discovering drivers and reconciling nodes (every 30 seconds, with automatic error backoff)
 
 ### **Configuration**
 When DRAConfig CRDs are created or updated:
 1. **User creates DRAConfigs** with user-chosen names (e.g., `gpu-config`, `fpga-config`)
 2. **Each DRAConfig specifies its driver** in `spec.driver` field (e.g., `gpu.nvidia.com`)
 3. **ResourceSliceController** detects them in next polling cycle (within 30 seconds)
-4. LISTs all DRAConfigs in `karpenter` namespace
-5. Groups configs by driver name (warns if duplicates found)
+4. LISTs all DRAConfigs (cluster-scoped)
+5. Groups configs by driver name
 6. Reconciles nodes and creates ResourceSlices for each driver
 
 ### **Node Processing (Polling Loop)**
 Every 30 seconds, the ResourceSliceController:
 1. LISTs all DRAConfig CRDs in the namespace
 2. If none found: cleanup all ResourceSlices and return
-3. Groups DRAConfigs by driver name (one config per driver, warns on duplicates)
+3. Merges pools by driver name from DRAConfigs (But only one DRAConfig would be defined per driver)
 4. Lists all nodes in the cluster
 5. For each driver:
    - For each KWOK node (has `kwok.x-k8s.io/node` annotation):
      - Iterates through driver's pools to find matching nodeSelectors
      - If match found: creates or updates ResourceSlices with auto-generated pool name `<driver>/<node>`. Each resourceSlice entry becomes one ResourceSlice.
-     - ResourceSlice naming: `<driver-sanitized>-<node>-<pool-name>` (single group) or `<driver-sanitized>-<node>-<pool-name>-<index>` (multiple groups)
+     - ResourceSlice naming: `<driver-sanitized>-<node>-<pool-name>` (single) or `<driver-sanitized>-<node>-<pool-name>-<index>` (multiple)
        - Example: `gpu-nvidia-com-node1-h100-pool` or `gpu-nvidia-com-node1-h100-pool-0`, `gpu-nvidia-com-node1-h100-pool-1`
 6. Cleans up any orphaned ResourceSlices (nodes deleted, configs deleted, etc.)
 7. Logs summary of reconciliation (drivers, nodes processed, errors encountered)
