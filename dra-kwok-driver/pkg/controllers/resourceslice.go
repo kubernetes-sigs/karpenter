@@ -27,6 +27,7 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -429,9 +430,11 @@ func (r *ResourceSliceController) nodeMatchesFieldExpression(node *corev1.Node, 
 }
 
 // resourceSliceNeedsUpdate checks if an existing ResourceSlice needs to be updated
-// based on device count or slice count changes
 func (r *ResourceSliceController) resourceSliceNeedsUpdate(existing *resourcev1.ResourceSlice, desiredDevices []resourcev1.Device, desiredSliceCount int64) bool {
-	return len(existing.Spec.Devices) != len(desiredDevices) || existing.Spec.Pool.ResourceSliceCount != desiredSliceCount
+	if existing.Spec.Pool.ResourceSliceCount != desiredSliceCount || len(existing.Spec.Devices) != len(desiredDevices) {
+		return true
+	}
+	return !apiequality.Semantic.DeepEqual(existing.Spec.Devices, desiredDevices)
 }
 
 // cleanupOrphanedResourceSlices removes ALL ResourceSlices managed by this driver
