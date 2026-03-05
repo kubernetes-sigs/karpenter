@@ -22,8 +22,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/serrors"
-	"github.com/go-logr/logr"
+	"github.com/awslabs/operatorpkg/singleton"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -32,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -51,39 +53,24 @@ func NewResourceSliceController(kubeClient client.Client) *ResourceSliceControll
 	}
 }
 
-// Register registers the controller with the manager and starts the polling loop
-func (r *ResourceSliceController) Register(ctx context.Context, mgr manager.Manager) error {
-	// Start a goroutine for periodic reconciliation
-	// This runs outside of controller-runtime's reconciliation loop
-	go r.startPollingLoop(ctx)
-	return nil
+const pollingPeriod = 30 * time.Second
+
+func (r *ResourceSliceController) Name() string {
+	return "resourceslice"
 }
 
-// startPollingLoop runs the reconciliation loop every 30 seconds
-func (r *ResourceSliceController) startPollingLoop(ctx context.Context) {
-	logger := log.FromContext(ctx).WithName("resourceslice-poller")
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+func (r *ResourceSliceController) Register(_ context.Context, mgr manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(mgr).
+		Named(r.Name()).
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(r))
+}
 
-	// Run immediately on startup
-	logger.Info("starting initial reconciliation")
+func (r *ResourceSliceController) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err := r.reconcileAllNodes(ctx); err != nil {
-		logger.Error(err, "error during initial reconciliation")
+		return reconciler.Result{}, err
 	}
-
-	// Then run periodically
-	for {
-		select {
-		case <-ticker.C:
-			logger.V(1).Info("starting periodic reconciliation")
-			if err := r.reconcileAllNodes(ctx); err != nil {
-				logger.Error(err, "error during periodic reconciliation")
-			}
-		case <-ctx.Done():
-			logger.Info("stopping polling loop")
-			return
-		}
-	}
+	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
 // reconcileAllNodes reconciles ResourceSlices for all KWOK nodes in the cluster
@@ -121,7 +108,7 @@ func (r *ResourceSliceController) reconcileAllNodes(ctx context.Context) error {
 
 	// Process each driver independently
 	for driverName, pools := range poolsByDriver {
-		expected, errs := r.processDriver(ctx, logger, driverName, pools, nodes.Items)
+		expected, errs := r.processDriver(ctx, driverName, pools, nodes.Items)
 		errorCount += errs
 		for _, name := range expected {
 			expectedResourceSlices[name] = true
@@ -158,11 +145,11 @@ func (r *ResourceSliceController) groupPoolsByDriver(configs []v1alpha1.DRAConfi
 // processDriver processes all nodes for a single driver, returning expected ResourceSlice names and error count
 func (r *ResourceSliceController) processDriver(
 	ctx context.Context,
-	logger logr.Logger,
 	driverName string,
 	pools []v1alpha1.Pool,
 	nodes []corev1.Node,
 ) ([]string, int) {
+	logger := log.FromContext(ctx).WithName("resourceslice")
 	logger.V(1).Info("reconciling driver", "driver", driverName)
 
 	var expectedNames []string
