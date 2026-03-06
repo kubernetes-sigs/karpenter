@@ -2397,6 +2397,144 @@ var _ = Describe("Topology", func() {
 			// Pods should be spread across all 3 zones (minDomains=3, maxSkew=2)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2, 2))
 		})
+		It("should only consider domains from NodePool when pod selects by karpenter.sh/nodepool label", func() {
+			if env.Version.Minor() < 26 {
+				Skip("NodeAffinityPolicy/NodeTaintsPolicy only enabled by default for K8s >= 1.26.x")
+			}
+
+			// NodePool A: tainted, 3 zones
+			npA := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-a"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{
+								{Key: "dedicated", Value: "pool-a", Effect: corev1.TaintEffectNoSchedule},
+							},
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}},
+								{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpExists},
+							},
+						},
+					},
+				},
+			})
+
+			// NodePool B: no taint, zone-3 only
+			npB := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-b"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
+								{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpExists},
+							},
+						},
+					},
+				},
+			})
+
+			var minDomains int32 = 3
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:        corev1.LabelTopologyZone,
+				WhenUnsatisfiable:  corev1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            2,
+				MinDomains:         &minDomains,
+				NodeTaintsPolicy:   lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+			}}
+
+			ExpectApplied(ctx, env.Client, npA, npB)
+
+			// Pod selects pool-a via karpenter.sh/nodepool label
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector:              map[string]string{v1.NodePoolLabelKey: "pool-a"},
+				Tolerations: []corev1.Toleration{
+					{Key: "dedicated", Value: "pool-a", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+				},
+			}, 6)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			// All pods should schedule: only pool-a's 3 zones are considered (not pool-b's zone-3 only)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// Pods should be spread across all 3 zones from pool-a
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2, 2))
+		})
+		It("should consider all domains when NodeAffinityPolicy is Ignore regardless of nodeSelector", func() {
+			if env.Version.Minor() < 26 {
+				Skip("NodeAffinityPolicy/NodeTaintsPolicy only enabled by default for K8s >= 1.26.x")
+			}
+
+			// NodePool A: zone-1 only, custom label
+			npA := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-a"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{"pool": "a"},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+								{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpExists},
+							},
+						},
+					},
+				},
+			})
+
+			// NodePool B: zone-2 and zone-3, different label
+			npB := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-b"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{"pool": "b"},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}},
+								{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpExists},
+							},
+						},
+					},
+				},
+			})
+
+			// With NodeAffinityPolicy: Ignore, topology spread should see all 3 zones
+			// even though the pod's nodeSelector targets pool=a (zone-1 only).
+			// Since maxSkew=1 and there are 3 domains but the pod can only go to zone-1,
+			// only 1 pod can be scheduled (0+1 - 0 = 1 <= maxSkew).
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:        corev1.LabelTopologyZone,
+				WhenUnsatisfiable:  corev1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            1,
+				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyIgnore),
+			}}
+
+			ExpectApplied(ctx, env.Client, npA, npB)
+
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector:              map[string]string{"pool": "a"},
+			}, 3)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			// With Ignore policy, topology sees 3 zones but pod can only schedule to zone-1.
+			// maxSkew=1 means only 1 pod in zone-1 is allowed (1 - 0 = 1 <= maxSkew).
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
+		})
 	})
 
 	Context("Pod Affinity/Anti-Affinity", func() {

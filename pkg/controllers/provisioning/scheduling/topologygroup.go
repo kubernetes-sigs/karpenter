@@ -108,7 +108,7 @@ func NewTopologyGroup(
 	// Use nodeFilter.Requirements which already handles all NodeSelectorTerms (OR'd together)
 	// combined with nodeSelector labels. This is consistent with how TopologyNodeFilter works
 	// for existing node filtering.
-	domainGroup.ForEachDomain(pod, nodeFilter.Requirements, nodeFilter.TaintPolicy, func(domain string) {
+	domainGroup.ForEachDomain(pod, nodeFilter.Requirements, nodeFilter.AffinityPolicy, nodeFilter.TaintPolicy, func(domain string) {
 		domains[domain] = 0
 		emptyDomains.Insert(domain)
 	})

@@ -109,13 +109,26 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 	domainGroups := map[string]TopologyDomainGroup{}
 	for npName, its := range instanceTypes {
 		np := nodePoolIndex[npName]
-		// This represents what a pod needs to match to schedule on this NodePool
-		// We exclude instance type requirements here because:
+		// This represents what a pod needs to match to schedule on this NodePool.
+		// We use NodePool-level requirements only, not per-instance-type requirements, because:
 		// 1. Instance type requirements are specific to individual instance types (capacity-type, instance-family, etc.)
 		// 2. Pod nodeSelector/nodeAffinity typically targets NodePool-level constraints (labels, zones, etc.)
 		// 3. Instance type requirements are evaluated separately during scheduling
+		//
+		// Limitation: Per-instance-type requirements (e.g., zones available for specific instance families)
+		// are not considered for compatibility checking. A pod may be matched to a NodePool even if no
+		// individual instance type satisfies all of the pod's constraints. Full per-instance-type filtering
+		// happens later during scheduling.
 		nodePoolRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
 		nodePoolRequirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.ObjectMeta.Labels).Values()...)
+		// Inject labels that Karpenter automatically adds to nodes (see nodeclaimtemplate.go).
+		// These are not part of NodePool.Spec.Template but are always present on resulting nodes,
+		// enabling pods with nodeSelector targeting karpenter.sh/nodepool or NodeClass labels to
+		// correctly filter topology domains.
+		nodePoolRequirements.Add(scheduling.NewLabelRequirements(map[string]string{
+			v1.NodePoolLabelKey: np.Name,
+			v1.NodeClassLabelKey(np.Spec.Template.Spec.NodeClassRef.GroupKind()): np.Spec.Template.Spec.NodeClassRef.Name,
+		}).Values()...)
 
 		for _, it := range its {
 			// We need to intersect the instance type requirements with the current nodePool requirements.  This
