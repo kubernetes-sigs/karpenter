@@ -122,8 +122,9 @@ For a first iteration approach, Karpenter will implement the force termination. 
 
 There are additional features we will consider including after the initial iteration. These include:
 
-* Disruption controls (budgets, terminationGracePeriod) for unhealthy nodes 
+* Disruption controls (budgets, terminationGracePeriod) for unhealthy nodes
 * Node Reboot (instead of replacement)
-* Configuration surface for graceful vs forceful termination 
-* Additional consideration for the availability zone resiliency 
+* Configuration surface for graceful vs forceful termination
+* Additional consideration for the availability zone resiliency
+* Customer-defined toleration durations per NodePool - see [NodePool Repair Configuration RFC](./nodepool-repair-configuration.md)
 
