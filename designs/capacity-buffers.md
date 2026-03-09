@@ -1,9 +1,4 @@
-
-
-
-
 #  RFC : Capacity Buffer Support For Karpenter
-
 
 # Problem
 
@@ -47,6 +42,8 @@ The feature has been requested multiple times by the community:
 - Optimizing scheduling simulation performance for Virtual pods
 - Initial implementation will only support same-namespace references for `scalableRef` and `podTemplateRef`
 - Guaranteed capacity reservation: Buffers do not provide hard guarantees that capacity is reserved exclusively for specific workloads. Any pod that can schedule on buffer capacity may use it.
+- Adding `expireAfter` field to the API in initial implementation (requires upstream sig-autoscaling consensus)
+
 
 
 # Proposal
@@ -85,7 +82,7 @@ Support the Kubernetes SIG Autoscaling CapacityBuffer API (`autoscaling.x-k8s.io
 **Behavior:**
 - Maintains dynamic spare capacity continuously
 - Reacts to workload scaling and template changes
-- Buffer size adjusts with deployment size when using `percentage`
+- Buffer size adjusts with deployment size
 - Provisioner checks buffer status every provisioning cycle
 - Virtual pods reconstructed each cycle to maintain capacity
 
@@ -111,22 +108,31 @@ Support the Kubernetes SIG Autoscaling CapacityBuffer API (`autoscaling.x-k8s.io
 - Buffer size remains constant and no more changes are allowed to the spec
 - After capacity is provisioned, status moves to `Completed: True`
 - Once completed, buffer is no longer acted upon by provisioner
-- Customer responsibility to delete resource after use
+- Capacity is preserved during disruption for a configurable grace period (default 1 hour)
+- After grace period, capacity can be automatically consolidated
+- Customer can delete buffer manually at any time
+
+**Restrictions:**
+- MUST use `podTemplateRef` (NOT `scalableRef`)
+- MUST use `replicas` or `limits` (NOT `percentage`)
+- Spec is immutable after creation (enforced via CEL validation)
+
+**Rationale:** Static strategy represents a one-time immutable capacity request. The `scalableRef` and `percentage` fields imply continuous tracking of workload changes and dynamic recalculation, which conflicts with static semantics. Static buffers should define fixed capacity requirements upfront using `podTemplateRef` and explicit `replicas` or resource `limits`.
 
 **Use Cases:**
 - Capacity request pattern (Kueue integration)
 - External systems requesting capacity confirmation
 
 **Lifecycle:**
-1. User creates buffer with static strategy
+1. User creates buffer with static strategy using `podTemplateRef` + `replicas`/`limits`
 2. Buffer controller resolves template and calculates replicas
 3. Provisioner attempts to provision capacity
 4. Status updated to `Provisioning: True` only when virtual pods can be placed on existing nodes (without new NodeClaims)
 5. Status updated to `Completed: True` once capacity is satisfied
-6. Buffer no longer considered by provisioner
-7. User deletes buffer when capacity no longer needed
-- Buffer no longer considered by provisioner
-- User deletes buffer when capacity no longer needed
+6. Buffer no longer considered by provisioner for new capacity
+7. Capacity preserved during disruption for grace period (default 1 hour, configurable)
+8. After grace period expires, capacity can be consolidated automatically
+9. User can delete buffer manually at any time
 
 ## Supported References
 
@@ -139,6 +145,21 @@ Support the Kubernetes SIG Autoscaling CapacityBuffer API (`autoscaling.x-k8s.io
 
 **podTemplateRef (Both Strategies):**
 - `core/v1/PodTemplate`
+
+## CapacityBuffer Status Conditions
+The CapacityBuffer uses standard Kubernetes conditions to report its state:
+
+ReadyForProvisioning (Applies to: Active & Static)
+- True: Pod template is successfully resolved and target replicas are calculated.
+- False: Missing references (ScalableRefNotFound, PodTemplateNotFound), validation errors, or calculation failures.
+
+Provisioning (Applies to: Active & Static)
+- True: Capacity is actually available. Virtual pods fit onto existing nodes without requiring new NodeClaims.
+- False: Virtual pods don't fit; new NodeClaims are required, limits prevent scaling (InsufficientCapacity), or provisioning failed.
+
+Completed (Applies to: Static only)
+- True: The static buffer's one-time provisioning is finished and the virtual pods are placed. The buffer is now idle and must be manually deleted.
+- Note: This is never set for Active strategy buffers, as they remain continuously active.
 
 ## Replica Calculation
 
@@ -156,6 +177,18 @@ This matches Cluster Autoscaler behavior.
 
 If only limits are specified, the system will generate the maximum number of chunks (based on podTemplateRef) allowed within those constraints.
 
+**Static Strategy Restrictions:**
+
+Static strategy ONLY supports:
+- Fixed `replicas` count, OR
+- Resource `limits` (which determines maximum chunks that fit)
+
+Static strategy does NOT support:
+- `percentage` field (percentage-based sizing requires tracking workload changes)
+- `scalableRef` (implies dynamic workload tracking)
+
+**Rationale:** The `percentage` field and `scalableRef` both imply continuous tracking of workload changes and recalculation of buffer size. This conflicts with the static strategy's core semantics: a one-time immutable capacity request. Static buffers represent a fixed capacity allocation that doesn't change after initial provisioning, making percentage-based or workload-tracking approaches inappropriate.
+
 
 ### Provisioner Integration
 
@@ -169,16 +202,41 @@ If only limits are specified, the system will generate the maximum number of chu
 
 **Virtual Pod Construction:**
 - Virtual pods reconstructed every provisioning loop from buffer status
-- No pod objects created in cluster (in-memory only)
+- Pods created in-memory only (NOT stored in etcd or cluster state)
+- Deterministic UUIDs assigned for logging and observability
+- No API server or etcd overhead
 
 ### Disruption Integration
 
 **Responsibilities:**
-- Include virtual buffer pods in consolidation simulation (active buffers only)
+- Include virtual buffer pods in consolidation simulation to prevent premature capacity removal
 - Treat buffer pods like real pods during scheduling simulation
 - Reject consolidation if buffer pods can't fit after node removal
 - Provide lower disruption cost for buffer pods
-- Skip completed static buffers (no longer need capacity preservation)
+
+**Active Buffers:**
+- Virtual pods always included in disruption simulation
+- Capacity continuously preserved as buffer reacts to workload changes
+- Buffer remains active until explicitly deleted
+
+**Static Buffers:**
+- Virtual pods included in disruption simulation for a grace period after `Completed: True`
+- Default grace period: 1 hour
+- After grace period expires, buffer is no longer considered and capacity can be consolidated
+- Grace period prevents consolidation from immediately removing capacity before workloads use it
+
+
+**Future: expireAfter Field**
+
+We propose adding an `expireAfter` field to the upstream CapacityBuffer API (sig-autoscaling) that would apply to both active and static strategies:
+- Allows per-buffer control over capacity lifecycle
+- More flexible than global configuration
+- Users can set different expiration times for different buffers based on workload patterns
+- Once buffer expires, it is no longer considered for provisioning or disruption protection
+
+Until upstream consensus is reached:
+- Static buffers use a configurable grace period (default 1 hour) via Karpenter settings
+- Active buffers are always preserved until manually deleted
 
 
 # Design Considerations
@@ -186,14 +244,10 @@ If only limits are specified, the system will generate the maximum number of chu
 ## Karpenter's Single-Loop Architecture
 
 Karpenter uses a single provisioning loop for all scheduling decisions. This design provides several critical guarantees:
-
-**Resource Consistency**: Multiple loops could make conflicting scheduling decisions that lead to over-provisioning or resource contention.
-
-**State Coherence**: Cluster state needs to be consistent across scheduling decisions. A single loop ensures all scheduling decisions are made with the same view of cluster state.
-
-**Avoid Over-provisioning**: Prevents race conditions where multiple loops provision capacity for the same pods, leading to wasted resources.
-
-**Batching Efficiency**: Allows optimal batching of pods for better bin-packing and more efficient node selection.
+- Multiple loops could make conflicting scheduling decisions that lead to over-provisioning or resource contention.
+- Cluster state needs to be consistent across scheduling decisions. A single loop ensures all scheduling decisions are made with the same view of cluster state.
+- Prevents race conditions where multiple loops provision capacity for the same pods, leading to wasted resources.
+- Allows optimal batching of pods for better bin-packing and more efficient node selection.
 
 This single-loop design has important implications for buffer pods:
 - All pods (real + buffer) are scheduled together in one coherent decision, ensuring optimal resource utilization.
@@ -202,21 +256,27 @@ This single-loop design has important implications for buffer pods:
 
 ### Performance Trade-offs
 
-Alarge number of virtual pods might increase the latency of scheduling simulation. The time to simulate and schedule grows with the number of pods being considered. We will look into improving this after running benchmarking to understand real-world performance characteristics.
+A large number of virtual pods might increase the latency of scheduling simulation. The time to simulate and schedule grows with the number of pods being considered. We will look into improving this after running benchmarking to understand real-world performance characteristics.
 
-**Rationale**: The cost of over-provisioning due to inconsistent scheduling decisions far outweighs the cost of slightly longer scheduling simulation times. We prioritize correctness and resource efficiency over simulation speed.
+**Current Approach: Stateless Virtual Pod Construction**
+
+We reconstruct virtual pods from buffer status every provisioning cycle rather than maintaining persistent state. This approach prioritizes correctness and simplicity over performance:
+
+**Pros:**
+- No stale state: Virtual pods always reflect current buffer status
+- Simpler implementation: No need to track virtual pod lifecycle
+
+**Rationale for Current Approach:**
+
+We are intentionally not optimizing prematurely. The cost of over-provisioning far outweighs the cost of slightly longer scheduling simulation times.
+We will benchmark these targets in real-world scenarios and optimize if scheduling latency becomes a bottleneck.
 
 ## Virtual Pod Creation
 
-To simplify integration with Karpenter's cluster state, virtual pods are created as fake pods with deterministic UUIDs. This makes the process of injecting pods into cluster state straightforward and predictable.
+Virtual pods are created in-memory (not stored in cluster state) with deterministic UUIDs for observability purposes. This provides unique identifiers for tracking buffer pods through the provisioning and disruption lifecycle.
+Virtual pods are NOT stored in etcd or cluster state. They exist only in-memory during the provisioning cycle. This avoids overhead on the API server and etcd while still providing the observability benefits of unique identifiers.
 
-- Each virtual pod gets a unique, deterministic UUID based on the buffer's UID and pod index
-- Pods are named `capacity-buffer-{buffer-name}-{index}` for easy identification
-- Pods inherit the template from the buffer's `podTemplateRef` or resolved `scalableRef`
-- Special annotations mark pods as buffer-related for filtering and observability
-- `spec.nodeName` is empty (unscheduled state)
-
-This approach avoids the need for special-case handling in the scheduler and allows virtual pods to participate naturally in scheduling simulation.
+**Future Consideration:** If we implement stateful virtual pod management (caching pods between cycles), the deterministic UUIDs will enable efficient state tracking without recreating pod identities.
 
 
 ## Open Questions
@@ -233,13 +293,15 @@ A: No. Static strategy buffers are immutable (enforced via CEL validation) to pr
 **Q: What happens if buffer can't be satisfied due to NodePool limits?**
 A: Buffer status reflects actual provisioned replicas may be less than requested. It is retried until replicas are satisfied. For static case, it will be retried until replicas are satisfied once. In future we can make the retry configurable.
 
+**Q: How long should static buffer capacity be preserved during disruption?**
+A: Static buffers are protected from consolidation for a configurable grace period after reaching `Completed: True`. The default grace period is 1 hour. After the grace period expires, the buffer is no longer considered and capacity can be consolidated automatically. Users can also manually delete buffers at any time. We propose adding an `expireAfter` field to the upstream CapacityBuffer API (sig-autoscaling) for per-buffer control, but this requires upstream consensus and would apply to both active and static strategies.
 
 ## Data Models
 
 ### CapacityBuffer CRD
 
 
-```
+```go
 type CapacityBuffer struct {
 	// Standard Kubernetes object metadata.
 	metav1.TypeMeta   `json:",inline"`
@@ -337,6 +399,33 @@ type CapacityBufferStatus struct {
 
 ```
 
+### Validation Rules
+
+The CapacityBuffer CRD enforces static strategy restrictions through CEL validation rules:
+
+**Static Strategy Restrictions:**
+
+1. **Must use podTemplateRef (not scalableRef):**
+```
+// CEL validation rule
+self.provisioningStrategy == "buffer.x-k8s.io/static-capacity" ? 
+  has(self.podTemplateRef) && !has(self.scalableRef) : true
+```
+
+2. **Cannot use percentage field:**
+```
+// CEL validation rule
+self.provisioningStrategy == "buffer.x-k8s.io/static-capacity" ? 
+  !has(self.percentage) : true
+```
+
+3. **Spec immutability for static buffers:**
+```
+// CEL validation rule on update
+self.provisioningStrategy == "buffer.x-k8s.io/static-capacity" ? 
+  self.spec == oldSelf.spec : true
+```
+
 
 ## Examples
 
@@ -353,9 +442,9 @@ metadata:
 spec:
   provisioningStrategy: "buffer.x-k8s.io/active-capacity"
   scalableRef:
-    apiGroup: apps
-    kind: Deployment
-    name: web-app
+	apiGroup: apps
+	kind: Deployment
+	name: web-app
   replicas: 5
 ```
 
@@ -372,9 +461,9 @@ metadata:
 spec:
   provisioningStrategy: "buffer.x-k8s.io/active-capacity"
   scalableRef:
-    apiGroup: apps
-    kind: Deployment
-    name: api-service
+	apiGroup: apps
+	kind: Deployment
+	name: api-service
   percentage: 20
   replicas: 10  # Cap at 10 pods maximum
 ```
@@ -382,7 +471,7 @@ spec:
 
 ### Example 3: Static Buffer
 
-**Use Case:** Request capacity before admitting a batch of ML training jobs.
+**Use Case:** Request capacity before admitting a batch of ML training jobs. Capacity will be protected for the configured grace period (default 1 hour).
 
 ```yaml
 apiVersion: v1
@@ -392,16 +481,16 @@ metadata:
   namespace: ml-workloads
 template:
   spec:
-    containers:
-    - name: trainer
-      image: ml-trainer:v2
-      resources:
-        requests:
-          cpu: "8"
-          memory: "32Gi"
-          nvidia.com/gpu: "1"
-    nodeSelector:
-      node-type: gpu
+	containers:
+	- name: trainer
+	  image: ml-trainer:v2
+	  resources:
+		requests:
+		  cpu: "8"
+		  memory: "32Gi"
+		  nvidia.com/gpu: "1"
+	nodeSelector:
+	  node-type: gpu
 ---
 apiVersion: autoscaling.x-k8s.io/v1alpha1
 kind: CapacityBuffer
@@ -411,7 +500,7 @@ metadata:
 spec:
   provisioningStrategy: "buffer.x-k8s.io/static-capacity"
   podTemplateRef:
-    name: ml-training-template
+	name: ml-training-template
   replicas: 10
 ```
 
@@ -428,13 +517,13 @@ metadata:
   namespace: workers
 template:
   spec:
-    containers:
-    - name: worker
-      image: worker:latest
-      resources:
-        requests:
-          cpu: "2"
-          memory: "4Gi"
+	containers:
+	- name: worker
+	  image: worker:latest
+	  resources:
+		requests:
+		  cpu: "2"
+		  memory: "4Gi"
 ---
 apiVersion: autoscaling.x-k8s.io/v1alpha1
 kind: CapacityBuffer
@@ -444,10 +533,10 @@ metadata:
 spec:
   provisioningStrategy: "buffer.x-k8s.io/active-capacity"
   podTemplateRef:
-    name: worker-template
+	name: worker-template
   limits:
-    cpu: "20"
-    memory: "40Gi"
+	cpu: "20"
+	memory: "40Gi"
 ```
 
 
@@ -463,6 +552,31 @@ For testing, we will add comprehensive integration tests to ensure the feature w
 ### Observability
 
 Controller-runtime metrics already provide baseline visibility into reconcile performance and errors. We will have status fields to let customers know the status of the buffer.
+
+
+# Alternatives
+
+### Alternative 1: Balloon Pods/Deployments
+
+**Pros:**
+- Simple to implement (no new CRDs or controllers)
+- Works with any Kubernetes cluster
+- Actual pods visible in cluster
+
+**Cons:**
+- **Scheduler overhead from preemption**: When real pods need capacity, the scheduler must preempt balloon pods, which adds latency and computational overhead. The scheduler evaluates preemption candidates, selects victims, evicts pods, and waits for termination before scheduling real pods.
+- **Manual maintenance**: Users must manually size balloon pods to match workload requirements and update them when workload specs change
+- **No workload awareness**: Balloon pods don't automatically adapt to deployment scaling or template changes
+- **Resource waste**: Balloon pods consume actual pod objects, etcd storage, and kubelet resources
+- **Difficult to manage at scale**: With multiple node types or instance families, users need separate balloon deployments for each, creating management overhead
+- **No standard API**: Each user implements their own balloon pod strategy, making it hard to integrate with external systems like Kueue
+
+**Why CapacityBuffer is better:**
+- Virtual pods avoid scheduler preemption overhead (no actual pods to evict)
+- Automatic adaptation to workload changes (active strategy)
+- Pod-level abstraction with automatic node selection
+- Standard API compatible with Cluster Autoscaler
+- Clear semantics for capacity requests (static strategy)
 
 
 ## References
