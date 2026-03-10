@@ -94,13 +94,16 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 	pods = append(pods, deletingNodePods...)
 
+	var candidateNodeTypes []string
+	stateNodes, candidateNodeTypes = filterStateNodesByCandidateNodeTypes(stateNodes, candidates)
+
 	var opts []scheduling.Options
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduling.IgnorePreferences)
 	}
 	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
 	scheduler, err := provisioner.NewScheduler(
-		log.IntoContext(ctx, operatorlogging.NopLogger),
+		context.WithValue(log.IntoContext(ctx, operatorlogging.NopLogger), "filterNodePoolsByStateNodeNodeTypes", candidateNodeTypes),
 		pods,
 		stateNodes,
 		opts...,
@@ -167,6 +170,25 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 	rhsNames := sets.NewString(lo.Map(rhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
 	lhsNames := sets.NewString(lo.Map(lhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
 	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
+}
+
+// speed up computation by only considering nodes that have the same "node-type" label as the candidates
+func filterStateNodesByCandidateNodeTypes(stateNodes []*state.StateNode, candidates []*Candidate) ([]*state.StateNode, []string) {
+	candidateNodeTypes := lo.Uniq(lo.Map(candidates, func(c *Candidate, _ int) string {
+		if c.Node != nil {
+			return c.Node.Labels["node-type"]
+		}
+		return ""
+	}))
+
+	if lo.Contains(candidateNodeTypes, "") { // something was weird, do not filter, even if some had node-type
+		return stateNodes, candidateNodeTypes
+	}
+
+	stateNodes = lo.Filter(stateNodes, func(n *state.StateNode, _ int) bool {
+		return lo.Contains(candidateNodeTypes, n.Labels()["node-type"])
+	})
+	return stateNodes, candidateNodeTypes
 }
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
