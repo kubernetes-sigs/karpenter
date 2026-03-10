@@ -58,6 +58,9 @@ type NodeClaim struct {
 	//   this expansion.
 	reservedOfferings    cloudprovider.Offerings
 	reservedOfferingMode ReservedOfferingMode
+
+	// Size class lock tracking for disruption control
+	lockedSizeClass *int // nil means not locked yet
 }
 
 // ReservedOfferingError indicates a NodeClaim couldn't be created or a pod couldn't be added to an exxisting NodeClaim
