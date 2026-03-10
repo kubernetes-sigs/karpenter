@@ -53,6 +53,7 @@ import (
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
 	nodepoolregistrationhealth "sigs.k8s.io/karpenter/pkg/controllers/nodepool/registrationhealth"
 	nodepoolvalidation "sigs.k8s.io/karpenter/pkg/controllers/nodepool/validation"
+	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -146,6 +147,10 @@ func NewControllers(
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
 		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
+	}
+
+	if options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
+		controllers = append(controllers, deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, recorder))
 	}
 
 	return controllers
