@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -191,7 +192,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("adding nodeclaim terminationGracePeriod annotation, %w", err)
+		return reconcile.Result{}, fmt.Errorf("setting nodeclaim termination time, %w", err)
 	}
 
 	// Only delete Nodes if the NodeClaim has been registered. Deleting Nodes without the termination finalizer
@@ -274,9 +275,9 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 }
 
 func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx context.Context, nodeClaim *v1.NodeClaim) error {
-	// if the expiration annotation is already set, we don't need to do anything
-	if _, exists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
-		return nil
+	if terminationTimeString, exists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
+		// The annotation is already set (possibly externally). Ensure the status mirrors it.
+		return c.syncTerminationTimeStatus(ctx, nodeClaim, terminationTimeString)
 	}
 
 	// In Kubernetes, every object has a terminationGracePeriodSeconds, defaulted to and un-changeable from 0. There is an additional TerminationGracePeriodSeconds in the PodSpec which can be configured.
@@ -303,5 +304,21 @@ func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.C
 	log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
 	c.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, terminationTime))
 
+	return c.syncTerminationTimeStatus(ctx, nodeClaim, terminationTime)
+}
+
+func (c *Controller) syncTerminationTimeStatus(ctx context.Context, nodeClaim *v1.NodeClaim, terminationTime string) error {
+	t, parseErr := time.Parse(time.RFC3339, terminationTime)
+	if parseErr != nil {
+		return nil //nolint:nilerr // malformed annotation value should not block reconciliation
+	}
+	if nodeClaim.Status.TerminationTime != nil && nodeClaim.Status.TerminationTime.Time.Equal(t) {
+		return nil
+	}
+	stored := nodeClaim.DeepCopy()
+	nodeClaim.Status.TerminationTime = &metav1.Time{Time: t}
+	if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)); client.IgnoreNotFound(err) != nil {
+		return err
+	}
 	return nil
 }
