@@ -41,7 +41,7 @@ import (
 var UnsupportedProvisioners = sets.New[string]()
 
 // UnsupportedTopologyKeys is a set of topology keys that are not supported. When a StorageClass has AllowedTopologies
-// containing any of these keys, Karpenter will skip scheduling pods that reference that StorageClass, since nodes
+// containing any of these keys, Karpenter will skip scheduling pods that reference a PVC with that StorageClass, since nodes
 // created by Karpenter will never satisfy the topology requirement.
 var UnsupportedTopologyKeys = sets.New[string]()
 
