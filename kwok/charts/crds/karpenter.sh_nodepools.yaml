@@ -172,6 +172,51 @@ spec:
                     Limits define a set of bounds for provisioning capacity.
                     Limits other than limits.nodes is not supported when replicas is set.
                   type: object
+                repair:
+                  description: |-
+                    Repair configures the repair policies for nodes in this NodePool.
+                    When specified, NodePool-level repair policies can override the CloudProvider's
+                    default TolerationDuration for specific node conditions.
+                  properties:
+                    defaultTolerationDuration:
+                      description: |-
+                        DefaultTolerationDuration is the default duration to wait before repairing
+                        nodes for any condition not explicitly configured in Policies.
+                        If not specified, uses the CloudProvider's default TolerationDuration.
+                      pattern: ^([0-9]+(s|m|h))+$
+                      type: string
+                    policies:
+                      description: |-
+                        Policies defines the repair policies for different node conditions.
+                        These policies override the CloudProvider's default TolerationDuration.
+                      items:
+                        description: NodePoolRepairPolicy defines a repair policy for a specific node condition.
+                        properties:
+                          conditionStatus:
+                            description: |-
+                              conditionStatus specifies the condition status that indicates unhealthy state,
+                              e.g. "False", "True", or "Unknown".
+                            type: string
+                          conditionType:
+                            description: |-
+                              conditionType specifies the node condition to monitor, e.g. "Ready", "DiskPressure".
+                              Must match a ConditionType defined in the CloudProvider's RepairPolicies.
+                            type: string
+                          tolerationDuration:
+                            description: |-
+                              TolerationDuration is the duration to wait before attempting to terminate
+                              nodes that match this repair policy. Overrides the CloudProvider's
+                              TolerationDuration for this specific condition.
+                            pattern: ^([0-9]+(s|m|h))+$
+                            type: string
+                        required:
+                          - conditionStatus
+                          - conditionType
+                          - tolerationDuration
+                        type: object
+                      type: array
+                      x-kubernetes-list-type: atomic
+                  type: object
                 replicas:
                   description: |-
                     Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will
