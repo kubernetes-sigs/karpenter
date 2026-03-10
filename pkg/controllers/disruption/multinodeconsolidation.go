@@ -50,10 +50,13 @@ func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOp
 
 // nolint:gocyclo
 func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
+	fmt.Printf("🔧 ComputeCommands START: %d candidates\n", len(candidates))
 	if m.IsConsolidated() {
+		fmt.Printf("🔧 Already consolidated, returning\n")
 		return []Command{}, nil
 	}
 	candidates = m.sortCandidates(candidates)
+	fmt.Printf("🔧 After sorting: %d candidates\n", len(candidates))
 
 	// In order, filter out all candidates that would violate the budget.
 	// Since multi-node consolidation relies on the ordering of
@@ -81,12 +84,15 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		disruptableCandidates = append(disruptableCandidates, candidate)
 		disruptionBudgetMapping[candidate.NodePool.Name]--
 	}
+	fmt.Printf("🔧 Disruptable candidates: %d (filtered from %d)\n", len(disruptableCandidates), len(candidates))
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
 
+	fmt.Printf("🔧 Calling firstNConsolidationOption with %d candidates, maxParallel=%d\n", len(disruptableCandidates), maxParallel)
 	cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
+	fmt.Printf("🔧 firstNConsolidationOption returned, decision=%s, err=%v\n", cmd.Decision(), err)
 	if err != nil {
 		return []Command{}, err
 	}
@@ -101,7 +107,9 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		return []Command{}, nil
 	}
 
+	fmt.Printf("🔧 Calling validator.Validate for %d candidates...\n", len(cmd.Candidates))
 	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
+		fmt.Printf("🔧 Validation returned with error: %v\n", err)
 		if IsValidationError(err) {
 			reason := getValidationFailureReason(err)
 			cmd.EmitRejectedEvents(m.recorder, reason)
@@ -109,6 +117,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		}
 		return []Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
+	fmt.Printf("🔧 Validation succeeded, returning command\n")
 	return []Command{cmd}, nil
 }
 
@@ -116,25 +125,33 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 // NodeClaims are sorted by increasing disruption order which correlates to likelihood of being able to consolidate the node
 // nolint:gocyclo
 func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
+	fmt.Printf("🔧 firstNConsolidationOption START: %d candidates, max=%d\n", len(candidates), max)
 	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
+		fmt.Printf("🔧 Less than 2 candidates, returning early\n")
 		return Command{}, nil
 	}
 	min := 1
 	if len(candidates) <= max {
 		max = len(candidates) - 1
 	}
+	fmt.Printf("🔧 Binary search range: min=%d, max=%d\n", min, max)
 
 	lastSavedCommand := Command{}
 	// Set a timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
+	iteration := 0
 	for min <= max {
+		iteration++
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
+		fmt.Printf("🔧 Iteration %d: trying %d candidates (mid=%d, min=%d, max=%d)\n", iteration, len(candidatesToConsolidate), mid, min, max)
 
 		// Pass the timeout context to ensure sub-operations can be canceled
+		fmt.Printf("🔧   Calling computeConsolidation...\n")
 		cmd, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
+		fmt.Printf("🔧   computeConsolidation returned: decision=%s, err=%v\n", cmd.Decision(), err)
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
