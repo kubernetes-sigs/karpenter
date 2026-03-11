@@ -1,18 +1,19 @@
-# RFC: Allow disrupting nodes before creating replacements for static NodePools
+# RFC: Optionally allow disrupting nodes without creating replacements
 
 ## Overview
 
-This design proposes an optional setting on static NodePools that allows for applying disruption actions without needing to spin up a replacement Node. Currently, Karpenter's drift resolution workflow requires a replacement Node to be spun up and available before the drifted node is terminated, which is not viable in certain static capacity scenarios. 
+This design proposes an optional setting on NodePools that allows for applying disruption actions without needing to spin up a replacement Node. Currently, Karpenter's drift resolution workflow requires a replacement Node to be spun up and available before the drifted node is terminated, which is not viable in certain static capacity scenarios. 
 
 Fixes https://github.com/kubernetes-sigs/karpenter/issues/2905
 
 ## User stories
 
 1. As a cluster operator, I want Karpenter to automate drift resolutions for limited/rare capacity types (ex. GPU instances, constrained ODCRs etc.) without manual intervention.
+2. As a Karpenter operator, I want design decisions on API changes to be extensible to future use cases of node replacement strategies.
 
 ## Problem statement
 
-Karpenter is used to manage automated drift resolution  safely by cluster operators when rolling out new node software (ex. new OS upgrades, Kubernetes versions etc.). Karpenter provides multiple safety controls such as Node disruption budgets and do-not-disrupt annotations on Nodes and pods. In addition, Karpenter also spins up replacement nodes before starting eviction and termination of the drifted node. However, in some scenrios, users have very static pools of capacity to choose from - two common cases are expensive instance types (ex. GPUs) and capacity reservations (ex. Amazon ODCRs) where it is not desirable to spin up additional high-cost or limited capacity before scaling down the drifted node. 
+Karpenter is used to manage automated drift resolution  safely by cluster operators when rolling out new node software (ex. new OS upgrades, Kubernetes versions etc.). Karpenter provides multiple safety controls such as Node disruption budgets and do-not-disrupt annotations on Nodes and pods. In addition, Karpenter also spins up replacement nodes before starting eviction and termination of the drifted node. However, in some scenarios, users have very limited pools of capacity to choose from - two common cases are expensive instance types (ex. GPUs) and capacity reservations (ex. Amazon ODCRs) where it is not desirable to spin up additional high-cost / limited capacity before scaling down the drifted node. 
 
 ## Proposed design
 
@@ -20,7 +21,7 @@ The proposed design is a fairly simple extension over the current NodePool API a
 
 ** API changes ** 
 
-The API introduces a new field (driftResolutionPolicy) modeled in a similar manner to consolidationPolicy. This allows optional extensibility to other drift resolution policies such as in-place upgrades (example: https://github.com/aws/karpenter-provider-aws/issues/8735) 
+The API introduces a new field (driftResolutionPolicy) modeled in a similar manner to consolidationPolicy. This allows optional extensibility to other drift resolution policies (example in-place upgrades: https://github.com/aws/karpenter-provider-aws/issues/8735) 
 
 ```yaml
 apiVersion: karpenter.sh/v1
@@ -57,7 +58,7 @@ Pros:
 * Based on a quick read of the code, this should be a relatively easy change for all types
 
 Cons:
-* Higher risk exposure of feature rollout, especially on standard NodePools. However, we should be able to mitigate with proper feature flagging
+* Higher risk exposure of feature rollout, especially on standard NodePools. Will definitely need to gate with a feature flag (which is likely necessary anyway?)
 
 ** Implementation notes ** 
 
