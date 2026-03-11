@@ -72,6 +72,14 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) (sche
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {
+	// For ephemeral volumes on bound pods, skip topology requirements.
+	// Ephemeral volume PVCs are owned by the pod and deleted when the pod is deleted.
+	// When the pod is rescheduled (e.g., during consolidation), a new PVC will be created,
+	// so the old PVC's zone constraint should not constrain the new scheduling decision.
+	if volume.Ephemeral != nil && pod.Spec.NodeName != "" {
+		return nil, nil
+	}
+
 	pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, volume)
 	if err != nil {
 		return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
