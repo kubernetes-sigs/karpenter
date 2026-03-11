@@ -32,10 +32,10 @@ metadata:
   name: my-node-pool-1
 spec: 
   template:
-    disruption:
+    disruptionReadiness:
       # NEW!
-      disruptionProbes:
-      # All probes are HTTP requests modeled after https://pkg.go.dev/golang.org/x/build/kubernetes/api#HTTPGetAction
+      httpProbes:
+      # All probes are modeled after https://pkg.go.dev/golang.org/x/build/kubernetes/api#HTTPGetAction
       - path: "/healthz" # Note: Cluster operators can use more granular paths for specific NodePools if their health probe service supports it.
         port: 8080
         host: "myclusterhealth.svc.local"
@@ -45,7 +45,7 @@ spec:
 
 ## Design Options
 
-### Option 1: Response code based interpretation of actions - Recommended 
+### Option 1: Response code based interpretation of actions
         
 A response code of 200-202 will be accepted as 'healthy' allowing disruption actions to proceed. Any other response code (including inability to communicate with the health service) will block disruptions.  
 
@@ -56,7 +56,7 @@ Pros:
 Cons:
 * Hard to control actions granularly, for example: block disruption but allow consolidation or vice-versa. However, based on user stories so far, this might not be something worth optimizing for.
           
-### Option 2: Structured response format from health endpoint
+### Option 2: Structured response format from health endpoint (Recommended)
 
 In this option, the response body will be parsed to identify what actions can be taken. A sample response from the service may look like:
 
@@ -66,13 +66,13 @@ deniedActions:
 ``` 
 
 Pros:
-* More extensible in the future if other actions are supported?
+* More extensible in the future if control over drift and consolidation are desired
 
 Cons:
 * Marginally more complicated to implement.
  
 
-### Option 3: Cluster level actions API (Alternative interface) - Feedback requested
+### Option 3: Cluster level actions API (Alternative interface)
 
 In this option, instead of having a NodePool level health probe, a cluster level probe will be implemented by Cluster operators. The endpoint for this probe would be and exposed as part of Karpenter [settings](https://karpenter.sh/docs/reference/settings/). Operators would implement a single Karpenter Actions API per cluster with a response type as follows:
 
@@ -91,3 +91,4 @@ Pros:
 Cons:
 * Expansion of Karpenter settings which has been communicated previously as undesirable
 * Harder to debug reasons for drift failing since no constraints are visible in the NodePool CRD. In a world where NodePools are managed by different personas than clusters (ex. dedicated capacity provisioning teams), this can become a little more confusing. 
+
