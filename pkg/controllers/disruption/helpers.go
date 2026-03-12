@@ -94,6 +94,8 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 	pods = append(pods, deletingNodePods...)
 
+	stateNodes = filterStateNodesByCandidateNodeTypes(stateNodes, candidates)
+
 	var opts []scheduling.Options
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduling.IgnorePreferences)
@@ -167,6 +169,21 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 	rhsNames := sets.NewString(lo.Map(rhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
 	lhsNames := sets.NewString(lo.Map(lhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
 	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
+}
+
+// speed up computation by only considering nodes that have the same "node-type" label as the candidates
+func filterStateNodesByCandidateNodeTypes(stateNodes []*state.StateNode, candidates []*Candidate) []*state.StateNode {
+	candidateNodeTypes := sets.NewString(lo.FilterMap(candidates, func(c *Candidate, _ int) (string, bool) {
+		if c.Node != nil {
+			if nt, ok := c.Node.Labels["node-type"]; ok {
+				return nt, true
+			}
+		}
+		return "", false
+	})...)
+	return lo.Filter(stateNodes, func(n *state.StateNode, _ int) bool {
+		return candidateNodeTypes.Has(n.Labels()["node-type"])
+	})
 }
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool

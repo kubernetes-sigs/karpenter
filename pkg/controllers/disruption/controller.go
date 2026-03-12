@@ -176,7 +176,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	}
 
 	// All methods did nothing, so return nothing to do
-	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
+	log.FromContext(ctx).Info("no disruption actions performed, delaying next evaluation", "delay", time.Minute)
+	return reconciler.Result{RequeueAfter: time.Minute}, nil
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {

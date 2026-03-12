@@ -35,6 +35,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -255,6 +256,7 @@ func (p *Provisioner) NewScheduler(
 		}
 		return np.DeletionTimestamp.IsZero()
 	})
+	nodePools = filterNodePoolsByStateNodeNodeTypes(nodePools, stateNodes)
 	if len(nodePools) == 0 {
 		return nil, ErrNodePoolsNotFound
 	}
@@ -304,6 +306,19 @@ func (p *Provisioner) NewScheduler(
 	}
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
 	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
+}
+
+// speed up computation by only considering pools that have the same "node-type" label as the nodes
+func filterNodePoolsByStateNodeNodeTypes(nodePools []*v1.NodePool, stateNodes []*state.StateNode) []*v1.NodePool {
+	stateNodeTypes := sets.NewString(lo.FilterMap(stateNodes, func(n *state.StateNode, _ int) (string, bool) {
+		if nt, ok := n.Labels()["node-type"]; ok {
+			return nt, true
+		}
+		return "", false
+	})...)
+	return lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
+		return stateNodeTypes.Has(np.Spec.Template.Labels["node-type"])
+	})
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
