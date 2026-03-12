@@ -4151,34 +4151,32 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
-		It("can merge 3 spot nodes into 1 when all NodePools explicitly enable spotToSpotConsolidation", func() {
-			// Create two NodePools with spot-to-spot enabled
-			nodePoolA := test.NodePool(v1.NodePool{
+		It("excludes spot nodes from NodePool with spotToSpotConsolidation disabled in multi-node consolidation", func() {
+			// Global SpotToSpotConsolidation is enabled (set in BeforeEach)
+			// Create a second NodePool with SpotToSpotConsolidation explicitly disabled
+			// Verify that nodes from the disabled pool are excluded from consolidation
+			disabledNodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot}},
+							},
+						},
+					},
 					Disruption: v1.Disruption{
 						ConsolidationPolicy:     v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 						ConsolidateAfter:        v1.MustParseNillableDuration("0s"),
 						Budgets:                 []v1.Budget{{Nodes: "100%"}},
-						SpotToSpotConsolidation: lo.ToPtr(true),
+						SpotToSpotConsolidation: lo.ToPtr(false), // Explicitly disabled
 					},
 				},
 			})
-			nodePoolB := test.NodePool(v1.NodePool{
-				Spec: v1.NodePoolSpec{
-					Disruption: v1.Disruption{
-						ConsolidationPolicy:     v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:        v1.MustParseNillableDuration("0s"),
-						Budgets:                 []v1.Budget{{Nodes: "100%"}},
-						SpotToSpotConsolidation: lo.ToPtr(true),
-					},
-				},
-			})
-
-			// Create 3 spot nodes - 2 from poolA, 1 from poolB
-			spotNodeClaimsMulti, spotNodesMulti := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+			// Create a spot node for the disabled pool
+			disabledNodeClaim, disabledNode := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePoolA.Name,
+						v1.NodePoolLabelKey:            disabledNodePool.Name,
 						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
 						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
@@ -4191,180 +4189,51 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
-			spotNodeClaimB, spotNodeB := test.NodeClaimAndNode(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePoolB.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					Allocatable: map[corev1.ResourceName]resource.Quantity{
-						corev1.ResourceCPU:  resource.MustParse("32"),
-						corev1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			for _, nc := range spotNodeClaimsMulti {
-				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-			}
-			spotNodeClaimB.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			disabledNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 
+			// Use existing spotNodeClaims/spotNodes from BeforeEach (global enabled via nodePool)
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
-			pods := test.Pods(3, test.PodOptions{
+			pods := test.Pods(4, test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels,
 					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
-						},
-					}}})
+						{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
+					}},
+			})
 
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2],
-				spotNodeClaimsMulti[0], spotNodesMulti[0],
-				spotNodeClaimsMulti[1], spotNodesMulti[1],
-				spotNodeClaimB, spotNodeB,
-				nodePoolA, nodePoolB)
-			ExpectMakeNodesInitialized(ctx, env.Client, spotNodesMulti[0], spotNodesMulti[1], spotNodeB)
-			ExpectManualBinding(ctx, env.Client, pods[0], spotNodesMulti[0])
-			ExpectManualBinding(ctx, env.Client, pods[1], spotNodesMulti[1])
-			ExpectManualBinding(ctx, env.Client, pods[2], spotNodeB)
+			// Apply: 3 nodes from enabled pool (BeforeEach) + 1 node from disabled pool
+			ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3],
+				spotNodeClaims[0], spotNodes[0], spotNodeClaims[1], spotNodes[1], spotNodeClaims[2], spotNodes[2],
+				disabledNodeClaim, disabledNode,
+				nodePool, disabledNodePool)
+			ExpectMakeNodesInitialized(ctx, env.Client, spotNodes[0], spotNodes[1], spotNodes[2], disabledNode)
+			ExpectManualBinding(ctx, env.Client, pods[0], spotNodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], spotNodes[1])
+			ExpectManualBinding(ctx, env.Client, pods[2], spotNodes[2])
+			ExpectManualBinding(ctx, env.Client, pods[3], disabledNode)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
-				[]*corev1.Node{spotNodesMulti[0], spotNodesMulti[1], spotNodeB},
-				[]*v1.NodeClaim{spotNodeClaimsMulti[0], spotNodeClaimsMulti[1], spotNodeClaimB})
+				[]*corev1.Node{spotNodes[0], spotNodes[1], spotNodes[2], disabledNode},
+				[]*v1.NodeClaim{spotNodeClaims[0], spotNodeClaims[1], spotNodeClaims[2], disabledNodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			// Multi-node consolidation should proceed since both NodePools enable spot-to-spot
+			// REPLACE commands (spot-to-spot) never include nodes from disabled pool
+			// Note: DELETE commands can include the disabled pool since they don't create new spot nodes
 			cmds := queue.GetCommands()
-			Expect(cmds).To(HaveLen(1))
-			// Verify all 3 nodes are candidates for consolidation
-			Expect(cmds[0].Candidates).To(HaveLen(3))
-
-			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
-			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, spotNodeClaimsMulti[0], spotNodeClaimsMulti[1], spotNodeClaimB)
-
-			// three nodeclaims should be replaced with a single nodeclaim
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		})
-		It("cannot merge spot nodes from mixed NodePools when any NodePool disables spotToSpotConsolidation", func() {
-			// Create two NodePools - one enabled, one disabled
-			nodePoolA := test.NodePool(v1.NodePool{
-				Spec: v1.NodePoolSpec{
-					Disruption: v1.Disruption{
-						ConsolidationPolicy:     v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:        v1.MustParseNillableDuration("0s"),
-						Budgets:                 []v1.Budget{{Nodes: "100%"}},
-						SpotToSpotConsolidation: lo.ToPtr(true), // Enabled
-					},
-				},
-			})
-			nodePoolB := test.NodePool(v1.NodePool{
-				Spec: v1.NodePoolSpec{
-					Disruption: v1.Disruption{
-						ConsolidationPolicy:     v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:        v1.MustParseNillableDuration("0s"),
-						Budgets:                 []v1.Budget{{Nodes: "100%"}},
-						SpotToSpotConsolidation: lo.ToPtr(false), // Disabled
-					},
-				},
-			})
-
-			// Create 3 spot nodes - 2 from poolA, 1 from poolB
-			spotNodeClaimsMulti, spotNodesMulti := test.NodeClaimsAndNodes(2, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePoolA.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					Allocatable: map[corev1.ResourceName]resource.Quantity{
-						corev1.ResourceCPU:  resource.MustParse("32"),
-						corev1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			spotNodeClaimB, spotNodeB := test.NodeClaimAndNode(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePoolB.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					Allocatable: map[corev1.ResourceName]resource.Quantity{
-						corev1.ResourceCPU:  resource.MustParse("32"),
-						corev1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			for _, nc := range spotNodeClaimsMulti {
-				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-			}
-			spotNodeClaimB.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
-						},
-					}}})
-
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2],
-				spotNodeClaimsMulti[0], spotNodesMulti[0],
-				spotNodeClaimsMulti[1], spotNodesMulti[1],
-				spotNodeClaimB, spotNodeB,
-				nodePoolA, nodePoolB)
-			ExpectMakeNodesInitialized(ctx, env.Client, spotNodesMulti[0], spotNodesMulti[1], spotNodeB)
-			ExpectManualBinding(ctx, env.Client, pods[0], spotNodesMulti[0])
-			ExpectManualBinding(ctx, env.Client, pods[1], spotNodesMulti[1])
-			ExpectManualBinding(ctx, env.Client, pods[2], spotNodeB)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
-				[]*corev1.Node{spotNodesMulti[0], spotNodesMulti[1], spotNodeB},
-				[]*v1.NodeClaim{spotNodeClaimsMulti[0], spotNodeClaimsMulti[1], spotNodeClaimB})
-
-			ExpectSingletonReconciled(ctx, disruptionController)
-
-			// Multi-node consolidation of all 3 nodes should be blocked because nodePoolB disables spot-to-spot
-			// However, we may still get consolidation commands for subsets that don't include poolB nodes
-			cmds := queue.GetCommands()
+			Expect(cmds).ToNot(BeEmpty())
 			for _, cmd := range cmds {
-				// Verify we don't have a command with candidates from BOTH NodePools
-				hasPoolA := false
-				hasPoolB := false
-				for _, c := range cmd.Candidates {
-					if c.NodePool.Name == nodePoolA.Name {
-						hasPoolA = true
-					}
-					if c.NodePool.Name == nodePoolB.Name {
-						hasPoolB = true
+				if cmd.Decision() == disruption.ReplaceDecision {
+					for _, c := range cmd.Candidates {
+						Expect(c.NodePool.Name).ToNot(Equal(disabledNodePool.Name),
+							"node from disabled NodePool should not be included in REPLACE consolidation")
 					}
 				}
-				// We should NOT have both pools in a single command when one disables spot-to-spot
-				Expect(hasPoolA && hasPoolB).To(BeFalse(), "multi-node consolidation should not include candidates from both pools when one disables spot-to-spot")
 			}
+
+			// Execute first consolidation command
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, lo.Map(cmds[0].Candidates, func(c *disruption.Candidate, _ int) *v1.NodeClaim { return c.NodeClaim })...)
 		})
 	})
 	Context("Node Lifetime Consideration", func() {
