@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -47,15 +48,79 @@ import (
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
+// IsWithinConsolidationGracePeriod checks if a node is within its consolidation grace period.
+// A node is within the grace period if:
+// 1. The NodePool has consolidationGracePeriod configured
+// 2. The node had a pod event (add/remove) within the grace period duration
+//
+// During the grace period, the node is "invisible" to consolidation:
+// - It cannot be a consolidation source (pods can't be moved out)
+// - It cannot be a consolidation destination (pods can't be moved in)
+// The timer resets every time there is a pod event on the node.
+func IsWithinConsolidationGracePeriod(n *state.StateNode, nodePoolMap map[string]*v1.NodePool, clk clock.Clock) bool {
+	if n.NodeClaim == nil {
+		return false
+	}
+
+	nodePoolName := n.Labels()[v1.NodePoolLabelKey]
+	if nodePoolName == "" {
+		return false
+	}
+
+	nodePool, ok := nodePoolMap[nodePoolName]
+	if !ok {
+		return false
+	}
+
+	// Check if consolidationGracePeriod is configured
+	if nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration == nil {
+		return false
+	}
+
+	gracePeriod := lo.FromPtr(nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration)
+	if gracePeriod == 0 {
+		return false
+	}
+
+	// Get the last pod event time
+	// Use LastPodEventTime if available, otherwise use initialization time
+	var timeToCheck time.Time
+	if !n.NodeClaim.Status.LastPodEventTime.IsZero() {
+		timeToCheck = n.NodeClaim.Status.LastPodEventTime.Time
+	} else {
+		// Use initialization time as fallback
+		initialized := n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
+		if initialized == nil || !initialized.IsTrue() {
+			// Node not initialized yet, consider it within grace period to be safe
+			return true
+		}
+		timeToCheck = initialized.LastTransitionTime.Time
+	}
+
+	// Check if we're within the grace period
+	return clk.Since(timeToCheck) < gracePeriod
+}
+
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	candidates ...*Candidate,
+	nodePoolMap map[string]*v1.NodePool, clk clock.Clock, candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.DeepCopyNodes()
 	deletingNodes := nodes.Deleting()
 	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool {
-		return !candidateNames.Has(n.Name())
+		// Filter out candidates (they're being consolidated)
+		if candidateNames.Has(n.Name()) {
+			return false
+		}
+		// Filter out nodes within consolidationGracePeriod (invisible to consolidation)
+		// These nodes cannot be consolidation destinations
+		if IsWithinConsolidationGracePeriod(n, nodePoolMap, clk) {
+			log.FromContext(ctx).V(1).Info("excluding node from consolidation destinations due to consolidationGracePeriod",
+				"node", n.Name(), "nodePool", n.Labels()[v1.NodePoolLabelKey])
+			return false
+		}
+		return true
 	})
 
 	// We do one final check to ensure that the node that we are attempting to consolidate isn't
@@ -182,6 +247,13 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	candidates := lo.FilterMap(cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
+		// Filter out nodes within consolidationGracePeriod (invisible to consolidation)
+		// These nodes cannot be consolidation sources
+		if IsWithinConsolidationGracePeriod(n, nodePoolMap, clk) {
+			log.FromContext(ctx).V(1).Info("excluding node from consolidation candidates due to consolidationGracePeriod",
+				"node", n.Name(), "nodePool", n.Labels()[v1.NodePoolLabelKey])
+			return nil, false
+		}
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil
 	})
