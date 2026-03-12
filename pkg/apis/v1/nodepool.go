@@ -111,12 +111,14 @@ type Disruption struct {
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
 	//nolint:kubeapilinter
 	// SpotToSpotConsolidation enables or disables spot-to-spot consolidation for this NodePool.
-	// When enabled, Karpenter can replace spot nodes with other spot nodes for cost optimization.
+	// When enabled, Karpenter can replace spot nodes with cheaper spot nodes for cost optimization.
 	// When not set (nil), the global SpotToSpotConsolidation feature gate is used.
+	// This only affects "replace" consolidation (launching new spot nodes); "delete" consolidation
+	// (moving pods to existing nodes without launching new ones) is unaffected by this setting.
 	// For multi-node consolidation involving multiple NodePools, ALL source NodePools
-	// must have this enabled for spot-to-spot consolidation to occur.
+	// must have this enabled for spot-to-spot replacement to occur.
 	// +optional
-	SpotToSpotConsolidation *bool `json:"spotToSpotConsolidation,omitempty"`
+	SpotToSpotConsolidation *bool `json:"spotToSpotConsolidation,omitempty" hash:"ignore"`
 }
 
 // Budget defines when Karpenter will restrict the
