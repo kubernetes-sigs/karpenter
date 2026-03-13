@@ -100,11 +100,12 @@ type Queue struct {
 	cluster             *state.Cluster
 	clock               clock.Clock
 	provisioner         *provisioning.Provisioner
+	tracker             *Tracker
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
 func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner,
+	provisioner *provisioning.Provisioner, tracker *Tracker,
 ) *Queue {
 	queue := &Queue{
 		// nolint:staticcheck
@@ -116,6 +117,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		cluster:             cluster,
 		clock:               clock,
 		provisioner:         provisioner,
+		tracker:             tracker,
 	}
 	return queue
 }
@@ -327,6 +329,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	if markDisruptedErr != nil && (len(cmd.Replacements) > 0 || len(markedCandidates) == 0) {
 		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", markDisruptedErr), "command-id", cmd.ID)
 	}
+	_ = q.tracker.AddCommand(ctx, cmd)
 
 	// Update the command to only consider the successfully MarkDisrupted candidates
 	cmd.Candidates = markedCandidates

@@ -233,7 +233,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 		res = append(res, &metrics.StoreMetric{
 			GaugeMetric: ClusterUtilization,
 			Value:       utilizationPercentage,
-			Labels:      map[string]string{metrics.ResourceTypeLabel: resourceNameToString(resourceName)},
+			Labels:      map[string]string{metrics.ResourceTypeLabel: resources.ResourceNameToString(resourceName)},
 		})
 	}
 
@@ -253,7 +253,7 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 			res = append(res, &metrics.StoreMetric{
 				GaugeMetric: gaugeMetric,
 				Value:       lo.Ternary(resourceName == corev1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
-				Labels:      getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName)),
+				Labels:      getNodeLabelsWithResourceType(n.Node, resources.ResourceNameToString(resourceName)),
 			})
 		}
 	}
@@ -294,8 +294,4 @@ func getWellKnownLabels() map[string]string {
 		}
 	}
 	return labels
-}
-
-func resourceNameToString(resourceName corev1.ResourceName) string {
-	return strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_")
 }
