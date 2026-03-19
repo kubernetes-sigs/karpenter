@@ -17,6 +17,9 @@ limitations under the License.
 package lifecycle_test
 
 import (
+	"context"
+	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/awslabs/operatorpkg/object"
@@ -27,8 +30,11 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -647,5 +653,229 @@ var _ = Describe("Registration", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+	})
+	Context("RegistrationHooks", func() {
+		It("should complete registration when a single hook passes", func() {
+			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				[]cloudprovider.RegistrationHook{
+					cloudprovider.RegistrationHookFunc{
+						HookName: "always-pass",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							return true, "", nil
+						},
+					},
+				},
+			)
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+		})
+		It("should defer registration when a hook returns false", func() {
+			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				[]cloudprovider.RegistrationHook{
+					cloudprovider.RegistrationHookFunc{
+						HookName: "capacity-reservation",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							return false, "waiting for capacity reservation", nil
+						},
+					},
+				},
+			)
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown()).To(BeTrue())
+			cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
+			Expect(cond.Reason).To(Equal("RegistrationHookPending"))
+			Expect(cond.Message).To(ContainSubstring("capacity-reservation"))
+			Expect(cond.Message).To(ContainSubstring("waiting for capacity reservation"))
+			Expect(nodeClaim.Status.NodeName).To(Equal(""))
+
+			// Verify the node still has the unregistered taint
+			node = ExpectExists(ctx, env.Client, node)
+			Expect(node.Spec.Taints).To(ContainElement(v1.UnregisteredNoExecuteTaint))
+		})
+		It("should return error when a hook returns an error", func() {
+			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				[]cloudprovider.RegistrationHook{
+					cloudprovider.RegistrationHookFunc{
+						HookName: "failing-hook",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							return false, "", fmt.Errorf("cloud provider API error")
+						},
+					},
+				},
+			)
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			_ = ExpectObjectReconcileFailed(ctx, env.Client, hookController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown()).To(BeTrue())
+			Expect(nodeClaim.Status.NodeName).To(Equal(""))
+		})
+		It("should defer registration when the second hook returns false with multiple hooks", func() {
+			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				[]cloudprovider.RegistrationHook{
+					cloudprovider.RegistrationHookFunc{
+						HookName: "pass-hook",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							return true, "", nil
+						},
+					},
+					cloudprovider.RegistrationHookFunc{
+						HookName: "fail-hook",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							return false, "not ready yet", nil
+						},
+					},
+				},
+			)
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown()).To(BeTrue())
+			cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
+			Expect(cond.Message).To(ContainSubstring("fail-hook"))
+			Expect(nodeClaim.Status.NodeName).To(Equal(""))
+		})
+		It("should complete registration when multiple hooks all pass", func() {
+			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				[]cloudprovider.RegistrationHook{
+					cloudprovider.RegistrationHookFunc{
+						HookName: "hook-one",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							return true, "", nil
+						},
+					},
+					cloudprovider.RegistrationHookFunc{
+						HookName: "hook-two",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							return true, "", nil
+						},
+					},
+				},
+			)
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+		})
+		It("should not call subsequent hooks when an earlier hook fails", func() {
+			var secondHookCalls atomic.Int32
+			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				[]cloudprovider.RegistrationHook{
+					cloudprovider.RegistrationHookFunc{
+						HookName: "blocking-hook",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							return false, "blocked", nil
+						},
+					},
+					cloudprovider.RegistrationHookFunc{
+						HookName: "should-not-be-called",
+						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+							secondHookCalls.Add(1)
+							return true, "", nil
+						},
+					},
+				},
+			)
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+
+			Expect(secondHookCalls.Load()).To(Equal(int32(0)))
+		})
+		It("should complete registration with nil hooks slice", func() {
+			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil)
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+		})
 	})
 })

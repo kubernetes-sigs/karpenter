@@ -103,16 +103,25 @@ type CloudProvider interface {
 // karpenter.sh/unregistered taint. All registered hooks must return true before
 // the taint is removed and registration completes.
 type RegistrationHook interface {
+	// Name for the hook.
+	Name() string
 	// RegistrationCheck returns true if this hook's preconditions are satisfied and
 	// registration can proceed. If false, reason describes what's pending.
 	RegistrationCheck(ctx context.Context, nodeClaim *v1.NodeClaim) (ok bool, reason string, err error)
 }
 
 // RegistrationHookFunc is a function adapter for RegistrationHook
-type RegistrationHookFunc func(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, string, error)
+type RegistrationHookFunc struct {
+	HookName string
+	Func     func(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, string, error)
+}
+
+func (f RegistrationHookFunc) Name() string {
+	return f.HookName
+}
 
 func (f RegistrationHookFunc) RegistrationCheck(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, string, error) {
-	return f(ctx, nodeClaim)
+	return f.Func(ctx, nodeClaim)
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
