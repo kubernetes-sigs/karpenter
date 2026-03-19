@@ -113,9 +113,9 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 // returned with the status condition updated. Returns blocked=false if all hooks pass.
 func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, bool, error) {
 	for _, hook := range r.registrationHooks {
-		ok, reason, hookErr := hook.RegistrationCheck(ctx, nodeClaim)
-		if hookErr != nil {
-			return reconcile.Result{}, false, fmt.Errorf("registration hook %q check failed, %w", hook.Name(), hookErr)
+		ok, reason, err := hook.RegistrationCheck(ctx, nodeClaim)
+		if err != nil {
+			return reconcile.Result{}, false, fmt.Errorf("registration hook %q check failed, %w", hook.Name(), err)
 		}
 		if !ok {
 			log.FromContext(ctx).V(1).Info("registration hook not satisfied", "hook", hook.Name(), "reason", reason)

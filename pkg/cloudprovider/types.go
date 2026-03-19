@@ -101,7 +101,7 @@ type CloudProvider interface {
 
 // RegistrationHook is implemented by cloud providers to gate the removal of the
 // karpenter.sh/unregistered taint. All registered hooks must return true before
-// the taint is removed and registration completes.
+// the taint is removed and node registration completes.
 type RegistrationHook interface {
 	// Name for the hook.
 	Name() string
