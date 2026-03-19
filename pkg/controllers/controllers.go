@@ -66,12 +66,14 @@ import (
 )
 
 type ControllerOptions struct {
-	registrationHooks []cloudprovider.RegistrationHook
+	registrationHooks []cloudprovider.NodeLifecycleHook
 }
 
-// WithRegistrationHook registers a hook from the cloud provider that gates the removal of the
-// karpenter.sh/unregistered taint during node registration.
-func WithRegistrationHook(hook cloudprovider.RegistrationHook) option.Function[ControllerOptions] {
+// WithRegistrationHook registers a hook that blocks Karpenter from marking a node as registered
+// until the hook's preconditions are satisfied. This is useful when a cloud provider needs to
+// apply well-known labels asynchronously after instance launch (e.g., capacity reservation labels
+// used by topology spread constraints).
+func WithRegistrationHook(hook cloudprovider.NodeLifecycleHook) option.Function[ControllerOptions] {
 	return func(o *ControllerOptions) {
 		o.registrationHooks = append(o.registrationHooks, hook)
 	}
