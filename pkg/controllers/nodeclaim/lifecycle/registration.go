@@ -83,11 +83,8 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KObj(node)))
 	// Check all registration hooks before proceeding with node sync.
 	// If any hook returns false, registration is deferred and the unregistered taint remains.
-	if result, err := r.checkRegistrationHooks(ctx, nodeClaim); err != nil || result != nil {
-		if result != nil {
-			return *result, nil
-		}
-		return reconcile.Result{}, err
+	if result, blocked, err := r.checkRegistrationHooks(ctx, nodeClaim); blocked || err != nil {
+		return result, err
 	}
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
 		if errors.IsConflict(err) {
@@ -112,22 +109,21 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 }
 
 // checkRegistrationHooks evaluates all registration hooks in order. If a hook returns an error,
-// it is returned. If a hook returns false (not ready), a requeue result is returned and the
-// status condition is updated. Returns (nil, nil) if all hooks pass.
-func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1.NodeClaim) (*reconcile.Result, error) {
+// it is returned. If a hook returns false (not ready), blocked is true and a requeue result is
+// returned with the status condition updated. Returns blocked=false if all hooks pass.
+func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, bool, error) {
 	for _, hook := range r.registrationHooks {
 		ok, reason, hookErr := hook.RegistrationCheck(ctx, nodeClaim)
 		if hookErr != nil {
-			return nil, fmt.Errorf("registration hook %q check failed, %w", hook.Name(), hookErr)
+			return reconcile.Result{}, false, fmt.Errorf("registration hook %q check failed, %w", hook.Name(), hookErr)
 		}
 		if !ok {
 			log.FromContext(ctx).V(1).Info("registration hook not satisfied", "hook", hook.Name(), "reason", reason)
 			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "RegistrationHookPending", fmt.Sprintf("[%s] %s", hook.Name(), reason))
-			result := reconcile.Result{RequeueAfter: registrationHookRequeueInterval}
-			return &result, nil
+			return reconcile.Result{RequeueAfter: registrationHookRequeueInterval}, true, nil
 		}
 	}
-	return nil, nil
+	return reconcile.Result{}, false, nil
 }
 
 // updateNodePoolRegistrationHealth adds a positive value to the nodepool buffer that stores node
