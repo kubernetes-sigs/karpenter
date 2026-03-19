@@ -19,6 +19,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -42,11 +44,13 @@ import (
 )
 
 type Registration struct {
-	kubeClient client.Client
-	recorder   events.Recorder
-	npState    *nodepoolhealth.State
+	kubeClient        client.Client
+	recorder          events.Recorder
+	npState           *nodepoolhealth.State
+	registrationHooks []cloudprovider.RegistrationHook
 }
 
+//nolint:gocyclo
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered); !cond.IsUnknown() {
 		// Ensure that we always set the status condition to the latest generation
@@ -75,6 +79,19 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 		r.recorder.Publish(UnregisteredTaintMissingEvent(nodeClaim))
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KObj(node)))
+	// Check all registration hooks before proceeding with node sync.
+	// If any hook returns false, registration is deferred and the unregistered taint remains.
+	for _, hook := range r.registrationHooks {
+		ok, reason, hookErr := hook.RegistrationCheck(ctx, nodeClaim)
+		if hookErr != nil {
+			return reconcile.Result{}, fmt.Errorf("registration hook check failed, %w", hookErr)
+		}
+		if !ok {
+			log.FromContext(ctx).V(1).Info("registration hook not satisfied", "reason", reason)
+			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "RegistrationHookPending", reason)
+			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		}
+	}
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil

@@ -99,6 +99,22 @@ type CloudProvider interface {
 	GetSupportedNodeClasses() []status.Object
 }
 
+// RegistrationHook is implemented by cloud providers to gate the removal of the
+// karpenter.sh/unregistered taint. All registered hooks must return true before
+// the taint is removed and registration completes.
+type RegistrationHook interface {
+	// RegistrationCheck returns true if this hook's preconditions are satisfied and
+	// registration can proceed. If false, reason describes what's pending.
+	RegistrationCheck(ctx context.Context, nodeClaim *v1.NodeClaim) (ok bool, reason string, err error)
+}
+
+// RegistrationHookFunc is a function adapter for RegistrationHook
+type RegistrationHookFunc func(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, string, error)
+
+func (f RegistrationHookFunc) RegistrationCheck(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, string, error) {
+	return f(ctx, nodeClaim)
+}
+
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
 // +k8s:deepcopy-gen=true
