@@ -110,20 +110,6 @@ type RegistrationHook interface {
 	RegistrationCheck(ctx context.Context, nodeClaim *v1.NodeClaim) (ok bool, reason string, err error)
 }
 
-// RegistrationHookFunc is a function adapter for RegistrationHook
-type RegistrationHookFunc struct {
-	HookName string
-	Func     func(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, string, error)
-}
-
-func (f RegistrationHookFunc) Name() string {
-	return f.HookName
-}
-
-func (f RegistrationHookFunc) RegistrationCheck(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, string, error) {
-	return f.Func(ctx, nodeClaim)
-}
-
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
 // +k8s:deepcopy-gen=true

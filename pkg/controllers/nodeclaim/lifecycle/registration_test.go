@@ -41,6 +41,16 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
+type testHook struct {
+	name string
+	fn   func(context.Context, *v1.NodeClaim) (bool, string, error)
+}
+
+func (h testHook) Name() string { return h.name }
+func (h testHook) RegistrationCheck(ctx context.Context, nc *v1.NodeClaim) (bool, string, error) {
+	return h.fn(ctx, nc)
+}
+
 var _ = Describe("Registration", func() {
 	var nodePool *v1.NodePool
 	var taints []corev1.Taint
@@ -659,9 +669,9 @@ var _ = Describe("Registration", func() {
 			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.RegistrationHook{
-					cloudprovider.RegistrationHookFunc{
-						HookName: "always-pass",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "always-pass",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							return true, "", nil
 						},
 					},
@@ -688,9 +698,9 @@ var _ = Describe("Registration", func() {
 			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.RegistrationHook{
-					cloudprovider.RegistrationHookFunc{
-						HookName: "capacity-reservation",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "capacity-reservation",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							return false, "waiting for capacity reservation", nil
 						},
 					},
@@ -725,9 +735,9 @@ var _ = Describe("Registration", func() {
 			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.RegistrationHook{
-					cloudprovider.RegistrationHookFunc{
-						HookName: "failing-hook",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "failing-hook",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							return false, "", fmt.Errorf("cloud provider API error")
 						},
 					},
@@ -754,15 +764,15 @@ var _ = Describe("Registration", func() {
 			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.RegistrationHook{
-					cloudprovider.RegistrationHookFunc{
-						HookName: "pass-hook",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "pass-hook",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							return true, "", nil
 						},
 					},
-					cloudprovider.RegistrationHookFunc{
-						HookName: "fail-hook",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "fail-hook",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							return false, "not ready yet", nil
 						},
 					},
@@ -791,15 +801,15 @@ var _ = Describe("Registration", func() {
 			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.RegistrationHook{
-					cloudprovider.RegistrationHookFunc{
-						HookName: "hook-one",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "hook-one",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							return true, "", nil
 						},
 					},
-					cloudprovider.RegistrationHookFunc{
-						HookName: "hook-two",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "hook-two",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							return true, "", nil
 						},
 					},
@@ -827,15 +837,15 @@ var _ = Describe("Registration", func() {
 			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.RegistrationHook{
-					cloudprovider.RegistrationHookFunc{
-						HookName: "blocking-hook",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "blocking-hook",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							return false, "blocked", nil
 						},
 					},
-					cloudprovider.RegistrationHookFunc{
-						HookName: "should-not-be-called",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "should-not-be-called",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							secondHookCalls.Add(1)
 							return true, "", nil
 						},
@@ -862,9 +872,9 @@ var _ = Describe("Registration", func() {
 			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.RegistrationHook{
-					cloudprovider.RegistrationHookFunc{
-						HookName: "eventually-ready",
-						Func: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
+					testHook{
+						name: "eventually-ready",
+						fn: func(_ context.Context, _ *v1.NodeClaim) (bool, string, error) {
 							if ready.Load() {
 								return true, "", nil
 							}
