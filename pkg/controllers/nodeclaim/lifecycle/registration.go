@@ -94,7 +94,6 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 		})
 		node.Labels[v1.NodeRegisteredLabelKey] = "true"
 	}
-	// Patch the node with all accumulated mutations in a single API call.
 	if !equality.Semantic.DeepEqual(stored, node) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
@@ -128,6 +127,8 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 // checkRegistrationHooks evaluates all registration hooks in parallel. If any hook returns an error,
 // it is returned. If any hook signals it is not ready (non-empty result), the status condition is
 // updated to list all pending hooks and the shortest requeue interval is returned.
+//
+//nolint:gocyclo
 func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if len(r.registrationHooks) == 0 {
 		return reconcile.Result{}, nil
