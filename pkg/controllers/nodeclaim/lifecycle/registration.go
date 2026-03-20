@@ -88,7 +88,6 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	// If any hook is not ready, registration is deferred and the unregistered taint remains.
 	hooksResult, hookErrors := r.checkRegistrationHooks(ctx, nodeClaim)
 	if lo.IsEmpty(hooksResult) && hookErrors == nil {
-		// Remove karpenter.sh/unregistered taint
 		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 			return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
 		})
@@ -143,29 +142,25 @@ func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1
 		}
 	})
 
-	// Collect pending hook names and compute the shortest requeue interval
+	// Collect pending and errored hook names and compute the shortest requeue interval
 	var pendingHooks []string
 	mergedResult := reconcile.Result{}
 	for i, result := range results {
-		if errs[i] != nil {
-			continue
-		}
-		if !lo.IsEmpty(result) {
+		if errs[i] != nil || !lo.IsEmpty(result) {
 			pendingHooks = append(pendingHooks, r.registrationHooks[i].Name())
-			if mergedResult.RequeueAfter == 0 || (result.RequeueAfter > 0 && result.RequeueAfter < mergedResult.RequeueAfter) {
-				mergedResult.RequeueAfter = result.RequeueAfter
+			if errs[i] == nil {
+				if mergedResult.RequeueAfter == 0 || (result.RequeueAfter > 0 && result.RequeueAfter < mergedResult.RequeueAfter) {
+					mergedResult.RequeueAfter = result.RequeueAfter
+				}
+				mergedResult.Requeue = mergedResult.Requeue || result.Requeue //nolint:staticcheck
 			}
-			mergedResult.Requeue = mergedResult.Requeue || result.Requeue //nolint:staticcheck
 		}
 	}
 
-	if err := multierr.Combine(errs...); err != nil {
-		return mergedResult, err
-	}
 	if len(pendingHooks) > 0 {
-		log.FromContext(ctx).V(1).Info("registration hooks not satisfied", "hooks", pendingHooks)
+		log.FromContext(ctx).V(1).Info("awaiting registration hooks", "hooks", pendingHooks)
 		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "RegistrationHookPending", strings.Join(pendingHooks, ", "))
-		return mergedResult, nil
+		return mergedResult, multierr.Combine(errs...)
 	}
 	return reconcile.Result{}, nil
 }
