@@ -155,7 +155,7 @@ func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1
 			if mergedResult.RequeueAfter == 0 || (result.RequeueAfter > 0 && result.RequeueAfter < mergedResult.RequeueAfter) {
 				mergedResult.RequeueAfter = result.RequeueAfter
 			}
-			mergedResult.Requeue = mergedResult.Requeue || result.Requeue
+			mergedResult.Requeue = mergedResult.Requeue || result.Requeue //nolint:staticcheck
 		}
 	}
 
