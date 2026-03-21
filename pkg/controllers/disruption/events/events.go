@@ -18,6 +18,7 @@ package events
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/text/cases"
@@ -93,6 +94,10 @@ func Unconsolidatable(node *corev1.Node, nodeClaim *v1.NodeClaim, msg string) []
 // Blocked is an event that informs the user that a NodeClaim/Node combination is blocked on deprovisioning
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
 func Blocked(node *corev1.Node, nodeClaim *v1.NodeClaim, msg string) (evs []events.Event) {
+	// Don't emit events for do-not-disrupt annotation blocking since this is an intentional user action
+	if strings.Contains(msg, v1.DoNotDisruptAnnotationKey) {
+		return nil
+	}
 	if node != nil {
 		evs = append(evs, events.Event{
 			InvolvedObject: node,
