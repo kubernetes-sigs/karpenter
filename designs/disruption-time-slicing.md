@@ -1,4 +1,4 @@
-# Disruption Controller Time-Slicing for Consolidation Throughput
+# CFS-Based Disruption Method Scheduling
 
 ## Motivation
 
