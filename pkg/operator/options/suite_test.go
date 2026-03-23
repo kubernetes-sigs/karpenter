@@ -62,6 +62,7 @@ var _ = Describe("Options", func() {
 		"LOG_ERROR_OUTPUT_PATHS",
 		"BATCH_MAX_DURATION",
 		"BATCH_IDLE_DURATION",
+		"DISRUPTION_POLLING_PERIOD",
 		"PREFERENCE_POLICY",
 		"MIN_VALUES_POLICY",
 		"FEATURE_GATES",
@@ -118,6 +119,7 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:              lo.ToPtr("stderr"),
 				BatchMaxDuration:                 lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:                lo.ToPtr(time.Second),
+				DisruptionPollingPeriod:          lo.ToPtr(10 * time.Second),
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
@@ -153,6 +155,7 @@ var _ = Describe("Options", func() {
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
+				"--disruption-polling-period", "5s",
 				"--preference-policy", "Ignore",
 				"--min-values-policy", "BestEffort",
 				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true",
@@ -176,6 +179,7 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:              lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:                lo.ToPtr(5 * time.Second),
+				DisruptionPollingPeriod:          lo.ToPtr(5 * time.Second),
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyIgnore),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
@@ -207,6 +211,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("DISRUPTION_POLLING_PERIOD", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true")
@@ -234,6 +239,7 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:              lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:                lo.ToPtr(5 * time.Second),
+				DisruptionPollingPeriod:          lo.ToPtr(5 * time.Second),
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyIgnore),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
@@ -260,6 +266,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("DISRUPTION_POLLING_PERIOD", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true")
@@ -294,6 +301,7 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:              lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:                lo.ToPtr(5 * time.Second),
+				DisruptionPollingPeriod:          lo.ToPtr(5 * time.Second),
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
@@ -398,6 +406,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.LogErrorOutputPaths).To(Equal(optsB.LogErrorOutputPaths))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
 	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
+	Expect(optsA.DisruptionPollingPeriod).To(Equal(optsB.DisruptionPollingPeriod))
 	Expect(optsA.PreferencePolicy).To(Equal(optsB.PreferencePolicy))
 	Expect(optsA.MinValuesPolicy).To(Equal(optsB.MinValuesPolicy))
 	Expect(optsA.FeatureGates.ReservedCapacity).To(Equal(optsB.FeatureGates.ReservedCapacity))
