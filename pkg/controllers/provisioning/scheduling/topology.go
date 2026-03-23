@@ -109,11 +109,32 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 	domainGroups := map[string]TopologyDomainGroup{}
 	for npName, its := range instanceTypes {
 		np := nodePoolIndex[npName]
+		// We need to associate available domains with the requirements of the NodePool that provides them. Consider a
+		// scenario where one NodePool provides a single zone and another provides three. If a pod has a scheduling
+		// constraint which restricts it to the single zone NodePool, the only zone it can spread across is that zone. We
+		// should not consider all zones eligible domains (assuming NodeAffinityPolicy is set to honor).
+		//
+		// Note that this approach still has limitations. Eligible domains are only tracked on a NodePool level rather than
+		// an instance type level. If an instance type has it's own domain restrictions and the application is only
+		// compatible with that instance type, we should only consider those zones. This is an extremely large combinatoric
+		// space, so this is currently not supported. Applications can work around this limitation by specifying the eligible
+		// domains for the instance type in a nodeSelector.
+		nodePoolRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
+		nodePoolRequirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.ObjectMeta.Labels).Values()...)
+		// Inject labels that Karpenter automatically adds to nodes (see nodeclaimtemplate.go).
+		// These are not part of NodePool.Spec.Template but are always present on resulting nodes,
+		// enabling pods with nodeSelector targeting karpenter.sh/nodepool or NodeClass labels to
+		// correctly filter topology domains.
+		nodePoolRequirements.Add(scheduling.NewLabelRequirements(map[string]string{
+			v1.NodePoolLabelKey: np.Name,
+			v1.NodeClassLabelKey(np.Spec.Template.Spec.NodeClassRef.GroupKind()): np.Spec.Template.Spec.NodeClassRef.Name,
+		}).Values()...)
+
 		for _, it := range its {
 			// We need to intersect the instance type requirements with the current nodePool requirements.  This
 			// ensures that something like zones from an instance type don't expand the universe of valid domains.
 			requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-			requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
+			requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.ObjectMeta.Labels).Values()...)
 			requirements.Add(it.Requirements.Values()...)
 
 			for topologyKey, requirement := range requirements {
@@ -121,20 +142,21 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 					domainGroups[topologyKey] = NewTopologyDomainGroup()
 				}
 				for _, domain := range requirement.Values() {
-					domainGroups[topologyKey].Insert(domain, np.Spec.Template.Spec.Taints...)
+					// Store NodePool-level requirements only (excludes instance type requirements)
+					// This allows filtering based on pod's nodeSelector/nodeAffinity without being
+					// affected by instance type specific constraints like capacity-type
+					domainGroups[topologyKey].Insert(domain, nodePoolRequirements, np.Spec.Template.Spec.Taints...)
 				}
 			}
 		}
 
-		requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-		requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
-		for key, requirement := range requirements {
+		for key, requirement := range nodePoolRequirements {
 			if requirement.Operator() == corev1.NodeSelectorOpIn {
 				if _, ok := domainGroups[key]; !ok {
 					domainGroups[key] = NewTopologyDomainGroup()
 				}
 				for _, value := range requirement.Values() {
-					domainGroups[key].Insert(value, np.Spec.Template.Spec.Taints...)
+					domainGroups[key].Insert(value, nodePoolRequirements, np.Spec.Template.Spec.Taints...)
 				}
 			}
 		}
