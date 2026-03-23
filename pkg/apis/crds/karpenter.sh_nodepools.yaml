@@ -132,6 +132,18 @@ spec:
                               This field is required if Duration is set.
                             pattern: ^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$
                             type: string
+                          sequential:
+                            description: |-
+                              Sequential, when true with TopologyKey, ensures only one topology domain
+                              is disrupted at a time. Disruptions in one zone must complete before the
+                              next zone begins. Requires TopologyKey to be set.
+                            type: boolean
+                          topologyKey:
+                            description: |-
+                              TopologyKey, when set, scopes this budget to individual topology domains.
+                              The Nodes limit is applied per distinct value of this label key.
+                              For example, "topology.kubernetes.io/zone" enforces the limit per AZ.
+                            type: string
                         required:
                           - nodes
                         type: object
@@ -140,6 +152,8 @@ spec:
                       x-kubernetes-validations:
                         - message: '''schedule'' must be set with ''duration'''
                           rule: self.all(x, has(x.schedule) == has(x.duration))
+                        - message: '''sequential'' requires ''topologyKey'''
+                          rule: self.all(x, !has(x.sequential) || !x.sequential || (has(x.topologyKey) && x.topologyKey != ''))
                     consolidateAfter:
                       description: |-
                         ConsolidateAfter is the duration the controller will wait

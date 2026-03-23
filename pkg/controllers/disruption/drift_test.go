@@ -1024,7 +1024,7 @@ var _ = Describe("Drift", func() {
 			for _, nc := range nodeClaims {
 				nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			}
-			drift := disruption.NewDrift(env.Client, cluster, prov, recorder)
+			drift := disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock)
 
 			ExpectApplied(ctx, env.Client, staticNp, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
 
@@ -1034,6 +1034,163 @@ var _ = Describe("Drift", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, drift.ShouldDisrupt, drift.Class(), queue)
 			Expect(err).To(Succeed())
 			Expect(candidates).To(HaveLen(0))
+		})
+	})
+	Context("Sequential Topology Disruption", func() {
+		It("should only disrupt nodes from the oldest-drifted zone", func() {
+			// Create nodes in 3 zones; zone-a has oldest drift time
+			zones := []string{"zone-a", "zone-b", "zone-c"}
+			driftTimes := []time.Duration{-2 * time.Hour, -1 * time.Hour, -30 * time.Minute}
+
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+				Nodes:       "100%",
+				TopologyKey: corev1.LabelTopologyZone,
+				Sequential:  true,
+				Reasons:     []v1.DisruptionReason{v1.DisruptionReasonDrifted},
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			var allNodeClaims []*v1.NodeClaim
+			var allNodes []*corev1.Node
+			for i, zone := range zones {
+				ncs, ns := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       zone,
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				driftTime := fakeClock.Now().Add(driftTimes[i])
+				for _, nc := range ncs {
+					nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+					// Directly set the drift LastTransitionTime to control ordering
+					for j, cond := range nc.Status.Conditions {
+						if cond.Type == string(v1.ConditionTypeDrifted) {
+							nc.Status.Conditions[j].LastTransitionTime = metav1.NewTime(driftTime)
+						}
+					}
+					ExpectApplied(ctx, env.Client, nc)
+				}
+				for _, n := range ns {
+					ExpectApplied(ctx, env.Client, n)
+				}
+				allNodeClaims = append(allNodeClaims, ncs...)
+				allNodes = append(allNodes, ns...)
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, allNodes, allNodeClaims)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Only one command should be enqueued, and it must target zone-a (oldest drift)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].Node.Labels[corev1.LabelTopologyZone]).To(Equal("zone-a"))
+		})
+		It("should continue disrupting the active zone when in-flight disruptions exist", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+				Nodes:       "100%",
+				TopologyKey: corev1.LabelTopologyZone,
+				Sequential:  true,
+				Reasons:     []v1.DisruptionReason{v1.DisruptionReasonDrifted},
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// zone-a: 3 nodes, all drifted; zone-b: 3 nodes, also drifted
+			var allNodeClaims []*v1.NodeClaim
+			var allNodes []*corev1.Node
+			for _, zone := range []string{"zone-a", "zone-b"} {
+				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       zone,
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				for _, nc := range ncs {
+					nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+					ExpectApplied(ctx, env.Client, nc)
+				}
+				for _, n := range ns {
+					ExpectApplied(ctx, env.Client, n)
+				}
+				allNodeClaims = append(allNodeClaims, ncs...)
+				allNodes = append(allNodes, ns...)
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, allNodes, allNodeClaims)
+
+			// First reconcile: disrupts one zone-a node
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			firstZone := cmds[0].Candidates[0].Node.Labels[corev1.LabelTopologyZone]
+			Expect(firstZone).To(Equal("zone-a"))
+
+			// Second reconcile (zone-a node still in queue = in-flight): should still target zone-a
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds = queue.GetCommands()
+			Expect(cmds).To(HaveLen(2))
+			Expect(cmds[1].Candidates[0].Node.Labels[corev1.LabelTopologyZone]).To(Equal("zone-a"))
+		})
+		It("should respect per-zone node budget cap", func() {
+			numPerZone := 5
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+				Nodes:       "2",
+				TopologyKey: corev1.LabelTopologyZone,
+				Sequential:  true,
+				Reasons:     []v1.DisruptionReason{v1.DisruptionReasonDrifted},
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			ncs, ns := test.NodeClaimsAndNodes(numPerZone, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-a",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			for _, nc := range ncs {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			}
+			for i := range ncs {
+				ExpectApplied(ctx, env.Client, ncs[i], ns[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, ns, ncs)
+
+			// Run enough reconciles to attempt all nodes
+			for range numPerZone {
+				ExpectSingletonReconciled(ctx, disruptionController)
+			}
+			// Budget of 2 nodes per zone should cap the disruptions
+			cmds := queue.GetCommands()
+			Expect(len(cmds)).To(BeNumerically("<=", 2))
 		})
 	})
 })
