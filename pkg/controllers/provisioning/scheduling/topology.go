@@ -109,16 +109,16 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 	domainGroups := map[string]TopologyDomainGroup{}
 	for npName, its := range instanceTypes {
 		np := nodePoolIndex[npName]
-		// This represents what a pod needs to match to schedule on this NodePool.
-		// We use NodePool-level requirements only, not per-instance-type requirements, because:
-		// 1. Instance type requirements are specific to individual instance types (capacity-type, instance-family, etc.)
-		// 2. Pod nodeSelector/nodeAffinity typically targets NodePool-level constraints (labels, zones, etc.)
-		// 3. Instance type requirements are evaluated separately during scheduling
+		// We need to associate available domains with the requirements of the NodePool that provides them. Consider a
+		// scenario where one NodePool provides a single zone and another provides three. If a pod has a scheduling
+		// constraint which restricts it to the single zone NodePool, the only zone it can spread across is that zone. We
+		// should not consider all zones eligible domains (assuming NodeAffinityPolicy is set to honor).
 		//
-		// Limitation: Per-instance-type requirements (e.g., zones available for specific instance families)
-		// are not considered for compatibility checking. A pod may be matched to a NodePool even if no
-		// individual instance type satisfies all of the pod's constraints. Full per-instance-type filtering
-		// happens later during scheduling.
+		// Note that this approach still has limitations. Eligible domains are only tracked on a NodePool level rather than
+		// an instance type level. If an instance type has it's own domain restrictions and the application is only
+		// compatible with that instance type, we should only consider those zones. This is an extremely large combinatoric
+		// space, so this is currently not supported. Applications can work around this limitation by specifying the eligible
+		// domains for the instance type in a nodeSelector.
 		nodePoolRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
 		nodePoolRequirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.ObjectMeta.Labels).Values()...)
 		// Inject labels that Karpenter automatically adds to nodes (see nodeclaimtemplate.go).
