@@ -116,7 +116,7 @@ func (t TopologyDomainGroup) isDomainCompatible(pod *v1.Pod, sources []DomainSou
 		if affinityPolicy == v1.NodeInclusionPolicyHonor {
 			requirementsMatch = len(podRequirementSets) == 0
 			for _, podReqs := range podRequirementSets {
-				if err := source.NodePoolRequirements.Intersects(podReqs); err == nil {
+				if err := source.NodePoolRequirements.Compatible(podReqs, scheduling.AllowUndefinedWellKnownLabels); err == nil {
 					requirementsMatch = true
 					break
 				}
