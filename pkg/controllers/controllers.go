@@ -21,6 +21,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -64,6 +65,20 @@ import (
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 )
 
+type ControllerOptions struct {
+	registrationHooks []cloudprovider.NodeLifecycleHook
+}
+
+// WithRegistrationHook registers a hook that blocks Karpenter from marking a node as registered
+// until the hook's preconditions are satisfied. This is useful when a cloud provider needs to
+// apply well-known labels asynchronously after instance launch (e.g., capacity reservation labels
+// used by topology spread constraints).
+func WithRegistrationHook(hook cloudprovider.NodeLifecycleHook) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.registrationHooks = append(o.registrationHooks, hook)
+	}
+}
+
 func NewControllers(
 	ctx context.Context,
 	mgr manager.Manager,
@@ -74,7 +89,9 @@ func NewControllers(
 	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
+	opts ...option.Function[ControllerOptions],
 ) []controller.Controller {
+	o := option.Resolve(opts...)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
@@ -101,7 +118,7 @@ func NewControllers(
 		nodepoolvalidation.NewController(kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState, o.registrationHooks),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
