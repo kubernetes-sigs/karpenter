@@ -68,6 +68,9 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		oldOfs, exists := c.npOfMap[client.ObjectKeyFromObject(&np)]
 		newIts, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
 		if err != nil {
+			if cloudprovider.IsUnevaluatedNodePoolError(err) {
+				continue
+			}
 			errs = multierr.Append(errs, err)
 			continue
 		}
