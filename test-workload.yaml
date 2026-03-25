@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-pod-deletion-cost
+  namespace: default
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: test-pod-deletion-cost
+  template:
+    metadata:
+      labels:
+        app: test-pod-deletion-cost
+    spec:
+      nodeSelector:
+        karpenter.sh/nodepool: default
+      containers:
+      - name: pause
+        image: registry.k8s.io/pause:3.9
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"

@@ -101,10 +101,10 @@ type Disruption struct {
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
 	//nolint:kubeapilinter
 	// ConsolidateWhen describes when Karpenter can consolidate nodes based on cost-benefit analysis.
-	// This policy defaults to "WhenEmptyOrUnderutilized" if not specified for backward compatibility.
+	// When set, this field takes precedence over consolidationPolicy.
+	// If not set, the controller falls back to consolidationPolicy for backward compatibility.
 	// When replicas is set, ConsolidateWhen is simply ignored
-	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
-	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized,WhenCostJustifiesDisruption}
+	// +kubebuilder:validation:Enum:={"",WhenEmpty,WhenEmptyOrUnderutilized,WhenCostJustifiesDisruption}
 	// +optional
 	ConsolidateWhen ConsolidateWhenPolicy `json:"consolidateWhen,omitempty"`
 	//nolint:kubeapilinter

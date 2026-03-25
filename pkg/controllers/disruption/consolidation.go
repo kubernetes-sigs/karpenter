@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -90,7 +91,7 @@ func (c *consolidation) markConsolidated() {
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
-func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
+func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 	// Disable consolidation for static NodePool
 	if cn.OwnedByStaticNodePool() {
 		return false
@@ -116,15 +117,57 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.NodePool.Name))...)
 		return false
 	}
-	// If we don't have the "WhenEmptyOrUnderutilized" policy set, we should not do any of the consolidation methods, but
-	// we should also not fire an event here to users since this can be confusing when the field on the NodePool
-	// is named "consolidationPolicy"
-	if cn.NodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyWhenEmptyOrUnderutilized {
+
+	// Determine the effective consolidation policy using field precedence:
+	// consolidateWhen takes precedence over consolidationPolicy when set.
+	effectivePolicy := resolveConsolidationPolicy(cn.NodePool)
+
+	switch effectivePolicy {
+	case v1.ConsolidateWhenEmptyOrUnderutilized:
+		// Allow all consolidation methods (legacy WhenEmptyOrUnderutilized behavior)
+	case v1.ConsolidateWhenCostJustifiesDisruption:
+		// Allow consolidation — decision ratio filtering happens in computeConsolidation
+		log.FromContext(ctx).V(1).Info("evaluating cost-justified consolidation candidate",
+			"node", cn.Name(),
+			"nodepool", cn.NodePool.Name,
+			"threshold", cn.NodePool.Spec.Disruption.GetDecisionRatioThreshold(),
+		)
+	case v1.ConsolidateWhenEmpty:
+		// WhenEmpty only allows empty node consolidation, which is handled by the Emptiness method.
+		// Non-empty consolidation (single/multi node) should not proceed.
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has non-empty consolidation disabled", cn.NodePool.Name))...)
 		return false
+	default:
+		// Unknown policy — fall back to legacy consolidationPolicy check for backward compatibility
+		if cn.NodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyWhenEmptyOrUnderutilized {
+			c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has non-empty consolidation disabled", cn.NodePool.Name))...)
+			return false
+		}
 	}
+
 	// return true if consolidatable
 	return cn.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
+}
+
+// resolveConsolidationPolicy determines the effective consolidation policy for a NodePool.
+// Field precedence: consolidateWhen > consolidationPolicy.
+// If consolidateWhen is set (non-empty), it takes precedence.
+// If only consolidationPolicy is set, map it to the equivalent ConsolidateWhenPolicy.
+// If neither is set, default to WhenEmptyOrUnderutilized.
+func resolveConsolidationPolicy(nodePool *v1.NodePool) v1.ConsolidateWhenPolicy {
+	// consolidateWhen takes precedence when explicitly set
+	if nodePool.Spec.Disruption.ConsolidateWhen != "" {
+		return nodePool.Spec.Disruption.ConsolidateWhen
+	}
+	// Fall back to consolidationPolicy, mapping to ConsolidateWhenPolicy
+	switch nodePool.Spec.Disruption.ConsolidationPolicy {
+	case v1.ConsolidationPolicyWhenEmpty:
+		return v1.ConsolidateWhenEmpty
+	case v1.ConsolidationPolicyWhenEmptyOrUnderutilized:
+		return v1.ConsolidateWhenEmptyOrUnderutilized
+	default:
+		return v1.ConsolidateWhenEmptyOrUnderutilized
+	}
 }
 
 // sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result
@@ -159,6 +202,20 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// Compute decision ratios for each candidate
 	for _, candidate := range candidates {
 		c.decisionRatioCalculator.ComputeDecisionRatio(ctx, candidate, totalCost, totalDisruption)
+
+		// Emit structured log entry for decision ratio evaluation (required for sim verification)
+		action := "skip"
+		if candidate.decisionRatio >= threshold {
+			action = "consolidate"
+		}
+		log.FromContext(ctx).V(1).Info("evaluating cost-justified consolidation",
+			"node", candidate.Name(),
+			"decision.ratio", candidate.decisionRatio,
+			"threshold", threshold,
+			"action", action,
+			"normalized.cost", candidate.normalizedCost,
+			"normalized.disruption", candidate.normalizedDisruption,
+		)
 
 		// Emit decision ratio metric
 		if candidate.NodePool != nil {

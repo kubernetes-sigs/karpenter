@@ -26,7 +26,25 @@ import (
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(), in.validateConsolidationFields())
+	return errs
+}
+
+// validateConsolidationFields validates that consolidateWhen and consolidationPolicy are not set to conflicting values.
+// When consolidateWhen is set, it takes precedence over consolidationPolicy.
+func (in *NodePool) validateConsolidationFields() (errs error) {
+	// Warn if consolidationPolicy is WhenEmpty but consolidateWhen is set to something that allows non-empty consolidation
+	if in.Spec.Disruption.ConsolidationPolicy == ConsolidationPolicyWhenEmpty &&
+		in.Spec.Disruption.ConsolidateWhen != "" &&
+		in.Spec.Disruption.ConsolidateWhen != ConsolidateWhenEmpty {
+		errs = multierr.Append(errs, fmt.Errorf("consolidateWhen %q conflicts with consolidationPolicy %q; consolidateWhen takes precedence when set",
+			in.Spec.Disruption.ConsolidateWhen, in.Spec.Disruption.ConsolidationPolicy))
+	}
+	// Validate decisionRatioThreshold is only meaningful with WhenCostJustifiesDisruption
+	if in.Spec.Disruption.DecisionRatioThreshold != nil &&
+		in.Spec.Disruption.ConsolidateWhen != ConsolidateWhenCostJustifiesDisruption {
+		// Not an error, but the threshold will be ignored — this is informational
+	}
 	return errs
 }
 

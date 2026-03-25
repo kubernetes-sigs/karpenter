@@ -1,0 +1,365 @@
+go mod tidy
+go generate ./...
+hack/validation/taint.sh
+hack/validation/requirements.sh
+hack/validation/labels.sh
+hack/validation/status.sh
+cp -r pkg/apis/crds kwok/charts
+hack/kwok/requirements.sh
+hack/dependabot.sh
+go tool -modfile=go.tools.mod nwa config -c add
+2026/02/27 13:20:02 WARN file already has a header path=kwok/apis/apis.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/apis/v1alpha1/kwoknodeclass.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/apis/v1alpha1/kwoknodeclass_status.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/apis/v1alpha1/doc.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/apis/v1alpha1/labels.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/cloudprovider/const.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/cloudprovider/helpers.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/cloudprovider/cloudprovider.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/main.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/options/options.go
+2026/02/27 13:20:02 WARN file already has a header path=kwok/tools/gen_instance_types.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/apis.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/labels.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/doc.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/duration.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodeclaim.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodeclaim_defaults.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodeclaim_status.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodeclaim_validation_cel_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodeclaim_validation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodepool.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodepool_budgets_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodepool_default_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodepool_defaults.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodepool_status.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodepool_validation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/nodepool_validation_cel_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1/taints.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1alpha1/nodeoverlay.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1alpha1/doc.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1alpha1/labels.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1alpha1/nodeoverlay_validation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1alpha1/nodeoverlay_status.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1alpha1/nodeoverlay_validation_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/apis/v1alpha1/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/cloudprovider/fake/cloudprovider.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/cloudprovider/fake/instancetype.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/cloudprovider/metrics/cloudprovider.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/cloudprovider/metrics/cloudprovider_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/cloudprovider/metrics/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/cloudprovider/overlay/cloudprovider.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/cloudprovider/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/cloudprovider/types.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/controllers.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/consolidatewhen_property_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/consolidation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/consolidation_integration_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/consolidation_logging_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/consolidation_property_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/consolidation_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/decisionratio.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/decisionratio_property_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/decisionratio_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/drift.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/drift_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/emptiness.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/emptiness_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/helpers.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/events/events.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/metrics_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/multinodeconsolidation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/policyevaluator.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/policyevaluator_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/queue.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/queue_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/singlenodeconsolidation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/singlenodeconsolidation_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/staticdrift.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/staticdrift_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/types.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/types_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/validation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/disruption/validation_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/metrics/node/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/metrics/node/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/metrics/nodepool/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/metrics/nodepool/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/metrics/pod/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/metrics/pod/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/health/events.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/health/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/health/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/health/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/hydration/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/hydration/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/termination/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/termination/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/termination/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/termination/terminator/eviction.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/termination/terminator/events/events.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/termination/terminator/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/termination/terminator/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/node/termination/terminator/terminator.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/consistency/events.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/consistency/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/consistency/nodeshape.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/consistency/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/disruption/consolidation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/disruption/consolidation_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/disruption/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/disruption/drift.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/disruption/drift_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/disruption/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/expiration/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/expiration/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/garbagecollection/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/garbagecollection/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/hydration/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/hydration/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/events.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/initialization_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/initialization.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/launch.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/launch_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/liveness.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/liveness_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/registration.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/registration_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/lifecycle/termination_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/podevents/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeclaim/podevents/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeoverlay/store_bench_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeoverlay/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeoverlay/store.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeoverlay/store_memory_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeoverlay/store_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodeoverlay/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/counter/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/counter/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/hash/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/hash/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/readiness/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/readiness/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/registrationhealth/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/registrationhealth/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/validation/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/nodepool/validation/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/pod/deletioncost/changedetector.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/pod/deletioncost/annotation.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/pod/deletioncost/events.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/pod/deletioncost/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/pod/deletioncost/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/pod/deletioncost/ranking.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/batcher.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/provisioner.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduler_sizeclass_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/instance_selection_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/events.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/existingnode.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/nodeclaim.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/nodeclaimtemplate.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/preferences.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/queue.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/reservationmanager.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/reservationmanager_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/scheduler.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/scheduling_benchmark_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/topology.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/topology_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/topologydomaingroup.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/topologygroup.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/topologynodefilter.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/scheduling/volumetopology.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/provisioning/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/cluster.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/informer/nodeclaim.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/informer/daemonset.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/informer/node.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/informer/pod.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/informer/nodepool.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/statenode.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/statenodepool.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/statenodepool_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/state/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/static/deprovisioning/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/static/deprovisioning/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/static/provisioning/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/controllers/static/provisioning/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/events/reason.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/events/recorder.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/events/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/metrics/metrics.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/metrics/constants.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/metrics/store.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/metrics/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/operator/injection/injection.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/operator/logging/logging.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/operator/operator.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/operator/options/options.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/operator/options/injectable.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/operator/options/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/operator/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/requirement.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/hostportusage.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/hostportusage_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/requirements_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/requirement_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/requirements.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/taints.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/scheduling/volumeusage.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/state/nodepoolhealth/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/state/nodepoolhealth/tracker.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/daemonsets.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/cachesyncingclient.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/deployment.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/environment.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/eventrecorder.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/nodeclaim.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/expectations/expectations.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/metadata.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/namespace.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/options.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/nodeclass.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/nodeoverlay.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/nodepool.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/nodes.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/ratelimitinginterface.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/pods.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/randomdelay.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/replicaset.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/statefulsets.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/storage.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/v1alpha1/labels.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/v1alpha1/doc.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/v1alpha1/testnodeclass.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/test/v1alpha1/testnodeclass_status.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/atomic/slice.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/atomic/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/controller/controller.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/controller/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/daemonset/daemonset.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/daemonset/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/disruption/disruption.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/env/env.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/node/node.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/node/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/nodeclaim/nodeclaim.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/nodeclaim/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/nodepool/nodepool.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/nodepool/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/pdb/pdb.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/pdb/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/pod/pod.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/pod/scheduling.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/pretty/changemonitor.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/pretty/pretty.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/pretty/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/resources/resources.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/resources/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/result/result.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/ringbuffer/buffer.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/ringbuffer/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/testing/util.go
+2026/02/27 13:20:02 WARN file already has a header path=pkg/utils/volume/volume.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/debug/monitor.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/debug/collector.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/debug/events.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/debug/nodeclaim.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/debug/node.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/debug/pod.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/debug/setup.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/environment/common/expectations.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/environment/common/environment.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/environment/common/monitor.go
+2026/02/27 13:20:02 WARN file already has a header path=test/pkg/environment/common/setup.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/do_no_disrupt_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/basic_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/host_name_spreading_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/drift_performance_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/host_name_spreading_xl_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/interference_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/report.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/types.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/performance/wide_deployments_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/expiration_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/chaos_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/drift_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/nodeclaim_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/integration_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/perf_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/staticcapacity_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/suite_test.go
+2026/02/27 13:20:02 WARN file already has a header path=test/suites/regression/termination_test.go
+[NWA SUMMARY] scanned=296 modified=0 skipped=7 failed=0
+go vet ./...
+go tool -modfile=go.tools.mod golangci-lint-kube-api-linter run
+pkg/controllers/disruption/consolidation_property_test.go:39:1: cyclomatic complexity 14 of func `TestProperty_DeleteRatioFiltering` is high (> 11) (gocyclo)
+func TestProperty_DeleteRatioFiltering(t *testing.T) {
+^
+pkg/controllers/disruption/consolidation_property_test.go:233:1: cyclomatic complexity 17 of func `TestProperty_RatioBasedMoveOrdering` is high (> 11) (gocyclo)
+func TestProperty_RatioBasedMoveOrdering(t *testing.T) {
+^
+pkg/controllers/disruption/consolidation_property_test.go:322:1: cyclomatic complexity 17 of func `TestProperty_CumulativeCostDisruptionEfficiency` is high (> 11) (gocyclo)
+func TestProperty_CumulativeCostDisruptionEfficiency(t *testing.T) {
+^
+pkg/controllers/disruption/decisionratio_property_test.go:217:1: cyclomatic complexity 12 of func `TestProperty_DecisionRatioFormula` is high (> 11) (gocyclo)
+func TestProperty_DecisionRatioFormula(t *testing.T) {
+^
+pkg/controllers/disruption/decisionratio_property_test.go:593:1: cyclomatic complexity 15 of func `TestProperty_PodDeletionCostImpact` is high (> 11) (gocyclo)
+func TestProperty_PodDeletionCostImpact(t *testing.T) {
+^
+pkg/controllers/disruption/decisionratio_property_test.go:728:1: cyclomatic complexity 21 of func `TestProperty_PodPriorityImpact` is high (> 11) (gocyclo)
+func TestProperty_PodPriorityImpact(t *testing.T) {
+^
+pkg/controllers/disruption/decisionratio_property_test.go:885:1: cyclomatic complexity 20 of func `TestProperty_DecisionRatioComputationStability` is high (> 11) (gocyclo)
+func TestProperty_DecisionRatioComputationStability(t *testing.T) {
+^
+pkg/controllers/disruption/decisionratio_property_test.go:1163:1: cyclomatic complexity 16 of func `TestProperty_ReplaceMoveCostSavings` is high (> 11) (gocyclo)
+func TestProperty_ReplaceMoveCostSavings(t *testing.T) {
+^
+pkg/controllers/disruption/decisionratio_property_test.go:1271:1: cyclomatic complexity 44 of func `TestProperty_PerNodePoolPolicyIndependence` is high (> 11) (gocyclo)
+func TestProperty_PerNodePoolPolicyIndependence(t *testing.T) {
+^
+pkg/controllers/disruption/decisionratio_property_test.go:1011:15: unusedwrite: unused write to field StateNode (govet)
+					StateNode: &state.StateNode{
+					         ^
+pkg/controllers/disruption/decisionratio_property_test.go:1023:18: unusedwrite: unused write to field instanceType (govet)
+					instanceType: &cloudprovider.InstanceType{
+					            ^
+pkg/controllers/disruption/decisionratio_property_test.go:1029:23: unusedwrite: unused write to field reschedulablePods (govet)
+					reschedulablePods: pods,
+					                 ^
+pkg/controllers/disruption/types_test.go:79:14: unusedwrite: unused write to field StateNode (govet)
+				StateNode: &state.StateNode{
+				         ^
+pkg/controllers/disruption/types_test.go:140:29: unusedwrite: unused write to field Candidates (govet)
+				Candidates: []*Candidate{
+				                        ^
+pkg/controllers/disruption/types_test.go:230:12: unusedwrite: unused write to field StateNode (govet)
+		StateNode: &state.StateNode{
+		         ^
+pkg/controllers/disruption/types_test.go:242:15: unusedwrite: unused write to field instanceType (govet)
+		instanceType: &cloudprovider.InstanceType{
+		            ^
+pkg/controllers/disruption/consolidation_property_test.go:304:5: S1008: should use 'return floatEquals(sortedCandidates[len(sortedCandidates)-1].decisionRatio, minRatio, 1e-9)' instead of 'if !floatEquals(sortedCandidates[len(sortedCandidates)-1].decisionRatio, minRatio, 1e-9) { return false }; return true' (staticcheck)
+				if !floatEquals(sortedCandidates[len(sortedCandidates)-1].decisionRatio, minRatio, 1e-9) {
+				^
+17 issues:
+* gocyclo: 9
+* govet: 7
+* staticcheck: 1
+make: *** [verify] Error 1

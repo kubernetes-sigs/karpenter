@@ -151,17 +151,19 @@ spec:
                     consolidateWhen:
                       allOf:
                         - enum:
+                            - ""
                             - WhenEmpty
                             - WhenEmptyOrUnderutilized
                             - WhenCostJustifiesDisruption
                         - enum:
+                            - ""
                             - WhenEmpty
                             - WhenEmptyOrUnderutilized
                             - WhenCostJustifiesDisruption
-                      default: WhenEmptyOrUnderutilized
                       description: |-
                         ConsolidateWhen describes when Karpenter can consolidate nodes based on cost-benefit analysis.
-                        This policy defaults to "WhenEmptyOrUnderutilized" if not specified for backward compatibility.
+                        When set, this field takes precedence over consolidationPolicy.
+                        If not set, the controller falls back to consolidationPolicy for backward compatibility.
                         When replicas is set, ConsolidateWhen is simply ignored
                       type: string
                     consolidationPolicy:

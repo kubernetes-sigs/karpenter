@@ -284,6 +284,18 @@ func (c Command) EmitRejectedEvents(recorder events.Recorder, reason string) {
 func (c Command) LogValues() []any {
 	podCount := lo.Reduce(c.Candidates, func(_ int, cd *Candidate, _ int) int { return len(cd.reschedulablePods) }, 0)
 
+	// Determine the consolidation path prefix based on the effective policy
+	consolidationPath := "Underutilized"
+	if len(c.Candidates) > 0 && c.Candidates[0].NodePool != nil {
+		policy := resolveConsolidationPolicy(c.Candidates[0].NodePool)
+		switch policy {
+		case v1.ConsolidateWhenCostJustifiesDisruption:
+			consolidationPath = "CostJustified"
+		case v1.ConsolidateWhenEmpty:
+			consolidationPath = "Empty"
+		}
+	}
+
 	candidateNodes := lo.Map(c.Candidates, func(candidate *Candidate, _ int) interface{} {
 		return map[string]interface{}{
 			"Node":          klog.KObj(candidate.Node),
@@ -309,6 +321,8 @@ func (c Command) LogValues() []any {
 
 	return []any{
 		"decision", c.Decision(),
+		"consolidation-path", consolidationPath,
+		"decision.ratio", c.DecisionRatio,
 		"disrupted-node-count", len(candidateNodes),
 		"replacement-node-count", len(replacementNodes),
 		"pod-count", podCount,

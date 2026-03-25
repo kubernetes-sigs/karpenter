@@ -164,12 +164,12 @@ var _ = Describe("CEL/Validation", func() {
 
 			Expect(env.Client.Create(ctx, obj)).ToNot(Succeed())
 		})
-		It("should default to WhenEmptyOrUnderutilized when ConsolidateWhen is not specified", func() {
+		It("should default to empty string when ConsolidateWhen is not specified", func() {
 			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
-			// Don't set ConsolidateWhen, let it use the default
+			// Don't set ConsolidateWhen, it should remain empty (no default)
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-			// Verify the default was applied
-			Expect(nodePool.Spec.Disruption.ConsolidateWhen).To(Equal(ConsolidateWhenEmptyOrUnderutilized))
+			// Verify no default was applied — the controller handles the fallback to consolidationPolicy
+			Expect(string(nodePool.Spec.Disruption.ConsolidateWhen)).To(Equal(""))
 		})
 		It("should succeed when setting consolidateWhen with consolidationPolicy", func() {
 			nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
