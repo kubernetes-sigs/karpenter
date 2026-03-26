@@ -117,7 +117,8 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 
-	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
+	nodePool := c.getNodePool(ctx, nodeClaim)
+	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node, nodePool)
 	if unhealthyNodeCondition == nil {
 		return reconcile.Result{}, nil
 	}
@@ -129,36 +130,56 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
 	}
 
-	// If a nodeclaim does have a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
-	// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
-	// to repair the nodes
-	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
-	if found {
-		nodePoolHealthy, err := c.isNodePoolHealthy(ctx, nodePoolName)
-		if err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-		if !nodePoolHealthy {
-			if err := c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName); err != nil {
-				return reconcile.Result{}, err
-			}
-			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
-		}
-	} else {
-		clusterHealthy, err := c.isClusterHealthy(ctx)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-		if !clusterHealthy {
-			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
-			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
-		}
+	if result, err := c.checkHealthThresholds(ctx, node, nodeClaim); result != nil {
+		return *result, err
 	}
+
 	// For unhealthy past the tolerationDisruption window we can forcefully terminate the node
 	if err := c.annotateTerminationGracePeriod(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	return c.deleteNodeClaim(ctx, nodeClaim, node, unhealthyNodeCondition)
+}
+
+// getNodePool retrieves the NodePool for a NodeClaim, returning nil if not found.
+func (c *Controller) getNodePool(ctx context.Context, nodeClaim *v1.NodeClaim) *v1.NodePool {
+	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if !found {
+		return nil
+	}
+	nodePool := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		return nil
+	}
+	return nodePool
+}
+
+// checkHealthThresholds validates that the cluster/nodepool is healthy enough to proceed with repair.
+// Returns a non-nil result if repair should be blocked, nil if repair can proceed.
+func (c *Controller) checkHealthThresholds(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim) (*reconcile.Result, error) {
+	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if found {
+		nodePoolHealthy, err := c.isNodePoolHealthy(ctx, nodePoolName)
+		if err != nil {
+			return &reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+		if !nodePoolHealthy {
+			if err := c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName); err != nil {
+				return &reconcile.Result{}, err
+			}
+			return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+		}
+	} else {
+		clusterHealthy, err := c.isClusterHealthy(ctx)
+		if err != nil {
+			return &reconcile.Result{}, err
+		}
+		if !clusterHealthy {
+			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
+			return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+		}
+	}
+	return nil, nil
 }
 
 // deleteNodeClaim removes the NodeClaim from the api-server
@@ -186,23 +207,46 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 }
 
 // Find a node with a condition that matches one of the unhealthy conditions defined by the cloud provider
-// If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration
-func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.NodeCondition, cpTerminationDuration time.Duration) {
+// If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration.
+// The NodePool's repair configuration can override the CloudProvider's TolerationDuration.
+func (c *Controller) findUnhealthyConditions(node *corev1.Node, nodePool *v1.NodePool) (nc *corev1.NodeCondition, terminationDuration time.Duration) {
 	requeueTime := time.Time{}
 	for _, policy := range c.cloudProvider.RepairPolicies() {
 		// check the status and the type on the condition
 		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
 		if nodeCondition.Status == policy.ConditionStatus {
-			terminationTime := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration)
-			// Determine requeue time
+			duration := c.resolveTolerationDuration(policy, nodePool)
+			terminationTime := nodeCondition.LastTransitionTime.Add(duration)
+			// Determine requeue time - find the condition with the earliest termination time
 			if requeueTime.IsZero() || requeueTime.After(terminationTime) {
 				nc = lo.ToPtr(nodeCondition)
-				cpTerminationDuration = policy.TolerationDuration
+				terminationDuration = duration
 				requeueTime = terminationTime
 			}
 		}
 	}
-	return nc, cpTerminationDuration
+	return nc, terminationDuration
+}
+
+// resolveTolerationDuration resolves the toleration duration in order of priority:
+// 1. NodePool-specific repair policy for the condition type and status
+// 2. NodePool's DefaultTolerationDuration
+// 3. CloudProvider's TolerationDuration from the RepairPolicy
+func (c *Controller) resolveTolerationDuration(policy cloudprovider.RepairPolicy, nodePool *v1.NodePool) time.Duration {
+	if nodePool != nil && nodePool.Spec.Repair != nil {
+		// Check for condition-specific policy override in NodePool
+		for _, npPolicy := range nodePool.Spec.Repair.Policies {
+			if npPolicy.ConditionType == policy.ConditionType && npPolicy.ConditionStatus == policy.ConditionStatus {
+				return npPolicy.TolerationDuration.Duration
+			}
+		}
+		// Check for default duration override in NodePool
+		if nodePool.Spec.Repair.DefaultTolerationDuration != nil {
+			return nodePool.Spec.Repair.DefaultTolerationDuration.Duration
+		}
+	}
+	// Fallback to CloudProvider's TolerationDuration
+	return policy.TolerationDuration
 }
 
 func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeClaim *v1.NodeClaim) error {
