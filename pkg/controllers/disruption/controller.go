@@ -21,6 +21,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +67,14 @@ type Controller struct {
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
-const pollingPeriod = 10 * time.Second
+var pollingPeriod = func() time.Duration {
+	if v, ok := os.LookupEnv("DISRUPTION_POLLING_PERIOD"); ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return 10 * time.Second
+}()
 
 type ControllerOptions struct {
 	methods []Method
@@ -176,6 +184,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	}
 
 	// All methods did nothing, so return nothing to do
+	log.FromContext(ctx).Info("no disruption actions performed, delaying next evaluation", "delay", pollingPeriod)
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
