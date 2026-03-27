@@ -9,6 +9,7 @@ linters:
     - asciicheck
     - bidichk
     - copyloopvar
+    - depguard
     - errorlint
     - gocyclo
     - goheader
@@ -31,6 +32,12 @@ linters:
         settings:
           linters: {}
           lintersConfig: {}
+    depguard:
+      rules:
+        forbid-pkg-errors:
+          deny:
+            - pkg: sort
+              desc: Should be replaced with slices package
     gocyclo:
       min-complexity: 11
     goheader:
