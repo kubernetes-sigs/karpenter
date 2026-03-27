@@ -15,6 +15,12 @@ This means consolidation can be indefinitely starved when higher-priority method
 
 Users running continuous drift (e.g., frequent AMI updates, config changes) see consolidation never run. Drift processes one node per `ComputeCommands` call, the loop restarts, and consolidation never gets a turn.
 
+### Use cases
+1. We have AMI changes every few days and a large cluster with large node pools. This means we have pretty inconsistent consolidations when large number of nodes are drifted causing wastages when consolidation are effectively paused for 20 minutes to an hour.
+2. Day to day we rely on Drift to cycle AMI, Node Class and Node Pool changes across our fleet and we don't need this to propagate quickly but we still need consolidation to run.
+3. Some times we want fast Drift to rollout, such as during emergencies, in which case we could turn off consolidations and give Drift full budget. (We have enough control already for this)
+4. This solution allows a way to reason about about changes to consolidation timeout. https://github.com/kubernetes-sigs/karpenter/issues/1733 
+
 ## Key Constraints
 
 ### Existing
