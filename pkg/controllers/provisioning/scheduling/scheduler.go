@@ -28,6 +28,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -48,6 +49,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
+)
+
+const (
+	// podSchedulingErrorLogTimeout defines how long to wait before logging the same pod scheduling error again.
+	// This prevents log spam when a pod repeatedly fails to schedule for expected reasons (e.g., incompatible NodePool).
+	podSchedulingErrorLogTimeout = 5 * time.Minute
 )
 
 type ReservedOfferingMode int
@@ -238,6 +245,7 @@ type Results struct {
 	NewNodeClaims []*NodeClaim
 	ExistingNodes []*ExistingNode
 	PodErrors     map[*corev1.Pod]error
+	logErrorCache *cache.Cache // cache to deduplicate pod scheduling error logs
 }
 
 // Record sends eventing and log messages back for the results that were produced from a scheduling run
@@ -245,18 +253,7 @@ type Results struct {
 // leveraging the cluster state that a previous scheduling run that was recorded is relying on these nodes
 func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
 	// Report failures and nominations
-	for p, err := range r.PodErrors {
-		if IsReservedOfferingError(err) {
-			continue
-		}
-		if IsDRAError(err) {
-			recorder.Publish(PodFailedToScheduleEvent(p, err))
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Info("skipping pod with Dynamic Resource Allocation requirements, not yet supported by Karpenter")
-			continue
-		}
-		log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
-		recorder.Publish(PodFailedToScheduleEvent(p, err))
-	}
+	r.recordPodErrors(ctx, recorder)
 	for _, existing := range r.ExistingNodes {
 		if len(existing.Pods) > 0 {
 			cluster.NominateNodeForPod(ctx, existing.ProviderID())
@@ -287,6 +284,26 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	log.FromContext(ctx).WithValues("nodes", inflightCount, "pods", existingCount).Info("computed unready node(s) will fit pod(s)")
 }
 
+func (r Results) recordPodErrors(ctx context.Context, recorder events.Recorder) {
+	for p, err := range r.PodErrors {
+		if IsReservedOfferingError(err) {
+			continue
+		}
+		if IsDRAError(err) {
+			recorder.Publish(PodFailedToScheduleEvent(p, err))
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Info("skipping pod with Dynamic Resource Allocation requirements, not yet supported by Karpenter")
+			continue
+		}
+		// Deduplicate log messages for the same pod+error combination to reduce log spam
+		// Different errors for the same pod will still be logged
+		// Events are already deduplicated by the PodFailedToScheduleEvent DedupeTimeout
+		if r.shouldLogPodError(p, err) {
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
+		}
+		recorder.Publish(PodFailedToScheduleEvent(p, err))
+	}
+}
+
 func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {
 	return lo.PickBy(r.PodErrors, func(_ *corev1.Pod, err error) bool {
 		return IsReservedOfferingError(err)
@@ -297,6 +314,24 @@ func (r Results) DRAErrors() map[*corev1.Pod]error {
 	return lo.PickBy(r.PodErrors, func(_ *corev1.Pod, err error) bool {
 		return IsDRAError(err)
 	})
+}
+
+// shouldLogPodError checks if we should log an error for this pod.
+// Returns true if this is the first time seeing this specific pod+error combination,
+// or if enough time has passed since the last log for this combination.
+// This allows different errors for the same pod to be logged, while deduplicating repeated identical errors.
+func (r Results) shouldLogPodError(p *corev1.Pod, err error) bool {
+	if r.logErrorCache == nil {
+		return true
+	}
+	// Include both pod UID and error message in the cache key to allow different errors
+	// for the same pod to be logged separately
+	key := fmt.Sprintf("%s:%s", p.UID, err.Error())
+	if _, found := r.logErrorCache.Get(key); found {
+		return false
+	}
+	r.logErrorCache.Set(key, nil, podSchedulingErrorLogTimeout)
+	return true
 }
 
 func (r Results) NodePoolToPodMapping() map[string][]*corev1.Pod {
@@ -432,6 +467,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
 		PodErrors:     podErrors,
+		logErrorCache: cache.New(podSchedulingErrorLogTimeout, 10*time.Minute),
 	}, ctx.Err()
 }
 
