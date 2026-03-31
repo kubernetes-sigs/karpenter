@@ -261,6 +261,10 @@ A: Buffer status reflects actual provisioned replicas may be less than requested
 
 ### CapacityBuffer CRD
 
+We will import and use the existing upstream CapacityBuffer API types from [`k8s.io/autoscaler/cluster-autoscaler/apis/capacitybuffer/autoscaling.x-k8s.io/v1alpha1`](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler/apis/capacitybuffer/autoscaling.x-k8s.io/v1alpha1) rather than defining our own. This ensures compatibility with Cluster Autoscaler and the SIG Autoscaling standard.
+
+The upstream types define:
+
 
 ```go
 type CapacityBuffer struct {
