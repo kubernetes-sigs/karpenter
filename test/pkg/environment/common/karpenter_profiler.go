@@ -21,15 +21,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/pprof/profile"
 	. "github.com/onsi/ginkgo/v2"
-	"github.com/samber/lo"
-	coordinationv1 "k8s.io/api/coordination/v1"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 const CPUProfileSeconds = 20
@@ -85,27 +80,10 @@ func (kp *KarpenterProfiler) run(ctx context.Context) {
 }
 
 func (kp *KarpenterProfiler) captureProfiles(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			kp.lastError = fmt.Sprintf("captureProfiles panic: %v", r)
-		}
-	}()
+	defer GinkgoRecover()
 
-	lease := &coordinationv1.Lease{}
-	if err := kp.env.Client.Get(ctx, types.NamespacedName{Name: "karpenter-leader-election", Namespace: "kube-system"}, lease); err != nil {
-		kp.lastError = fmt.Sprintf("failed to get leader lease: %v", err)
-		return
-	}
-	holderIdentity := lo.FromPtr(lease.Spec.HolderIdentity)
-	if holderIdentity == "" {
-		kp.lastError = "leader lease has empty holderIdentity"
-		return
-	}
-	podName := strings.Split(holderIdentity, "_")[0]
-
-	pod := &corev1.Pod{}
-	if err := kp.env.Client.Get(ctx, types.NamespacedName{Name: podName, Namespace: "kube-system"}, pod); err != nil {
-		kp.lastError = fmt.Sprintf("failed to get pod %s: %v", podName, err)
+	pod := kp.env.ExpectActiveKarpenterPod()
+	if pod == nil {
 		return
 	}
 
