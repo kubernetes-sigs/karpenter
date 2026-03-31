@@ -10,7 +10,6 @@ Users maintain spare capacity through balloon pods, pause containers, or NodePoo
 
 - **Balloon pods**: Hard to maintain, create scheduler overhead through preemption
 - **Fixed NodePools**: Operate at node-level, require manual capacity planning, no workload awareness
-- **No standard API**: Not compatible with other autoscalers
 
 **What's Missing:**
 
@@ -35,26 +34,25 @@ The feature has been requested multiple times by the community:
 
 - Optimizing scheduling simulation performance for Virtual pods (will measure and optimize if needed)
 - Initial implementation will only support same-namespace references for `scalableRef` and `podTemplateRef`
-- Guaranteed capacity reservation: Buffers do not provide hard guarantees that capacity is reserved exclusively for specific workloads. Any pod that can schedule on buffer capacity may use it.
-- Static capacity strategy: One-time capacity request pattern for batch systems like Kueue (deferred to future work)
+- Ephemeral capacity strategy: One-time capacity request pattern for batch systems like Kueue (deferred to future work)
 - Adding `expireAfter` field to the API in initial implementation (requires upstream sig-autoscaling consensus)
 
 # Future Work
 
-**Static Capacity Strategy:**
+**Ephemeral Capacity Strategy:**
 
-After the initial active buffer implementation, we will implement static capacity strategy to support batch systems like Kueue. Static strategy will provide:
+After the initial active buffer implementation, we will implement ephemeral capacity strategy to support batch systems like Kueue. Ephemeral strategy will provide:
 - One-time capacity request with completion semantics
 - Integration with external admission controllers
 
 This is deferred to allow us to:
 - Validate the active buffer implementation first
 - Gather user feedback on the core functionality
-- Drive consensus with sig-autoscaling on static strategy semantics
+- Drive consensus with sig-autoscaling on ephemeral strategy semantics
 
-**fulfilledBy Field (Capacity Tracking):**
+**satisfiedBy Field (Capacity Tracking):**
 
-We propose adding a `fulfilledBy` field to track which pods are consuming buffer capacity. This would provide:
+We propose adding a `satisfiedBy` field to track which pods are consuming buffer capacity. This would provide:
 
 **Functionality:**
 - Selector-based mechanism to identify pods that fulfill buffer capacity
@@ -87,32 +85,17 @@ spec:
 	  tier: frontend
 status:
   replicas: 5
-  fulfilledBy:  # Future status field
-	- name: web-app-abc123
-	  namespace: production
-	  uid: 12345-67890
-	  resources:
-		cpu: "1"
-		memory: "2Gi"
-	- name: web-app-def456
-	  namespace: production
-	  uid: 67890-12345
-	  resources:
-		cpu: "1"
-		memory: "2Gi"
 ```
 
 **Implementation Considerations:**
 - Requires tracking pod-to-buffer mappings in memory
 - Need to handle pod lifecycle events (creation, deletion, updates)
 - Should work with both `scalableRef` and `podTemplateRef`
-- Performance impact of selector evaluation on every pod event
 
 **Rationale for Deferring:**
 - Adds complexity to initial implementation
-- Requires careful design around selector semantics
 - Can be added incrementally without breaking existing buffers
-- Want to validate core buffer functionality first before adding tracking
+- Want to validate core buffer functionality first
 
 # Proposal
 
@@ -133,14 +116,14 @@ To achieve this we will
 5. Updates status conditions
 
 **Make changes to existing Provisioner:**
-1. Reads buffer status for active buffers
+1. Reads buffer status
 2. Constructs virtual pods in-memory (not actual pod objects)
 3. Runs scheduling simulation: Can these virtual pods fit on existing nodes?
    - Yes → Virtual pods can be placed on existing capacity, set `Provisioning: True`
    - No → Create NodeClaims, keep `Provisioning: False` until nodes are available
 4. Only sets buffer status to `Provisioning: True` when virtual pods can be successfully placed on existing cluster capacity without creating new NodeClaims
 
-**Key Point:** Virtual pods are reconstructed every provisioning loop from buffer status. No pod objects are created. The `Provisioning: True` status reflects actual available capacity in the cluster, ensuring the status accurately represents whether buffer capacity is ready for use even if NodeClaims fail to provision. This allows external systems like Kueue to reliably determine when capacity is actually available.
+**Key Point:** Virtual pods are reconstructed every provisioning loop from buffer status. No pod objects are created. The `Provisioning: True` status reflects actual available capacity in the cluster, ensuring the status accurately represents whether buffer capacity is ready for use even if NodeClaims fail to provision.
 
 
 ## Provisioning Strategies
@@ -188,9 +171,6 @@ The scale subresource offers a selector to find pods created by a given resource
 
 **Important Limitation:** This means that the buffer will not initialize until at least one pod of the target workload exists in the cluster. The buffer controller needs an actual pod to extract the template from.
 
-**Future Improvements:**
-- We can predict the pod spec for known workload definitions (like Deployment, Job, or ReplicaSet) by directly reading the workload's pod template spec, eliminating the need for an existing pod
-- We can implement better support for popular community-owned controllers like LeaderWorkerSet where the assumption that all pods are homogeneous is incorrect
 
 **Current Assumption:** The implementation assumes that pods run as part of a scale subresource are homogeneous (identical pod specs across all replicas).
 
@@ -240,13 +220,6 @@ When both `replicas` and `percentage` are specified, use minimum to match Cluste
 - Virtual pods always included in disruption simulation
 - Capacity continuously preserved as buffer reacts to workload changes
 - Buffer remains active until explicitly deleted
-- Virtual pods included in disruption simulation for a grace period after `Completed: True`
-- Default grace period: 1 hour
-- After grace period expires, buffer is no longer considered and capacity can be consolidated
-- Grace period prevents consolidation from immediately removing capacity before workloads use it
-	- The grace period is tracked from the timestamp when `Completed: True` condition is set in the buffer status. This ensures:
-		- Time starts only after capacity is actually available
-		- Buffers that take longer to provision don't have reduced protection time
 
 
 
@@ -259,22 +232,10 @@ Karpenter uses a single provisioning loop for all scheduling decisions. This sin
 - Cluster state remains consistent during scheduling, preventing race conditions in capacity tracking.
 - The singleton pattern helps with buffer pod tracking since there's no risk of concurrent provisioning loops interfering with each other.
 
-### Performance Trade-offs
+### Performance Trade-offs 
 
-A large number of virtual pods might increase the latency of scheduling simulation. The time to simulate and schedule grows with the number of pods being considered. We will look into improving this after running benchmarking to understand real-world performance characteristics.
+The trade-off of this approach is that virtual pods must be reconstructed and injected into the scheduling simulation every provisioning loop. Caching virtual pods between cycles is not viable because cluster state changes between loops (pods are created/deleted, nodes scale, buffer status updates), so virtual pods must always be derived from the current buffer status to ensure correctness. That said, this reconstruction is a cheap operation.
 
-**Current Approach: Stateless Virtual Pod Construction**
-
-We reconstruct virtual pods from buffer status every provisioning cycle rather than maintaining persistent state. This approach prioritizes correctness and simplicity over performance:
-
-**Pros:**
-- No stale state: Virtual pods always reflect current buffer status
-- Simpler implementation: No need to track virtual pod lifecycle
-
-**Rationale for Current Approach:**
-
-We are intentionally not optimizing prematurely. The cost of over-provisioning far outweighs the cost of slightly longer scheduling simulation times.
-We will benchmark these targets in real-world scenarios and optimize if scheduling latency becomes a bottleneck.
 
 ### Virtual Pod Creation
 
