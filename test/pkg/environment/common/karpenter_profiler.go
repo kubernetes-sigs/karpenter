@@ -74,6 +74,12 @@ func (kp *KarpenterProfiler) run(ctx context.Context) {
 
 		kp.pollCount++
 		kp.captureProfiles(ctx)
+		// Wait before next poll to avoid tight loops when profiling fails quickly
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
 	}
 }
 
