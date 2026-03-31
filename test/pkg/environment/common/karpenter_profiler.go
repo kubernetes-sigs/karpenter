@@ -21,10 +21,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/pprof/profile"
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/samber/lo"
+	coordinationv1 "k8s.io/api/coordination/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const CPUProfileSeconds = 20
@@ -64,21 +69,17 @@ func (kp *KarpenterProfiler) Stop() (float64, []byte, int64, []byte) {
 
 func (kp *KarpenterProfiler) run(ctx context.Context) {
 	defer close(kp.done)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
 		kp.pollCount++
 		kp.captureProfiles(ctx)
-		// Wait before next poll to avoid tight loops when profiling fails quickly
+
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
+		case <-ticker.C:
 		}
 	}
 }
@@ -90,8 +91,21 @@ func (kp *KarpenterProfiler) captureProfiles(ctx context.Context) {
 		}
 	}()
 
-	pod := kp.env.ExpectActiveKarpenterPod()
-	if pod == nil {
+	lease := &coordinationv1.Lease{}
+	if err := kp.env.Client.Get(ctx, types.NamespacedName{Name: "karpenter-leader-election", Namespace: "kube-system"}, lease); err != nil {
+		kp.lastError = fmt.Sprintf("failed to get leader lease: %v", err)
+		return
+	}
+	holderIdentity := lo.FromPtr(lease.Spec.HolderIdentity)
+	if holderIdentity == "" {
+		kp.lastError = "leader lease has empty holderIdentity"
+		return
+	}
+	podName := strings.Split(holderIdentity, "_")[0]
+
+	pod := &corev1.Pod{}
+	if err := kp.env.Client.Get(ctx, types.NamespacedName{Name: podName, Namespace: "kube-system"}, pod); err != nil {
+		kp.lastError = fmt.Sprintf("failed to get pod %s: %v", podName, err)
 		return
 	}
 
