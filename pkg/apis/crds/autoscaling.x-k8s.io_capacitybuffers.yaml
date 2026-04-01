@@ -13,23 +13,47 @@ spec:
     kind: CapacityBuffer
     listKind: CapacityBufferList
     plural: capacitybuffers
+    shortNames:
+    - cb
     singular: capacitybuffer
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.provisioningStrategy
+    - description: The strategy to be used.
+      jsonPath: .spec.provisioningStrategy
       name: Strategy
       type: string
-    - jsonPath: .status.replicas
+    - description: The name of the PodTemplate used.
+      jsonPath: .status.podTemplateRef.name
+      name: PodTemplate
+      type: string
+    - description: The actual number of buffer chunks.
+      jsonPath: .status.replicas
       name: Replicas
       type: integer
-    - jsonPath: .metadata.creationTimestamp
+    - description: List of all condition types.
+      jsonPath: .status.conditions[*].type
+      name: ConditionsType
+      type: string
+    - description: List of all condition statuses.
+      jsonPath: .status.conditions[*].status
+      name: ConditionsStatus
+      type: string
+    - description: List of all condition reasons.
+      jsonPath: .status.conditions[*].reason
+      name: ConditionsReason
+      type: string
+    - description: The age of the CapacityBuffer.
+      jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: CapacityBuffer is the Schema for the CapacityBuffer API.
+        description: |-
+          CapacityBuffer is the configuration that an autoscaler can use to provision buffer capacity within a cluster.
+          This buffer is represented by placeholder pods that trigger the Cluster Autoscaler to scale up nodes in advance,
+          ensuring that there is always spare capacity available to handle sudden workload spikes or to speed up scaling events.
         properties:
           apiVersion:
             description: |-
@@ -49,7 +73,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec defines the desired characteristics of the buffer.
+            description: spec defines the desired characteristics of the buffer.
             properties:
               limits:
                 additionalProperties:
@@ -82,6 +106,7 @@ spec:
                 properties:
                   name:
                     description: name of the referent.
+                    minLength: 1
                     type: string
                 required:
                 - name
@@ -96,7 +121,7 @@ spec:
                 description: |-
                   replicas defines the desired number of buffer chunks to provision.
                   If neither `replicas` nor `percentage` is set, as many chunks as fit within
-                  defined resource limits (if any) will be created. If both are set, the minimum
+                  defined resource limits (if any) will be created. If both are set, the maximum
                   of the two will be used.
                 format: int32
                 minimum: 0
@@ -109,20 +134,29 @@ spec:
                   Exactly one of `podTemplateRef`, `scalableRef` should be specified.
                 properties:
                   apiGroup:
-                    description: apiGroup is the API group of the referent.
+                    description: |-
+                      apiGroup is the API group of the referent.
+                      Empty string for the core API group.
                     type: string
                   kind:
                     description: kind is the kind of the referent.
+                    minLength: 1
                     type: string
                   name:
                     description: name is the name of the referent.
+                    minLength: 1
                     type: string
                 required:
-                - apiGroup
                 - kind
                 - name
                 type: object
             type: object
+            x-kubernetes-validations:
+            - message: If podTemplateRef is set, replicas or limits must also be set
+              rule: '!has(self.podTemplateRef) || has(self.replicas) || has(self.limits)'
+            - message: You must define either PodTemplateRef or ScalableRef, but not
+                both
+              rule: '!(has(self.podTemplateRef) && has(self.scalableRef))'
           status:
             description: status represents the current state of the buffer and its
               readiness for autoprovisioning.
@@ -205,6 +239,7 @@ spec:
                 properties:
                   name:
                     description: name of the referent.
+                    minLength: 1
                     type: string
                 required:
                 - name

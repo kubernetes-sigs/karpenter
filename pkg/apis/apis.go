@@ -42,13 +42,6 @@ var (
 		object.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodePoolCRD),
 		object.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodeClaimCRD),
 		object.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodeOverlayCRD),
+		object.Unmarshal[apiextensionsv1.CustomResourceDefinition](CapacityBufferCRD),
 	}
 )
-
-// CapacityBufferCRDInstance returns the unmarshalled CapacityBuffer CRD.
-// This is kept separate from the core CRDs slice because it belongs to a
-// different API group (autoscaling.x-k8s.io) and is gated behind the
-// CapacityBuffer feature gate.
-func CapacityBufferCRDInstance() *apiextensionsv1.CustomResourceDefinition {
-	return object.Unmarshal[apiextensionsv1.CustomResourceDefinition](CapacityBufferCRD)
-}

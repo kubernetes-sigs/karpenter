@@ -46,7 +46,7 @@ func TestCapacityBuffer(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...), test.WithCRDs(apis.CapacityBufferCRDInstance()))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	cbController = NewController(env.Client)
 })
 

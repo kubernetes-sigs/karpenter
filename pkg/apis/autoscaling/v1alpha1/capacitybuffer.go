@@ -25,48 +25,28 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type Limits v1.ResourceList
-
-// LocalObjectRef is a reference to an object in the same namespace.
-type LocalObjectRef struct {
-	//nolint:kubeapilinter
-	// name of the referent.
-	// +required
-	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
-}
-
-// ScalableRef is a reference to an object with a scale subresource.
-type ScalableRef struct {
-	//nolint:kubeapilinter
-	// apiGroup is the API group of the referent.
-	// +required
-	APIGroup string `json:"apiGroup" protobuf:"bytes,1,opt,name=apiGroup"`
-
-	//nolint:kubeapilinter
-	// kind is the kind of the referent.
-	// +required
-	Kind string `json:"kind" protobuf:"bytes,2,opt,name=kind"`
-
-	//nolint:kubeapilinter
-	// name is the name of the referent.
-	// +required
-	Name string `json:"name" protobuf:"bytes,3,opt,name=name"`
-}
-
 // CapacityBuffer is the Schema for the CapacityBuffer API.
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:path=capacitybuffers,scope=Namespaced,categories=autoscaling
+// +kubebuilder:resource:path=capacitybuffers,scope=Namespaced,shortName=cb,categories=autoscaling
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
-// +kubebuilder:printcolumn:name="Strategy",type="string",JSONPath=".spec.provisioningStrategy",description=""
-// +kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".status.replicas",description=""
-// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
+// +kubebuilder:printcolumn:name="Strategy",type="string",JSONPath=".spec.provisioningStrategy",description="The strategy to be used."
+// +kubebuilder:printcolumn:name="PodTemplate",type="string",JSONPath=".status.podTemplateRef.name",description="The name of the PodTemplate used."
+// +kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".status.replicas",description="The actual number of buffer chunks."
+// +kubebuilder:printcolumn:name="ConditionsType",type="string",JSONPath=".status.conditions[*].type",description="List of all condition types."
+// +kubebuilder:printcolumn:name="ConditionsStatus",type="string",JSONPath=".status.conditions[*].status",description="List of all condition statuses."
+// +kubebuilder:printcolumn:name="ConditionsReason",type="string",JSONPath=".status.conditions[*].reason",description="List of all condition reasons."
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="The age of the CapacityBuffer."
+
+// CapacityBuffer is the configuration that an autoscaler can use to provision buffer capacity within a cluster.
+// This buffer is represented by placeholder pods that trigger the Cluster Autoscaler to scale up nodes in advance,
+// ensuring that there is always spare capacity available to handle sudden workload spikes or to speed up scaling events.
 type CapacityBuffer struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"` //nolint:kubeapilinter
 
 	//nolint:kubeapilinter
-	// Spec defines the desired characteristics of the buffer.
+	// spec defines the desired characteristics of the buffer.
 	// +required
 	Spec CapacityBufferSpec `json:"spec" protobuf:"bytes,2,opt,name=spec"`
 
@@ -75,7 +55,41 @@ type CapacityBuffer struct {
 	Status CapacityBufferStatus `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"` //nolint:kubeapilinter
 }
 
+type Limits v1.ResourceList
+
+// LocalObjectRef is a reference to an object in the same namespace.
+type LocalObjectRef struct {
+	//nolint:kubeapilinter
+	// name of the referent.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
+}
+
+// ScalableRef is a reference to an object with a scale subresource.
+type ScalableRef struct {
+	//nolint:kubeapilinter
+	// apiGroup is the API group of the referent.
+	// Empty string for the core API group.
+	// +optional
+	APIGroup string `json:"apiGroup,omitempty" protobuf:"bytes,1,opt,name=apiGroup"`
+
+	//nolint:kubeapilinter
+	// kind is the kind of the referent.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Kind string `json:"kind" protobuf:"bytes,2,opt,name=kind"`
+
+	//nolint:kubeapilinter
+	// name is the name of the referent.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name" protobuf:"bytes,3,opt,name=name"`
+}
+
 // CapacityBufferSpec defines the desired state of CapacityBuffer.
+// +kubebuilder:validation:XValidation:rule="!has(self.podTemplateRef) || has(self.replicas) || has(self.limits)",message="If podTemplateRef is set, replicas or limits must also be set"
+// +kubebuilder:validation:XValidation:rule="!(has(self.podTemplateRef) && has(self.scalableRef))",message="You must define either PodTemplateRef or ScalableRef, but not both"
 type CapacityBufferSpec struct {
 	// provisioningStrategy defines how the buffer is utilized.
 	// "buffer.x-k8s.io/active-capacity" is the default strategy, where the buffer actively scales up the cluster by creating placeholder pods.
@@ -99,10 +113,11 @@ type CapacityBufferSpec struct {
 
 	// replicas defines the desired number of buffer chunks to provision.
 	// If neither `replicas` nor `percentage` is set, as many chunks as fit within
-	// defined resource limits (if any) will be created. If both are set, the minimum
+	// defined resource limits (if any) will be created. If both are set, the maximum
 	// of the two will be used.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:ExclusiveMinimum=false
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,4,opt,name=replicas"`
 
 	// percentage defines the desired buffer capacity as a percentage of the
@@ -111,6 +126,7 @@ type CapacityBufferSpec struct {
 	// For example, if `scalableRef` has 10 replicas and `percentage` is 20, 2 buffer chunks will be created.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:ExclusiveMinimum=false
 	Percentage *int32 `json:"percentage,omitempty" protobuf:"varint,5,opt,name=percentage"`
 
 	// limits specifies resource constraints that limit the number of chunks created for this buffer
@@ -123,17 +139,6 @@ type CapacityBufferSpec struct {
 
 // CapacityBufferStatus defines the observed state of CapacityBuffer.
 type CapacityBufferStatus struct {
-	// conditions provide a standard mechanism for reporting the buffer's state.
-	// The "Ready" condition indicates if the buffer is successfully provisioned
-	// and active. Other conditions may report on various aspects of the buffer's
-	// health and provisioning process.
-	// +optional
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=type
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
-
 	// podTemplateRef is the observed reference to the PodTemplate that was used
 	// to provision the buffer. If this field is not set, and the `conditions`
 	// indicate an error, it provides details about the error state.
@@ -148,6 +153,17 @@ type CapacityBufferStatus struct {
 	// to determine if the status is up-to-date with the desired `spec.podTemplateRef`.
 	// +optional
 	PodTemplateGeneration *int64 `json:"podTemplateGeneration,omitempty" protobuf:"varint,3,opt,name=podTemplateGeneration"`
+
+	// conditions provide a standard mechanism for reporting the buffer's state.
+	// The "Ready" condition indicates if the buffer is successfully provisioned
+	// and active. Other conditions may report on various aspects of the buffer's
+	// health and provisioning process.
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"` //nolint:kubeapilinter
 
 	// provisioningStrategy defines how the buffer should be utilized.
 	// +optional
