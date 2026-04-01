@@ -37,6 +37,17 @@ func init() {
 }
 
 var (
+	ConsolidationScoreHistogram = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "consolidation_score",
+			Help:      "The consolidation score for evaluated moves. Higher scores indicate better cost-benefit ratio. Labeled by decision type and consolidation type.",
+			Buckets:   []float64{0, 0.1, 0.25, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0},
+		},
+		[]string{decisionLabel, ConsolidationTypeLabel},
+	)
 	EvaluationDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{

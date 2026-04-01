@@ -162,6 +162,26 @@ type Command struct {
 	Replacements []*Replacement
 }
 
+// Reason returns the disruption reason for this command from the Method.
+func (c Command) Reason() v1.DisruptionReason {
+	if c.Method != nil {
+		return c.Method.Reason()
+	}
+	return ""
+}
+
+// ConsolidationPolicy returns "Balanced" if any candidate uses the Balanced
+// consolidation policy, empty string otherwise. Use this for log labels and
+// event messages rather than overriding the budget reason.
+func (c Command) ConsolidationPolicy() string {
+	for _, cn := range c.Candidates {
+		if cn.NodePool.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyBalanced {
+			return string(v1.ConsolidationPolicyBalanced)
+		}
+	}
+	return ""
+}
+
 type Decision string
 
 var (

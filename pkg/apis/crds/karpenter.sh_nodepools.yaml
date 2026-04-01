@@ -157,10 +157,26 @@ spec:
                       enum:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
+                        - Balanced
                       type: string
+                    disruptionTolerance:
+                      description: |-
+                        DisruptionTolerance controls how aggressive the Balanced consolidation policy is.
+                        Higher values make consolidation more aggressive (allow more disruption for less savings).
+                        The consolidation score threshold is computed as 1/DisruptionTolerance.
+                        For example, DisruptionTolerance=2 means threshold=0.5, so consolidation occurs when
+                        cost savings are at least half the disruption cost.
+                        This field only applies when ConsolidationPolicy is Balanced.
+                        Defaults to 2 if not specified.
+                      format: int32
+                      minimum: 1
+                      type: integer
                   required:
                     - consolidateAfter
                   type: object
+                  x-kubernetes-validations:
+                    - message: disruptionTolerance is only valid with consolidationPolicy Balanced
+                      rule: self.consolidationPolicy == 'Balanced' || !has(self.disruptionTolerance)
                 limits:
                   additionalProperties:
                     anyOf:

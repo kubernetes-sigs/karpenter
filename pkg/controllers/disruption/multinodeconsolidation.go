@@ -86,7 +86,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
 
-	cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
+	cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel, candidates)
 	if err != nil {
 		return []Command{}, err
 	}
@@ -115,7 +115,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
 // NodeClaims are sorted by increasing disruption order which correlates to likelihood of being able to consolidate the node
 // nolint:gocyclo
-func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
+func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int, allCandidates []*Candidate) (Command, error) {
 	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
 		return Command{}, nil
@@ -157,6 +157,14 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			// we check the error before the replacement instanceTypeOptions since we return nil for the replacement if we get an error
 			if err == nil && len(cmd.Replacements[0].InstanceTypeOptions) > 0 {
 				validDecision = true
+			}
+		}
+		if validDecision {
+			// For Balanced policy, check the consolidation score
+			var ok bool
+			cmd, ok = m.checkBalancedScore(ctx, cmd, allCandidates, m.ConsolidationType())
+			if !ok {
+				validDecision = false
 			}
 		}
 		if validDecision {
