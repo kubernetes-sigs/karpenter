@@ -122,9 +122,22 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 	return cn.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
-// sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result
+// sortCandidates sorts candidates by drift priority (drifted before non-drifted,
+// oldest-drifted first) then by disruption cost ascending.
 func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
-	sort.Slice(candidates, func(i int, j int) bool {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		iDrifted := candidates[i].StateNode.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
+		jDrifted := candidates[j].StateNode.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
+		if iDrifted != jDrifted {
+			return iDrifted // drifted nodes first
+		}
+		if iDrifted && jDrifted {
+			iTime := candidates[i].StateNode.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).LastTransitionTime
+			jTime := candidates[j].StateNode.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).LastTransitionTime
+			if !iTime.Equal(&jTime) {
+				return iTime.Before(&jTime)
+			}
+		}
 		return candidates[i].DisruptionCost < candidates[j].DisruptionCost
 	})
 	return candidates
