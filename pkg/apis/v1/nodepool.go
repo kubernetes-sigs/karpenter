@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/mitchellh/hashstructure/v2"
@@ -169,6 +170,18 @@ const (
 	DisruptionReasonEmpty         DisruptionReason = "Empty"
 	DisruptionReasonDrifted       DisruptionReason = "Drifted"
 )
+
+const DriftSLOAnnotationKey = "karpenter.sh/drift-slo"
+
+// GetDriftSLO returns the drift SLO duration from the NodePool annotation, if set and valid.
+func (in *NodePool) GetDriftSLO() *time.Duration {
+	if v, ok := in.Annotations[DriftSLOAnnotationKey]; ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			return &d
+		}
+	}
+	return nil
+}
 
 type Limits v1.ResourceList
 

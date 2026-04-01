@@ -137,6 +137,30 @@ func NodePoolBlocked(nodePool *v1.NodePool) events.Event {
 	}
 }
 
+// DriftSLOExceeded emits a warning event when the drift SLO deadline has passed and drifted nodes remain.
+func DriftSLOExceeded(nodePool *v1.NodePool, remainingNodes int) events.Event {
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           corev1.EventTypeWarning,
+		Reason:         "DriftSLOExceeded",
+		Message:        fmt.Sprintf("Drift SLO deadline has passed with %d drifted nodes remaining", remainingNodes),
+		DedupeValues:   []string{string(nodePool.UID), "drift-slo-exceeded"},
+		DedupeTimeout:  1 * time.Minute,
+	}
+}
+
+// DriftSLOAtRisk emits a warning event when the projected drift rate won't meet the SLO.
+func DriftSLOAtRisk(nodePool *v1.NodePool, remainingNodes int, availableBudget int) events.Event {
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           corev1.EventTypeWarning,
+		Reason:         "DriftSLOAtRisk",
+		Message:        fmt.Sprintf("Projected drift rate (%d remaining nodes) may not meet SLO with available budget of %d per cycle", remainingNodes, availableBudget),
+		DedupeValues:   []string{string(nodePool.UID), "drift-slo-at-risk"},
+		DedupeTimeout:  1 * time.Minute,
+	}
+}
+
 // ConsolidationCandidate is an event that informs the user that a consolidation candidate has been generated
 func ConsolidationCandidate(node *corev1.Node, nodeClaim *v1.NodeClaim, command string, savings float64) []events.Event {
 	message := fmt.Sprintf("Consolidation candidate: %s (savings: $%.2f)", command, savings)

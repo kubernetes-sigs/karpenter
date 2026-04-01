@@ -128,4 +128,34 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
+	DriftSLORemainingSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "drift_slo_remaining_seconds",
+			Help:      "Time remaining until drift SLO deadline, per NodePool. Negative values indicate the deadline has passed.",
+		},
+		[]string{metrics.NodePoolLabel},
+	)
+	DriftSLORemainingNodes = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "drift_slo_remaining_nodes",
+			Help:      "Drifted nodes not yet disrupted, per NodePool.",
+		},
+		[]string{metrics.NodePoolLabel},
+	)
+	DriftSLOShare = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "drift_slo_share",
+			Help:      "Current drift budget share reserved from consolidation, per NodePool.",
+		},
+		[]string{metrics.NodePoolLabel},
+	)
 )

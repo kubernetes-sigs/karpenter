@@ -225,13 +225,15 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 
 // BuildDisruptionBudgets prepares our disruption budget mapping. The disruption budget maps each disruption reason to the number of allowed disruptions.
 // We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are NotReady and already being deleted by that disruption reason.
+// When a NodePool has a drift SLO annotation and the reason is not Drifted, the drift share is reserved from the budget so consolidation sees reduced availability.
 //
 //nolint:gocyclo
 func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, reason v1.DisruptionReason) (map[string]int, error) {
 	disruptionBudgetMapping := map[string]int{}
 	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
 	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
-	for _, node := range cluster.DeepCopyNodes() {
+	allNodes := cluster.DeepCopyNodes()
+	for _, node := range allNodes {
 		// We only consider nodes that we own and are initialized towards the total.
 		// If a node is launched/registered, but not initialized, pods aren't scheduled
 		// to the node, and these are treated as unhealthy until they're cleaned up.
@@ -264,9 +266,22 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	if err != nil {
 		return disruptionBudgetMapping, fmt.Errorf("listing node pools, %w", err)
 	}
+	now := clk.Now()
 	for _, nodePool := range nodePools {
 		allowedDisruptions := nodePool.MustGetAllowedDisruptions(clk, numNodes[nodePool.Name], reason)
-		disruptionBudgetMapping[nodePool.Name] = lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
+		available := lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
+
+		// When computing budgets for non-drift reasons, reserve drift share from the budget
+		// so that drift SLO deadlines can be met.
+		if reason != v1.DisruptionReasonDrifted {
+			driftShare := ComputeDriftShare(nodePool, allNodes, available, now)
+			available = lo.Max([]int{available - driftShare, 0})
+			DriftSLOShare.Set(float64(driftShare), map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
+			})
+		}
+
+		disruptionBudgetMapping[nodePool.Name] = available
 		NodePoolAllowedDisruptions.Set(float64(allowedDisruptions), map[string]string{
 			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
 		})
@@ -276,6 +291,9 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		if numNodes[nodePool.Name] != 0 && allowedDisruptions == 0 {
 			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(nodePool, reason))
 		}
+
+		// Emit drift SLO warning events
+		emitDriftSLOWarnings(nodePool, allNodes, available, now, recorder)
 	}
 	return disruptionBudgetMapping, nil
 }
