@@ -100,7 +100,12 @@ func NewControllers(
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue,
+			lo.Ternary(options.FromContext(ctx).FeatureGates.CooperativeDriftConsolidation,
+				disruption.WithMethods(disruption.NewCooperativeMethods(clock, cluster, kubeClient, p, cloudProvider, recorder, disruptionQueue)...),
+				disruption.WithMethods(disruption.NewMethods(clock, cluster, kubeClient, p, cloudProvider, recorder, disruptionQueue)...),
+			),
+		),
 		provisioning.NewPodController(kubeClient, p, cluster),
 		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient, cloudProvider),

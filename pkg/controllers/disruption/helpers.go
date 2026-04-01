@@ -273,7 +273,7 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 
 		// When computing budgets for non-drift reasons, reserve drift share from the budget
 		// so that drift SLO deadlines can be met.
-		if reason != v1.DisruptionReasonDrifted {
+		if options.FromContext(ctx).FeatureGates.CooperativeDriftConsolidation && reason != v1.DisruptionReasonDrifted {
 			driftShare := ComputeDriftShare(nodePool, allNodes, available, now)
 			available = lo.Max([]int{available - driftShare, 0})
 			DriftSLOShare.Set(float64(driftShare), map[string]string{
@@ -293,7 +293,9 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		}
 
 		// Emit drift SLO warning events
-		emitDriftSLOWarnings(nodePool, allNodes, available, now, recorder)
+		if options.FromContext(ctx).FeatureGates.CooperativeDriftConsolidation {
+			emitDriftSLOWarnings(nodePool, allNodes, available, now, recorder)
+		}
 	}
 	return disruptionBudgetMapping, nil
 }

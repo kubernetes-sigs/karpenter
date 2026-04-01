@@ -59,7 +59,7 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 	if e.IsConsolidated() {
 		return []Command{}, nil
 	}
-	candidates = e.sortCandidates(candidates)
+	candidates = e.sortCandidates(ctx, candidates)
 
 	empty := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false

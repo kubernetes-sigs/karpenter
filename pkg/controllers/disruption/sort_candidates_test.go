@@ -17,6 +17,7 @@ limitations under the License.
 package disruption
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 func makeCandidate(drifted bool, driftTime time.Time, cost float64) *Candidate {
@@ -44,15 +46,21 @@ func makeCandidate(drifted bool, driftTime time.Time, cost float64) *Candidate {
 	}
 }
 
+func cooperativeCtx() context.Context {
+	opts := &options.Options{FeatureGates: options.FeatureGates{CooperativeDriftConsolidation: true}}
+	return options.ToContext(context.Background(), opts)
+}
+
 func TestSortCandidates_DriftedBeforeNonDrifted(t *testing.T) {
 	c := consolidation{}
+	ctx := cooperativeCtx()
 	now := time.Now()
 	candidates := []*Candidate{
 		makeCandidate(false, time.Time{}, 1.0),
 		makeCandidate(true, now, 2.0),
 		makeCandidate(false, time.Time{}, 0.5),
 	}
-	result := c.sortCandidates(candidates)
+	result := c.sortCandidates(ctx, candidates)
 	if !result[0].StateNode.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue() {
 		t.Fatal("expected drifted candidate first")
 	}
@@ -65,13 +73,14 @@ func TestSortCandidates_DriftedBeforeNonDrifted(t *testing.T) {
 
 func TestSortCandidates_OldestDriftedFirst(t *testing.T) {
 	c := consolidation{}
+	ctx := cooperativeCtx()
 	now := time.Now()
 	candidates := []*Candidate{
 		makeCandidate(true, now, 1.0),
 		makeCandidate(true, now.Add(-1*time.Hour), 2.0),
 		makeCandidate(true, now.Add(-2*time.Hour), 3.0),
 	}
-	result := c.sortCandidates(candidates)
+	result := c.sortCandidates(ctx, candidates)
 	for i := 0; i < len(result)-1; i++ {
 		iTime := result[i].StateNode.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).LastTransitionTime
 		jTime := result[i+1].StateNode.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).LastTransitionTime
@@ -83,12 +92,13 @@ func TestSortCandidates_OldestDriftedFirst(t *testing.T) {
 
 func TestSortCandidates_NonDriftedOrderUnchanged(t *testing.T) {
 	c := consolidation{}
+	ctx := cooperativeCtx()
 	candidates := []*Candidate{
 		makeCandidate(false, time.Time{}, 3.0),
 		makeCandidate(false, time.Time{}, 1.0),
 		makeCandidate(false, time.Time{}, 2.0),
 	}
-	result := c.sortCandidates(candidates)
+	result := c.sortCandidates(ctx, candidates)
 	for i := 0; i < len(result)-1; i++ {
 		if result[i].DisruptionCost > result[i+1].DisruptionCost {
 			t.Fatalf("expected non-drifted sorted by disruption cost, got %f > %f at index %d",
