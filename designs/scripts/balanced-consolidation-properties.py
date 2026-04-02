@@ -246,8 +246,12 @@ def check_p7():
 # ─── P8: Churn chains ───
 
 def check_p8():
-    """Find replace chains: p1 -> p2 -> p3 -> ... where each step is approved.
-    Models the ACTUAL post-replace pool (updated pool_cost)."""
+    """Find the longest replace chain via exhaustive DFS over all approved next-steps.
+
+    At each step, every cheaper price that the scoring formula approves is a valid
+    next node in the chain.  DFS explores all of them and returns the true maximum
+    chain length — not just the greedy "least aggressive step" path, which could
+    miss longer cross-family zigzag paths."""
     results = defaultdict(list)
     for k in K_VALUES:
         for pod_config in pod_configs(max_pods=4):
@@ -256,38 +260,41 @@ def check_p8():
             move_disruption = sum(pod_config)
             for n_nodes in range(1, 5):
                 for start_price in PRICES:
-                    chain = [start_price]
-                    current_price = start_price
-                    # Other nodes stay the same
                     other_cost = (n_nodes - 1) * start_price
                     other_disruption = (n_nodes - 1) * move_disruption
-                    while True:
-                        found_next = False
-                        # Try all cheaper prices, pick the most expensive one that's approved
-                        # (least aggressive step — longest chain)
-                        candidates = sorted([p for p in PRICES if p < current_price], reverse=True)
-                        for np in candidates:
-                            savings = current_price - np
-                            pool_cost = current_price + other_cost
-                            pool_disruption = move_disruption + other_disruption
-                            if approved(k, savings, move_disruption, pool_cost, pool_disruption):
-                                chain.append(np)
-                                # Update for next iteration
-                                current_price = np
-                                found_next = True
-                                break
-                        if not found_next:
-                            break
-                    if len(chain) > 1:
+                    longest_chain = _dfs_longest_chain(
+                        k, start_price, [start_price],
+                        move_disruption, other_cost, other_disruption,
+                    )
+                    if len(longest_chain) > 1:
                         results[k].append({
                             'n_nodes': n_nodes, 'pods': pod_config,
-                            'chain': chain, 'steps': len(chain) - 1,
+                            'chain': longest_chain, 'steps': len(longest_chain) - 1,
                         })
     # Keep only the longest chains per k
     for k in results:
         results[k].sort(key=lambda x: -x['steps'])
         results[k] = results[k][:5]
     return results
+
+
+def _dfs_longest_chain(k, current_price, chain, move_disruption, other_cost, other_disruption):
+    """Return the longest chain reachable from current_price via any sequence of approved replaces."""
+    best = list(chain)
+    for np in PRICES:
+        if np >= current_price:
+            continue
+        savings = current_price - np
+        pool_cost = current_price + other_cost
+        pool_disruption = move_disruption + other_disruption
+        if approved(k, savings, move_disruption, pool_cost, pool_disruption):
+            candidate = _dfs_longest_chain(
+                k, np, chain + [np],
+                move_disruption, other_cost, other_disruption,
+            )
+            if len(candidate) > len(best):
+                best = candidate
+    return best
 
 
 # ─── Utility ───

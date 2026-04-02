@@ -191,8 +191,8 @@ Existing feasibility checks (disruption budgets, PDBs, `consolidateAfter`, `do-n
 
 Approved and rejected moves are surfaced as events. Single-node moves emit on the NodeClaim. Multi-node moves emit on the NodePool (the score describes the move, not any single node).
 
-- `ConsolidationApproved`: `"score %.2f >= threshold %.2f (savings %.1f%%, disruption %.1f%%)"`
-- `ConsolidationRejected`: `"score %.2f < threshold %.2f (savings %.1f%%, disruption %.1f%%)"`
+- `ConsolidationApproved`: `"score %.2f >= threshold %.2f (consolidationThreshold: %.1f, savings %.1f%%, disruption %.1f%%)"`
+- `ConsolidationRejected`: `"score %.2f < threshold %.2f (consolidationThreshold: %.1f, savings %.1f%%, disruption %.1f%%)"`
 
 Scored moves are also logged at DEBUG level.
 
@@ -324,9 +324,9 @@ The scoring formula has one free parameter: `consolidationThreshold` (k). We cho
 
 ### State Space
 
-We enumerate configurations in a bounded space using on-demand prices from three instance families in us-east-1: c7i (compute-optimized), m7i (general-purpose), and r7i (memory-optimized), medium through 4xlarge (15 price points). 1 to 6 nodes per pool, 0 to 4 pods per node, per-pod disruption cost in {1, 2, 5, 10}. For each configuration, we evaluate every candidate move (Delete and Replace to every cheaper price) at every k from 1 through 5. Three families matter because cross-family replacement ratios are not power-of-2.
+We enumerate configurations in a bounded space using on-demand prices from three instance families in us-east-1: c7i (compute-optimized), m7i (general-purpose), and r7i (memory-optimized), medium through 4xlarge (15 price points). 1 to 6 nodes per pool, 0 to 4 pods per node, per-pod disruption cost in {1, 2, 5, 10} (max per-node disruption cost: 4 pods x 10 = 40). For each configuration, we evaluate every candidate move (Delete and Replace to every cheaper price) at every k from 1 through 5. Three families matter because cross-family replacement ratios are not power-of-2.
 
-The enumeration caps at 4 pods per node for tractability. Properties 1-4, 6, and 7 are algebraic and hold for any pod count. Properties 5 and 8 depend on the price structure, not pod count.
+Properties 1-4, 6, and 7 are algebraic properties of the ratio formula and hold for any pod count — the enumeration is a sanity check, not the proof. Properties 5 and 8 are empirical results bounded by the enumerated price structure and pod counts.
 
 ### What a good scoring function does
 
@@ -355,7 +355,7 @@ Properties 1-4, 6, and 7 hold at all k values (structural properties of the rati
 
 At k=1, no replace is ever approved in a uniform pool. The score for a uniform-pool replace simplifies to `1 - replacement_price / node_price`, which requires a free replacement to reach 1.0.
 
-k=2 is the smallest integer where uniform-pool REPLACEs pass. Within a single family, prices follow power-of-2 scaling, so every replacement ratio is 0.5 or less and k>=3 adds nothing. Across families, k=3 opens 8 additional cross-family pairs (e.g., c7i.large → m7i.medium at 43% savings, score 0.43) without increasing the max churn chain. k=4 opens 9 more pairs but allows 9-step churn chains that zigzag through all three families.
+k=2 is the smallest integer where uniform-pool REPLACEs pass. Within a single family, prices follow power-of-2 scaling, so every replacement ratio is 0.5 or less and k>=3 adds nothing. Across families, k=3 opens 8 additional cross-family pairs (e.g., c7i.large → m7i.medium at 43% savings, score 0.43) without increasing the max churn chain. k=4 opens 9 more pairs but allows 9-step churn chains that zigzag through all three families. Max chain lengths are confirmed by exhaustive DFS over all approved replacement paths, not a greedy heuristic (see [`balanced-consolidation-properties.py`](scripts/balanced-consolidation-properties.py)).
 
 k=2 is the right default. It is the smallest value that makes within-family REPLACEs viable, and it captures all cross-family pairs where the replacement costs less than half the original. The 8 additional cross-family pairs at k=3 are available to operators who set `consolidationThreshold: 3` (see [`balanced-consolidation-properties.py`](scripts/balanced-consolidation-properties.py)).
 
