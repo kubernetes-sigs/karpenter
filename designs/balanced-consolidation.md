@@ -183,7 +183,9 @@ The NodePool totals only need to be sensible relative to each other. The impleme
 
 Existing feasibility checks (disruption budgets, PDBs, `consolidateAfter`, `do-not-disrupt`) are unchanged. Scoring applies only to consolidation, not to spot interruptions, expiration, or drift.
 
-`consolidateAfter` determines candidacy. Young nodes are not candidates but contribute to the denominators, preventing the post-replacement cycle from being artificially aggressive.
+**Consolidation cycling loops.** The scoring filter is the primary mechanism that breaks cycling loops ([aws#8536](https://github.com/aws/karpenter-provider-aws/issues/8536), [aws#6642](https://github.com/aws/karpenter-provider-aws/issues/6642), [aws#7146](https://github.com/aws/karpenter-provider-aws/issues/7146)). A same-type REPLACE that saves $0 scores 0 and is rejected at any threshold. A near-zero-savings move with meaningful disruption scores below 1/k and is also rejected. These are the moves that produce multi-hour loops under `WhenEmptyOrUnderutilized`, where any positive savings (including rounding-error savings) triggers a replace. The `consolidateAfter` cooldown on destination nodes (described below) provides a secondary damping effect between rounds but is not sufficient on its own to prevent cycling.
+
+`consolidateAfter` determines candidacy: a node whose last pod event is within the `consolidateAfter` window is not a candidate. Non-candidate nodes still contribute to the denominators, preventing the post-replacement cycle from being artificially aggressive. When a move executes, pods landing on the destination node reset its `consolidateAfter` timer, temporarily removing it from candidacy. This provides a natural cooldown between consolidation rounds.
 
 ### Observability
 
@@ -413,7 +415,7 @@ No. The score assumes pods land on the intended destination. In practice, kube-s
 
 This exists in all consolidation modes. The cost threshold concentrates the remaining moves onto higher-impact candidates. The system self-corrects: a nearly-empty replacement scores as a trivial DELETE next cycle. Cascades terminate because each round has strictly fewer displaced nodes.
 
-Configuring kube-scheduler with `MostAllocated` scoring reduces divergence. The [Workload-Aware Scheduling proposal](https://docs.google.com/document/d/1mPYqS4cFmsHPaVQDKyCz7-TKyWNJGjTaZQD3Umkvmgk) (Kepka, Feb 2026) addresses this more directly.
+Configuring kube-scheduler with `MostAllocated` scoring reduces divergence.
 
 ### Why doesn't the score account for reserved instance or ODCR opportunity cost?
 
