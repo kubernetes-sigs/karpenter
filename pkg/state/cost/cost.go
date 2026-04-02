@@ -228,6 +228,10 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 
 	cc.Lock()
 	defer cc.Unlock()
+	if _, exists = cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim)]; exists {
+		return nil
+	}
+
 	err := cc.internalAddOffering(ctx, nodePoolName, offeringKey)
 	if err != nil {
 		failed = true
@@ -262,6 +266,9 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nn types.NamespacedN
 
 	cc.Lock()
 	defer cc.Unlock()
+	if _, exists = cc.nodeClaimMap[nn]; exists {
+		return nil
+	}
 
 	err := cc.internalRemoveOffering(metadata.NodePoolName, metadata.NodeClaimKey)
 	if err != nil {
