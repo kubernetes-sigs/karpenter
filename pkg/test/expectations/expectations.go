@@ -403,6 +403,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	node := test.NodeClaimLinkedNode(nc)
 	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true"})
+	nc.Status.NodeName = node.Name
 	ExpectApplied(ctx, c, nc, node)
 	return nc, node, nil
 }
