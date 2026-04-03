@@ -105,7 +105,7 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Nod
 	for _, node := range nodes {
 		var podList corev1.PodList
 		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
-			return nil, fmt.Errorf("listing pods, %w", err)
+			return nil, fmt.Errorf("listing pods for node %q, %w", node.Name, err)
 		}
 		for i := range podList.Items {
 			pods = append(pods, &podList.Items[i])
