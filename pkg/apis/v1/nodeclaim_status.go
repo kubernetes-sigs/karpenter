@@ -67,6 +67,13 @@ type NodeClaimStatus struct {
 	// is also considered as removed.
 	// +optional
 	LastPodEventTime metav1.Time `json:"lastPodEventTime,omitempty"`
+	//nolint:kubeapilinter
+	// TerminationTime is the time at which the NodeClaim will be forcefully terminated,
+	// bypassing pod terminationGracePeriodSeconds, PDBs, and the do-not-disrupt annotation.
+	// This is set when a NodeClaim with a terminationGracePeriod begins terminating, or when
+	// node repair initiates forced termination.
+	// +optional
+	TerminationTime *metav1.Time `json:"terminationTime,omitempty"`
 }
 
 func (in *NodeClaim) StatusConditions() status.ConditionSet {
