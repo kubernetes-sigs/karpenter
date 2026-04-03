@@ -3775,6 +3775,122 @@ var _ = Context("Scheduling", func() {
 		})
 	})
 
+	Describe("VolumeTopology", func() {
+		It("should not return volume topology requirements for ephemeral volumes on bound pods", func() {
+			volumeName := "tmp-ephemeral"
+			pod := test.UnschedulablePod()
+			pod.Spec.NodeName = "fake-node" // simulate a bound pod
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: volumeName,
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								StorageClassName: lo.ToPtr("my-storage-class"),
+								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+								},
+							},
+						},
+					},
+				},
+			})
+			pvName := "test-pv"
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: pod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+				},
+				StorageClassName: lo.ToPtr("my-storage-class"),
+				VolumeName:       pvName,
+			})
+			pv := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{Name: pvName},
+				Zones:      []string{"test-zone-1"},
+			})
+			ExpectApplied(ctx, env.Client, pvc, pv)
+
+			volumeTopology := scheduling.NewVolumeTopology(env.Client)
+			reqs, err := volumeTopology.GetRequirements(ctx, pod)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(reqs).To(BeNil())
+		})
+		It("should return volume topology requirements for ephemeral volumes on unbound pods", func() {
+			volumeName := "tmp-ephemeral"
+			pod := test.UnschedulablePod()
+			// pod.Spec.NodeName is empty (unbound pod)
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: volumeName,
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								StorageClassName: lo.ToPtr("my-storage-class"),
+								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+								},
+							},
+						},
+					},
+				},
+			})
+			pvName := "test-pv"
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: pod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+				},
+				StorageClassName: lo.ToPtr("my-storage-class"),
+				VolumeName:       pvName,
+			})
+			pv := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{Name: pvName},
+				Zones:      []string{"test-zone-1"},
+			})
+			ExpectApplied(ctx, env.Client, pvc, pv)
+
+			volumeTopology := scheduling.NewVolumeTopology(env.Client)
+			reqs, err := volumeTopology.GetRequirements(ctx, pod)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(reqs).ToNot(BeNil())
+			Expect(reqs.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("test-zone-1"))
+		})
+		It("should return volume topology requirements for regular PVCs on bound pods", func() {
+			pod := test.UnschedulablePod()
+			pod.Spec.NodeName = "fake-node" // simulate a bound pod
+			pvName := "test-pv"
+			pvcName := "test-pvc"
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: "data",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: pvcName,
+					},
+				},
+			})
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: pod.Namespace,
+					Name:      pvcName,
+				},
+				VolumeName: pvName,
+			})
+			pv := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{Name: pvName},
+				Zones:      []string{"test-zone-1"},
+			})
+			ExpectApplied(ctx, env.Client, pvc, pv)
+
+			volumeTopology := scheduling.NewVolumeTopology(env.Client)
+			reqs, err := volumeTopology.GetRequirements(ctx, pod)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(reqs).ToNot(BeNil())
+			Expect(reqs.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("test-zone-1"))
+		})
+	})
+
 	Describe("Deleting Nodes", func() {
 		It("should re-schedule pods from a deleting node when pods are active", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
