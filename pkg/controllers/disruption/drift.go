@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -40,14 +41,16 @@ type Drift struct {
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
 	recorder    events.Recorder
+	clock       clock.Clock
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
 		recorder:    recorder,
+		clock:       clk,
 	}
 }
 
@@ -62,6 +65,8 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
 	})
+
+	candidates = d.filterBySequentialTopology(candidates)
 
 	emptyCandidates, nonEmptyCandidates := lo.FilterReject(candidates, func(c *Candidate, _ int) bool {
 		return len(c.reschedulablePods) == 0
@@ -113,4 +118,141 @@ func (d *Drift) Class() string {
 
 func (d *Drift) ConsolidationType() string {
 	return ""
+}
+
+// filterBySequentialTopology restricts candidates to a single active topology domain
+// for NodePools with an active Sequential topology budget.
+//
+// Algorithm:
+//  1. Group candidates by NodePool.
+//  2. Pre-resolve each NodePool's active sequential budget.
+//  3. Build per-(NodePool, domain) node counts in a single pass over all cluster nodes.
+//  4. For each NodePool with an active sequential topology budget:
+//     a. If any domain has in-flight disruptions → active domain = that domain
+//     (chosen deterministically by sorted key).
+//     b. If no in-flight disruptions → active domain = domain of candidates[0]
+//     (already sorted oldest-drift-first, so this is the most urgent domain).
+//     c. Count disrupting nodes in the active domain, compute remaining budget.
+//     d. Return only candidates from the active domain, capped at remaining budget.
+func (d *Drift) filterBySequentialTopology(candidates []*Candidate) []*Candidate {
+	byNodePool := lo.GroupBy(candidates, func(c *Candidate) string { return c.NodePool.Name })
+	allNodes := d.cluster.DeepCopyNodes()
+
+	// Pre-resolve active sequential budgets so we know which topology keys to index.
+	activeBudgets := make(map[string]*v1.Budget, len(byNodePool))
+	for npName, npCandidates := range byNodePool {
+		activeBudgets[npName] = d.findActiveSequentialBudget(npCandidates[0].NodePool)
+	}
+
+	// Build per-(NodePool, domain) counts in a single pass over all cluster nodes.
+	numByDomain, inFlightByDomain := d.buildTopologyIndex(allNodes, activeBudgets)
+
+	var result []*Candidate
+	for npName, npCandidates := range byNodePool {
+		budget := activeBudgets[npName]
+		if budget == nil {
+			result = append(result, npCandidates...)
+			continue
+		}
+		activeDomain := pickActiveDomain(inFlightByDomain[npName], npCandidates, budget.TopologyKey)
+		if activeDomain == "" {
+			result = append(result, npCandidates...)
+			continue
+		}
+
+		allowance, err := budget.GetAllowedDisruptions(d.clock, numByDomain[npName][activeDomain])
+		if err != nil || allowance == 0 {
+			continue
+		}
+		remaining := lo.Max([]int{allowance - inFlightByDomain[npName][activeDomain], 0})
+		if remaining == 0 {
+			continue
+		}
+
+		domainCandidates := lo.Filter(npCandidates, func(c *Candidate, _ int) bool {
+			return c.Labels()[budget.TopologyKey] == activeDomain
+		})
+		if len(domainCandidates) > remaining {
+			domainCandidates = domainCandidates[:remaining]
+		}
+		result = append(result, domainCandidates...)
+	}
+	return result
+}
+
+// buildTopologyIndex counts total and in-flight (MarkedForDeletion) nodes per
+// (NodePool, topology domain) in a single pass over all cluster nodes.
+// Only NodePools present in activeBudgets with a non-nil budget are indexed.
+func (d *Drift) buildTopologyIndex(allNodes state.StateNodes, activeBudgets map[string]*v1.Budget) (numByDomain, inFlightByDomain map[string]map[string]int) {
+	numByDomain = make(map[string]map[string]int)
+	inFlightByDomain = make(map[string]map[string]int)
+	for _, n := range allNodes {
+		if !n.Managed() || !n.Initialized() {
+			continue
+		}
+		npName := n.Labels()[v1.NodePoolLabelKey]
+		budget, ok := activeBudgets[npName]
+		if !ok || budget == nil {
+			continue
+		}
+		if n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+			continue
+		}
+		domain := n.Labels()[budget.TopologyKey]
+		if domain == "" {
+			continue
+		}
+		if numByDomain[npName] == nil {
+			numByDomain[npName] = make(map[string]int)
+			inFlightByDomain[npName] = make(map[string]int)
+		}
+		numByDomain[npName][domain]++
+		if n.MarkedForDeletion() {
+			inFlightByDomain[npName][domain]++
+		}
+	}
+	return numByDomain, inFlightByDomain
+}
+
+// pickActiveDomain returns the topology domain that should be disrupted next.
+// If any domain already has in-flight disruptions, that domain is continued;
+// the domain is chosen deterministically by sorted key.
+// Otherwise the domain of the first (oldest-drifted) candidate is chosen.
+func pickActiveDomain(inFlightByDomain map[string]int, candidates []*Candidate, topologyKey string) string {
+	if len(inFlightByDomain) > 0 {
+		domains := make([]string, 0, len(inFlightByDomain))
+		for domain := range inFlightByDomain {
+			domains = append(domains, domain)
+		}
+		sort.Strings(domains)
+		for _, domain := range domains {
+			if inFlightByDomain[domain] > 0 {
+				return domain
+			}
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0].Labels()[topologyKey]
+	}
+	return ""
+}
+
+// findActiveSequentialBudget returns the first active budget with TopologyKey +
+// Sequential=true that applies to the Drifted reason. Returns nil if none.
+func (d *Drift) findActiveSequentialBudget(nodePool *v1.NodePool) *v1.Budget {
+	for i := range nodePool.Spec.Disruption.Budgets {
+		b := &nodePool.Spec.Disruption.Budgets[i]
+		if b.TopologyKey == "" || !b.Sequential {
+			continue
+		}
+		if b.Reasons != nil && !lo.Contains(b.Reasons, v1.DisruptionReasonDrifted) {
+			continue
+		}
+		active, err := b.IsActive(d.clock)
+		if err != nil || !active {
+			continue
+		}
+		return b
+	}
+	return nil
 }

@@ -26,7 +26,29 @@ import (
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	errs = multierr.Combine(
+		in.Spec.Template.validateLabels(),
+		in.Spec.Template.Spec.validateTaints(),
+		in.Spec.Template.Spec.validateRequirements(ctx),
+		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(),
+		in.validateDisruptionBudgets(),
+	)
+	return errs
+}
+
+func (in *NodePool) validateDisruptionBudgets() (errs error) {
+	for i, b := range in.Spec.Disruption.Budgets {
+		if b.Sequential && b.TopologyKey == "" {
+			errs = multierr.Append(errs,
+				fmt.Errorf("spec.disruption.budgets[%d]: 'sequential' requires 'topologyKey' to be set", i))
+		}
+		if b.TopologyKey != "" {
+			for _, err := range validation.IsQualifiedName(b.TopologyKey) {
+				errs = multierr.Append(errs,
+					fmt.Errorf("spec.disruption.budgets[%d]: invalid topologyKey %q: %s", i, b.TopologyKey, err))
+			}
+		}
+	}
 	return errs
 }
 

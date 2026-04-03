@@ -272,4 +272,63 @@ var _ = Describe("Budgets", func() {
 			Expect(err).To(MatchError(ContainSubstring("beginning of range (2) beyond end of range (1)")))
 		})
 	})
+
+	Context("Sequential Topology Budgets", func() {
+		It("should fail validation when sequential is true but topologyKey is not set", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:      "1",
+					Sequential: true,
+				},
+			}
+			err := nodePool.RuntimeValidate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("'sequential' requires 'topologyKey'"))
+		})
+		It("should fail validation when topologyKey is not a valid qualified name", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:       "1",
+					TopologyKey: "not valid!",
+				},
+			}
+			err := nodePool.RuntimeValidate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("invalid topologyKey"))
+		})
+		It("should pass validation for a valid sequential topology budget", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:       "1",
+					TopologyKey: "topology.kubernetes.io/zone",
+					Sequential:  true,
+				},
+			}
+			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+		})
+		It("should return MaxInt32 for Drifted reason and apply the budget for other reasons when only topology budgets exist", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:       "1",
+					TopologyKey: "topology.kubernetes.io/zone",
+					Sequential:  true,
+				},
+			}
+			// Topology budgets are handled inside the Drift method, so they are skipped
+			// at the NodePool level for the Drifted reason.
+			allowedDisruption, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, DisruptionReasonDrifted)
+			Expect(err).To(BeNil())
+			Expect(allowedDisruption).To(Equal(math.MaxInt32))
+
+			// For other disruption reasons, topology budgets apply as regular NodePool-level budgets.
+			for _, reason := range allKnownDisruptionReasons {
+				if reason == DisruptionReasonDrifted {
+					continue
+				}
+				allowedDisruption, err = nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, reason)
+				Expect(err).To(BeNil())
+				Expect(allowedDisruption).To(Equal(1))
+			}
+		})
+	})
 })
