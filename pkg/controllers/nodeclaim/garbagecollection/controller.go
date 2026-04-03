@@ -66,11 +66,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
-		return reconciler.Result{}, err
+		return c.handleUnevaluatedError(ctx, err)
 	}
 	cloudProviderNodeClaims, err := c.cloudProvider.List(ctx)
 	if err != nil {
-		return reconciler.Result{}, err
+		return c.handleUnevaluatedError(ctx, err)
 	}
 	cloudProviderNodeClaims = lo.Filter(cloudProviderNodeClaims, func(nc *v1.NodeClaim, _ int) bool {
 		return nc.DeletionTimestamp.IsZero()
@@ -119,6 +119,14 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, err
 	}
 	return reconciler.Result{RequeueAfter: time.Minute * 2}, nil
+}
+
+func (c *Controller) handleUnevaluatedError(ctx context.Context, err error) (reconciler.Result, error) {
+	if cloudprovider.IsUnevaluatedNodePoolError(err) {
+		log.FromContext(ctx).V(1).Info("skipping, awaiting nodeoverlay evaluation")
+		return reconciler.Result{RequeueAfter: time.Minute * 2}, nil
+	}
+	return reconciler.Result{}, err
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
