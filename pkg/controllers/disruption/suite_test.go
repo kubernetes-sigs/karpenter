@@ -2177,7 +2177,7 @@ var _ = Describe("Metrics", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 		// create timeout in the past
-		timeoutCtx, cancel := context.WithTimeout(ctx, -disruption.MultiNodeConsolidationTimeoutDuration)
+		timeoutCtx, cancel := context.WithTimeout(ctx, -time.Minute)
 		defer cancel()
 
 		ExpectSingletonReconciled(timeoutCtx, disruptionController)
