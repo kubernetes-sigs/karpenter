@@ -57,7 +57,7 @@ metadata:
 spec:
   disruption:
     consolidationPolicy: Balanced
-    consolidationThreshold: 2.0
+    consolidationThreshold: 2
     consolidateAfter: 30s
     budgets:
     - nodes: 10%
@@ -75,7 +75,7 @@ The three consolidation policies sit on a spectrum from conservative to aggressi
 
 `WhenEmpty` and `WhenEmptyOrUnderutilized` are implemented by their existing controllers. `Balanced` uses the scoring formula. The spectrum is conceptual — `WhenEmpty` and `WhenEmptyOrUnderutilized` are not special cases of the formula. They remain separate code paths.
 
-`consolidationThreshold` controls how aggressively `Balanced` consolidates. Higher values approve more moves. At the default of 2, a move passes when its disruption fraction is at most 2x its savings fraction. The parameter accepts any positive real number (k=2.5 sits between k=2 and k=3). Validation rejects zero, negative values, and `consolidationThreshold` without `consolidationPolicy: Balanced`.
+`consolidationThreshold` controls how aggressively `Balanced` consolidates. Higher values approve more moves. At the default of 2, a move passes when its disruption fraction is at most 2x its savings fraction. The parameter accepts integer values 1, 2, or 3. Validation rejects values outside this range and `consolidationThreshold` without `consolidationPolicy: Balanced`.
 
 If an operator enables `BalancedConsolidation`, sets `consolidationPolicy: Balanced`, then disables the feature gate during rollback, the controller falls back to `WhenEmptyOrUnderutilized` behavior and sets a `ConsolidationPolicyUnsupported` status condition on the NodePool. The condition message directs the operator to change the policy or re-enable the gate. This avoids reconcile failures while making the fallback visible.
 
@@ -105,7 +105,7 @@ nodepool_cost = sum(node.price for node in nodepool.nodes)
 nodepool_total_disruption_cost = sum(node.disruption_cost for node in nodepool.nodes)
 ```
 
-Each node's disruption cost is 1.0 (per-node baseline) plus `sum(max(0, EvictionCost(pod)))` for its pods. The baseline eliminates division-by-zero for empty nodes. It is not a calibrated estimate of cordon/drain overhead. A 10-pod node has disruption cost 11; the baseline is 9% of the total. A node whose only pod has `EvictionCost = -10` has disruption cost 1.0, same as an empty node.
+Each node's disruption cost is 1.0 (per-node cost) plus `sum(max(0, EvictionCost(pod)))` for its pods. Nodes have a disruption cost independent of their pods (cordoning, draining, API calls, replacement latency). We have not modeled this precisely and 1.0 is a placeholder. It eliminates division-by-zero for empty nodes and gives room to refine later (e.g., if GPU nodes should carry higher inherent disruption cost than CPU nodes). A 10-pod node has disruption cost 11; the per-node cost is 9% of the total. A node whose only pod has `EvictionCost = -10` has disruption cost 1.0, same as an empty node.
 
 For cross-NodePool moves, the source pool's totals, policy, and budget govern scoring. Cross-pool DELETEs require scheduling simulation to confirm pods fit on the destination. The destination pool's budget is not consumed (it absorbs pods, not loses a node). The source pool's policy governs regardless of the destination's policy; otherwise a permissive destination could override a conservative source.
 
@@ -127,7 +127,7 @@ score = savings_fraction / disruption_fraction
 
 A move is approved when `score >= 1/k`, where k is `consolidationThreshold` (default 2). At k=2, `score >= 0.5`. Both sides are dimensionless fractions, so the score is scale-invariant (see [Scale Invariance](#scale-invariance)).
 
-**Division-by-zero handling.** With the per-node baseline of 1.0, `disruption_cost` is always positive for any node, eliminating the zero-disruption special case. The remaining edge cases:
+**Division-by-zero handling.** With the per-node disruption cost of 1.0, `disruption_cost` is always positive for any node, eliminating the zero-disruption special case. The remaining edge cases:
 
 | savings | nodepool_total_cost | nodepool_total_disruption_cost | decision |
 |---|---|---|---|
@@ -135,7 +135,7 @@ A move is approved when `score >= 1/k`, where k is `consolidationThreshold` (def
 | zero | any | any | reject (no benefit) |
 | negative | any | any | reject (net loss) |
 | near-zero | near-zero (ODCR pool) | any | compute normally; the 1/10M divisor cancels and the score equals the on-demand price ratio |
-| any | any | zero | cannot happen (per-node baseline ensures > 0) |
+| any | any | zero | cannot happen (per-node disruption cost ensures > 0) |
 
 See [Edge Cases](#edge-cases) for worked examples.
 
@@ -153,7 +153,7 @@ The graphs show REPLACE and DELETE moves from a simulated cluster: 5000 pods wit
 
 #### Empty Nodes
 
-An empty node has disruption cost 1.0 (baseline only). A DELETE saves the full node cost against a small disruption fraction. Empty DELETEs always pass. No special case needed.
+An empty node has disruption cost 1.0 (per-node cost only). A DELETE saves the full node cost against a small disruption fraction. Empty DELETEs always pass. No special case needed.
 
 #### Single-Node Pool
 
@@ -198,7 +198,7 @@ Scored moves are also logged at DEBUG level.
 
 A Prometheus histogram `karpenter_consolidation_score` records scores by decision and NodePool, with buckets {0.1, 0.25, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0}. A counter `karpenter_consolidation_moves_total` by decision and NodePool tracks move volume.
 
-How to use these: if `moves_total{decision="rejected"}` is high and the histogram shows most rejected scores clustered just below the threshold, the operator's k is slightly too conservative — raising it by 0.5 would capture those moves. If `moves_total{decision="approved"}` is zero and `moves_total{decision="rejected"}` is also zero, there are no candidates (the cluster is well-packed or `consolidateAfter` hasn't elapsed). If approved moves are high but savings aren't materializing, kube-scheduler divergence may be undoing the moves (check for rapidly churning NodeClaims).
+How to use these: if `moves_total{decision="rejected"}` is high and the histogram shows most rejected scores clustered just below the threshold, the operator's k is slightly too conservative — raising it by 1 would capture those moves. If `moves_total{decision="approved"}` is zero and `moves_total{decision="rejected"}` is also zero, there are no candidates (the cluster is well-packed or `consolidateAfter` hasn't elapsed). If approved moves are high but savings aren't materializing, kube-scheduler divergence may be undoing the moves (check for rapidly churning NodeClaims).
 
 ## Examples
 
@@ -363,11 +363,11 @@ k=2 is the right default. It is the smallest value that makes within-family REPL
 
 ### Consolidation Aggressiveness Tuning [Recommended: consolidationThreshold]
 
-`consolidationThreshold` exposes k directly. A move passes when its disruption fraction is at most k times its savings fraction. Higher k approves more moves. k=2 for within-family replaces, k=3 for cross-family. Real-valued. Scoring properties hold for all k > 0.
+`consolidationThreshold` exposes k directly. A move passes when its disruption fraction is at most k times its savings fraction. Higher k approves more moves. The formally motivated values are all integers: k=1 (break-even, deletes only), k=2 (within-family replaces viable, 4-step max churn), k=3 (adds cross-family pairs, same 4-step churn). At k=4, churn chains jump to 9 steps and the formal analysis argues against higher values. The field accepts integers 1, 2, or 3.
 
 Two alternatives were considered:
 
-**Named presets (Low/Medium/High).** A `consolidationAggressiveness` enum mapping to k values (e.g., Low=1, Medium=2, High=3). This hides the math but limits choices to three points. Not preferred because the direct parameter is equally simple and more flexible.
+**Named presets (Low/Medium/High).** A `consolidationAggressiveness` enum mapping to k values (e.g., Low=1, Medium=2, High=3). Karpenter does not have an existing ordinal enum pattern, and picking names that age well is hard. "Conservative/Balanced/Aggressive" reuses "Balanced" which is already the policy name. Not preferred because the integer is simpler.
 
 **Continuous slider (0-100).** A percentage-based field mapping to a log-scale threshold. This adds a nonlinear transformation that obscures the underlying math. Not preferred.
 

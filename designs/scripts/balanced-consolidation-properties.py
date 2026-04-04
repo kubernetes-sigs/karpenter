@@ -41,7 +41,7 @@ PRICES = sorted([
     661, 1323, 2646, 5292, 10584,   # r7i
 ])
 DCOSTS = [1, 2, 5, 10]
-K_VALUES = [1, 2, 3, 4, 5]
+K_VALUES = [1, 2, 3]
 
 
 def approved(k, savings, move_disruption, pool_cost, pool_disruption):
