@@ -603,6 +603,12 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		its := s.nodeClaimTemplates[i].InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
+			// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
+			nodesRemaining, ok := remaining[resources.Node]
+			if ok && nodesRemaining.IsZero() {
+				errs[i] = serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				return true
+			}
 			its = filterByRemainingResources(its, remaining)
 			if len(its) == 0 {
 				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
@@ -610,11 +616,9 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
 					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
-				).Info(fmt.Sprintf(
-					"%d out of %d instance types were excluded because they would breach limits",
-					len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
-					len(s.nodeClaimTemplates[i].InstanceTypeOptions),
-				))
+				).Info("instance types were excluded because they would breach limits",
+					"excluded", len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
+					"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
 			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)

@@ -145,7 +145,7 @@ func ResolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, v
 		//  2. The StorageClass never existed and was used to bind the PVC to an existing PV, but that PV was removed
 		// In either of these cases, we should ignore the PVC while computing limits and continue.
 		if errors.IsNotFound(err) {
-			log.FromContext(ctx).WithValues("volume", volumeName, "Pod", klog.KObj(pod), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName)).V(1).Info(fmt.Sprintf("failed tracking CSI volume limits for volume with unbound PVC, %s", err))
+			log.FromContext(ctx).WithValues("volume", volumeName, "Pod", klog.KObj(pod), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName)).V(1).Info("failed tracking CSI volume limits for volume with unbound PVC", "error", err)
 			return "", nil
 		}
 		return "", err

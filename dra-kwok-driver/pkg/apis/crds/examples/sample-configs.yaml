@@ -1,0 +1,105 @@
+---
+# Example DRAConfig for testing GPU devices
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: gpu-config
+spec:
+  driver: test.karpenter.sh
+  pools:
+    - name: nvidia-h100
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+                - g5.48xlarge
+                - p4d.24xlarge
+      devices:
+        - name: nvidia-h100-0
+          basic:
+            attributes:
+              type:
+                stringValue: nvidia-h100
+              memory:
+                stringValue: "80Gi"
+            capacity:
+              gpu:
+                quantity: "1"
+
+---
+# Example DRAConfig for testing FPGA devices
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: fpga-config
+spec:
+  driver: test.karpenter.sh
+  pools:
+    - name: xilinx-fpga
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+                - f1.2xlarge
+      devices:
+        - name: xilinx-u250-0
+          basic:
+            attributes:
+              type:
+                stringValue: xilinx-u250
+              memory:
+                stringValue: "16Gi"
+            capacity:
+              fpga:
+                quantity: "1"
+
+---
+# Example: Multiple drivers simultaneously
+# GPU driver
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: my-gpu-config
+spec:
+  driver: gpu.nvidia.com
+  pools:
+    - name: h100-pool
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+                - g5.48xlarge
+      devices:
+        - name: h100-0
+          basic:
+            attributes:
+              type:
+                stringValue: nvidia-h100
+              memory:
+                stringValue: "80Gi"
+
+---
+# FPGA driver (different driver name, same cluster)
+apiVersion: test.karpenter.sh/v1alpha1
+kind: DRAConfig
+metadata:
+  name: my-fpga-config
+spec:
+  driver: fpga.intel.com
+  pools:
+    - name: arria-pool
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+                - f1.2xlarge
+      devices:
+        - name: arria-0
+          basic:
+            attributes:
+              type:
+                stringValue: intel-arria10

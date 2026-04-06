@@ -1284,7 +1284,7 @@ func (env *Environment) ExpectPodMetrics() (res []PrometheusMetric) {
 	ctx, cancel := context.WithCancel(env.Context)
 	defer cancel()
 
-	localPort := rand.IntnRange(1024, 49151)
+	localPort := rand.IntnRange(1025, 49151)
 	env.ExpectPodPortForwarded(ctx, env.ExpectActiveKarpenterPod(), 8080, localPort)
 
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", localPort))

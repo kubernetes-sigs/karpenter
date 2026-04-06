@@ -183,7 +183,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 		if err := p.Validate(ctx, po); err != nil {
 			// Mark in memory that this pod is unschedulable
 			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil, nil)
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info("ignoring pod", "error", err)
 			// Don't create pod events for pods that are specifically avoiding scheduling to Karpenter-managed capacity
 			if !errors.Is(err, KarpenterManagedLabelDoesNotExistError) {
 				p.recorder.Publish(scheduler.PodFailedToScheduleEvent(po, err))
