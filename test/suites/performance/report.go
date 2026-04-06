@@ -95,6 +95,7 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 // Returns a PerformanceReport with scale-out metrics and timing information.
 func ReportScaleOut(env *common.Environment, testName string, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
 	profiler := common.StartKarpenterProfiler(env)
+	defer profiler.Stop()
 	startTime := time.Now()
 
 	// Wait for all pods to be healthy
@@ -153,6 +154,7 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 // Returns a PerformanceReport with consolidation metrics and timing information.
 func ReportConsolidation(env *common.Environment, testName string, initialPods, finalPods, initialNodes int, timeout time.Duration) (*PerformanceReport, error) {
 	profiler := common.StartKarpenterProfiler(env)
+	defer profiler.Stop()
 	startTime := time.Now()
 
 	// Wait for pods to scale down first
@@ -212,6 +214,7 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 // Returns a PerformanceReport with drift metrics and timing information.
 func ReportDrift(env *common.Environment, testName string, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
 	profiler := common.StartKarpenterProfiler(env)
+	defer profiler.Stop()
 	startTime := time.Now()
 	initialNodeCount := env.Monitor.CreatedNodeCount()
 

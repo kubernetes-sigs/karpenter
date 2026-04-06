@@ -27,6 +27,7 @@ import (
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -359,11 +360,12 @@ func (in *StateNode) Capacity() corev1.ResourceList {
 					ret[resourceName] = quantity
 				}
 			}
-			return ret
+			// A StateNode will always have a capacity of 1 node.
+			return lo.Assign(ret, corev1.ResourceList{resources.Node: resource.MustParse("1")})
 		}
-		return in.NodeClaim.Status.Capacity
+		return lo.Assign(in.NodeClaim.Status.Capacity, corev1.ResourceList{resources.Node: resource.MustParse("1")})
 	}
-	return in.Node.Status.Capacity
+	return lo.Assign(in.Node.Status.Capacity, corev1.ResourceList{resources.Node: resource.MustParse("1")})
 }
 
 func (in *StateNode) Allocatable() corev1.ResourceList {

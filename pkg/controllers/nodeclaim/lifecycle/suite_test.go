@@ -86,7 +86,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	npState = nodepoolhealth.NewState()
-	nodeClaimController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider, recorder, npState)
+	nodeClaimController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider, recorder, npState, nil)
 })
 
 var _ = AfterSuite(func() {
