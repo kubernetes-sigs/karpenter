@@ -19,6 +19,7 @@ package termination
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -63,11 +64,12 @@ const (
 
 // Controller for the resource
 type Controller struct {
-	clock         clock.Clock
-	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
-	terminator    *terminator.Terminator
-	recorder      events.Recorder
+	clock           clock.Clock
+	kubeClient      client.Client
+	cloudProvider   cloudprovider.CloudProvider
+	terminator      *terminator.Terminator
+	recorder        events.Recorder
+	drainStartTimes sync.Map // node name -> time.Time, tracked with injected clock
 }
 
 // NewController constructs a controller instance
@@ -203,6 +205,9 @@ func (c *Controller) awaitDrain(
 	if nodeClaim != nil && nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained) == nil {
 		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
 	}
+	// Track drain start time using the injected clock. The condition's LastTransitionTime
+	// uses metav1.Now() (real clock), which diverges from the injected clock in tests.
+	c.drainStartTimes.LoadOrStore(node.Name, c.clock.Now())
 	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
@@ -211,12 +216,11 @@ func (c *Controller) awaitDrain(
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
-	// If the nodeclaim exists, check if minDrainTime has elapsed. If it hasn't we should requeue.
-	// This check helps to ensure that we drain pods scheduled to the Node immediately after we taint it, which
-	// can occur when the scheduler has not seen the taint yet.
+	// Check if minDrainTime has elapsed. This ensures we drain pods scheduled to the
+	// Node immediately after we taint it, which can occur when the scheduler has not
+	// seen the taint yet.
 	if nodeClaim != nil {
-		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained)
-		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < MinDrainTime) {
+		if startTime, ok := c.drainStartTimes.Load(node.Name); ok && c.clock.Since(startTime.(time.Time)) < MinDrainTime {
 			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
 	}
@@ -358,6 +362,7 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 }
 
 func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error {
+	c.drainStartTimes.Delete(n.Name)
 	stored := n.DeepCopy()
 	controllerutil.RemoveFinalizer(n, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, n) {
