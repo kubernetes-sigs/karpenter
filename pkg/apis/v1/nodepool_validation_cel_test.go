@@ -145,6 +145,18 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
+		It("should succeed when setting driftResolutionPolicy=CreateReplacement", func() {
+			nodePool.Spec.Disruption.DriftResolutionPolicy = DriftResolutionPolicyCreateReplacement
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should succeed when setting driftResolutionPolicy=Terminate", func() {
+			nodePool.Spec.Disruption.DriftResolutionPolicy = DriftResolutionPolicyTerminate
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should fail when setting driftResolutionPolicy to an invalid value", func() {
+			nodePool.Spec.Disruption.DriftResolutionPolicy = "Invalid"
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
 		It("should fail when creating a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",

@@ -100,6 +100,16 @@ type Disruption struct {
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
 	//nolint:kubeapilinter
+	// DriftResolutionPolicy describes what action Karpenter takes to resolve a drifted node.
+	// This policy defaults to "CreateReplacement" if not specified.
+	// - CreateReplacement (default): Karpenter spins up a replacement node before terminating the drifted one.
+	// - Terminate: Karpenter terminates the node without spinning up a replacement.
+	//   If evicted pods are unable to be placed, Karpenter's auto-scaling will spin up a replacement node.
+	// +kubebuilder:default:="CreateReplacement"
+	// +kubebuilder:validation:Enum:={CreateReplacement,Terminate}
+	// +optional
+	DriftResolutionPolicy DriftResolutionPolicy `json:"driftResolutionPolicy,omitempty"`
+	//nolint:kubeapilinter
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,
@@ -158,6 +168,13 @@ type ConsolidationPolicy string
 const (
 	ConsolidationPolicyWhenEmpty                ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenEmptyOrUnderutilized ConsolidationPolicy = "WhenEmptyOrUnderutilized"
+)
+
+type DriftResolutionPolicy string
+
+const (
+	DriftResolutionPolicyCreateReplacement DriftResolutionPolicy = "CreateReplacement"
+	DriftResolutionPolicyTerminate         DriftResolutionPolicy = "Terminate"
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.
