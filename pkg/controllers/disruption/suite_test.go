@@ -716,7 +716,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			Expect(budgets[nodePool.Name]).To(Equal(10))
 		}
 	})
-	It("should not consider nodes that are not initialized as part of disruption count", func() {
+	It("should count uninitialized nodes towards the disruption budget", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -743,11 +743,42 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		for _, reason := range allKnownDisruptionReasons {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
-			// This should not bring in the uninitialized node.
+			// 11 total nodes (10 initialized + 1 uninitialized), 100% budget = 11 allowed, 1 disrupting = 10 remaining
 			Expect(budgets[nodePool.Name]).To(Equal(10))
 		}
 	})
-	It("should not consider nodes that have the terminating status condition as part of disruption count", func() {
+	It("should count uninitialized nodes as disrupting even with a tight budget", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Allocatable: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:  resource.MustParse("32"),
+					corev1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
+			Expect(err).To(Succeed())
+			// Budget allows 1 disruption, but the uninitialized node consumes it, so 0 remaining
+			Expect(budgets[nodePool.Name]).To(Equal(0))
+		}
+	})
+	It("should count nodes with the terminating status condition towards the disruption budget", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -775,8 +806,40 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		for _, reason := range allKnownDisruptionReasons {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
-			// This should not bring in the terminating node.
+			// 11 total nodes (10 initialized + 1 terminating), 100% budget = 11 allowed, 1 disrupting = 10 remaining
 			Expect(budgets[nodePool.Name]).To(Equal(10))
+		}
+	})
+	It("should count nodes with the terminating status condition as disrupting even with a tight budget", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Allocatable: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:  resource.MustParse("32"),
+					corev1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
+			Expect(err).To(Succeed())
+			// Budget allows 1 disruption, but the terminating node consumes it, so 0 remaining
+			Expect(budgets[nodePool.Name]).To(Equal(0))
 		}
 	})
 	It("should not return a negative disruption value", func() {
