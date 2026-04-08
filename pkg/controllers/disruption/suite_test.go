@@ -329,8 +329,12 @@ var _ = Describe("Simulate Scheduling", func() {
 			return !nodeClaimNames.Has(nc.Name)
 		})
 		Expect(ok).To(BeTrue())
-		// which needs to be deployed
-		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		// which needs to be deployed and initialized so it doesn't consume a budget slot
+		nc, n := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nc)
+		ExpectMakeNodesInitialized(ctx, env.Client, n)
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 		nodeClaimNames[nc.Name] = struct{}{}
 		ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -341,7 +345,11 @@ var _ = Describe("Simulate Scheduling", func() {
 			return !nodeClaimNames.Has(nc.Name)
 		})
 		Expect(ok).To(BeTrue())
-		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		nc, n = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nc)
+		ExpectMakeNodesInitialized(ctx, env.Client, n)
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		ExpectSingletonReconciled(ctx, disruptionController)
@@ -353,7 +361,11 @@ var _ = Describe("Simulate Scheduling", func() {
 			return !nodeClaimNames.Has(nc.Name)
 		})
 		Expect(ok).To(BeTrue())
-		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		nc, n = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nc)
+		ExpectMakeNodesInitialized(ctx, env.Client, n)
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		// Try one more time, but fail since the budgets only allow 3 disruptions.
