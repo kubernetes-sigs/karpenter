@@ -997,6 +997,108 @@ var _ = Describe("Drift", func() {
 		})
 	})
 
+	Context("DriftResolutionPolicy", func() {
+		BeforeEach(func() {
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			Expect(nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)).To(BeNil())
+		})
+		It("should terminate drifted node without creating a replacement when policy is Terminate", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+
+			nodePool.Spec.Disruption.DriftResolutionPolicy = v1.DriftResolutionPolicyTerminate
+			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			// Command should have no replacements (DeleteDecision)
+			Expect(cmds[0].Replacements).To(HaveLen(0))
+
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// The drifted node should be deleted with no replacement created
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("should create a replacement when policy is CreateReplacement", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+
+			nodePool.Spec.Disruption.DriftResolutionPolicy = v1.DriftResolutionPolicyCreateReplacement
+			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			// Command should have a replacement (ReplaceDecision)
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// Old node deleted, replacement created
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		})
+		It("should terminate empty drifted node without creating a replacement when policy is Terminate", func() {
+			nodePool.Spec.Disruption.DriftResolutionPolicy = v1.DriftResolutionPolicyTerminate
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+	})
 	Context("Static NodePool", func() {
 		It("should not consider static nodepool for drift", func() {
 			staticNp := test.StaticNodePool(v1.NodePool{

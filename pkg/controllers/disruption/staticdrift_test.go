@@ -822,6 +822,97 @@ var _ = Describe("StaticDrift", func() {
 			})
 		})
 	})
+	Context("DriftResolutionPolicy", func() {
+		It("should terminate drifted static nodes without creating replacements when policy is Terminate", func() {
+			nodePool.Spec.Disruption.DriftResolutionPolicy = v1.DriftResolutionPolicyTerminate
+			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(3))
+			for _, cmd := range cmds {
+				// Commands should have no replacements (DeleteDecision)
+				Expect(cmd.Replacements).To(HaveLen(0))
+				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+			}
+
+			// All nodes deleted, no replacements created
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		})
+		It("should create replacements for drifted static nodes when policy is CreateReplacement", func() {
+			nodePool.Spec.Disruption.DriftResolutionPolicy = v1.DriftResolutionPolicyCreateReplacement
+			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			nodePool.Spec.Limits = v1.Limits{
+				resources.Node: resource.MustParse("4"),
+			}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(2))
+			for _, cmd := range cmds {
+				// Commands should have replacements (ReplaceDecision)
+				Expect(cmd.Replacements).To(HaveLen(1))
+				ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmd)
+				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
+			}
+
+			// Old nodes replaced
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(2))
+		})
+	})
 	Context("Edge Cases", func() {
 		It("should handle zero replicas", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(0))

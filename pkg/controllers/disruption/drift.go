@@ -77,6 +77,16 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 			continue
 		}
+
+		// When the drift resolution policy is Terminate, skip replacement creation entirely.
+		// The node will be terminated and Karpenter's provisioning will handle rescheduling.
+		if candidate.NodePool.Spec.Disruption.DriftResolutionPolicy == v1.DriftResolutionPolicyTerminate {
+			cmd := Command{
+				Candidates: []*Candidate{candidate},
+			}
+			return []Command{cmd}, nil
+		}
+
 		// Check if we need to create any NodeClaims.
 		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {
