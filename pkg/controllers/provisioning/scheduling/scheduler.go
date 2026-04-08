@@ -701,7 +701,7 @@ func (s *Scheduler) getCompatibleDaemonPods(ctx context.Context, node *state.Sta
 		if s.shouldSkipDaemonPod(ctx, p) {
 			continue
 		}
-		if s.isDaemonPodCompatibleWithNode(p, taints, node.Labels()) {
+		if PodCompatibleWithNode(p, taints, node.Labels()) {
 			daemons = append(daemons, p)
 		}
 	}
@@ -713,8 +713,8 @@ func (s *Scheduler) shouldSkipDaemonPod(ctx context.Context, p *corev1.Pod) bool
 	return pod.HasDRARequirements(p) && karpopts.FromContext(ctx).IgnoreDRARequests
 }
 
-// isDaemonPodCompatibleWithNode checks if a daemon pod is compatible with the node
-func (s *Scheduler) isDaemonPodCompatibleWithNode(p *corev1.Pod, taints []corev1.Taint, nodeLabels map[string]string) bool {
+// PodCompatibleWithNode checks if a pod's tolerations and nodeSelector/affinity are compatible with a node
+func PodCompatibleWithNode(p *corev1.Pod, taints []corev1.Taint, nodeLabels map[string]string) bool {
 	if err := scheduling.Taints(taints).ToleratesPod(p); err != nil {
 		return false
 	}
