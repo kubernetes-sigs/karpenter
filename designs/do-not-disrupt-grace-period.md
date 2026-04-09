@@ -79,7 +79,7 @@ Extend the existing `karpenter.sh/do-not-disrupt` annotation to accept duration 
 #### Annotation Values
 
 - `"true"`: Indefinite protection (existing behavior, backward compatible)
-- Duration string: Protection for the specified duration from pod binding time (e.g., `"4h"`, `"30m"`, `"1h30m"`)
+- Duration string: Protection for the specified duration from pod start time (e.g., `"4h"`, `"30m"`, `"1h30m"`)
   - Follows Go's `time.Duration` format
   - Common examples: `"30m"`, `"1h"`, `"4h"`, `"24h"`, `"1h30m"`
 
@@ -100,19 +100,19 @@ spec:
 
 1. **Indefinite Protection**: If `karpenter.sh/do-not-disrupt: "true"` is set, the behavior remains the same as today - indefinite protection (backward compatible)
 2. **Time-Limited Protection**: If set to a duration value (e.g., `"4h"`):
-   - The pod is protected from disruption for the specified duration starting from the pod's binding time
+   - The pod is protected from disruption for the specified duration starting from the pod's start time
    - After the grace period expires, the pod is treated as if it doesn't have the do-not-disrupt annotation
    - The node becomes eligible for disruption if no other constraints prevent it
-3. **Invalid Values**: If the value cannot be parsed as either `"true"` or a valid duration, it is treated as indefinite protection (backward compatible, fail-safe behavior)
+3. **Invalid Values**: If the value cannot be parsed as either `"true"` or a valid duration, the pod is treated as if it doesn't have the do-not-disrupt annotation, maintaining Karpenter's current behavior
 
 ### Time Calculation
 
 The grace period expiration time is calculated as:
 ```
-expiration_time = pod.BoundTimestamp + parsed_duration
+expiration_time = pod.Status.StartTime + parsed_duration
 ```
 
-For example, if a pod is bound at `2024-01-01T10:00:00Z` with `karpenter.sh/do-not-disrupt: "4h"`, it will be protected until `2024-01-01T14:00:00Z`.
+For example, if a pod starts at `2024-01-01T10:00:00Z` with `karpenter.sh/do-not-disrupt: "4h"`, it will be protected until `2024-01-01T14:00:00Z`.
 
 ### Implementation Details
 
@@ -127,13 +127,13 @@ func parseDoNotDisrupt(value string) (indefinite bool, duration time.Duration, e
 
     d, err := time.ParseDuration(value)
     if err != nil {
-        // Invalid format - treat as indefinite (fail-safe)
-        return true, 0, nil
+        // Invalid format - treat as if annotation doesn't exist
+        return false, 0, fmt.Errorf("failed to parse %q as a duration: %w", value, err)
     }
 
     if d <= 0 {
-        // Zero or negative - treat as indefinite (fail-safe)
-        return true, 0, nil
+        // Zero or negative - treat as if annotation doesn't exist
+        return false, 0, fmt.Errorf("duration %q must be positive", value)
     }
 
     return false, d, nil
@@ -175,7 +175,7 @@ spec:
 ```
 
 **Behavior**:
-- For the first 2 hours after pod binding, the node hosting this job will not be disrupted
+- For the first 2 hours after pod start, the node hosting this job will not be disrupted
 - After 2 hours, if the job hasn't completed, the node becomes eligible for disruption
 - This provides protection for normal execution while ensuring the node can eventually be disrupted
 
@@ -332,7 +332,7 @@ The annotation controls **when** a pod can be disrupted. Pod's `terminationGrace
 
 Users can determine the grace period status by:
 1. Checking pod annotations for the grace period value
-2. Comparing current time against `pod.BindingTimestamp + grace_period`
+2. Comparing current time against `pod.Status.StartTime + grace_period`
 3. Observing Karpenter events when nodes become eligible for disruption
 
 Potential future enhancements:
@@ -399,7 +399,6 @@ While ideally this would be a Kubernetes-native PDB feature, the immediate probl
 
 This feature is fully backward compatible:
 - Existing pods with only `karpenter.sh/do-not-disrupt: "true"` continue to work as before
-- Invalid grace period values default to indefinite protection
 - No changes to existing API contracts
 
 ## Rollout Plan
