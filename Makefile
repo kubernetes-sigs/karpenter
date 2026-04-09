@@ -152,8 +152,9 @@ vulncheck: ## Verify code vulnerabilities
 	@go tool -modfile=go.tools.mod govulncheck ./pkg/...
 
 licenses: download ## Verifies dependency licenses
-	go tool -modfile=go.tools.mod go-licenses csv ./... > /tmp/licenses.csv
-	! grep /tmp/licenses.csv -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
+	LICENSEFILE=$$(mktemp /tmp/licenses-XXXXXX.csv) && \
+	go tool -modfile=go.tools.mod go-licenses csv ./... > $$LICENSEFILE && \
+	! grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0' $$LICENSEFILE
 
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
