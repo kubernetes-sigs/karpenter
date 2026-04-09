@@ -20,6 +20,7 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/clock"
 )
 
 const (
@@ -70,11 +71,24 @@ type NodeClaimStatus struct {
 }
 
 func (in *NodeClaim) StatusConditions() status.ConditionSet {
+	return in.statusConditions()
+}
+
+// StatusConditionsWithClock returns the ConditionSet with an injected clock.
+// Use this in controllers that hold a clock (e.g. for testability) so that
+// LastTransitionTime is stamped with the injected clock instead of the
+// real wall clock. The variadic StatusConditions() above is required to
+// satisfy operatorpkg's status.Object interface, which is non-variadic.
+func (in *NodeClaim) StatusConditionsWithClock(clk clock.Clock) status.ConditionSet {
+	return in.statusConditions(status.WithClock(clk))
+}
+
+func (in *NodeClaim) statusConditions(opts ...status.ForOption) status.ConditionSet {
 	return status.NewReadyConditions(
 		ConditionTypeLaunched,
 		ConditionTypeRegistered,
 		ConditionTypeInitialized,
-	).For(in)
+	).For(in, opts...)
 }
 
 func (in *NodeClaim) GetConditions() []status.Condition {
