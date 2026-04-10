@@ -66,14 +66,24 @@ type Controller struct {
 	lastRun       map[string]time.Time
 }
 
-// pollingPeriod that we inspect cluster to look for opportunities to disrupt
-var pollingPeriod = func() time.Duration {
-	if v, ok := os.LookupEnv("DISRUPTION_POLLING_PERIOD"); ok {
+// idleRequeuePeriod is the delay before re-evaluating when no disruption actions were performed
+var idleRequeuePeriod = func() time.Duration {
+	if v, ok := os.LookupEnv("DISRUPTION_IDLE_REQUEUE_PERIOD"); ok {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}
 	}
 	return 10 * time.Second
+}()
+
+// disruptionRequeuePeriod is the delay before re-evaluating after a successful disruption
+var disruptionRequeuePeriod = func() time.Duration {
+	if v, ok := os.LookupEnv("DISRUPTION_REQUEUE_PERIOD"); ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return singleton.RequeueImmediately
 }()
 
 type ControllerOptions struct {
@@ -179,13 +189,16 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(m.Reason())), "reason")
 		}
 		if success {
-			return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+			if m.Reason() == v1.DisruptionReasonEmpty { // these don't cause node churn, so we can be quick
+				return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+			}
+			return reconciler.Result{RequeueAfter: disruptionRequeuePeriod}, nil
 		}
 	}
 
 	// All methods did nothing, so return nothing to do
-	log.FromContext(ctx).Info("no disruption actions performed, delaying next evaluation", "delay", pollingPeriod)
-	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
+	log.FromContext(ctx).Info("no disruption actions performed, delaying next evaluation", "delay", idleRequeuePeriod)
+	return reconciler.Result{RequeueAfter: idleRequeuePeriod}, nil
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
