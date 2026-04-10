@@ -109,6 +109,15 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+	//nolint:kubeapilinter
+	// DriftInterval controls how frequently Karpenter checks this NodePool's
+	// nodes for configuration drift. When omitted the controller falls back
+	// to its global default (currently 5 minutes). A shorter interval
+	// increases API server and cloud-provider API load; a longer interval
+	// reduces churn for batch workloads.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(s|m|h))+$`
+	DriftInterval *metav1.Duration `json:"driftInterval,omitempty"` //nolint:kubeapilinter
 }
 
 // Budget defines when Karpenter will restrict the
