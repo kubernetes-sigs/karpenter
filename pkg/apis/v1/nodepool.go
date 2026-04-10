@@ -116,7 +116,6 @@ type Disruption struct {
 	// increases API server and cloud-provider API load; a longer interval
 	// reduces churn for batch workloads.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(s|m|h))+$`
 	DriftInterval *metav1.Duration `json:"driftInterval,omitempty"` //nolint:kubeapilinter
 }
 
