@@ -128,4 +128,23 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
+	ConsolidationScoreHistogram = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Name:      "consolidation_score",
+			Help:      "Score of balanced consolidation moves. Labeled by decision (approved/rejected) and NodePool.",
+			Buckets:   []float64{0.1, 0.25, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0},
+		},
+		[]string{decisionLabel, metrics.NodePoolLabel},
+	)
+	ConsolidationMovesTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Name:      "consolidation_moves_total",
+			Help:      "Number of balanced consolidation moves. Labeled by decision (approved/rejected) and NodePool.",
+		},
+		[]string{decisionLabel, metrics.NodePoolLabel},
+	)
 )

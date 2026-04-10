@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -101,6 +102,25 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		return []Command{}, nil
 	}
 
+	// Emit balanced consolidation event and metrics for the final multi-node command
+	if AnyBalancedCandidate(cmd.Candidates) {
+		result := EvaluateBalancedMove(ctx, cmd, m.nodePoolTotals)
+		poolName := cmd.Candidates[0].NodePool.Name
+		decisionLabel := "approved"
+		if !result.Approved {
+			decisionLabel = "rejected"
+		}
+		ConsolidationScoreHistogram.Observe(result.Score, map[string]string{"decision": decisionLabel, "nodepool": poolName})
+		ConsolidationMovesTotal.Inc(map[string]string{"decision": decisionLabel, "nodepool": poolName})
+		if result.Approved {
+			m.recorder.Publish(disruptionevents.BalancedConsolidationApprovedMultiNode(
+				cmd.Candidates[0].NodePool,
+				result.Score, result.Threshold, result.ConsolidationThreshold,
+				result.SavingsFraction*100, result.DisruptionFraction*100,
+			))
+		}
+	}
+
 	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			reason := getValidationFailureReason(err)
@@ -157,6 +177,13 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			// we check the error before the replacement instanceTypeOptions since we return nil for the replacement if we get an error
 			if err == nil && len(cmd.Replacements[0].InstanceTypeOptions) > 0 {
 				validDecision = true
+			}
+		}
+		// Apply balanced scoring if any candidate uses the Balanced policy
+		if validDecision && AnyBalancedCandidate(candidatesToConsolidate) {
+			result := EvaluateBalancedMove(ctx, cmd, m.nodePoolTotals)
+			if !result.Approved {
+				validDecision = false
 			}
 		}
 		if validDecision {

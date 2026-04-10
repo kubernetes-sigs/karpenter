@@ -80,6 +80,7 @@ type NodePoolSpec struct {
 	Replicas *int64 `json:"replicas,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.consolidationThreshold) || self.consolidationPolicy == 'Balanced'",message="consolidationThreshold is only valid when consolidationPolicy is Balanced"
 type Disruption struct {
 	//nolint:kubeapilinter
 	// ConsolidateAfter is the duration the controller will wait
@@ -96,9 +97,18 @@ type Disruption struct {
 	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified
 	// When replicas is set, ConsolidationPolicy is simply ignored
 	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
-	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized}
+	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized,Balanced}
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
+	//nolint:kubeapilinter
+	// ConsolidationThreshold controls how much disruption one unit of savings can buy
+	// when using the Balanced consolidation policy. A move is approved when
+	// score >= 1/consolidationThreshold. Higher values approve more aggressively.
+	// Only valid when consolidationPolicy is "Balanced". Defaults to 2.
+	// +kubebuilder:validation:Minimum:=1
+	// +kubebuilder:validation:Maximum:=3
+	// +optional
+	ConsolidationThreshold *int32 `json:"consolidationThreshold,omitempty"`
 	//nolint:kubeapilinter
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
@@ -158,7 +168,11 @@ type ConsolidationPolicy string
 const (
 	ConsolidationPolicyWhenEmpty                ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenEmptyOrUnderutilized ConsolidationPolicy = "WhenEmptyOrUnderutilized"
+	ConsolidationPolicyBalanced                 ConsolidationPolicy = "Balanced"
 )
+
+// DefaultConsolidationThreshold is the default value for ConsolidationThreshold when using the Balanced policy.
+const DefaultConsolidationThreshold int32 = 2
 
 // DisruptionReason defines valid reasons for disruption budgets.
 // +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}

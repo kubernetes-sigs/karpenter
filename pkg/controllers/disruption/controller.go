@@ -184,7 +184,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
+	candidates, nodePoolTotals, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -195,6 +195,10 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	// If there are no candidates, move to the next disruption
 	if len(candidates) == 0 {
 		return false, nil
+	}
+	// Pass precomputed NodePool totals to consolidation methods for balanced scoring
+	if setter, ok := disruption.(NodePoolTotalsSetter); ok {
+		setter.SetNodePoolTotals(nodePoolTotals)
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
 	if err != nil {

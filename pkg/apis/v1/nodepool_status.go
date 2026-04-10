@@ -29,6 +29,9 @@ const (
 	ConditionTypeNodeClassReady = "NodeClassReady"
 	// ConditionTypeNodeRegistrationHealthy = "NodeRegistrationHealthy" condition indicates if a misconfiguration exists that is preventing successful node launch/registrations that requires manual investigation
 	ConditionTypeNodeRegistrationHealthy = "NodeRegistrationHealthy"
+	// ConditionTypeConsolidationPolicyUnsupported indicates that the NodePool's consolidationPolicy
+	// is set to Balanced but the BalancedConsolidation feature gate is disabled.
+	ConditionTypeConsolidationPolicyUnsupported = "ConsolidationPolicyUnsupported"
 )
 
 // NodePoolStatus defines the observed state of NodePool

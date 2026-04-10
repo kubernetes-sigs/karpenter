@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 )
 
 var SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
@@ -99,6 +100,31 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		}
 		if cmd.Decision() == NoOpDecision {
 			continue
+		}
+		// Apply balanced scoring if the NodePool uses the Balanced policy
+		if AnyBalancedCandidate(cmd.Candidates) {
+			result := EvaluateBalancedMove(ctx, cmd, s.nodePoolTotals)
+			poolName := cmd.Candidates[0].NodePool.Name
+			decisionLabel := "approved"
+			if !result.Approved {
+				decisionLabel = "rejected"
+			}
+			ConsolidationScoreHistogram.Observe(result.Score, map[string]string{"decision": decisionLabel, "nodepool": poolName})
+			ConsolidationMovesTotal.Inc(map[string]string{"decision": decisionLabel, "nodepool": poolName})
+			if result.Approved {
+				s.recorder.Publish(disruptionevents.BalancedConsolidationApprovedSingleNode(
+					candidate.Node, candidate.NodeClaim,
+					result.Score, result.Threshold, result.ConsolidationThreshold,
+					result.SavingsFraction*100, result.DisruptionFraction*100,
+				)...)
+			} else {
+				s.recorder.Publish(disruptionevents.BalancedConsolidationRejectedSingleNode(
+					candidate.Node, candidate.NodeClaim,
+					result.Score, result.Threshold, result.ConsolidationThreshold,
+					result.SavingsFraction*100, result.DisruptionFraction*100,
+				)...)
+				continue
+			}
 		}
 		if _, err = s.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
