@@ -1264,10 +1264,10 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			// Only nodeClaim1 should be disrupted; nodeClaim2 blocked by budget
+			// nodeClaim1 is already in-flight; budget (maxConcurrentPerDomain=1) is exhausted,
+			// so nodeClaim2 must NOT be disrupted. Expect zero new disruption commands.
 			cmds := queue.GetCommands()
-			Expect(cmds).To(HaveLen(1))
-			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaim1.Name))
+			Expect(cmds).To(HaveLen(0))
 		})
 		It("should allow second disruption when maxConcurrentPerDomain=2 with only 1 in-flight", func() {
 			// Create two nodes in same zone with maxConcurrentPerDomain=2
@@ -1333,10 +1333,12 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			// Both nodeClaims should be candidates (budget allows 2 concurrent)
+			// nodeClaim1 is already in-flight (DeletionTimestamp set), so SimulateScheduling
+			// skips it with errCandidateDeleting. Budget allows 1 more (inFlight=1 < max=2),
+			// so nodeClaim2 should be the disruption target.
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaim1.Name))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaim2.Name))
 		})
 		It("should disrupt unlabeled node when DriftPolicy is active", func() {
 			// Create one labeled node in zone-a and one unlabeled node
