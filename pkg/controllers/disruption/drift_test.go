@@ -1131,6 +1131,375 @@ var _ = Describe("Drift", func() {
 		})
 	})
 
+	Context("DriftPolicy", func() {
+		It("should select alphabetically first domain when multiple zones have drift", func() {
+			// Create nodes in zone-a and zone-b, both drifted
+			// zone-b drifts first (older), but zone-a should be selected (alphabetically first)
+			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-a",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			// zone-a drifts later
+			nodeClaim1.Status.Conditions = append(nodeClaim1.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now()},
+			})
+
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-b",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			// zone-b drifts earlier
+			nodeClaim2.Status.Conditions = append(nodeClaim2.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now().Add(-time.Hour)},
+			})
+
+			nodePool.Spec.Disruption.DriftPolicy = &v1.DriftPolicy{
+				TopologyKey: corev1.LabelTopologyZone,
+			}
+
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// zone-a should be selected (alphabetically first), not zone-b (even though older)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].Node.Labels[corev1.LabelTopologyZone]).To(Equal("zone-a"))
+		})
+		It("should respect maxConcurrentPerDomain budget gate", func() {
+			// Create two nodes in same zone with maxConcurrentPerDomain=1
+			// First node is in-flight deletion, second should NOT be disrupted due to budget
+			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-1",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim1.Status.Conditions = append(nodeClaim1.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now().Add(-time.Hour)},
+			})
+			// Mark as in-flight deletion
+			nodeClaim1.DeletionTimestamp = lo.ToPtr(metav1.Now())
+
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-1",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim2.Status.Conditions = append(nodeClaim2.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now()},
+			})
+
+			nodePool.Spec.Disruption.DriftPolicy = &v1.DriftPolicy{
+				TopologyKey:             corev1.LabelTopologyZone,
+				MaxConcurrentPerDomain:  "1",
+			}
+
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Only nodeClaim1 should be disrupted; nodeClaim2 blocked by budget
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaim1.Name))
+		})
+		It("should allow second disruption when maxConcurrentPerDomain=2 with only 1 in-flight", func() {
+			// Create two nodes in same zone with maxConcurrentPerDomain=2
+			// First node is in-flight deletion, second SHOULD be disrupted (budget allows it)
+			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-1",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim1.Status.Conditions = append(nodeClaim1.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now().Add(-time.Hour)},
+			})
+			// Mark as in-flight deletion
+			nodeClaim1.DeletionTimestamp = lo.ToPtr(metav1.Now())
+
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-1",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim2.Status.Conditions = append(nodeClaim2.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now()},
+			})
+
+			nodePool.Spec.Disruption.DriftPolicy = &v1.DriftPolicy{
+				TopologyKey:             corev1.LabelTopologyZone,
+				MaxConcurrentPerDomain:  "2",
+			}
+
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Both nodeClaims should be candidates (budget allows 2 concurrent)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaim1.Name))
+		})
+		It("should disrupt unlabeled node when DriftPolicy is active", func() {
+			// Create one labeled node in zone-a and one unlabeled node
+			// Unlabeled node should be included in disruption (falls through)
+			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-a",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim1.Status.Conditions = append(nodeClaim1.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now().Add(-time.Hour)},
+			})
+
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						// No LabelTopologyZone
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim2.Status.Conditions = append(nodeClaim2.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now()},
+			})
+
+			nodePool.Spec.Disruption.DriftPolicy = &v1.DriftPolicy{
+				TopologyKey: corev1.LabelTopologyZone,
+			}
+
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// zone-a is the first candidate domain; nodeClaim1 should be disrupted
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaim1.Name))
+		})
+		It("should disrupt empty node before non-empty in same active domain", func() {
+			// Create two nodes in zone-a: one empty, one non-empty
+			// Empty node should be disrupted first (preserved by applyDriftPolicies)
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "test"},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					},
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("1"),
+					},
+				},
+			})
+
+			// Empty node in zone-a
+			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-a",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim1.Status.Conditions = append(nodeClaim1.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now().Add(-time.Hour)}, // older
+			})
+
+			// Non-empty node in zone-a
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       "zone-a",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim2.Status.Conditions = append(nodeClaim2.Status.Conditions, status.Condition{
+				Type:               v1.ConditionTypeDrifted,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1.ConditionTypeDrifted,
+				Message:            v1.ConditionTypeDrifted,
+				LastTransitionTime: metav1.Time{Time: time.Now()}, // newer
+			})
+
+			nodePool.Spec.Disruption.DriftPolicy = &v1.DriftPolicy{
+				TopologyKey: corev1.LabelTopologyZone,
+			}
+
+			ExpectApplied(ctx, env.Client, rs, nodePool, nodeClaim1, node1, nodeClaim2, node2, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Empty node (nodeClaim1) should be disrupted first despite being older
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaim1.Name))
+		})
+	})
+
 	Context("Static NodePool", func() {
 		It("should not consider static nodepool for drift", func() {
 			staticNp := test.StaticNodePool(v1.NodePool{
