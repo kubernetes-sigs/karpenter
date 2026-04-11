@@ -169,22 +169,10 @@ func (d *Drift) applyDriftPolicies(candidates []*Candidate) []*Candidate {
 			continue
 		}
 		active := d.activeTopologyDomain(policy.TopologyKey, index[npName], npCandidates)
-		budgetOK := true
-		if active != "" {
-			stats := index[npName][active]
-			maxConcurrent := policy.MaxConcurrentPerDomain
-			if maxConcurrent == "" {
-				maxConcurrent = "1"
-			}
-			maxAllowed, err := intstr.GetScaledValueFromIntOrPercent(
-				lo.ToPtr(v1.GetIntStrFromValue(maxConcurrent)),
-				stats.total, true,
-			)
-			if err != nil || stats.inFlight >= maxAllowed {
-				budgetOK = false
-			}
+		stateByNodePool[npName] = policyState{
+			activeDomain: active,
+			budgetOK:     active == "" || d.domainBudgetOK(policy, index[npName][active]),
 		}
-		stateByNodePool[npName] = policyState{activeDomain: active, budgetOK: budgetOK}
 	}
 
 	// Filter the already-sorted input slice, preserving order.
@@ -199,6 +187,19 @@ func (d *Drift) applyDriftPolicies(candidates []*Candidate) []*Candidate {
 		domain := c.Labels()[c.NodePool.Spec.Disruption.DriftPolicy.TopologyKey]
 		return domain == "" || domain == ps.activeDomain
 	})
+}
+
+// domainBudgetOK reports whether the per-domain concurrency limit allows another
+// disruption in the given domain. Returns true when no active domain is set (active == "").
+func (d *Drift) domainBudgetOK(policy *v1.DriftPolicy, stats domainStats) bool {
+	if policy.MaxConcurrentPerDomain == "" {
+		return stats.inFlight < 1
+	}
+	maxAllowed, err := intstr.GetScaledValueFromIntOrPercent(
+		lo.ToPtr(v1.GetIntStrFromValue(policy.MaxConcurrentPerDomain)),
+		stats.total, true,
+	)
+	return err == nil && stats.inFlight < maxAllowed
 }
 
 // buildDomainIndex iterates all managed cluster nodes once to count total and
