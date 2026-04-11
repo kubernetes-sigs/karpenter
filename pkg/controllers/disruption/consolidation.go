@@ -153,14 +153,14 @@ func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 // (best consolidation value first) so that the binary search in firstNConsolidationOption
 // is monotonic with balanced scoring. Otherwise, candidates are sorted by disruption cost
 // ascending (lowest disruption first), matching the pre-existing behavior.
-func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
+func (c *consolidation) sortCandidates(ctx context.Context, candidates []*Candidate) []*Candidate {
 	hasBalanced := lo.SomeBy(candidates, func(cn *Candidate) bool {
 		return cn.NodePool.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyBalanced
 	})
 	if hasBalanced {
 		sort.Slice(candidates, func(i int, j int) bool {
-			ri := candidateSavingsRatio(candidates[i])
-			rj := candidateSavingsRatio(candidates[j])
+			ri := candidateSavingsRatio(ctx, candidates[i])
+			rj := candidateSavingsRatio(ctx, candidates[j])
 			return ri > rj // descending: best value first
 		})
 	} else {
@@ -175,11 +175,11 @@ func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
 // Higher ratio means better consolidation value (more savings per unit disruption).
 // Uses the same disruption cost formula as balanced scoring: per-node base of 1.0
 // plus sum(max(0, EvictionCost(pod))) for reschedulable pods.
-func candidateSavingsRatio(c *Candidate) float64 {
+func candidateSavingsRatio(ctx context.Context, c *Candidate) float64 {
 	price := candidatePrice(c)
 	dc := 1.0 // per-node base
 	for _, p := range c.reschedulablePods {
-		dc += math.Max(0, disruptionutils.EvictionCost(context.Background(), p))
+		dc += math.Max(0, disruptionutils.EvictionCost(ctx, p))
 	}
 	return price / dc
 }

@@ -670,7 +670,7 @@ func TestSortCandidates_BalancedSortsBySavingsRatio(t *testing.T) {
 
 	c := consolidation{}
 	candidates := []*Candidate{candB, candC, candA}
-	sorted := c.sortCandidates(candidates)
+	sorted := c.sortCandidates(context.Background(), candidates)
 
 	// Expected order: A (ratio 5.0) > C (ratio 1.25) > B (ratio 0.11)
 	if sorted[0] != candA {
@@ -701,7 +701,7 @@ func TestSortCandidates_NonBalancedSortsByDisruptionCost(t *testing.T) {
 
 	c := consolidation{}
 	candidates := []*Candidate{candA, candB, candC}
-	sorted := c.sortCandidates(candidates)
+	sorted := c.sortCandidates(context.Background(), candidates)
 
 	// Expected order: B (1.0) < C (5.0) < A (10.0)
 	if sorted[0] != candB {
@@ -732,7 +732,7 @@ func TestSortCandidates_MixedPoliciesSortsBySavingsRatio(t *testing.T) {
 
 	c := consolidation{}
 	candidates := []*Candidate{candDefault, candBalanced}
-	sorted := c.sortCandidates(candidates)
+	sorted := c.sortCandidates(context.Background(), candidates)
 
 	// Balanced candidate has higher ratio, should come first
 	if sorted[0] != candBalanced {
@@ -748,7 +748,7 @@ func TestCandidateSavingsRatio_Values(t *testing.T) {
 	// No pods: ratio = price / 1.0 (per-node base only)
 	it := makeInstanceType("m7i.xlarge", 4.84)
 	c := makeCandidate("node", np, it, nil)
-	ratio := candidateSavingsRatio(c)
+	ratio := candidateSavingsRatio(context.Background(), c)
 	if !approxEqual(ratio, 4.84, 0.01) {
 		t.Errorf("expected ratio ~4.84, got %.2f", ratio)
 	}
@@ -756,14 +756,14 @@ func TestCandidateSavingsRatio_Values(t *testing.T) {
 	// With 3 pods: disruption = 1.0 + 3.0 = 4.0, ratio = 4.84 / 4.0 = 1.21
 	pods := []*corev1.Pod{makePod("p1", ""), makePod("p2", ""), makePod("p3", "")}
 	c2 := makeCandidate("node2", np, it, pods)
-	ratio2 := candidateSavingsRatio(c2)
+	ratio2 := candidateSavingsRatio(context.Background(), c2)
 	if !approxEqual(ratio2, 1.21, 0.01) {
 		t.Errorf("expected ratio ~1.21, got %.2f", ratio2)
 	}
 
 	// Nil instanceType: price = 0, ratio = 0 / disruption = 0
 	c3 := makeCandidate("node3", np, nil, pods)
-	ratio3 := candidateSavingsRatio(c3)
+	ratio3 := candidateSavingsRatio(context.Background(), c3)
 	if ratio3 != 0 {
 		t.Errorf("expected ratio 0 for nil instanceType, got %.2f", ratio3)
 	}

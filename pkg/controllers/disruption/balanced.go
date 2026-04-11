@@ -24,6 +24,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 )
@@ -240,6 +242,55 @@ func EvaluateBalancedMove(ctx context.Context, cmd Command, nodePoolTotals map[s
 	}
 
 	return worstResult
+}
+
+// EmitBalancedMultiNodeEvents emits events and metrics for a final multi-node
+// command, one per Balanced NodePool in the batch. This ensures cross-NodePool
+// batches get events on each participating pool, not just the first.
+func EmitBalancedMultiNodeEvents(ctx context.Context, cmd Command, nodePoolTotals map[string]NodePoolTotals, recorder events.Recorder) {
+	byPool := lo.GroupBy(cmd.Candidates, func(c *Candidate) string { return c.NodePool.Name })
+	savings := cmd.EstimatedSavings()
+
+	for poolName, poolCandidates := range byPool {
+		nodePool := poolCandidates[0].NodePool
+		if nodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyBalanced {
+			continue
+		}
+
+		consolidationThreshold := GetConsolidationThreshold(nodePool)
+		disruptionCost := ComputeMoveDisruptionCost(ctx, poolCandidates)
+		totals := nodePoolTotals[poolName]
+
+		poolCost := candidatesCost(poolCandidates)
+		totalCost := candidatesCost(cmd.Candidates)
+		poolSavings := savings
+		if totalCost > 0 && len(byPool) > 1 {
+			poolSavings = savings * (poolCost / totalCost)
+		}
+
+		result := ScoreMove(poolSavings, disruptionCost, totals, consolidationThreshold)
+
+		decisionLabel := "approved"
+		if !result.Approved {
+			decisionLabel = "rejected"
+		}
+		ConsolidationScoreHistogram.Observe(result.Score, map[string]string{"decision": decisionLabel, "nodepool": poolName})
+		ConsolidationMovesTotal.Inc(map[string]string{"decision": decisionLabel, "nodepool": poolName})
+
+		if result.Approved {
+			recorder.Publish(disruptionevents.BalancedConsolidationApprovedMultiNode(
+				nodePool,
+				result.Score, result.Threshold, result.ConsolidationThreshold,
+				result.SavingsFraction*100, result.DisruptionFraction*100,
+			))
+		} else {
+			recorder.Publish(disruptionevents.BalancedConsolidationRejectedMultiNode(
+				nodePool,
+				result.Score, result.Threshold, result.ConsolidationThreshold,
+				result.SavingsFraction*100, result.DisruptionFraction*100,
+			))
+		}
+	}
 }
 
 // candidatesCost returns the total price of a set of candidates.

@@ -54,7 +54,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	if m.IsConsolidated() {
 		return []Command{}, nil
 	}
-	candidates = m.sortCandidates(candidates)
+	candidates = m.sortCandidates(ctx, candidates)
 
 	// In order, filter out all candidates that would violate the budget.
 	// Since multi-node consolidation relies on the ordering of
@@ -102,23 +102,9 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		return []Command{}, nil
 	}
 
-	// Emit balanced consolidation event and metrics for the final multi-node command
+	// Emit balanced consolidation events and metrics per Balanced NodePool
 	if AnyBalancedCandidate(cmd.Candidates) {
-		result := EvaluateBalancedMove(ctx, cmd, m.nodePoolTotals)
-		poolName := cmd.Candidates[0].NodePool.Name
-		decisionLabel := "approved"
-		if !result.Approved {
-			decisionLabel = "rejected"
-		}
-		ConsolidationScoreHistogram.Observe(result.Score, map[string]string{"decision": decisionLabel, "nodepool": poolName})
-		ConsolidationMovesTotal.Inc(map[string]string{"decision": decisionLabel, "nodepool": poolName})
-		if result.Approved {
-			m.recorder.Publish(disruptionevents.BalancedConsolidationApprovedMultiNode(
-				cmd.Candidates[0].NodePool,
-				result.Score, result.Threshold, result.ConsolidationThreshold,
-				result.SavingsFraction*100, result.DisruptionFraction*100,
-			))
-		}
+		EmitBalancedMultiNodeEvents(ctx, cmd, m.nodePoolTotals, m.recorder)
 	}
 
 	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
@@ -184,6 +170,17 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			result := EvaluateBalancedMove(ctx, cmd, m.nodePoolTotals)
 			if !result.Approved {
 				validDecision = false
+				// Emit rejection event so operators can see why multi-node
+				// consolidation rejected a batch size
+				for _, poolCandidates := range lo.GroupBy(candidatesToConsolidate, func(c *Candidate) string { return c.NodePool.Name }) {
+					np := poolCandidates[0].NodePool
+					if np.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyBalanced {
+						m.recorder.Publish(disruptionevents.BalancedConsolidationRejectedMultiNode(
+							np, result.Score, result.Threshold, result.ConsolidationThreshold,
+							result.SavingsFraction*100, result.DisruptionFraction*100,
+						))
+					}
+				}
 			}
 		}
 		if validDecision {
