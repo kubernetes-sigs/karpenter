@@ -1256,8 +1256,8 @@ var _ = Describe("Drift", func() {
 			})
 
 			nodePool.Spec.Disruption.DriftPolicy = &v1.DriftPolicy{
-				TopologyKey:             corev1.LabelTopologyZone,
-				MaxConcurrentPerDomain:  "1",
+				TopologyKey:            corev1.LabelTopologyZone,
+				MaxConcurrentPerDomain: "1",
 			}
 
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
@@ -1325,8 +1325,8 @@ var _ = Describe("Drift", func() {
 			})
 
 			nodePool.Spec.Disruption.DriftPolicy = &v1.DriftPolicy{
-				TopologyKey:             corev1.LabelTopologyZone,
-				MaxConcurrentPerDomain:  "2",
+				TopologyKey:            corev1.LabelTopologyZone,
+				MaxConcurrentPerDomain: "2",
 			}
 
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)

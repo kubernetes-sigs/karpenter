@@ -119,7 +119,7 @@ type Disruption struct {
 	// in-flight disruptions; DriftPolicy controls the order in which domains are
 	// disrupted. Both can be set together.
 	// When unset, nodes are disrupted in globally oldest-first order (no change to
-	// existing behaviour).
+	// existing behavior).
 	// +optional
 	DriftPolicy *DriftPolicy `json:"driftPolicy,omitempty" hash:"ignore"`
 }
