@@ -109,6 +109,12 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+	//nolint:kubeapilinter
+	// DriftPolicy controls how Karpenter sequences node replacements across topology
+	// domains when disrupting drifted nodes. When unset, nodes are disrupted in
+	// globally oldest-first order.
+	// +optional
+	DriftPolicy *DriftPolicy `json:"driftPolicy,omitempty" hash:"ignore"`
 }
 
 // Budget defines when Karpenter will restrict the
@@ -151,6 +157,23 @@ type Budget struct {
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
+}
+
+// DriftPolicy configures topology-aware disruption ordering for drifted nodes.
+type DriftPolicy struct {
+	//nolint:kubeapilinter
+	// TopologyKey is the node label used to group nodes into topology domains.
+	// Karpenter will disrupt one domain at a time, in alphabetical order of domain name.
+	// +required
+	TopologyKey string `json:"topologyKey"`
+	//nolint:kubeapilinter
+	// MaxConcurrentPerDomain is the maximum number of nodes that can be simultaneously
+	// in-flight within the active topology domain. Supports absolute values ("2") and
+	// percentages ("50%"). Defaults to "1" (fully sequential within a domain).
+	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
+	// +kubebuilder:default:="1"
+	// +optional
+	MaxConcurrentPerDomain string `json:"maxConcurrentPerDomain,omitempty"`
 }
 
 type ConsolidationPolicy string
