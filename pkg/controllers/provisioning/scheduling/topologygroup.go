@@ -196,9 +196,9 @@ func (t *TopologyGroup) Hash() uint64 {
 	for _, n := range ns {
 		_, _ = h.Write([]byte(n))
 	}
-	// MaxSkew
+	// MaxSkew: int32 reinterpreted as uint32 for byte encoding — intentional bit-pattern hash.
 	var b4 [4]byte
-	binary.LittleEndian.PutUint32(b4[:], uint32(t.maxSkew))
+	binary.LittleEndian.PutUint32(b4[:], uint32(t.maxSkew)) //nolint:gosec // G115: bit-pattern reinterpretation for hashing
 	_, _ = h.Write(b4[:])
 	// NodeFilter
 	_, _ = h.Write([]byte(t.nodeFilter.TaintPolicy))
@@ -206,60 +206,62 @@ func (t *TopologyGroup) Hash() uint64 {
 	// Requirements: each element corresponds to one NodeSelectorTerm (OR semantics).
 	// Hash each term independently and sort the per-term hashes so that two NodeFilters
 	// with the same terms in different slice order produce the same hash.
-	if len(t.nodeFilter.Requirements) > 0 {
-		reqHashes := make([]uint64, len(t.nodeFilter.Requirements))
-		for i, reqs := range t.nodeFilter.Requirements {
-			rh := fnv.New64a()
-			rkeys := make([]string, 0, len(reqs))
-			for k := range reqs {
-				rkeys = append(rkeys, k)
-			}
-			sort.Strings(rkeys)
-			for _, k := range rkeys {
-				req := reqs[k]
-				_, _ = rh.Write([]byte(req.Key))
-				if req.MinValues != nil {
-					binary.LittleEndian.PutUint32(b4[:], uint32(*req.MinValues))
-					_, _ = rh.Write(b4[:])
-				}
-			}
-			reqHashes[i] = rh.Sum64()
+	// Guard omitted: empty slice produces no output, which is correct.
+	reqHashes := make([]uint64, len(t.nodeFilter.Requirements))
+	for i, reqs := range t.nodeFilter.Requirements {
+		rh := fnv.New64a()
+		rkeys := make([]string, 0, len(reqs))
+		for k := range reqs {
+			rkeys = append(rkeys, k)
 		}
-		sort.Slice(reqHashes, func(i, j int) bool { return reqHashes[i] < reqHashes[j] })
-		var b8 [8]byte
-		for _, rh := range reqHashes {
-			binary.LittleEndian.PutUint64(b8[:], rh)
-			_, _ = h.Write(b8[:])
+		sort.Strings(rkeys)
+		for _, k := range rkeys {
+			req := reqs[k]
+			_, _ = rh.Write([]byte(req.Key))
+			if req.MinValues != nil {
+				binary.LittleEndian.PutUint32(b4[:], uint32(*req.MinValues)) //nolint:gosec // G115: MinValues is a bounded topology count, cannot overflow uint32
+				_, _ = rh.Write(b4[:])
+			}
 		}
+		reqHashes[i] = rh.Sum64()
+	}
+	sort.Slice(reqHashes, func(i, j int) bool { return reqHashes[i] < reqHashes[j] })
+	var b8 [8]byte
+	for _, rh := range reqHashes {
+		binary.LittleEndian.PutUint64(b8[:], rh)
+		_, _ = h.Write(b8[:])
 	}
 	// Tolerations: hash each independently and sort so that insertion order does not affect the result.
-	if len(t.nodeFilter.Tolerations) > 0 {
-		tolHashes := make([]uint64, len(t.nodeFilter.Tolerations))
-		for i, tol := range t.nodeFilter.Tolerations {
-			th := fnv.New64a()
-			_, _ = th.Write([]byte(tol.Key))
-			_, _ = th.Write([]byte(tol.Operator))
-			_, _ = th.Write([]byte(tol.Value))
-			_, _ = th.Write([]byte(tol.Effect))
-			if tol.TolerationSeconds != nil {
-				var b8t [8]byte
-				binary.LittleEndian.PutUint64(b8t[:], uint64(*tol.TolerationSeconds))
-				_, _ = th.Write(b8t[:])
-			}
-			tolHashes[i] = th.Sum64()
-		}
-		sort.Slice(tolHashes, func(i, j int) bool { return tolHashes[i] < tolHashes[j] })
-		var b8 [8]byte
-		for _, th := range tolHashes {
-			binary.LittleEndian.PutUint64(b8[:], th)
-			_, _ = h.Write(b8[:])
-		}
+	tolHashes := hashTolerations(t.nodeFilter.Tolerations)
+	sort.Slice(tolHashes, func(i, j int) bool { return tolHashes[i] < tolHashes[j] })
+	for _, th := range tolHashes {
+		binary.LittleEndian.PutUint64(b8[:], th)
+		_, _ = h.Write(b8[:])
 	}
 	// SelectorHash
-	var b8 [8]byte
 	binary.LittleEndian.PutUint64(b8[:], hashSelector(t.rawSelector))
 	_, _ = h.Write(b8[:])
 	return h.Sum64()
+}
+
+// hashTolerations hashes each toleration independently and returns a slice of per-toleration hashes.
+// The caller is responsible for sorting the returned slice to achieve insertion-order independence.
+func hashTolerations(tols []corev1.Toleration) []uint64 {
+	hashes := make([]uint64, len(tols))
+	for i, tol := range tols {
+		th := fnv.New64a()
+		_, _ = th.Write([]byte(tol.Key))
+		_, _ = th.Write([]byte(tol.Operator))
+		_, _ = th.Write([]byte(tol.Value))
+		_, _ = th.Write([]byte(tol.Effect))
+		if tol.TolerationSeconds != nil {
+			var b8 [8]byte
+			binary.LittleEndian.PutUint64(b8[:], uint64(*tol.TolerationSeconds)) //nolint:gosec // G115: bit-pattern reinterpretation for hashing
+			_, _ = th.Write(b8[:])
+		}
+		hashes[i] = th.Sum64()
+	}
+	return hashes
 }
 
 // hashSelector is a specialized hash function for a metav1.LabelSelector. Due to https://github.com/mitchellh/hashstructure/issues/36
