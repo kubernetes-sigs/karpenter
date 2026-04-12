@@ -703,7 +703,7 @@ func makeUniqueTSCPods(count int) []*corev1.Pod {
 }
 
 // BenchmarkSchedulingHighInflight500 and ...2000 measure scheduling throughput when
-// every pod must land on a distinct node (hostname anti-affinity), maximising
+// every pod must land on a distinct node (hostname anti-affinity), maximizing
 // s.newNodeClaims size and the sort.Slice cost in scheduler.add().
 // Compare pods/sec against BenchmarkScheduling500 / BenchmarkScheduling2000 to quantify
 // the throughput regression from inflight NodeClaim accumulation.
