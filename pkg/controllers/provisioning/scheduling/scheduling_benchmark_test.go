@@ -67,12 +67,12 @@ var r = rand.New(rand.NewSource(42))
 // To run the benchmarks use:
 // `go test -tags=test_performance -run=XXX -bench=.`
 //
-// For statistically significant before/after comparisons:
+// For statistically significant before/after comparisons (recommended: sequential runs, multi-CPU):
 //
-//	go test -tags=test_performance -run=XXX -bench=. -count=10 | tee /tmp/old
+//	go test -tags=test_performance -run='^$' -bench=. -count=10 -benchtime=5s -cpu=1,2,4 -benchmem | tee /tmp/old
 //	# apply your fix
-//	go test -tags=test_performance -run=XXX -bench=. -count=10 | tee /tmp/new
-//	benchstat /tmp/old /tmp/new
+//	go test -tags=test_performance -run='^$' -bench=. -count=10 -benchtime=5s -cpu=1,2,4 -benchmem | tee /tmp/new
+//	go run golang.org/x/perf/cmd/benchstat@latest /tmp/old /tmp/new
 //
 // Performance hotspot benchmarks (run a specific one for focused comparison):
 //
