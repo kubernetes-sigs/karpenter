@@ -17,12 +17,13 @@ limitations under the License.
 package scheduling
 
 import (
+	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"math"
+	"sort"
 
 	"github.com/awslabs/operatorpkg/option"
-	"github.com/mitchellh/hashstructure/v2"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -184,21 +185,81 @@ func (t *TopologyGroup) IsOwnedBy(key types.UID) bool {
 // Hash is used so we can track single topologies that affect multiple groups of pods.  If a deployment has 100x pods
 // with self anti-affinity, we track that as a single topology with 100 owners instead of 100x topologies.
 func (t *TopologyGroup) Hash() uint64 {
-	return lo.Must(hashstructure.Hash(struct {
-		TopologyKey  string
-		Type         TopologyType
-		Namespaces   sets.Set[string]
-		MaxSkew      int32
-		NodeFilter   TopologyNodeFilter
-		SelectorHash uint64
-	}{
-		TopologyKey:  t.Key,
-		Type:         t.Type,
-		Namespaces:   t.namespaces,
-		MaxSkew:      t.maxSkew,
-		NodeFilter:   t.nodeFilter,
-		SelectorHash: hashSelector(t.rawSelector),
-	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
+	h := fnv.New64a()
+	// TopologyKey
+	_, _ = h.Write([]byte(t.Key))
+	// Type
+	_, _ = h.Write([]byte{byte(t.Type)})
+	// Namespaces: sorted for determinism
+	ns := t.namespaces.UnsortedList()
+	sort.Strings(ns)
+	for _, n := range ns {
+		_, _ = h.Write([]byte(n))
+	}
+	// MaxSkew
+	var b4 [4]byte
+	binary.LittleEndian.PutUint32(b4[:], uint32(t.maxSkew))
+	_, _ = h.Write(b4[:])
+	// NodeFilter
+	_, _ = h.Write([]byte(t.nodeFilter.TaintPolicy))
+	_, _ = h.Write([]byte(t.nodeFilter.AffinityPolicy))
+	// Requirements: each element corresponds to one NodeSelectorTerm (OR semantics).
+	// Hash each term independently and sort the per-term hashes so that two NodeFilters
+	// with the same terms in different slice order produce the same hash.
+	if len(t.nodeFilter.Requirements) > 0 {
+		reqHashes := make([]uint64, len(t.nodeFilter.Requirements))
+		for i, reqs := range t.nodeFilter.Requirements {
+			rh := fnv.New64a()
+			rkeys := make([]string, 0, len(reqs))
+			for k := range reqs {
+				rkeys = append(rkeys, k)
+			}
+			sort.Strings(rkeys)
+			for _, k := range rkeys {
+				req := reqs[k]
+				_, _ = rh.Write([]byte(req.Key))
+				if req.MinValues != nil {
+					binary.LittleEndian.PutUint32(b4[:], uint32(*req.MinValues))
+					_, _ = rh.Write(b4[:])
+				}
+			}
+			reqHashes[i] = rh.Sum64()
+		}
+		sort.Slice(reqHashes, func(i, j int) bool { return reqHashes[i] < reqHashes[j] })
+		var b8 [8]byte
+		for _, rh := range reqHashes {
+			binary.LittleEndian.PutUint64(b8[:], rh)
+			_, _ = h.Write(b8[:])
+		}
+	}
+	// Tolerations: hash each independently and sort so that insertion order does not affect the result.
+	if len(t.nodeFilter.Tolerations) > 0 {
+		tolHashes := make([]uint64, len(t.nodeFilter.Tolerations))
+		for i, tol := range t.nodeFilter.Tolerations {
+			th := fnv.New64a()
+			_, _ = th.Write([]byte(tol.Key))
+			_, _ = th.Write([]byte(tol.Operator))
+			_, _ = th.Write([]byte(tol.Value))
+			_, _ = th.Write([]byte(tol.Effect))
+			if tol.TolerationSeconds != nil {
+				var b8t [8]byte
+				binary.LittleEndian.PutUint64(b8t[:], uint64(*tol.TolerationSeconds))
+				_, _ = th.Write(b8t[:])
+			}
+			tolHashes[i] = th.Sum64()
+		}
+		sort.Slice(tolHashes, func(i, j int) bool { return tolHashes[i] < tolHashes[j] })
+		var b8 [8]byte
+		for _, th := range tolHashes {
+			binary.LittleEndian.PutUint64(b8[:], th)
+			_, _ = h.Write(b8[:])
+		}
+	}
+	// SelectorHash
+	var b8 [8]byte
+	binary.LittleEndian.PutUint64(b8[:], hashSelector(t.rawSelector))
+	_, _ = h.Write(b8[:])
+	return h.Sum64()
 }
 
 // hashSelector is a specialized hash function for a metav1.LabelSelector. Due to https://github.com/mitchellh/hashstructure/issues/36
@@ -208,15 +269,44 @@ func (t *TopologyGroup) Hash() uint64 {
 // NOTE: Although repeated elements typically won't occur, they can occur on k8s 1.34+ when using matchLabelKeys since both Karpenter
 // and the API server inject an expression.
 func hashSelector(selector *metav1.LabelSelector) uint64 {
-	expressionHashes := sets.New[uint64]()
-	var selectorHash uint64
-	if selector != nil {
-		for i := range selector.MatchExpressions {
-			expressionHashes.Insert(lo.Must(hashstructure.Hash(selector.MatchExpressions[i], hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})))
-		}
-		selectorHash = lo.Must(hashstructure.Hash(selector.MatchLabels, hashstructure.FormatV2, nil))
+	if selector == nil {
+		return 0
 	}
-	return lo.Must(hashstructure.Hash([]interface{}{expressionHashes, selectorHash}, hashstructure.FormatV2, nil))
+	h := fnv.New64a()
+	// MatchLabels: sort keys for determinism
+	labelKeys := make([]string, 0, len(selector.MatchLabels))
+	for k := range selector.MatchLabels {
+		labelKeys = append(labelKeys, k)
+	}
+	sort.Strings(labelKeys)
+	for _, k := range labelKeys {
+		_, _ = h.Write([]byte(k))
+		_, _ = h.Write([]byte(selector.MatchLabels[k]))
+	}
+	// MatchExpressions: hash each independently, store in a set to deduplicate, then sort for determinism.
+	// Deduplication is required because on k8s 1.34+ both Karpenter and the API server can inject the same
+	// matchLabelKeys expression, producing duplicate entries (see NOTE in function comment).
+	exprHashSet := sets.New[uint64]()
+	for _, expr := range selector.MatchExpressions {
+		eh := fnv.New64a()
+		_, _ = eh.Write([]byte(expr.Key))
+		_, _ = eh.Write([]byte(expr.Operator))
+		vals := make([]string, len(expr.Values))
+		copy(vals, expr.Values)
+		sort.Strings(vals)
+		for _, v := range vals {
+			_, _ = eh.Write([]byte(v))
+		}
+		exprHashSet.Insert(eh.Sum64())
+	}
+	exprHashes := exprHashSet.UnsortedList()
+	sort.Slice(exprHashes, func(i, j int) bool { return exprHashes[i] < exprHashes[j] })
+	var b8 [8]byte
+	for _, eh := range exprHashes {
+		binary.LittleEndian.PutUint64(b8[:], eh)
+		_, _ = h.Write(b8[:])
+	}
+	return h.Sum64()
 }
 
 // nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.
