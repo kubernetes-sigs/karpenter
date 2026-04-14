@@ -45,6 +45,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -62,14 +63,16 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
 	clock         clock.Clock
+	recorder      events.Recorder
 }
 
-func NewController(kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, clock clock.Clock) *Controller {
+func NewController(kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, clock clock.Clock, recorder events.Recorder) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		cluster:       cluster,
 		clock:         clock,
+		recorder:      recorder,
 	}
 }
 
@@ -251,11 +254,13 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 	candidates := make([]*v1.NodeClaim, 0, count)
 
 	// Priority 1: Empty nodes
-	emptyNodes := c.filterEmptyNodes(ctx, nodes)
-
-	// Sort empty nodes by priority (highest first)
-	slices.SortFunc(emptyNodes, func(i, j *state.StateNode) int {
-		return cmp.Compare(getDeprovisioningPriority(j.NodeClaim), getDeprovisioningPriority(i.NodeClaim))
+	emptyNodes := lo.Filter(nodes, func(node *state.StateNode, _ int) bool {
+		pods, err := node.Pods(ctx, c.kubeClient)
+		if err != nil {
+			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, treating as non-empty")
+			return false
+		}
+		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, func(p *corev1.Pod) bool { return pod.IsDoNotDisruptActive(p, c.clock, c.recorder) })
 	})
 
 	for _, node := range lo.Slice(emptyNodes, 0, count) {
@@ -322,7 +327,7 @@ func (c *Controller) getNonEmptyNodes(ctx context.Context, nodes []*state.StateN
 		return NonEmptyNode{
 			node:            node,
 			pods:            pods,
-			hasDoNotDisrupt: lo.SomeBy(pods, pod.HasDoNotDisrupt),
+			hasDoNotDisrupt: lo.SomeBy(pods, func(p *corev1.Pod) bool { return pod.IsDoNotDisruptActive(p, c.clock, c.recorder) }),
 		}, true
 	})
 }
