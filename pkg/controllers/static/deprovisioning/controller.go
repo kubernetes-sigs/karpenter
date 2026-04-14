@@ -254,13 +254,11 @@ func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes
 	candidates := make([]*v1.NodeClaim, 0, count)
 
 	// Priority 1: Empty nodes
-	emptyNodes := lo.Filter(nodes, func(node *state.StateNode, _ int) bool {
-		pods, err := node.Pods(ctx, c.kubeClient)
-		if err != nil {
-			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, treating as non-empty")
-			return false
-		}
-		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, func(p *corev1.Pod) bool { return pod.IsDoNotDisruptActive(p, c.clock, c.recorder) })
+	emptyNodes := c.filterEmptyNodes(ctx, nodes)
+
+	// Sort empty nodes by priority (highest first)
+	slices.SortFunc(emptyNodes, func(i, j *state.StateNode) int {
+		return cmp.Compare(getDeprovisioningPriority(j.NodeClaim), getDeprovisioningPriority(i.NodeClaim))
 	})
 
 	for _, node := range lo.Slice(emptyNodes, 0, count) {
