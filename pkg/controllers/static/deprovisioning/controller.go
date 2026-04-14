@@ -298,7 +298,7 @@ func (c *Controller) isNodeEmpty(pods []*corev1.Pod) bool {
 	if len(pods) == 0 {
 		return true
 	}
-	return lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, pod.HasDoNotDisrupt)
+	return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, func(p *corev1.Pod) bool { return pod.IsDoNotDisruptActive(p, c.clock, c.recorder) })
 }
 
 // NonEmptyNode represents a non-empty node with its pods and disruption metadata
