@@ -159,6 +159,15 @@ var _ = Describe("Pod Healthy NodePool", func() {
 		cluster.DeletePod(client.ObjectKeyFromObject(pod))
 		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod)).IsZero()).To(BeTrue())
 	})
+	It("should not store scheduling times for pods that are already bound to a node", func() {
+		pod := test.Pod(test.PodOptions{NodeName: "test-node"})
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		ExpectApplied(ctx, env.Client, pod, nodePool)
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
+		nn := client.ObjectKeyFromObject(pod)
+		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(nn).IsZero()).To(BeTrue())
+		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+	})
 })
 
 var _ = Describe("Pod Ack", func() {
