@@ -2,19 +2,19 @@
 
 ## Summary
 
-This RFC proposes a new feature-gated controller for Karpenter that ranks nodes by consolidation preference — with drifted nodes prioritized for early draining — and propagates that ranking to pods via the `controller.kubernetes.io/pod-deletion-cost` annotation. By aligning the ReplicaSet controller's scale-down decisions with Karpenter's consolidation targets, we measurably reduce voluntary pod disruption rate — tracked and validated via the pod disruption metrics being added in [kubernetes-sigs/karpenter#2892](https://github.com/kubernetes-sigs/karpenter/pull/2892) — while maintaining or improving compute cost. The feature is off by default and configured entirely through feature gates and CLI flags, with no CRD changes required.
+This RFC proposes a new feature-gated controller for Karpenter that ranks nodes by consolidation preference and propagates that ranking to pods via the `controller.kubernetes.io/pod-deletion-cost` annotation. By aligning the ReplicaSet controller's scale-down decisions with Karpenter's consolidation targets, we measurably reduce voluntary pod disruption rate. This is tracked and validated via the pod disruption metrics being added in [kubernetes-sigs/karpenter#2892](https://github.com/kubernetes-sigs/karpenter/pull/2892). The feature is off by default and configured entirely through feature gates and CLI flags, with no CRD changes required.
 
 ## Motivation
 
-### Disruption from consolidation (context)
+### Disruption from consolidation
 
 When Karpenter consolidates underutilized nodes, it disrupts running pods. For customer workloads, that disruption has a real cost: in-flight requests may fail, warm caches are lost, and replacement pods must re-establish connections and reload state. Depending on the workload, this recovery process can take seconds to minutes (or even hours in some cases). Teams pay for this in terms of latency, availability, and engineering complexity to handle it gracefully.
 
 Karpenter already manages clusters toward lower compute cost, but it has limited ability to control how much disruption that right-sizing produces. Current disruption controls focus on preventing disruptions that exceed a given rate for a given nodepool or deployment regardless of the cost-savings merits of that action.
 
-### Coordination gap (solved here)
+### Coordination gap
 
-The root cause is a coordination gap between two independent controllers operating on the same cluster. The ReplicaSet controller decides which pods to delete during scale-down. Karpenter's consolidation controller decides which nodes to drain and remove. These two controllers share no information about each other's intent. Without coordination, the ReplicaSet controller uses its default pod selection heuristic during scale-in: prefer pending over ready, respect pod-deletion-cost, spread terminations across nodes, prefer newer pods, then break ties randomly. With no pod-deletion-cost set, the spreading heuristic dominates, and terminations distribute roughly evenly across nodes. This increases the entropy of the cluster: most nodes end up packed at roughly the same density, and often no single node moves meaningfully closer to empty than other nodes. The result is that Karpenter's consolidation controller finds the same unfavorable state after a pod replica scale-in that it found before, with all nodes still occupied, none empty, and utilization distribution roughly unchanged but slightly lower everywhere. This matters especially for ConsolidateWhenEmpty NodePools, where the consolidation policy requires a node to be completely free of pods before it can be removed. If the ReplicaSet controller never concentrates deletions on a single node, that condition is rarely met, and the cluster carries more nodes than necessary.
+The root cause is a coordination gap between two independent controllers operating on the same cluster. The ReplicaSet controller decides which pods to delete during scale-down. Karpenter's consolidation controller decides which nodes to drain and remove. These two controllers share no information about each other's intent. Without coordination, the ReplicaSet controller uses its default pod selection heuristic during scale-in: prefer pending over ready, respect pod-deletion-cost, spread terminations across nodes, prefer newer pods, then break ties randomly. With no pod-deletion-cost set, the spreading heuristic dominates, and terminations distribute roughly evenly across nodes. This increases the entropy of the cluster: most nodes end up packed at roughly the same density, and often no single node moves meaningfully closer to empty than other nodes. The result is that Karpenter's consolidation controller finds the same unfavorable state after a pod replica scale-in that it found before, with all nodes still occupied, none empty, and utilization distribution roughly unchanged but slightly lower everywhere. This matters especially for “ConsolidateWhenEmpty” NodePools, where the consolidation policy requires a node to be completely free of pods before it can be removed. If the ReplicaSet controller never concentrates deletions on a single node, that condition is rarely met, and the cluster carries more nodes than necessary.
 
 ### Why node-level ranking is the right signal
 
@@ -45,9 +45,8 @@ Community issues and production reports consistently point to excessive disrupti
 - [aws/karpenter#3785](https://github.com/aws/karpenter/issues/3785) -- After peak hours, consolidation was too slow, but aggressive consolidation caused massive pod churn
 - [aws/karpenter#3927](https://github.com/aws/karpenter/issues/3927) -- Production clusters with 100+ pods per node couldn't consolidate without disrupting running workloads
 - BMW's Karpenter migration across 375+ EKS clusters explicitly called out "excessive pod disruption" as a challenge
-- re:Invent 2025 COP208 talk emphasized the need for PDB guardrails and consolidation delays because without them, Karpenter will "go crazy and interrupt your containers" during short-term usage dips
 
-Benchmark experiments and simulations show meaningful decreases in disruption rate when using pod deletion cost annotations. The pod disruption tracking being added in [kubernetes-sigs/karpenter#2892](https://github.com/kubernetes-sigs/karpenter/pull/2892) will provide the metrics infrastructure to measure and validate these improvements in production. These gains compound when combined with other proposed features such as dynamically limiting node size and consolidation disruption cost thresholds. This feature also pairs with the "MostAllocated" scoring strategy for kube-scheduler.
+Benchmark experiments and simulations show meaningful decreases in disruption rate when using pod deletion cost annotations. The pod disruption tracking being added in [kubernetes-sigs/karpenter#2892](https://github.com/kubernetes-sigs/karpenter/pull/2892) will provide the metrics infrastructure to measure and validate these improvements in production. These gains compound when combined with other proposed features such as consolidation disruption cost thresholds. This feature also pairs with the "MostAllocated" scoring strategy for kube-scheduler.
 
 ## Goals
 
@@ -62,7 +61,6 @@ The benefit of this feature varies by consolidation policy. For `ConsolidateWhen
 ### Related Proposals that can reduce the pod disruption rate
 
 - Most important: Consolidation cost thresholding -- see draft RFC
-- Limiting large node sizes for Karpenter -- internal draft RFC in progress
 
 ## Proposal
 
@@ -194,11 +192,11 @@ Group B (normal), sorted by pod count ascending:
 
 ### Rank pods directly instead of inheriting node rank
 
-Pod-level ranking spreads ReplicaSet deletions across many nodes rather than concentrating them on the node Karpenter intends to consolidate next. In the 3-node/9-pod example, pod-level ranking would likely remove 1 pod from each of 3 nodes, leaving all 3 still occupied. There's also a coherence problem: if two pods on the same node get very different deletion costs, the ReplicaSet controller might partially drain a node, which doesn't help Karpenter because it must still evict the remaining pods to consolidate, adding disruption that the scale-in could have avoided. Node-rank inheritance ensures all pods on a target node are aligned in terms of deletion priority/probability.
+Pod-level ranking spreads ReplicaSet deletions across many nodes rather than concentrating them on the node Karpenter intends to consolidate next. In the 3-node/9-pod example, pod-level ranking could remove 1 pod from each of 3 nodes, leaving all 3 still occupied. There's a coherence problem: if two pods on the same node get very different deletion costs, the ReplicaSet controller might partially drain a node, which doesn't help Karpenter because it must still evict the remaining pod(s) to consolidate, adding disruption that the scale-in could have avoided. Node-rank inheritance ensures all pods on a target node are aligned in terms of deletion priority/probability.
 
 ### Standalone controller outside Karpenter
 
-The ranking strategies that matter most require the same cluster state Karpenter already maintains in its `state.Cluster` informer cache. A standalone controller would duplicate this state and API server watch load. More importantly, it can't access Karpenter's internal consolidation priority. If the ranking logic evolves to directly consume Karpenter's consolidation scoring, that integration is trivial when they share a process. The operational cost is also higher: separate RBAC, Helm chart, release lifecycle, and failure domain. For a feature tightly coupled to consolidation behavior, co-location is the right call.
+The ranking strategies that matter most require the same cluster state Karpenter already maintains in its state.Cluster informer cache. A standalone controller would duplicate this state and API server watch load. If the ranking logic evolves to directly consume Karpenter's consolidation scoring, that integration is trivial when they share a process. The operational cost is also higher: separate RBAC, Helm chart, release lifecycle, etc. For a feature tightly coupled to consolidation behavior, co-location is the right call, but the controller could certainly be kept independent and still work the same.
 
 ### Changing the ReplicaSet Controller Behavior Directly
 
@@ -255,8 +253,6 @@ The ReplicaSet controller's scale-down decisions and Karpenter's consolidation d
 - **Consolidation-optimized deletions may conflict with topology spread constraints (Low):** When the controller concentrates deletions on specific nodes, the resulting pod distribution may temporarily violate `topologySpreadConstraints` until the scheduler places replacement pods. *Mitigation:* This is the same behavior as the current spreading heuristic — neither approach guarantees constraint satisfaction during scale-down. The Kubernetes scheduler enforces topology spread when placing new pods, so any temporary imbalance is corrected on the next scheduling cycle. Operators with strict spreading requirements can leave the feature disabled.
 
 - **Active-scaling fan-out (Medium):** During active scaling events (e.g., HPA-driven burst), many nodes may change pod count simultaneously, causing the controller to re-rank and update annotations on a large fraction of pods in a single reconcile cycle. For a 500-node cluster averaging 30 pods/node, a full re-rank writes ~15,000 pod annotations in one 60-second window (~250 writes/sec). *Mitigation:* Change detection prevents re-ranking when state is stable. During active scaling, the writes are bounded by the reconcile interval (at most once per 60s). The API server write load is comparable to a large Deployment rollout. Clusters with >1,000 nodes should monitor `karpenter_pod_deletion_cost_annotation_duration_seconds` and consider disabling the feature if annotation latency exceeds acceptable thresholds.
-
-- **Multi-writer limitation (Medium):** If multiple Karpenter instances run in the same cluster (e.g., during rolling upgrades or in multi-tenant configurations), each instance will independently compute rankings and write annotations, potentially causing conflicting updates. *Mitigation:* The two-annotation protocol (`karpenter.sh/managed-deletion-cost`) ensures only Karpenter-managed annotations are overwritten. During rolling upgrades, the overlap window is brief and the 60-second reconcile interval limits conflict frequency. For true multi-tenant deployments with separate Karpenter instances managing disjoint NodePools, annotations are scoped to each instance's managed nodes and won't conflict. This is a known limitation documented here for awareness.
 
 ### Placement and Spreading Constraints
 
