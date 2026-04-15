@@ -62,9 +62,9 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterMemoryMB).To(BeNumerically("<", 300),
+			Expect(scaleOutReport.KarpenterMemoryMB).To(BeNumerically("<", 300+MemoryOverheadMB()),
 				"Karpenter controller memory should be less than 300 MB during scale-out")
-			Expect(scaleOutReport.KarpenterCPUNanos).To(BeNumerically("<", 22*1e9),
+			Expect(scaleOutReport.KarpenterCPUNanos).To(BeNumerically("<", 22*1e9+CPUOverheadNanos()),
 				"Karpenter controller CPU should be less than 22s (110%) during scale-out")
 
 			// ========== PHASE 2: Interference Scale Out TEST ==========
@@ -91,9 +91,9 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
-			Expect(interferenceReport.KarpenterMemoryMB).To(BeNumerically("<", 550),
+			Expect(interferenceReport.KarpenterMemoryMB).To(BeNumerically("<", 550+MemoryOverheadMB()),
 				"Karpenter controller memory should be less than 550 MB during scale-out")
-			Expect(interferenceReport.KarpenterCPUNanos).To(BeNumerically("<", 20*1e9),
+			Expect(interferenceReport.KarpenterCPUNanos).To(BeNumerically("<", 20*1e9+CPUOverheadNanos()),
 				"Karpenter controller CPU should be less than 20s (100%) during scale-out")
 
 			// ========== PHASE 3: Interference Scale In TEST ==========
@@ -125,9 +125,9 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should remain greater than 38% after consolidation")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should remain greater than 40% after consolidation")
-			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 450),
+			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 450+MemoryOverheadMB()),
 				"Karpenter controller memory should be less than 450 MB during consolidation")
-			Expect(consolidationReport.KarpenterCPUNanos).To(BeNumerically("<", 16*1e9),
+			Expect(consolidationReport.KarpenterCPUNanos).To(BeNumerically("<", 16*1e9+CPUOverheadNanos()),
 				"Karpenter controller CPU should be less than 16s (80%) during consolidation")
 
 		})

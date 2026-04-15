@@ -423,4 +423,85 @@ var _ = Describe("Integration", func() {
 			})
 		})
 	})
+	Describe("DoNotDisrupt", func() {
+		Context("Grace Period", func() {
+			It("should drain pods according to their grace period durations and block indefinitely for 'true'", func() {
+				// Pod with a 1-minute grace period
+				shortPod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "short-grace"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "1m",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10m"),
+						},
+					},
+					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+				})
+				// Pod with a 2-minute grace period
+				longPod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "long-grace"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "2m",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10m"),
+						},
+					},
+					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+				})
+				// Pod with indefinite protection
+				indefinitePod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "indefinite-grace"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "true",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10m"),
+						},
+					},
+					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+				})
+
+				env.ExpectCreated(nodeClass, nodePool, shortPod, longPod, indefinitePod)
+
+				// All three pods should schedule to the same node
+				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+				env.EventuallyExpectCreatedNodeCount("==", 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(shortPod.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(longPod.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(indefinitePod.Labels), 1)
+
+				// Delete the nodeclaim to trigger draining
+				env.ExpectDeleted(nodeClaim)
+
+				// During the first minute, all three pods should remain active
+				env.ConsistentlyExpectActivePods(45*time.Second, shortPod, longPod, indefinitePod)
+
+				// After ~1m the short grace period pod should be drained, but the other two remain
+				env.EventuallyExpectNotFound(shortPod)
+				env.ConsistentlyExpectActivePods(30*time.Second, longPod, indefinitePod)
+
+				// After ~2m the long grace period pod should be drained, but the indefinite pod remains
+				env.EventuallyExpectNotFound(longPod)
+				env.ConsistentlyExpectActivePods(30*time.Second, indefinitePod)
+
+				// The indefinite pod should still be alive — remove the annotation to unblock draining
+				delete(indefinitePod.Annotations, v1.DoNotDisruptAnnotationKey)
+				env.ExpectUpdated(indefinitePod)
+
+				// Now the indefinite pod should be drained
+				env.EventuallyExpectNotFound(indefinitePod)
+			})
+		})
+	})
 })

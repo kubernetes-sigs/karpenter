@@ -199,11 +199,9 @@ func (cc *ClusterCost) createNewNodePoolCost(npName string, instanceTypes []*clo
 // UpdateNodeClaim adds a NodeClaim to cost tracking. The NodeClaim must have
 // all required labels or it will be ignored and logged as an error.
 func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) error {
-	cc.RLock()
-	_, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim)]
-	cc.RUnlock()
-
-	if exists {
+	cc.Lock()
+	defer cc.Unlock()
+	if _, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim)]; exists {
 		return nil
 	}
 
@@ -226,8 +224,6 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	nodePoolName := nodeClaim.Labels[v1.NodePoolLabelKey]
 	offeringKey := OfferingKey{CapacityType: nodeClaim.Labels[v1.CapacityTypeLabelKey], Zone: nodeClaim.Labels[corev1.LabelTopologyZone], InstanceName: nodeClaim.Labels[corev1.LabelInstanceTypeStable]}
 
-	cc.Lock()
-	defer cc.Unlock()
 	err := cc.internalAddOffering(ctx, nodePoolName, offeringKey)
 	if err != nil {
 		failed = true
@@ -243,9 +239,9 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 // DeleteNodeClaim removes a NodeClaim from cost tracking. If the NodeClaim
 // was not being tracked, this operation is a no-op.
 func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nn types.NamespacedName) error {
-	cc.RLock()
+	cc.Lock()
+	defer cc.Unlock()
 	metadata, exists := cc.nodeClaimMap[nn]
-	cc.RUnlock()
 
 	if !exists {
 		return nil
@@ -259,9 +255,6 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nn types.NamespacedN
 			})
 		}
 	}()
-
-	cc.Lock()
-	defer cc.Unlock()
 
 	err := cc.internalRemoveOffering(metadata.NodePoolName, metadata.NodeClaimKey)
 	if err != nil {
@@ -312,12 +305,12 @@ func (cc *ClusterCost) internalAddOffering(ctx context.Context, npName string, o
 		}
 		oc, exists = cc.npCostMap[npName].offeringCounts[offeringKey]
 		if !exists {
-			oc = OfferingCount{Count: 1, Price: 0.0}
-			log.FromContext(ctx).Error(fmt.Errorf("failed to find offering %q during retry while searching for instance %q in zone %q with capacity %q in nodepool %q", offeringKey, offeringKey.InstanceName, offeringKey.Zone, offeringKey.CapacityType, npName), "offering won't be counted towards total cluster cost")
+			// Start at 0; the unconditional oc.Count += 1 below accounts for this add.
+			oc = OfferingCount{Count: 0, Price: 0.0}
+			log.FromContext(ctx).Error(fmt.Errorf("failed to find offering %q during retry while searching for instance %q in zone %q with capacity %q in nodepool %q", offeringKey, offeringKey.InstanceName, offeringKey.Zone, offeringKey.CapacityType, npName), "offering price unknown after retry — cost tracking will undercount for this nodeclaim until next UpdateOfferings")
 		}
-	} else {
-		oc.Count += 1
 	}
+	oc.Count += 1
 	cc.npCostMap[npName].offeringCounts[offeringKey] = oc
 	cc.npCostMap[npName].cost += oc.Price
 	return nil
