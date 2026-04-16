@@ -143,7 +143,7 @@ func NewScheduler(
 	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
 		var err error
 		nct := NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, &corev1.Pod{}, corev1.ResourceList{}, map[*cloudprovider.InstanceType]corev1.ResourceList{}, map[*cloudprovider.InstanceType]*scheduling.HostPortUsage{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
+		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, &corev1.Pod{}, corev1.ResourceList{}, map[string]corev1.ResourceList{}, map[string]*scheduling.HostPortUsage{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if len(nct.InstanceTypeOptions) == 0 {
 			if instanceTypeFilterErr, ok := lo.ErrorsAs[InstanceTypeFilterError](err); ok && instanceTypeFilterErr.minValuesIncompatibleErr != nil {
 				recorder.Publish(NoCompatibleInstanceTypes(np, true))
@@ -194,8 +194,8 @@ type Scheduler struct {
 	existingNodes           []*ExistingNode
 	nodeClaimTemplates      []*NodeClaimTemplate
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
-	daemonOverhead          map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]corev1.ResourceList
-	daemonHostPortUsage     map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]*scheduling.HostPortUsage
+	daemonOverhead          map[*NodeClaimTemplate]map[string]corev1.ResourceList
+	daemonHostPortUsage     map[*NodeClaimTemplate]map[string]*scheduling.HostPortUsage
 	cachedPodData           map[types.UID]*PodData // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
 	preferences             *Preferences
 	topology                *Topology
@@ -770,30 +770,30 @@ func parallelizeUntil(workers, pieces int, doWorkPiece func(int) bool) {
 }
 
 // getDaemonOverhead determines the overhead for each NodeClaimTemplate required for daemons to schedule for any node provisioned by the NodeClaimTemplate
-func getDaemonOverhead(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]corev1.ResourceList {
-	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, map[*cloudprovider.InstanceType]corev1.ResourceList) {
-		return nct, lo.SliceToMap(nct.InstanceTypeOptions, func(it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, corev1.ResourceList) {
+func getDaemonOverhead(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]map[string]corev1.ResourceList {
+	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, map[string]corev1.ResourceList) {
+		return nct, lo.SliceToMap(nct.InstanceTypeOptions, func(it *cloudprovider.InstanceType) (string, corev1.ResourceList) {
 			compatibleDaemonPods := getCompatibleDaemonPods(ctx, daemonSetPods, nct, it)
 			if len(compatibleDaemonPods) == 0 {
-				return it, corev1.ResourceList{}
+				return it.Name, corev1.ResourceList{}
 			}
-			return it, resources.RequestsForPods(compatibleDaemonPods...)
+			return it.Name, resources.RequestsForPods(compatibleDaemonPods...)
 		})
 	})
 }
 
 // getDaemonHostPortUsage determines requested host ports for DaemonSet pods, given a NodeClaimTemplate
-func getDaemonHostPortUsage(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]*scheduling.HostPortUsage {
-	nctToOccupiedPorts := map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]*scheduling.HostPortUsage{}
+func getDaemonHostPortUsage(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]map[string]*scheduling.HostPortUsage {
+	nctToOccupiedPorts := map[*NodeClaimTemplate]map[string]*scheduling.HostPortUsage{}
 	for _, nct := range nodeClaimTemplates {
-		occupiedPorts := map[*cloudprovider.InstanceType]*scheduling.HostPortUsage{}
+		occupiedPorts := map[string]*scheduling.HostPortUsage{}
 		for _, it := range nct.InstanceTypeOptions {
 			hostPortUsage := scheduling.NewHostPortUsage()
 			// gather compatible DaemonSet pods for the NodeClaimTemplate
 			for _, pod := range getCompatibleDaemonPods(ctx, daemonSetPods, nct, it) {
 				hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
 			}
-			occupiedPorts[it] = hostPortUsage
+			occupiedPorts[it.Name] = hostPortUsage
 		}
 		nctToOccupiedPorts[nct] = occupiedPorts
 	}
