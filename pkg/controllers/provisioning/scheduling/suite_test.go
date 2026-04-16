@@ -2920,10 +2920,13 @@ var _ = Context("Scheduling", func() {
 			Expect(nodeList.Items).To(HaveLen(1))
 		})
 		It("should schedule pods using a PV with multiple zones", func() {
-			// Create a PV with multiple zones
+			// Create a PV with multiple node selector terms so the zones are ORed.
 			pv := test.PersistentVolume(test.PersistentVolumeOptions{
 				ObjectMeta: metav1.ObjectMeta{Name: "multi-zone-pv"},
-				Zones:      []string{"test-zone-1", "test-zone-2"},
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}},
+				},
 			})
 
 			// Create a PVC binding to the PV
@@ -2963,11 +2966,14 @@ var _ = Context("Scheduling", func() {
 			Expect(node0.Labels[corev1.LabelTopologyZone]).ToNot(Equal(node1.Labels[corev1.LabelTopologyZone]))
 		})
 		It("should schedule pods using a StorageClass with multiple zones in AllowedTopologies", func() {
-			// Create a StorageClass with multiple zones (each zone is a separate TopologySelectorTerm, ORed)
+			// Create a StorageClass with multiple allowed topology terms so the zones are ORed.
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta:        metav1.ObjectMeta{Name: "multi-zone-sc"},
 				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
-				Zones:             []string{"test-zone-1", "test-zone-2"},
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: corev1.LabelTopologyZone, Values: []string{"test-zone-1"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: corev1.LabelTopologyZone, Values: []string{"test-zone-2"}}}},
+				},
 			})
 			ExpectApplied(ctx, env.Client, sc)
 
