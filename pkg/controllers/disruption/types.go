@@ -113,7 +113,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
-	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
+	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs, clk, recorder); err != nil {
 		// If the NodeClaim has a TerminationGracePeriod set and the disruption class is eventual, the node should be
 		// considered a candidate even if there's a pod that will block eviction. Other error types should still cause
 		// failure creating the candidate.
@@ -191,6 +191,12 @@ func (c Command) SourceNodeNames() []string {
 // String returns a human-readable representation of the command
 func (c Command) String() string {
 	sources := strings.Join(c.SourceNodeNames(), ", ")
+	nodePools := strings.Join(lo.Uniq(lo.FilterMap(c.Candidates, func(candidate *Candidate, _ int) (string, bool) {
+		if candidate.NodePool == nil {
+			return "", false
+		}
+		return candidate.NodePool.Name, true
+	})), ",")
 
 	// For test commands without Method/ID set, use simple format
 	if c.Method == nil {
@@ -204,15 +210,15 @@ func (c Command) String() string {
 		return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
 	}
 
-	// Full format with reason, ID, and savings
+	// Full format with reason, ID, nodepools, and savings
 	if len(c.Replacements) > 0 {
 		plural := "replacements"
 		if len(c.Replacements) == 1 {
 			plural = "replacement"
 		}
-		return fmt.Sprintf("%s/%s: %s: [%s] -> [%d %s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, len(c.Replacements), plural, c.EstimatedSavings())
+		return fmt.Sprintf("%s/%s: %s: nodepools=[%s]: [%s] -> [%d %s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), nodePools, sources, len(c.Replacements), plural, c.EstimatedSavings())
 	}
-	return fmt.Sprintf("%s/%s: %s: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), sources, c.EstimatedSavings())
+	return fmt.Sprintf("%s/%s: %s: nodepools=[%s]: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), nodePools, sources, c.EstimatedSavings())
 }
 
 // StringForNode returns a string representation of the command from the perspective of a single source candidate node.

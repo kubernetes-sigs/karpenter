@@ -22,6 +22,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -161,5 +162,18 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func HasNodePoolReplicaOrStatusChanged(oldNP, newNP *v1.NodePool) bool {
-	return lo.FromPtr(oldNP.Spec.Replicas) != lo.FromPtr(newNP.Spec.Replicas) || (!oldNP.StatusConditions().Root().IsTrue() && newNP.StatusConditions().Root().IsTrue())
+	if lo.FromPtr(oldNP.Spec.Replicas) != lo.FromPtr(newNP.Spec.Replicas) {
+		return true
+	}
+	// np.StatusConditions.Root() may mutate the np which is unsafe when operating directly against the informer cache
+	isReady := func(np *v1.NodePool) bool {
+		for i := range np.Status.Conditions {
+			if np.Status.Conditions[i].Type != status.ConditionReady {
+				continue
+			}
+			return np.Status.Conditions[i].IsTrue()
+		}
+		return false
+	}
+	return !isReady(oldNP) && isReady(newNP)
 }

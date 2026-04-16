@@ -1066,6 +1066,7 @@ var _ = Describe("Consolidation", func() {
 				corev1.LabelTopologyZone:       mostExpSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
+			ExpectSingletonReconciled(ctx, pricingController)
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -1180,6 +1181,7 @@ var _ = Describe("Consolidation", func() {
 				v1.CapacityTypeLabelKey:        spotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 				corev1.LabelTopologyZone:       spotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
+			ExpectSingletonReconciled(ctx, pricingController)
 
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -1715,6 +1717,7 @@ var _ = Describe("Consolidation", func() {
 				node = lo.Ternary(spotToSpot, spotNode, node)
 				// Add these spot instance with this special condition to cloud provider instancetypes
 				cloudProvider.InstanceTypes = append(cloudProvider.InstanceTypes, lo.Ternary(spotToSpot, spotInstances, onDemandInstances)...)
+				ExpectSingletonReconciled(ctx, pricingController)
 
 				rs := test.ReplicaSet()
 				ExpectApplied(ctx, env.Client, rs)
@@ -2015,7 +2018,7 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
-		DescribeTable("can replace nodes, considers karpenter.sh/do-not-disrupt on nodes",
+		DescribeTable("can replace nodes, considers karpenter.sh/do-not-disrupt set to true on nodes",
 			func(spotToSpot bool) {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
 				node = lo.Ternary(spotToSpot, spotNode, node)
@@ -2105,7 +2108,7 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
-		DescribeTable("can replace nodes, considers karpenter.sh/do-not-disrupt on pods",
+		DescribeTable("can replace nodes, considers karpenter.sh/do-not-disrupt set to true on pods",
 			func(spotToSpot bool) {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
 				node = lo.Ternary(spotToSpot, spotNode, node)
@@ -2229,6 +2232,7 @@ var _ = Describe("Consolidation", func() {
 				currentInstance,
 				replacementInstance,
 			}
+			ExpectSingletonReconciled(ctx, pricingController)
 
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -2317,6 +2321,7 @@ var _ = Describe("Consolidation", func() {
 				currentInstance,
 				replacementInstance,
 			}
+			ExpectSingletonReconciled(ctx, pricingController)
 
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -2622,7 +2627,7 @@ var _ = Describe("Consolidation", func() {
 			// eviction
 			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
 		})
-		It("can delete nodes, considers karpenter.sh/do-not-disrupt on nodes", func() {
+		It("can delete nodes, considers karpenter.sh/do-not-disrupt set to true on nodes", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -2664,7 +2669,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
 		})
-		It("can delete nodes, considers karpenter.sh/do-not-disrupt on pods", func() {
+		It("can delete nodes, considers karpenter.sh/do-not-disrupt set to true on pods", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -2707,7 +2712,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
 		})
-		It("does not consolidate nodes with karpenter.sh/do-not-disrupt on pods when the NodePool's TerminationGracePeriod is not nil", func() {
+		It("does not consolidate nodes with karpenter.sh/do-not-disrupt set to true on pods when the NodePool's TerminationGracePeriod is not nil", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -2801,6 +2806,138 @@ var _ = Describe("Consolidation", func() {
 			// we should delete the non-annotated node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("does not consolidate nodes with pods that have a duration-based do-not-disrupt annotation that is still active", func() {
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			// Set a 2m duration-based do-not-disrupt annotation on pod[2]
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "2m"})
+			pods[2].Status.StartTime = &metav1.Time{Time: fakeClock.Now()}
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
+
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Grace period is still active on pod[2], so nodes[1] should not be consolidated
+			// Only nodes[0] (no annotated pods) can be consolidated
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
+
+			// nodes[0] deleted, nodes[1] still protected
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
+		})
+		It("can consolidate nodes after duration-based do-not-disrupt annotation expires", func() {
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			// All pods have a 2m duration-based do-not-disrupt annotation
+			for _, p := range pods {
+				p.Annotations = lo.Assign(p.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "2m"})
+				p.Status.StartTime = &metav1.Time{Time: fakeClock.Now()}
+			}
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
+
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// All pods have active grace periods, no consolidation should happen
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+
+			// Advance clock past the 2m grace period
+			fakeClock.Step(3 * time.Minute)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Grace periods expired, consolidation should now proceed
+			cmds = queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+		})
+		It("can delete nodes, considers invalid do-not-disrupt annotation format as not blocking", func() {
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			// Set an invalid format annotation - should not block consolidation
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "invalid-format"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
+
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Invalid annotation format should not block consolidation
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
+
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
 		It("can delete nodes, evicts pods without an ownerRef", func() {
 			// create our RS so we can link a pod to it
@@ -2917,6 +3054,7 @@ var _ = Describe("Consolidation", func() {
 				defaultInstanceType,
 				smallInstanceType,
 			}
+			ExpectSingletonReconciled(ctx, pricingController)
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -3437,7 +3575,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaims[0])
 		})
-		It("should not replace node if a pod schedules with karpenter.sh/do-not-disrupt during the TTL wait", func() {
+		It("should not replace node if a pod schedules with karpenter.sh/do-not-disrupt set to true during the TTL wait", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 
@@ -3509,7 +3647,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			)
 		})
-		It("should not delete node if pods schedule with karpenter.sh/do-not-disrupt during the TTL wait", func() {
+		It("should not delete node if pods schedule with karpenter.sh/do-not-disrupt set to true during the TTL wait", func() {
 			pods := test.Pods(2, test.PodOptions{})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], pods[0], pods[1])
 
@@ -4468,6 +4606,7 @@ var _ = Describe("Consolidation", func() {
 					v1alpha1.LabelReservationID: mostExpensiveReservationID,
 				}),
 			})
+			ExpectSingletonReconciled(ctx, pricingController)
 			reservedNodeClaim, reservedNode = test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

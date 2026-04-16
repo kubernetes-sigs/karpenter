@@ -40,6 +40,11 @@ import (
 // that uses a StorageClass with any of these unsupported provisioners, Karpenter will skip scheduling that pod.
 var UnsupportedProvisioners = sets.New[string]()
 
+// UnsupportedTopologyKeys is a set of topology keys that are not supported. When a StorageClass has AllowedTopologies
+// containing any of these keys, Karpenter will skip scheduling pods that reference a PVC with that StorageClass, since nodes
+// created by Karpenter will never satisfy the topology requirement.
+var UnsupportedTopologyKeys = sets.New[string]()
+
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
 	return &VolumeTopology{kubeClient: kubeClient}
 }
@@ -215,6 +220,15 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 			// Ignore pods than have unbound pvc for volumeBindingMode immediate
 			if lo.FromPtr(storageClass.VolumeBindingMode) == storagev1.VolumeBindingImmediate {
 				return serrors.Wrap(fmt.Errorf("failed to validate pvc, pvc with immediate volume binding mode must be bound"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+			}
+			// Reject pods whose StorageClass has AllowedTopologies with unsupported topology keys,
+			// since Karpenter-created nodes will never have matching labels for these keys.
+			for _, term := range storageClass.AllowedTopologies {
+				for _, expr := range term.MatchLabelExpressions {
+					if UnsupportedTopologyKeys.Has(expr.Key) {
+						return serrors.Wrap(fmt.Errorf("failed to validate pvc, storage class uses unsupported topology key"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName), "TopologyKey", expr.Key)
+					}
+				}
 			}
 		}
 		// Finally, validate that the driver is in the set of supported drivers

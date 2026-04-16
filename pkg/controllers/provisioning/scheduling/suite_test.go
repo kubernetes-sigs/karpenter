@@ -59,6 +59,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -69,6 +70,7 @@ var ctx context.Context
 var prov *provisioning.Provisioner
 var env *test.Environment
 var fakeClock *clock.FakeClock
+var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
@@ -95,9 +97,10 @@ var _ = BeforeSuite(func() {
 	// set these on the cloud provider, so we can manipulate them if needed
 	cloudProvider.InstanceTypes = instanceTypes
 	fakeClock = clock.NewFakeClock(time.Now())
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	podStateController = informer.NewPodController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
@@ -115,6 +118,7 @@ var _ = BeforeEach(func() {
 	scheduling.MaxInstanceTypes = 60
 	state.PodSchedulingDecisionSeconds.Reset()
 	scheduling.UnsupportedProvisioners = sets.New[string]()
+	scheduling.UnsupportedTopologyKeys = sets.New[string]()
 })
 
 var _ = AfterEach(func() {
@@ -3426,6 +3430,39 @@ var _ = Context("Scheduling", func() {
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			// no nodes should be created as the persistent volume is using an unsupported provisioner
 			Expect(nodeList.Items).To(HaveLen(0))
+		})
+		It("should not launch nodes for pod with storageClass that uses an unsupported topology key", func() {
+			scheduling.UnsupportedTopologyKeys = lo.Assign(scheduling.UnsupportedTopologyKeys, sets.New("topology.ebs.csi.aws.com/zone"))
+
+			sc := &storagev1.StorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "default-storage-class",
+				},
+				Provisioner:       "ebs.csi.eks.amazonaws.com",
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{
+						MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{
+							{
+								Key:    "topology.ebs.csi.aws.com/zone",
+								Values: []string{"us-west-2a", "us-west-2b"},
+							},
+						},
+					},
+				},
+			}
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tmp-ephemeral",
+				},
+				StorageClassName: lo.ToPtr(sc.Name),
+			})
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, sc, pvc, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should not launch nodes for pod with unbound volume for volumeBindingMode immediate", func() {
 			sc := test.StorageClass(test.StorageClassOptions{

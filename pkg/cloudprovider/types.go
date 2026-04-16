@@ -99,6 +99,23 @@ type CloudProvider interface {
 	GetSupportedNodeClasses() []status.Object
 }
 
+type NodeLifecycleHookResult struct {
+	// Requeue indicates the lifecycle controller should requeue with exponential backoff.
+	Requeue bool
+	// RequeueAfter indicates the lifecycle controller should requeue after the provided duration.
+	// If multiple hooks are provided, the shortest interval is respected.
+	RequeueAfter time.Duration
+}
+
+// NodeLifecycleHook is implemented by cloud providers to gate node registration.
+// All registered hooks must return an empty result before node registration completes.
+type NodeLifecycleHook interface {
+	// Name for the hook.
+	Name() string
+	// Registered returns true if this hook's preconditions are satisfied and can proceed.
+	Registered(context.Context, *v1.NodeClaim) (NodeLifecycleHookResult, error)
+}
+
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
 // +k8s:deepcopy-gen=true
