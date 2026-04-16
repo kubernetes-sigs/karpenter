@@ -131,15 +131,15 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	baseRequirements.Add(podData.Requirements.Values()...)
 
 	// Build the list of volume requirement alternatives to try.
-	// Each alternative represents one valid zone combination for the pod's volumes.
-	// If there are no volume requirements, use a single nil entry (no zone constraint).
+	// Each alternative represents one valid combination of topology requirements for the pod's volumes.
+	// If there are no volume requirements, use a single nil entry with no additional topology constraint.
 	volumeAlternatives := podData.VolumeRequirements
 	if len(volumeAlternatives) == 0 {
 		volumeAlternatives = []scheduling.Requirements{nil}
 	}
 
-	// Try each volume alternative. We need to iterate here because choosing a zone
-	// for volumes affects downstream topology checks (e.g., pod anti-affinity).
+	// Try each volume topology alternative. We need to iterate here because the selected
+	// volume topology constraints affect downstream topology checks (e.g., pod anti-affinity).
 	var lastErr error
 	for _, volReqs := range volumeAlternatives {
 		reqs, its, ofs, err := n.tryVolumeAlternative(ctx, pod, podData, baseRequirements, volReqs, relaxMinValues)
@@ -158,7 +158,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	nodeClaimRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
 
 	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
-	// This ensures NodeClaim is created in the correct zone for volumes,
+	// This ensures the NodeClaim satisfies the selected volume topology constraints,
 	// while TSC counting uses pod's original affinity.
 	if volReqs != nil {
 		if err := nodeClaimRequirements.Compatible(volReqs, scheduling.AllowUndefinedWellKnownLabels); err != nil {

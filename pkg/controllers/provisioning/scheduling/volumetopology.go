@@ -54,13 +54,13 @@ type VolumeTopology struct {
 }
 
 // GetRequirements returns the volume topology requirements for the pod as a list of alternatives.
-// Each alternative is a scheduling.Requirements representing one valid combination of volume zone constraints.
-// When a volume has multiple allowed zones (OR'd NodeSelectorTerms or AllowedTopologies), each zone
-// option becomes a separate alternative. For pods with multiple volumes, the cross product of all
+// Each alternative is a scheduling.Requirements representing one valid combination of volume topology constraints.
+// When a volume has multiple allowed topology terms (OR'd NodeSelectorTerms or AllowedTopologies),
+// each term becomes a separate alternative. For pods with multiple volumes, the cross product of all
 // per-volume alternatives is computed.
 //
 // These requirements should be:
-//   - Added to nodeRequirements (for NodeClaim zone selection)
+//   - Added to nodeRequirements (for NodeClaim topology filtering)
 //   - NOT added to pod's NodeAffinity (to preserve correct TSC counting)
 func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]scheduling.Requirements, error) {
 	// Start with a single empty alternative (matches everything)

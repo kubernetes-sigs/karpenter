@@ -100,7 +100,7 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 		volumeAlternatives = []scheduling.Requirements{nil}
 	}
 
-	// Try each volume alternative. Choosing a zone for volumes affects topology checks.
+	// Try each volume topology alternative. The selected constraints affect topology checks.
 	var lastErr error
 	for _, volReqs := range volumeAlternatives {
 		reqs, err := n.tryVolumeAlternative(pod, podData, baseRequirements, volReqs)
@@ -119,7 +119,7 @@ func (n *ExistingNode) tryVolumeAlternative(pod *v1.Pod, podData *PodData, baseR
 	nodeRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
 
 	// Add volume requirements to nodeRequirements ONLY (not to pod's affinity).
-	// This ensures existing node must be in the correct zone for volumes,
+	// This ensures the existing node satisfies the selected volume topology constraints,
 	// while TSC counting uses pod's original affinity.
 	if volReqs != nil {
 		if err := nodeRequirements.Compatible(volReqs); err != nil {
