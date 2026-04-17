@@ -56,3 +56,14 @@ func DisabledEvent(reason string) events.Event {
 		DedupeValues:   []string{reason},
 	}
 }
+
+// ThirdPartyConflictEvent creates a warning event when a third party modified a Karpenter-managed deletion cost
+func ThirdPartyConflictEvent(pod *corev1.Pod) events.Event {
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.PodDeletionCostThirdPartyConflict,
+		Message:        "Pod deletion cost annotation was externally modified; Karpenter is releasing management of this pod",
+		DedupeValues:   []string{string(pod.UID)},
+	}
+}

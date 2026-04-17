@@ -41,7 +41,6 @@ var _ = Describe("Controller", func() {
 	It("should skip reconciliation when feature gate is disabled", func() {
 		opts := test.Options()
 		opts.FeatureGates.PodDeletionCostManagement = false
-		opts.PodDeletionCostRankingStrategy = "Random"
 		disabledCtx := options.ToContext(ctx, opts)
 
 		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
@@ -142,5 +141,37 @@ var _ = Describe("Controller", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(customerPod), updatedPod)).To(Succeed())
 		Expect(updatedPod.Annotations[deletioncost.PodDeletionCostAnnotation]).To(Equal("999"))
 		Expect(updatedPod.Annotations).ToNot(HaveKey(deletioncost.KarpenterManagedDeletionCostAnnotation))
+	})
+
+	Context("Bounded labeling", func() {
+		It("should only annotate top maxNodesPerCycle nodes", func() {
+			// Create 3 nodes — all should be annotated since 3 < 50
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pods := make([]*corev1.Pod, len(nodes))
+			for i, n := range nodes {
+				pods[i] = test.Pod(test.PodOptions{NodeName: n.Name})
+				ExpectApplied(ctx, env.Client, pods[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
+			result, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.RequeueAfter).ToNot(BeZero())
+
+			// All 3 pods should be annotated (under the 50 limit)
+			for _, pod := range pods {
+				updatedPod := &corev1.Pod{}
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
+				Expect(updatedPod.Annotations).To(HaveKey(deletioncost.PodDeletionCostAnnotation))
+			}
+		})
 	})
 })

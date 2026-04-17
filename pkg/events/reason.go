@@ -51,7 +51,8 @@ const (
 	NodeClassNotReady         = "NodeClassNotReady"
 
 	// pod/deletioncost
-	PodDeletionCostRankingCompleted = "PodDeletionCostRankingCompleted"
-	PodDeletionCostUpdateFailed     = "PodDeletionCostUpdateFailed"
-	PodDeletionCostDisabled         = "PodDeletionCostDisabled"
+	PodDeletionCostRankingCompleted  = "PodDeletionCostRankingCompleted"
+	PodDeletionCostUpdateFailed      = "PodDeletionCostUpdateFailed"
+	PodDeletionCostDisabled          = "PodDeletionCostDisabled"
+	PodDeletionCostThirdPartyConflict = "PodDeletionCostThirdPartyConflict"
 )

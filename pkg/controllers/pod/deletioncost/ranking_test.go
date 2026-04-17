@@ -61,7 +61,7 @@ var _ = Describe("Ranking", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(deletioncost.RankingStrategyRandom)
+			engine := deletioncost.NewRankingEngine()
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -90,7 +90,7 @@ var _ = Describe("Ranking", func() {
 		})
 
 		It("should handle empty node list", func() {
-			engine := deletioncost.NewRankingEngine(deletioncost.RankingStrategyRandom)
+			engine := deletioncost.NewRankingEngine()
 			ranks, err := engine.RankNodes(ctx, env.Client, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(BeEmpty())
@@ -110,7 +110,7 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(deletioncost.RankingStrategyRandom)
+			engine := deletioncost.NewRankingEngine()
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -141,7 +141,7 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(deletioncost.RankingStrategyRandom)
+			engine := deletioncost.NewRankingEngine()
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -155,7 +155,7 @@ var _ = Describe("Ranking", func() {
 			}
 		})
 
-		It("should assign sequential ranks starting from BaseRank", func() {
+		It("should assign sequential ranks starting from -len(nodes)", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -169,7 +169,7 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(deletioncost.RankingStrategyRandom)
+			engine := deletioncost.NewRankingEngine()
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -178,13 +178,14 @@ var _ = Describe("Ranking", func() {
 			ranks, err := engine.RankNodes(ctx, env.Client, stateNodes)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Ranks should be sequential starting from BaseRank
+			// Ranks should be sequential starting from -len(nodes)
+			baseRank := -len(stateNodes)
 			rankValues := make(map[int]bool)
 			for _, r := range ranks {
 				rankValues[r.Rank] = true
 			}
 			for i := 0; i < len(ranks); i++ {
-				Expect(rankValues).To(HaveKey(deletioncost.BaseRank + i))
+				Expect(rankValues).To(HaveKey(baseRank + i))
 			}
 		})
 
@@ -210,7 +211,7 @@ var _ = Describe("Ranking", func() {
 			}))
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(deletioncost.RankingStrategyRandom)
+			engine := deletioncost.NewRankingEngine()
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -221,8 +222,9 @@ var _ = Describe("Ranking", func() {
 			Expect(ranks).To(HaveLen(4))
 
 			var normalCount, dndCount int
-			maxNormalRank := deletioncost.BaseRank - 1
-			minDNDRank := deletioncost.BaseRank + 100
+			baseRank := -len(stateNodes)
+			maxNormalRank := baseRank - 1
+			minDNDRank := baseRank + 100
 			for _, r := range ranks {
 				if r.HasDoNotDisrupt {
 					dndCount++

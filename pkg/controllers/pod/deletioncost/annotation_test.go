@@ -272,4 +272,49 @@ var _ = Describe("Annotation", func() {
 			}
 		})
 	})
+
+	Context("Third-party conflict detection", func() {
+		It("should detect externally modified annotation and remove sentinel", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -5, HasDoNotDisrupt: false}}
+
+			// First update — Karpenter sets the annotation
+			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			updatedPod := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
+			Expect(updatedPod.Annotations[deletioncost.PodDeletionCostAnnotation]).To(Equal("-5"))
+
+			// Simulate third-party modifying the annotation
+			updatedPod.Annotations[deletioncost.PodDeletionCostAnnotation] = "999"
+			Expect(env.Client.Update(ctx, updatedPod)).To(Succeed())
+
+			// Second update — should detect conflict, remove sentinel, skip pod
+			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+
+			finalPod := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), finalPod)).To(Succeed())
+			// Sentinel should be removed
+			Expect(finalPod.Annotations).ToNot(HaveKey(deletioncost.KarpenterManagedDeletionCostAnnotation))
+			// Third-party value should be preserved
+			Expect(finalPod.Annotations[deletioncost.PodDeletionCostAnnotation]).To(Equal("999"))
+		})
+	})
 })
+
