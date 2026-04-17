@@ -36,7 +36,10 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
-const reconcileInterval = time.Minute
+const (
+	reconcileInterval = time.Minute
+	maxNodesPerCycle  = 50
+)
 
 // Controller manages pod deletion cost annotations for Karpenter-managed nodes
 type Controller struct {
@@ -46,9 +49,10 @@ type Controller struct {
 	cluster       *state.Cluster
 	recorder      events.Recorder
 
-	rankingEngine  *RankingEngine
-	annotationMgr  *AnnotationManager
-	changeDetector *ChangeDetector
+	rankingEngine          *RankingEngine
+	annotationMgr          *AnnotationManager
+	changeDetector         *ChangeDetector
+	previouslyLabeledNodes map[string]bool
 }
 
 // NewController creates a new pod deletion cost controller
@@ -60,14 +64,15 @@ func NewController(
 	recorder events.Recorder,
 ) *Controller {
 	return &Controller{
-		clock:          clk,
-		kubeClient:     kubeClient,
-		cloudProvider:  cloudProvider,
-		cluster:        cluster,
-		recorder:       recorder,
-		rankingEngine:  NewRankingEngine(),
-		annotationMgr:  NewAnnotationManager(kubeClient, recorder),
-		changeDetector: NewChangeDetector(),
+		clock:                  clk,
+		kubeClient:             kubeClient,
+		cloudProvider:          cloudProvider,
+		cluster:                cluster,
+		recorder:               recorder,
+		rankingEngine:          NewRankingEngine(),
+		annotationMgr:          NewAnnotationManager(kubeClient, recorder),
+		changeDetector:         NewChangeDetector(),
+		previouslyLabeledNodes: make(map[string]bool),
 	}
 }
 
@@ -90,12 +95,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	opts := options.FromContext(ctx)
 
-	// Check if feature is enabled via feature gate
 	if !opts.FeatureGates.PodDeletionCostManagement {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	// Get all Karpenter-managed nodes from cluster state
 	var nodes []*state.StateNode
 	for node := range c.cluster.Nodes() {
 		nodes = append(nodes, node)
@@ -105,7 +108,6 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	// Check change detection if enabled
 	if opts.PodDeletionCostChangeDetection {
 		changed, err := c.changeDetector.HasChanged(ctx, c.kubeClient, nodes)
 		if err != nil {
@@ -126,13 +128,37 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	c.recorder.Publish(RankingCompletedEvent(len(nodeRanks)))
 
-	if err := c.annotationMgr.UpdatePodDeletionCosts(ctx, nodeRanks); err != nil {
+	// Bounded labeling: take only top maxNodesPerCycle nodes
+	activeRanks := nodeRanks
+	if len(activeRanks) > maxNodesPerCycle {
+		activeRanks = activeRanks[:maxNodesPerCycle]
+	}
+
+	// Build set of currently active node names
+	currentNodes := make(map[string]bool, len(activeRanks))
+	for _, nr := range activeRanks {
+		currentNodes[nr.Node.Name()] = true
+	}
+
+	// Clean up annotations on nodes that dropped out of top-N
+	for nodeName := range c.previouslyLabeledNodes {
+		if !currentNodes[nodeName] {
+			if err := c.annotationMgr.CleanupNodeAnnotations(ctx, nodeName); err != nil {
+				log.FromContext(ctx).WithValues("node", nodeName).Error(err, "failed to clean up annotations on dropped node")
+			}
+		}
+	}
+
+	// Update tracking
+	c.previouslyLabeledNodes = currentNodes
+
+	if err := c.annotationMgr.UpdatePodDeletionCosts(ctx, activeRanks); err != nil {
 		log.FromContext(ctx).Error(err, "failed to update pod deletion costs")
 		c.recorder.Publish(DisabledEvent(fmt.Sprintf("failed to update pod deletion costs: %v", err)))
 		return reconciler.Result{RequeueAfter: reconcileInterval}, err
 	}
 
-	log.FromContext(ctx).V(1).WithValues("nodeCount", len(nodeRanks)).Info("updated pod deletion costs")
+	log.FromContext(ctx).V(1).WithValues("nodeCount", len(activeRanks)).Info("updated pod deletion costs")
 
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }

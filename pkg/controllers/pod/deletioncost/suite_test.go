@@ -56,7 +56,6 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(coreapis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	opts := test.Options()
 	opts.FeatureGates.PodDeletionCostManagement = true
-	opts.PodDeletionCostRankingStrategy = "Random"
 	opts.PodDeletionCostChangeDetection = true
 	ctx = options.ToContext(ctx, opts)
 	cloudProvider = fake.NewCloudProvider()
