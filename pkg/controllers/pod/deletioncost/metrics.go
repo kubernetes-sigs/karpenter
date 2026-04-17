@@ -26,7 +26,6 @@ import (
 
 const (
 	podDeletionCostSubsystem = "pod_deletion_cost"
-	strategyLabel            = "strategy"
 	resultLabel              = "result"
 )
 
@@ -37,9 +36,9 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
 			Name:      "nodes_ranked_total",
-			Help:      "Number of nodes ranked in total by the pod deletion cost controller. Labeled by ranking strategy.",
+			Help:      "Number of nodes ranked in total by the pod deletion cost controller.",
 		},
-		[]string{strategyLabel},
+		[]string{},
 	)
 	PodsUpdatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -57,10 +56,10 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
 			Name:      "ranking_duration_seconds",
-			Help:      "Duration of node ranking computation in seconds. Labeled by ranking strategy.",
+			Help:      "Duration of node ranking computation in seconds.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{strategyLabel},
+		[]string{},
 	)
 	AnnotationDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,

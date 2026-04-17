@@ -91,7 +91,6 @@ type Options struct {
 	IgnoreDRARequests                bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
 	FeatureGates                     FeatureGates
 	// Pod deletion cost management options
-	PodDeletionCostRankingStrategy string
 	PodDeletionCostChangeDetection bool
 }
 
@@ -136,7 +135,6 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,PodDeletionCostManagement=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, StaticCapacity, and PodDeletionCostManagement.")
 	// Pod deletion cost management options
-	fs.StringVar(&o.PodDeletionCostRankingStrategy, "pod-deletion-cost-ranking-strategy", env.WithDefaultString("POD_DELETION_COST_RANKING_STRATEGY", "Random"), "Ranking strategy for pod deletion cost management. Options: Random, LargestToSmallest, SmallestToLargest, UnallocatedVCPUPerPodCost")
 	fs.BoolVarWithEnv(&o.PodDeletionCostChangeDetection, "pod-deletion-cost-change-detection", "POD_DELETION_COST_CHANGE_DETECTION", true, "Enable change detection optimization for pod deletion cost management")
 }
 
