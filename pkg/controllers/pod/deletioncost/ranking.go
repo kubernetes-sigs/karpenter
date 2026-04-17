@@ -26,7 +26,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // NodeRank represents a node with its assigned rank for pod deletion cost
@@ -132,7 +131,7 @@ func hasDoNotDisruptPods(ctx context.Context, kubeClient client.Client, node *st
 		return false, err
 	}
 	for _, pod := range pods {
-		if podutils.HasDoNotDisrupt(pod) {
+		if pod.Annotations[v1.DoNotDisruptAnnotationKey] == "true" {
 			return true, nil
 		}
 	}
