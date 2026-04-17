@@ -18,34 +18,15 @@ package deletioncost
 
 import (
 	"context"
-	"crypto/rand"
-	"math/big"
 	"sort"
 
-	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
-)
-
-// RankingStrategy defines the algorithm used to rank nodes for pod deletion cost assignment
-type RankingStrategy string
-
-const (
-	// RankingStrategyRandom assigns node ranks in random order
-	RankingStrategyRandom RankingStrategy = "Random"
-	// RankingStrategyLargestToSmallest assigns lower ranks to nodes with greater total capacity
-	RankingStrategyLargestToSmallest RankingStrategy = "LargestToSmallest"
-	// RankingStrategySmallestToLargest assigns lower ranks to nodes with lesser total capacity
-	RankingStrategySmallestToLargest RankingStrategy = "SmallestToLargest"
-	// RankingStrategyUnallocatedVCPUPerPodCost assigns lower ranks to nodes with higher unallocated vCPU per pod ratios
-	RankingStrategyUnallocatedVCPUPerPodCost RankingStrategy = "UnallocatedVCPUPerPodCost"
-
-	// BaseRank is the starting rank for nodes without do-not-disrupt pods
-	BaseRank = -1000
 )
 
 // NodeRank represents a node with its assigned rank for pod deletion cost
@@ -55,103 +36,93 @@ type NodeRank struct {
 	HasDoNotDisrupt bool
 }
 
-// RankingEngine implements node ranking strategies
-type RankingEngine struct {
-	strategy RankingStrategy
+// RankingEngine implements PodCount-based node ranking with three-tier drift partitioning
+type RankingEngine struct{}
+
+// NewRankingEngine creates a new RankingEngine
+func NewRankingEngine() *RankingEngine {
+	return &RankingEngine{}
 }
 
-// NewRankingEngine creates a new RankingEngine with the specified strategy
-func NewRankingEngine(strategy RankingStrategy) *RankingEngine {
-	return &RankingEngine{
-		strategy: strategy,
-	}
-}
-
-// RankNodes ranks the provided nodes according to the configured strategy
-// Returns a slice of NodeRank with assigned ranks
+// RankNodes ranks nodes using PodCount strategy with three-tier partitioning:
+// Tier 1 (lowest cost): Drifted nodes — sorted by pod count ascending
+// Tier 2 (middle):      Normal nodes — sorted by pod count ascending
+// Tier 3 (highest):     Do-not-disrupt nodes — sorted by pod count ascending
 func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) ([]NodeRank, error) {
 	if len(nodes) == 0 {
 		return []NodeRank{}, nil
 	}
 
-	// Measure ranking duration
-	defer metrics.Measure(RankingDurationSeconds, map[string]string{
-		strategyLabel: string(r.strategy),
-	})()
+	defer metrics.Measure(RankingDurationSeconds, map[string]string{})()
 
-	// Step 1: Partition nodes by do-not-disrupt status
-	groupA, groupB, err := partitionNodesByDoNotDisrupt(ctx, kubeClient, nodes)
+	// Partition into three tiers
+	drifted, normal, doNotDisrupt, err := partitionNodes(ctx, kubeClient, nodes)
 	if err != nil {
 		return nil, err
 	}
 
-	// Step 2: Apply ranking strategy to each group
-	var rankedGroupA, rankedGroupB []*state.StateNode
+	// Sort each tier by pod count ascending, tiebreak by node name
+	sortByPodCount(ctx, kubeClient, drifted)
+	sortByPodCount(ctx, kubeClient, normal)
+	sortByPodCount(ctx, kubeClient, doNotDisrupt)
 
-	switch r.strategy {
-	case RankingStrategyRandom:
-		rankedGroupA = rankNodesRandom(groupA)
-		rankedGroupB = rankNodesRandom(groupB)
-	case RankingStrategyLargestToSmallest:
-		rankedGroupA = rankNodesBySize(groupA, true)
-		rankedGroupB = rankNodesBySize(groupB, true)
-	case RankingStrategySmallestToLargest:
-		rankedGroupA = rankNodesBySize(groupA, false)
-		rankedGroupB = rankNodesBySize(groupB, false)
-	case RankingStrategyUnallocatedVCPUPerPodCost:
-		rankedGroupA, err = rankNodesByUnallocatedVCPUPerPod(ctx, kubeClient, groupA)
-		if err != nil {
-			return nil, err
-		}
-		rankedGroupB, err = rankNodesByUnallocatedVCPUPerPod(ctx, kubeClient, groupB)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		// Default to random if strategy is unknown
-		rankedGroupA = rankNodesRandom(groupA)
-		rankedGroupB = rankNodesRandom(groupB)
-	}
-
-	// Step 3: Assign ranks
+	// BaseRank = -n where n is total managed nodes
+	baseRank := -len(nodes)
+	currentRank := baseRank
 	result := make([]NodeRank, 0, len(nodes))
-	currentRank := BaseRank
 
-	// Assign ranks to Group A (nodes without do-not-disrupt pods)
-	for _, node := range rankedGroupA {
-		result = append(result, NodeRank{
-			Node:            node,
-			Rank:            currentRank,
-			HasDoNotDisrupt: false,
-		})
+	for _, node := range drifted {
+		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: false})
+		currentRank++
+	}
+	for _, node := range normal {
+		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: false})
+		currentRank++
+	}
+	for _, node := range doNotDisrupt {
+		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: true})
 		currentRank++
 	}
 
-	// Assign ranks to Group B (nodes with do-not-disrupt pods)
-	// Start from the next rank after Group A
-	for _, node := range rankedGroupB {
-		result = append(result, NodeRank{
-			Node:            node,
-			Rank:            currentRank,
-			HasDoNotDisrupt: true,
-		})
-		currentRank++
-	}
+	NodesRankedTotal.Add(float64(len(result)), map[string]string{})
 
-	// Record metrics
-	NodesRankedTotal.Add(float64(len(result)), map[string]string{
-		strategyLabel: string(r.strategy),
-	})
-
-	// Log ranking results at debug level
 	log.FromContext(ctx).V(1).WithValues(
-		"strategy", r.strategy,
 		"totalNodes", len(result),
-		"nodesWithoutDoNotDisrupt", len(rankedGroupA),
-		"nodesWithDoNotDisrupt", len(rankedGroupB),
+		"driftedNodes", len(drifted),
+		"normalNodes", len(normal),
+		"doNotDisruptNodes", len(doNotDisrupt),
 	).Info("completed node ranking")
 
 	return result, nil
+}
+
+// partitionNodes splits nodes into three tiers:
+// 1. Drifted — NodeClaim has ConditionTypeDrifted=True
+// 2. Normal — not drifted, no do-not-disrupt pods
+// 3. DoNotDisrupt — has do-not-disrupt pods (regardless of drift)
+func partitionNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) (drifted, normal, doNotDisrupt []*state.StateNode, err error) {
+	for _, node := range nodes {
+		hasDND, err := hasDoNotDisruptPods(ctx, kubeClient, node)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if hasDND {
+			doNotDisrupt = append(doNotDisrupt, node)
+		} else if isDrifted(node) {
+			drifted = append(drifted, node)
+		} else {
+			normal = append(normal, node)
+		}
+	}
+	return
+}
+
+// isDrifted returns true if the node's NodeClaim has ConditionTypeDrifted=True
+func isDrifted(node *state.StateNode) bool {
+	if node.NodeClaim == nil {
+		return false
+	}
+	return node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
 }
 
 // hasDoNotDisruptPods checks if a node has at least one pod with the do-not-disrupt annotation
@@ -160,182 +131,34 @@ func hasDoNotDisruptPods(ctx context.Context, kubeClient client.Client, node *st
 	if err != nil {
 		return false, err
 	}
-
 	for _, pod := range pods {
 		if podutils.HasDoNotDisrupt(pod) {
 			return true, nil
 		}
 	}
-
 	return false, nil
 }
 
-// partitionNodesByDoNotDisrupt partitions nodes into two groups:
-// - Group A: nodes without do-not-disrupt pods
-// - Group B: nodes with do-not-disrupt pods
-func partitionNodesByDoNotDisrupt(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) (groupA, groupB []*state.StateNode, err error) {
-	groupA = make([]*state.StateNode, 0)
-	groupB = make([]*state.StateNode, 0)
-
+// sortByPodCount sorts nodes by pod count ascending with deterministic tiebreak by node name.
+// Pod count errors are treated as 0 (node sorts first).
+func sortByPodCount(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) {
+	if len(nodes) <= 1 {
+		return
+	}
+	counts := make(map[string]int, len(nodes))
 	for _, node := range nodes {
-		hasDoNotDisrupt, err := hasDoNotDisruptPods(ctx, kubeClient, node)
+		pods, err := node.Pods(ctx, kubeClient)
 		if err != nil {
-			return nil, nil, err
+			counts[node.Name()] = 0
+			continue
 		}
-
-		if hasDoNotDisrupt {
-			groupB = append(groupB, node)
-		} else {
-			groupA = append(groupA, node)
-		}
+		counts[node.Name()] = len(pods)
 	}
-
-	return groupA, groupB, nil
-}
-
-// rankNodesRandom shuffles nodes randomly and assigns sequential ranks
-func rankNodesRandom(nodes []*state.StateNode) []*state.StateNode {
-	if len(nodes) == 0 {
-		return nodes
-	}
-
-	// Create a copy to avoid modifying the original slice
-	shuffled := make([]*state.StateNode, len(nodes))
-	copy(shuffled, nodes)
-
-	// Fisher-Yates shuffle using crypto/rand for determinism
-	for i := len(shuffled) - 1; i > 0; i-- {
-		// Generate random index from 0 to i (inclusive)
-		maxBig := big.NewInt(int64(i + 1))
-		jBig, err := rand.Int(rand.Reader, maxBig)
-		if err != nil {
-			// If crypto/rand fails, fall back to no shuffle (deterministic by node order)
-			return nodes
+	sort.SliceStable(nodes, func(i, j int) bool {
+		ci, cj := counts[nodes[i].Name()], counts[nodes[j].Name()]
+		if ci != cj {
+			return ci < cj
 		}
-		j := int(jBig.Int64())
-
-		// Swap elements
-		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-	}
-
-	return shuffled
-}
-
-// calculateNormalizedCapacity calculates a normalized capacity value for a node
-// by combining CPU and memory resources into a single comparable value
-func calculateNormalizedCapacity(allocatable corev1.ResourceList) float64 {
-	// Get CPU in millicores
-	cpu := allocatable[corev1.ResourceCPU]
-	cpuMillis := float64(cpu.MilliValue())
-
-	// Get memory in bytes
-	memory := allocatable[corev1.ResourceMemory]
-	memoryBytes := float64(memory.Value())
-
-	// Normalize: 1 CPU core = 1GB memory for comparison purposes
-	// This gives us a single comparable value
-	cpuNormalized := cpuMillis / 1000.0                          // Convert millicores to cores
-	memoryNormalized := memoryBytes / (1024.0 * 1024.0 * 1024.0) // Convert bytes to GB
-
-	return cpuNormalized + memoryNormalized
-}
-
-// rankNodesBySize sorts nodes by their total allocatable capacity
-// If largest is true, sorts largest to smallest (descending)
-// If largest is false, sorts smallest to largest (ascending)
-func rankNodesBySize(nodes []*state.StateNode, largest bool) []*state.StateNode {
-	if len(nodes) == 0 {
-		return nodes
-	}
-
-	// Create a copy to avoid modifying the original slice
-	sorted := make([]*state.StateNode, len(nodes))
-	copy(sorted, nodes)
-
-	// Sort by normalized capacity
-	sort.SliceStable(sorted, func(i, j int) bool {
-		capacityI := calculateNormalizedCapacity(sorted[i].Allocatable())
-		capacityJ := calculateNormalizedCapacity(sorted[j].Allocatable())
-
-		if capacityI == capacityJ {
-			// Deterministic ordering by node name for ties
-			return sorted[i].Name() < sorted[j].Name()
-		}
-
-		if largest {
-			// Largest to smallest (descending)
-			return capacityI > capacityJ
-		}
-		// Smallest to largest (ascending)
-		return capacityI < capacityJ
+		return nodes[i].Name() < nodes[j].Name()
 	})
-
-	return sorted
-}
-
-// calculateUnallocatedVCPUPerPod calculates the ratio of unallocated vCPU to pod count
-func calculateUnallocatedVCPUPerPod(ctx context.Context, kubeClient client.Client, node *state.StateNode) (float64, error) {
-	// Get unallocated CPU (available CPU)
-	available := node.Available()
-	unallocatedCPU := available[corev1.ResourceCPU]
-	unallocatedMillis := float64(unallocatedCPU.MilliValue())
-
-	// Get pod count on the node
-	pods, err := node.Pods(ctx, kubeClient)
-	if err != nil {
-		return 0, err
-	}
-	podCount := len(pods)
-
-	// Handle edge case: no pods on node
-	if podCount == 0 {
-		// Return a very high value to indicate this node should be ranked lower
-		// (higher deletion priority) since it has no pods
-		return 1e9, nil
-	}
-
-	// Calculate ratio: unallocated vCPU / pod count
-	// Convert millicores to cores for the ratio
-	unallocatedCores := unallocatedMillis / 1000.0
-	ratio := unallocatedCores / float64(podCount)
-
-	return ratio, nil
-}
-
-// rankNodesByUnallocatedVCPUPerPod sorts nodes by their unallocated vCPU per pod ratio
-// Higher ratios get lower ranks (higher deletion priority)
-func rankNodesByUnallocatedVCPUPerPod(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) ([]*state.StateNode, error) {
-	if len(nodes) == 0 {
-		return nodes, nil
-	}
-
-	// Create a copy to avoid modifying the original slice
-	sorted := make([]*state.StateNode, len(nodes))
-	copy(sorted, nodes)
-
-	// Calculate ratios for all nodes
-	ratios := make(map[string]float64)
-	for _, node := range sorted {
-		ratio, err := calculateUnallocatedVCPUPerPod(ctx, kubeClient, node)
-		if err != nil {
-			return nil, err
-		}
-		ratios[node.Name()] = ratio
-	}
-
-	// Sort by ratio descending (higher ratio = lower rank = higher deletion priority)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		ratioI := ratios[sorted[i].Name()]
-		ratioJ := ratios[sorted[j].Name()]
-
-		if ratioI == ratioJ {
-			// Deterministic ordering by node name for ties
-			return sorted[i].Name() < sorted[j].Name()
-		}
-
-		// Higher ratio first (descending)
-		return ratioI > ratioJ
-	})
-
-	return sorted, nil
 }

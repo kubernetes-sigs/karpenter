@@ -25,13 +25,13 @@ import (
 )
 
 // RankingCompletedEvent creates an event indicating that node ranking has completed successfully
-func RankingCompletedEvent(nodeCount int, strategy string) events.Event {
+func RankingCompletedEvent(nodeCount int) events.Event {
 	return events.Event{
-		InvolvedObject: &corev1.Namespace{}, // Global event, not tied to specific object
+		InvolvedObject: &corev1.Namespace{},
 		Type:           corev1.EventTypeNormal,
 		Reason:         events.PodDeletionCostRankingCompleted,
-		Message:        fmt.Sprintf("Ranked %d nodes using strategy %s", nodeCount, strategy),
-		DedupeValues:   []string{strategy},
+		Message:        fmt.Sprintf("Ranked %d nodes using PodCount strategy", nodeCount),
+		DedupeValues:   []string{"PodCount"},
 	}
 }
 
@@ -49,7 +49,7 @@ func UpdateFailedEvent(pod *corev1.Pod, err error) events.Event {
 // DisabledEvent creates an event indicating that the pod deletion cost feature has been disabled due to an error
 func DisabledEvent(reason string) events.Event {
 	return events.Event{
-		InvolvedObject: &corev1.Namespace{}, // Global event, not tied to specific object
+		InvolvedObject: &corev1.Namespace{},
 		Type:           corev1.EventTypeWarning,
 		Reason:         events.PodDeletionCostDisabled,
 		Message:        fmt.Sprintf("Pod deletion cost management disabled: %s", reason),
