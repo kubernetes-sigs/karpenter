@@ -94,6 +94,10 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 		// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
 		its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
 		if err != nil {
+			if cloudprovider.IsUnevaluatedNodePoolError(err) {
+				log.FromContext(ctx).V(1).Info("skipping instance type drift check, awaiting nodeoverlay evaluation")
+				return "", nil
+			}
 			return "", err
 		}
 		if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
