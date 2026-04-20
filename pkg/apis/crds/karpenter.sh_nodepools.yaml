@@ -157,10 +157,24 @@ spec:
                       enum:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
+                        - Balanced
                       type: string
+                    consolidationThreshold:
+                      description: |-
+                        ConsolidationThreshold controls how much disruption one unit of savings can buy
+                        when using the Balanced consolidation policy. A move is approved when
+                        score >= 1/consolidationThreshold. Higher values approve more aggressively.
+                        Only valid when consolidationPolicy is "Balanced". Defaults to 2.
+                      format: int32
+                      maximum: 3
+                      minimum: 1
+                      type: integer
                   required:
                     - consolidateAfter
                   type: object
+                  x-kubernetes-validations:
+                    - message: consolidationThreshold is only valid when consolidationPolicy is Balanced
+                      rule: '!has(self.consolidationThreshold) || self.consolidationPolicy == ''Balanced'''
                 limits:
                   additionalProperties:
                     anyOf:

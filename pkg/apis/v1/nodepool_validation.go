@@ -26,8 +26,15 @@ import (
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(), in.Spec.Disruption.validateConsolidationThreshold())
 	return errs
+}
+
+func (in *Disruption) validateConsolidationThreshold() error {
+	if in.ConsolidationThreshold != nil && in.ConsolidationPolicy != ConsolidationPolicyBalanced {
+		return fmt.Errorf("consolidationThreshold is only valid when consolidationPolicy is Balanced")
+	}
+	return nil
 }
 
 func (in *NodeClaimTemplate) validateLabels() (errs error) {

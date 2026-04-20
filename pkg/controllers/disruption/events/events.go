@@ -180,3 +180,74 @@ func ConsolidationRejected(node *corev1.Node, nodeClaim *v1.NodeClaim, command s
 		},
 	}
 }
+
+func balancedScoreMessage(decision string, score, threshold float64, consolidationThreshold int32, savingsPct, disruptionPct float64) string {
+	return fmt.Sprintf("score %.2f %s threshold %.2f (consolidationThreshold: %d, savings %.1f%%, disruption %.1f%%)",
+		score, decision, threshold, consolidationThreshold, savingsPct, disruptionPct)
+}
+
+// BalancedConsolidationApprovedSingleNode emits ConsolidationApproved on Node + NodeClaim.
+func BalancedConsolidationApprovedSingleNode(node *corev1.Node, nodeClaim *v1.NodeClaim, score, threshold float64, consolidationThreshold int32, savingsPct, disruptionPct float64) []events.Event {
+	msg := balancedScoreMessage(">=", score, threshold, consolidationThreshold, savingsPct, disruptionPct)
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           corev1.EventTypeNormal,
+			Reason:         events.ConsolidationApproved,
+			Message:        msg,
+			DedupeValues:   []string{string(node.UID)},
+		},
+		{
+			InvolvedObject: nodeClaim,
+			Type:           corev1.EventTypeNormal,
+			Reason:         events.ConsolidationApproved,
+			Message:        msg,
+			DedupeValues:   []string{string(nodeClaim.UID)},
+		},
+	}
+}
+
+// BalancedConsolidationRejectedSingleNode emits ConsolidationRejected on Node + NodeClaim.
+func BalancedConsolidationRejectedSingleNode(node *corev1.Node, nodeClaim *v1.NodeClaim, score, threshold float64, consolidationThreshold int32, savingsPct, disruptionPct float64) []events.Event {
+	msg := balancedScoreMessage("<", score, threshold, consolidationThreshold, savingsPct, disruptionPct)
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           corev1.EventTypeNormal,
+			Reason:         events.ConsolidationRejected,
+			Message:        msg,
+			DedupeValues:   []string{string(node.UID)},
+		},
+		{
+			InvolvedObject: nodeClaim,
+			Type:           corev1.EventTypeNormal,
+			Reason:         events.ConsolidationRejected,
+			Message:        msg,
+			DedupeValues:   []string{string(nodeClaim.UID)},
+		},
+	}
+}
+
+// BalancedConsolidationApprovedMultiNode emits a single ConsolidationApproved event on the NodePool.
+func BalancedConsolidationApprovedMultiNode(nodePool *v1.NodePool, score, threshold float64, consolidationThreshold int32, savingsPct, disruptionPct float64) events.Event {
+	msg := balancedScoreMessage(">=", score, threshold, consolidationThreshold, savingsPct, disruptionPct)
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.ConsolidationApproved,
+		Message:        msg,
+		DedupeValues:   []string{string(nodePool.UID)},
+	}
+}
+
+// BalancedConsolidationRejectedMultiNode emits a single ConsolidationRejected event on the NodePool.
+func BalancedConsolidationRejectedMultiNode(nodePool *v1.NodePool, score, threshold float64, consolidationThreshold int32, savingsPct, disruptionPct float64) events.Event {
+	msg := balancedScoreMessage("<", score, threshold, consolidationThreshold, savingsPct, disruptionPct)
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.ConsolidationRejected,
+		Message:        msg,
+		DedupeValues:   []string{string(nodePool.UID)},
+	}
+}

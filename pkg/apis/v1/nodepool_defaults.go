@@ -21,4 +21,9 @@ import (
 )
 
 // SetDefaults for the NodePool
-func (in *NodePool) SetDefaults(_ context.Context) {}
+func (in *NodePool) SetDefaults(_ context.Context) {
+	if in.Spec.Disruption.ConsolidationPolicy == ConsolidationPolicyBalanced && in.Spec.Disruption.ConsolidationThreshold == nil {
+		threshold := DefaultConsolidationThreshold
+		in.Spec.Disruption.ConsolidationThreshold = &threshold
+	}
+}
