@@ -25,6 +25,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -38,6 +39,11 @@ const MultiNodeConsolidationType = "multi"
 type MultiNodeConsolidation struct {
 	consolidation
 	validator Validator
+}
+
+type candidateGroup struct {
+	name       string
+	candidates []*Candidate
 }
 
 func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *MultiNodeConsolidation {
@@ -82,34 +88,50 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		disruptionBudgetMapping[candidate.NodePool.Name]--
 	}
 
-	// Only consider a maximum batch of 100 NodeClaims to save on computation.
-	// This could be further configurable in the future.
-	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
+	// create 1 command per node-type and optionally az,
+	// making the checks much simpler since no candidate should get rejected
+	// and also faster since fewer candidates will be compared,
+	// and avoid issue with consolidation not working with >100 nodes
+	// also solves that consolidation often fails because when multiple pods have az requirements,
+	// a consolidation always needs 2 replacement nodes, leading to failed consolidation
+	var cmd Command
+	var err error
+	groups := groupCandidates(disruptableCandidates)
+	for _, g := range groups {
+		cs := g.candidates
 
-	cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
-	if err != nil {
-		return []Command{}, err
-	}
+		// Only consider a maximum batch of 100 NodeClaims to save on computation.
+		// This could be further configurable in the future.
+		maxParallel := lo.Clamp(len(cs), 0, 100)
 
-	if cmd.Decision() == NoOpDecision {
-		// if there are no candidates because of a budget, don't mark
-		// as consolidated, as it's possible it should be consolidatable
-		// the next time we try to disrupt.
-		if !constrainedByBudgets {
-			m.markConsolidated()
+		cmd, err = m.firstNConsolidationOption(ctx, cs, maxParallel)
+
+		// do not stop when a single node-type has problems, maybe others work
+		if err != nil {
+			log.FromContext(ctx).V(1).Error(err, "ignoring failed multinodeconsolidation option", "group", g.name)
+			continue
 		}
-		return []Command{}, nil
+
+		// if we find a good command we can stop
+		if cmd.Decision() != NoOpDecision {
+			if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err == nil {
+				return []Command{cmd}, nil
+			}
+			if IsValidationError(err) {
+				cmd.EmitRejectedEvents(m.recorder, getValidationFailureReason(err))
+				continue
+			}
+			return []Command{}, fmt.Errorf("validating consolidation, %w", err)
+		}
 	}
 
-	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
-		if IsValidationError(err) {
-			reason := getValidationFailureReason(err)
-			cmd.EmitRejectedEvents(m.recorder, reason)
-			return []Command{}, nil
-		}
-		return []Command{}, fmt.Errorf("validating consolidation, %w", err)
+	// if there are no candidates because of a budget, don't mark
+	// as consolidated, as it's possible it should be consolidatable
+	// the next time we try to disrupt.
+	if !constrainedByBudgets {
+		m.markConsolidated()
 	}
-	return []Command{cmd}, nil
+	return []Command{}, nil
 }
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
@@ -235,4 +257,22 @@ func (m *MultiNodeConsolidation) Class() string {
 
 func (m *MultiNodeConsolidation) ConsolidationType() string {
 	return MultiNodeConsolidationType
+}
+
+// groupCandidates groups candidates first by node-type, then by node-type+zone.
+// Node-type groups come first since they are larger and more likely to produce good consolidation.
+// Node-type+zone groups come second as a fallback for when cross-zone consolidation fails
+// (e.g. pods with zone-affinity requirements needing 2 replacement nodes).
+func groupCandidates(candidates []*Candidate) []candidateGroup {
+	toGroups := func(m map[string][]*Candidate) []candidateGroup {
+		return lo.MapToSlice(m, func(name string, cs []*Candidate) candidateGroup { return candidateGroup{name, cs} })
+	}
+	return append(
+		toGroups(lo.GroupBy(candidates, func(c *Candidate) string {
+			return c.Labels()["node-type"]
+		})),
+		toGroups(lo.GroupBy(candidates, func(c *Candidate) string {
+			return c.Labels()["node-type"] + "/" + c.Labels()[corev1.LabelTopologyZone]
+		}))...,
+	)
 }
