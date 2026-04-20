@@ -108,15 +108,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	if opts.PodDeletionCostChangeDetection {
-		changed, err := c.changeDetector.HasChanged(ctx, c.kubeClient, nodes)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to check for changes")
-		} else if !changed {
-			log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
-			SkippedNoChangesTotal.Add(1, map[string]string{})
-			return reconciler.Result{RequeueAfter: reconcileInterval}, nil
-		}
+	if c.shouldSkipUnchanged(ctx, opts, nodes) {
+		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
 	nodeRanks, err := c.rankingEngine.RankNodes(ctx, c.kubeClient, nodes)
@@ -128,29 +121,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	c.recorder.Publish(RankingCompletedEvent(len(nodeRanks)))
 
-	// Bounded labeling: take only top maxNodesPerCycle nodes
-	activeRanks := nodeRanks
-	if len(activeRanks) > maxNodesPerCycle {
-		activeRanks = activeRanks[:maxNodesPerCycle]
-	}
-
-	// Build set of currently active node names
-	currentNodes := make(map[string]bool, len(activeRanks))
-	for _, nr := range activeRanks {
-		currentNodes[nr.Node.Name()] = true
-	}
-
-	// Clean up annotations on nodes that dropped out of top-N
-	for nodeName := range c.previouslyLabeledNodes {
-		if !currentNodes[nodeName] {
-			if err := c.annotationMgr.CleanupNodeAnnotations(ctx, nodeName); err != nil {
-				log.FromContext(ctx).WithValues("node", nodeName).Error(err, "failed to clean up annotations on dropped node")
-			}
-		}
-	}
-
-	// Update tracking
-	c.previouslyLabeledNodes = currentNodes
+	activeRanks := c.boundAndCleanup(ctx, nodeRanks)
 
 	if err := c.annotationMgr.UpdatePodDeletionCosts(ctx, activeRanks); err != nil {
 		log.FromContext(ctx).Error(err, "failed to update pod deletion costs")
@@ -161,4 +132,47 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	log.FromContext(ctx).V(1).WithValues("nodeCount", len(activeRanks)).Info("updated pod deletion costs")
 
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
+}
+
+// shouldSkipUnchanged returns true if change detection is enabled and no changes were detected.
+func (c *Controller) shouldSkipUnchanged(ctx context.Context, opts *options.Options, nodes []*state.StateNode) bool {
+	if !opts.PodDeletionCostChangeDetection {
+		return false
+	}
+	changed, err := c.changeDetector.HasChanged(ctx, c.kubeClient, nodes)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to check for changes")
+		return false
+	}
+	if !changed {
+		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
+		SkippedNoChangesTotal.Add(1, map[string]string{})
+		return true
+	}
+	return false
+}
+
+// boundAndCleanup limits the ranked nodes to maxNodesPerCycle and cleans up annotations
+// on nodes that dropped out of the active set since the last reconcile.
+func (c *Controller) boundAndCleanup(ctx context.Context, nodeRanks []NodeRank) []NodeRank {
+	activeRanks := nodeRanks
+	if len(activeRanks) > maxNodesPerCycle {
+		activeRanks = activeRanks[:maxNodesPerCycle]
+	}
+
+	currentNodes := make(map[string]bool, len(activeRanks))
+	for _, nr := range activeRanks {
+		currentNodes[nr.Node.Name()] = true
+	}
+
+	for nodeName := range c.previouslyLabeledNodes {
+		if !currentNodes[nodeName] {
+			if err := c.annotationMgr.CleanupNodeAnnotations(ctx, nodeName); err != nil {
+				log.FromContext(ctx).WithValues("node", nodeName).Error(err, "failed to clean up annotations on dropped node")
+			}
+		}
+	}
+
+	c.previouslyLabeledNodes = currentNodes
+	return activeRanks
 }
