@@ -12,7 +12,7 @@ Terminating a non-empty node requires evicting running pods and starting replace
 - `consolidateAfter` not preventing disruption of well-packed nodes ([kubernetes-sigs#2705](https://github.com/kubernetes-sigs/karpenter/issues/2705), [aws#3577](https://github.com/aws/karpenter-provider-aws/issues/3577))
 - Direct requests for a savings threshold or utilization-based consolidation gating ([kubernetes-sigs#2883](https://github.com/kubernetes-sigs/karpenter/issues/2883), [kubernetes-sigs#1440](https://github.com/kubernetes-sigs/karpenter/issues/1440), [kubernetes-sigs#1686](https://github.com/kubernetes-sigs/karpenter/issues/1686), [kubernetes-sigs#1430](https://github.com/kubernetes-sigs/karpenter/issues/1430), [aws#5218](https://github.com/aws/karpenter-provider-aws/issues/5218))
 
-This RFC calls each consolidation action a *move*. A move deletes one or more nodes, along with pod eviction and optional replacement node creation. We propose a new `consolidationPolicy` value, `Balanced`, that scores each move and rejects moves where the disruption outweighs the savings. A `consolidationThreshold` parameter (default 2) controls the tradeoff.
+This RFC calls each consolidation action a *move*. A move deletes one or more nodes, along with pod eviction and optional replacement node creation. We propose new `consolidationPolicy` values that score each move and reject moves where the disruption outweighs the savings. `Balanced` (k=2) is the recommended default. Integer values (1-3) provide direct control over the threshold.
 
 ## Alternatives Considered
 
@@ -57,27 +57,26 @@ metadata:
 spec:
   disruption:
     consolidationPolicy: Balanced
-    consolidationThreshold: 2
     consolidateAfter: 30s
     budgets:
     - nodes: 10%
 ```
 
-`Balanced` scores each consolidation move and approves it when `score >= 1/consolidationThreshold`.
+`consolidationPolicy` is an `IntOrString` field. Named string values and integer values sit on a spectrum from conservative to aggressive:
 
-The three consolidation policies sit on a spectrum from conservative to aggressive:
+| Value | k | Behavior |
+|---|---|---|
+| `WhenEmpty` | — | Only empty nodes (emptiness controller, no scoring) |
+| `1` | 1 | Scoring with break-even threshold (deletes only, no replaces in uniform pools) |
+| `Balanced` | 2 | Scoring with default threshold (within-family replaces viable) |
+| `3` | 3 | Scoring with aggressive threshold (adds cross-family replace pairs) |
+| `WhenEmptyOrUnderutilized` | — | Any positive savings (existing behavior, no scoring) |
 
-| Policy | Behavior |
-|---|---|
-| `WhenEmpty` | Only empty nodes (emptiness controller, no scoring) |
-| `Balanced` | Savings must justify disruption |
-| `WhenEmptyOrUnderutilized` | Any positive savings |
+`Balanced` is shorthand for k=2. An integer value uses the scoring formula directly with that k. `WhenEmpty` and `WhenEmptyOrUnderutilized` are implemented by their existing controllers and do not use the scoring formula. Validation rejects integers outside 1-3.
 
-`WhenEmpty` and `WhenEmptyOrUnderutilized` are implemented by their existing controllers. `Balanced` uses the scoring formula. The spectrum is conceptual — `WhenEmpty` and `WhenEmptyOrUnderutilized` are not special cases of the formula. They remain separate code paths.
+A move is approved when `score >= 1/k`. At the default `Balanced` (k=2), `score >= 0.5`.
 
-`consolidationThreshold` controls how aggressively `Balanced` consolidates. Higher values approve more moves. At the default of 2, a move passes when its disruption fraction is at most 2x its savings fraction. The parameter accepts integer values 1, 2, or 3. Validation rejects values outside this range and `consolidationThreshold` without `consolidationPolicy: Balanced`.
-
-If an operator enables `BalancedConsolidation`, sets `consolidationPolicy: Balanced`, then disables the feature gate during rollback, the controller falls back to `WhenEmptyOrUnderutilized` behavior and sets a `ConsolidationPolicyUnsupported` status condition on the NodePool. The condition message directs the operator to change the policy or re-enable the gate. This avoids reconcile failures while making the fallback visible.
+If an operator enables `BalancedConsolidation`, sets `consolidationPolicy: Balanced` (or an integer), then disables the feature gate during rollback, the controller falls back to `WhenEmptyOrUnderutilized` behavior and sets a `ConsolidationPolicyUnsupported` status condition on the NodePool. The condition message directs the operator to change the policy or re-enable the gate. This avoids reconcile failures while making the fallback visible.
 
 ### How Scoring Works
 
@@ -125,7 +124,7 @@ score = savings_fraction / disruption_fraction
 
 `evicted_pods` is all pods on deleted source nodes. Every pod is evicted regardless of where it lands. The disruption cost counts every eviction.
 
-A move is approved when `score >= 1/k`, where k is `consolidationThreshold` (default 2). At k=2, `score >= 0.5`. Both sides are dimensionless fractions, so the score is scale-invariant (see [Scale Invariance](#scale-invariance)).
+A move is approved when `score >= 1/k`, where k comes from `consolidationPolicy` (`Balanced` = 2, or an integer value directly). At k=2, `score >= 0.5`. Both sides are dimensionless fractions, so the score is scale-invariant (see [Scale Invariance](#scale-invariance)).
 
 **Division-by-zero handling.** With the per-node disruption cost of 1.0, `disruption_cost` is always positive for any node, eliminating the zero-disruption special case. The remaining edge cases:
 
@@ -191,8 +190,8 @@ Existing feasibility checks (disruption budgets, PDBs, `consolidateAfter`, `do-n
 
 Approved and rejected moves are surfaced as events. Single-node moves emit on the NodeClaim. Multi-node moves emit on the NodePool (the score describes the move, not any single node).
 
-- `ConsolidationApproved`: `"score %.2f >= threshold %.2f (consolidationThreshold: %.1f, savings %.1f%%, disruption %.1f%%)"`
-- `ConsolidationRejected`: `"score %.2f < threshold %.2f (consolidationThreshold: %.1f, savings %.1f%%, disruption %.1f%%)"`
+- `ConsolidationApproved`: `"score %.2f >= threshold %.2f (k: %d, savings %.1f%%, disruption %.1f%%)"`
+- `ConsolidationRejected`: `"score %.2f < threshold %.2f (k: %d, savings %.1f%%, disruption %.1f%%)"`
 
 Scored moves are also logged at DEBUG level.
 
@@ -202,7 +201,7 @@ How to use these: if `moves_total{decision="rejected"}` is high and the histogra
 
 ## Examples
 
-All examples use the default `consolidationThreshold` of 2. The NodePool has 10 nodes: eight m7i.xlarge (4 vCPU, 16 GiB, $4.84/day) and two m7i.2xlarge (8 vCPU, 32 GiB, $9.68/day). Total NodePool cost is $58.08/day. The NodePool runs 80 pods with total disruption cost 80.
+All examples use `consolidationPolicy: Balanced` (k=2). The NodePool has 10 nodes: eight m7i.xlarge (4 vCPU, 16 GiB, $4.84/day) and two m7i.2xlarge (8 vCPU, 32 GiB, $9.68/day). Total NodePool cost is $58.08/day. The NodePool runs 80 pods with total disruption cost 80.
 
 ### Oversized Node (approved)
 
@@ -320,7 +319,7 @@ The move is approved. To reach the 0.5 boundary, each of the 8 pods would need d
 
 ## Why k=2
 
-The scoring formula has one free parameter: `consolidationThreshold` (k). We chose k=2 by exhaustive enumeration.
+The scoring formula has one free parameter: k (exposed via `consolidationPolicy`). We chose k=2 as the default by exhaustive enumeration.
 
 ### State Space
 
@@ -357,19 +356,21 @@ At k=1, no replace is ever approved in a uniform pool. The score for a uniform-p
 
 k=2 is the smallest integer where uniform-pool REPLACEs pass. Within a single family, prices follow power-of-2 scaling, so every replacement ratio is 0.5 or less and k>=3 adds nothing. Across families, k=3 opens 8 additional cross-family pairs (e.g., c7i.large → m7i.medium at 43% savings, score 0.43) without increasing the max churn chain. k=4 opens 9 more pairs but allows 9-step churn chains that zigzag through all three families. Max chain lengths are confirmed by exhaustive DFS over all approved replacement paths, not a greedy heuristic (see [`balanced-consolidation-properties.py`](scripts/balanced-consolidation-properties.py)).
 
-k=2 is the right default. It is the smallest value that makes within-family REPLACEs viable, and it captures all cross-family pairs where the replacement costs less than half the original. The 8 additional cross-family pairs at k=3 are available to operators who set `consolidationThreshold: 3` (see [`balanced-consolidation-properties.py`](scripts/balanced-consolidation-properties.py)).
+k=2 is the right default. It is the smallest value that makes within-family REPLACEs viable, and it captures all cross-family pairs where the replacement costs less than half the original. The 8 additional cross-family pairs at k=3 are available to operators who set `consolidationPolicy: 3` (see [`balanced-consolidation-properties.py`](scripts/balanced-consolidation-properties.py)).
 
 ## API Choices
 
-### Consolidation Aggressiveness Tuning [Recommended: consolidationThreshold]
+### Consolidation Aggressiveness Tuning [Recommended: IntOrString consolidationPolicy]
 
-`consolidationThreshold` exposes k directly. A move passes when its disruption fraction is at most k times its savings fraction. Higher k approves more moves. The formally motivated values are all integers: k=1 (break-even, deletes only), k=2 (within-family replaces viable, 4-step max churn), k=3 (adds cross-family pairs, same 4-step churn). At k=4, churn chains jump to 9 steps and the formal analysis argues against higher values. The field accepts integers 1, 2, or 3.
+`consolidationPolicy` is an `IntOrString` field. `Balanced` maps to k=2. Integer values (1-3) pass k directly. This gives most users a single named value while preserving an escape hatch for operators who need a different threshold.
+
+The formally motivated values are all integers: k=1 (break-even, deletes only), k=2 (within-family replaces viable, 4-step max churn), k=3 (adds cross-family pairs, same 4-step churn). At k=4, churn chains jump to 9 steps and the formal analysis argues against higher values.
 
 Two alternatives were considered:
 
-**Named presets (Low/Medium/High).** A `consolidationAggressiveness` enum mapping to k values (e.g., Low=1, Medium=2, High=3). Karpenter does not have an existing ordinal enum pattern, and picking names that age well is hard. "Conservative/Balanced/Aggressive" reuses "Balanced" which is already the policy name. Not preferred because the integer is simpler.
+**Separate `consolidationThreshold` field.** A dedicated integer field alongside `consolidationPolicy: Balanced`. This works but adds a field that only applies to one policy value. Folding k into `consolidationPolicy` keeps the API surface smaller.
 
-**Continuous slider (0-100).** A percentage-based field mapping to a log-scale threshold. This adds a nonlinear transformation that obscures the underlying math. Not preferred.
+**Named presets (Low/Medium/High).** A `consolidationAggressiveness` enum mapping to k values. Karpenter does not have an existing ordinal enum pattern, and picking names that age well is hard. "Conservative/Balanced/Aggressive" reuses "Balanced" which is already the policy name. IntOrString is simpler.
 
 ### Per-NodePool vs. Per-Cluster Normalization [Recommended: Per-NodePool]
 
@@ -379,7 +380,7 @@ Per-NodePool normalization matches Karpenter's existing architecture (policies, 
 
 Con: scores reflect relative efficiency within a pool, not absolute dollar impact. A score of 2.0 in a $50/hr pool and 2.0 in a $10,000/hr pool look identical. This does not affect behavior but limits cross-pool comparison.
 
-### New consolidationPolicy Value with consolidationThreshold
+### consolidationPolicy Naming
 
 No behavior change for existing users. Migration: change `WhenEmptyOrUnderutilized` to `Balanced`.
 
