@@ -120,7 +120,7 @@ var _ = Describe("Annotation", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						deletioncost.PodDeletionCostAnnotation:          "-5",
+						deletioncost.PodDeletionCostAnnotation:              "-5",
 						deletioncost.KarpenterManagedDeletionCostAnnotation: "true",
 					},
 				},
@@ -317,4 +317,3 @@ var _ = Describe("Annotation", func() {
 		})
 	})
 })
-
