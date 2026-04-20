@@ -65,6 +65,15 @@ func NewAnnotationManager(kubeClient client.Client, recorder events.Recorder) *A
 	}
 }
 
+// podResult tracks the outcome of processing a single pod
+type podResult int
+
+const (
+	podResultSuccess podResult = iota
+	podResultSkipped
+	podResultError
+)
+
 // UpdatePodDeletionCosts updates pod deletion cost annotations for all pods on the ranked nodes
 func (a *AnnotationManager) UpdatePodDeletionCosts(ctx context.Context, nodeRanks []NodeRank) error {
 	defer metrics.Measure(AnnotationDurationSeconds, map[string]string{})()
@@ -84,64 +93,36 @@ func (a *AnnotationManager) UpdatePodDeletionCosts(ctx context.Context, nodeRank
 
 		for _, pod := range pods {
 			activePods[pod.UID] = true
-
-			if a.isExternallyModified(pod) {
-				// Third-party conflict: remove sentinel, skip pod, emit warning
-				if err := a.removeSentinelAnnotation(ctx, pod); err != nil {
-					log.FromContext(ctx).WithValues("pod", klog.KObj(pod)).Error(err, "failed to remove sentinel annotation from externally modified pod")
-					errorCount++
-				} else {
-					a.recorder.Publish(ThirdPartyConflictEvent(pod))
-					skippedCount++
-				}
-				a.mu.Lock()
-				delete(a.lastAssignedValues, pod.UID)
-				a.mu.Unlock()
-				continue
-			}
-
-			if shouldUpdatePod(pod) {
-				podUpdate := PodUpdate{
-					Pod:       pod,
-					NewRank:   nodeRank.Rank,
-					ShouldAdd: !hasDeletionCostAnnotation(pod),
-				}
-				if err := a.updatePodAnnotation(ctx, podUpdate); err != nil {
-					if apierrors.IsNotFound(err) {
-						log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("pod not found, skipping annotation update")
-						continue
-					}
-					if apierrors.IsConflict(err) {
-						log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("conflict updating pod annotation, will retry on next reconcile")
-						errorCount++
-						continue
-					}
-					log.FromContext(ctx).WithValues("pod", klog.KObj(pod)).Error(err, "failed to update pod deletion cost annotation")
-					a.recorder.Publish(UpdateFailedEvent(pod, err))
-					errorCount++
-					continue
-				}
-				// Record what we set
-				newVal := fmt.Sprintf("%d", nodeRank.Rank)
-				a.mu.Lock()
-				a.lastAssignedValues[pod.UID] = newVal
-				a.mu.Unlock()
+			switch a.processSinglePod(ctx, pod, nodeRank.Rank) {
+			case podResultSuccess:
 				successCount++
-			} else {
+			case podResultSkipped:
 				skippedCount++
+			case podResultError:
+				errorCount++
 			}
 		}
 	}
 
-	// Clean up map entries for pods no longer on any ranked node
+	a.cleanupStalePods(activePods)
+	a.recordMetrics(ctx, successCount, skippedCount, errorCount)
+
+	return nil
+}
+
+// cleanupStalePods removes tracking entries for pods no longer on any ranked node.
+func (a *AnnotationManager) cleanupStalePods(activePods map[types.UID]bool) {
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	for uid := range a.lastAssignedValues {
 		if !activePods[uid] {
 			delete(a.lastAssignedValues, uid)
 		}
 	}
-	a.mu.Unlock()
+}
 
+// recordMetrics emits pod update metrics and logs the summary.
+func (a *AnnotationManager) recordMetrics(ctx context.Context, successCount, skippedCount, errorCount int) {
 	PodsUpdatedTotal.Add(float64(successCount), map[string]string{resultLabel: "success"})
 	PodsUpdatedTotal.Add(float64(skippedCount), map[string]string{resultLabel: "skipped_customer_managed"})
 	PodsUpdatedTotal.Add(float64(errorCount), map[string]string{resultLabel: "error"})
@@ -153,8 +134,49 @@ func (a *AnnotationManager) UpdatePodDeletionCosts(ctx context.Context, nodeRank
 			"errors", errorCount,
 		).V(1).Info("pod deletion cost annotation update completed")
 	}
+}
 
-	return nil
+// processSinglePod handles the annotation update logic for a single pod, returning the outcome.
+func (a *AnnotationManager) processSinglePod(ctx context.Context, pod *corev1.Pod, rank int) podResult {
+	if a.isExternallyModified(pod) {
+		if err := a.removeSentinelAnnotation(ctx, pod); err != nil {
+			log.FromContext(ctx).WithValues("pod", klog.KObj(pod)).Error(err, "failed to remove sentinel annotation from externally modified pod")
+			return podResultError
+		}
+		a.recorder.Publish(ThirdPartyConflictEvent(pod))
+		a.mu.Lock()
+		delete(a.lastAssignedValues, pod.UID)
+		a.mu.Unlock()
+		return podResultSkipped
+	}
+
+	if !shouldUpdatePod(pod) {
+		return podResultSkipped
+	}
+
+	podUpdate := PodUpdate{
+		Pod:       pod,
+		NewRank:   rank,
+		ShouldAdd: !hasDeletionCostAnnotation(pod),
+	}
+	if err := a.updatePodAnnotation(ctx, podUpdate); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("pod not found, skipping annotation update")
+			return podResultSkipped
+		}
+		if apierrors.IsConflict(err) {
+			log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("conflict updating pod annotation, will retry on next reconcile")
+			return podResultError
+		}
+		log.FromContext(ctx).WithValues("pod", klog.KObj(pod)).Error(err, "failed to update pod deletion cost annotation")
+		a.recorder.Publish(UpdateFailedEvent(pod, err))
+		return podResultError
+	}
+
+	a.mu.Lock()
+	a.lastAssignedValues[pod.UID] = fmt.Sprintf("%d", rank)
+	a.mu.Unlock()
+	return podResultSuccess
 }
 
 // isExternallyModified checks if the pod's deletion cost annotation was changed
