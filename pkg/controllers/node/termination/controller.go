@@ -200,8 +200,8 @@ func (c *Controller) awaitDrain(
 	node *corev1.Node,
 	nodeTerminationTime *time.Time,
 ) (reconcile.Result, error) {
-	if nodeClaim != nil && nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained) == nil {
-		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
+	if nodeClaim != nil && nodeClaim.StatusConditionsWithClock(c.clock).Get(v1.ConditionTypeDrained) == nil {
+		nodeClaim.StatusConditionsWithClock(c.clock).SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
 	}
 	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
@@ -211,12 +211,12 @@ func (c *Controller) awaitDrain(
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
-	// If the nodeclaim exists, check if minDrainTime has elapsed. If it hasn't we should requeue.
-	// This check helps to ensure that we drain pods scheduled to the Node immediately after we taint it, which
-	// can occur when the scheduler has not seen the taint yet.
+	// Check if minDrainTime has elapsed. This ensures we drain pods scheduled to the
+	// Node immediately after we taint it, which can occur when the scheduler has not
+	// seen the taint yet. We read LastTransitionTime from the Drained condition, which
+	// honors the injected clock (via status.WithClock above).
 	if nodeClaim != nil {
-		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained)
-		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < MinDrainTime) {
+		if drained := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained); drained != nil && c.clock.Since(drained.LastTransitionTime.Time) < MinDrainTime {
 			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
 	}
