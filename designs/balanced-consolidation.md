@@ -62,17 +62,19 @@ spec:
     - nodes: 10%
 ```
 
-`consolidationPolicy` is an `IntOrString` field. Named string values and integer values sit on a spectrum from conservative to aggressive:
+`consolidationPolicy` is an `IntOrString` field. All values are expressed through the disruption cost model:
 
-| Value | k | Behavior |
-|---|---|---|
-| `WhenEmpty` | — | Only empty nodes (emptiness controller, no scoring) |
-| `1` | 1 | Scoring with break-even threshold (deletes only, no replaces in uniform pools) |
-| `Balanced` | 2 | Scoring with default threshold (within-family replaces viable) |
-| `3` | 3 | Scoring with aggressive threshold (adds cross-family replace pairs) |
-| `WhenEmptyOrUnderutilized` | — | Any positive savings (existing behavior, no scoring) |
+| Value | Behavior |
+|---|---|
+| `WhenEmpty` | Approve only when move disruption cost equals the per-node disruption cost (no pod contributes positive disruption cost) |
+| `1` | Scoring with break-even threshold (deletes only, no replaces in uniform pools) |
+| `Balanced` | Scoring with k=2 (within-family replaces viable) |
+| `3` | Scoring with k=3 (adds cross-family replace pairs) |
+| `WhenEmptyOrUnderutilized` | Any positive savings (k=+inf) |
 
-`Balanced` is shorthand for k=2. An integer value uses the scoring formula directly with that k. `WhenEmpty` and `WhenEmptyOrUnderutilized` are implemented by their existing controllers and do not use the scoring formula. Validation rejects integers outside 1-3.
+`Balanced` is shorthand for k=2. An integer value uses the scoring formula directly with that k. `WhenEmptyOrUnderutilized` is equivalent to k=+inf (any move with positive savings passes). Validation rejects integers outside 1-3.
+
+`WhenEmpty` approves a move when its disruption cost equals the per-node disruption cost, meaning no pod on the candidate node has positive disruption cost. This is a behavioral change from today's `WhenEmpty`, which checks for literally zero pods. Under the new definition, a node whose pods all have large negative `pod-deletion-cost` (driving their disruption cost to 0 after clamping) qualifies as "empty" for consolidation purposes. This is an improvement: pods that declared themselves free to disrupt should not block consolidation.
 
 A move is approved when `score >= 1/k`. At the default `Balanced` (k=2), `score >= 0.5`.
 
