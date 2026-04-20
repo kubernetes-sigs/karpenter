@@ -64,25 +64,23 @@ func (kp *KarpenterProfiler) Stop() (float64, []byte, int64, []byte) {
 
 func (kp *KarpenterProfiler) run(ctx context.Context) {
 	defer close(kp.done)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
 	for {
+		kp.pollCount++
+		kp.captureProfiles(ctx)
+
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-ticker.C:
 		}
-
-		kp.pollCount++
-		kp.captureProfiles(ctx)
 	}
 }
 
 func (kp *KarpenterProfiler) captureProfiles(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			kp.lastError = fmt.Sprintf("captureProfiles panic: %v", r)
-		}
-	}()
+	defer GinkgoRecover()
 
 	pod := kp.env.ExpectActiveKarpenterPod()
 	if pod == nil {
