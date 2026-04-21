@@ -8,7 +8,7 @@ This RFC proposes a new feature-gated controller for Karpenter that ranks nodes 
 
 ### Disruption from consolidation
 
-When Karpenter consolidates underutilized nodes, it disrupts running pods. For customer workloads, that disruption has a real cost: in-flight requests may fail, warm caches are lost, and replacement pods must re-establish connections and reload state. Depending on the workload, this recovery process can take seconds to minutes (or even hours in some cases). Teams pay for this in terms of latency, availability, and engineering complexity to handle it gracefully.
+When Karpenter consolidates underutilized nodes, it disrupts running pods. For customer workloads, that disruption has a real cost: warm caches are lost, replacement pods must re-establish connections and reload state, and workloads that are slow to start (ML model loading, JVM warmup, large dataset hydration) can take minutes or longer to return to full capacity. Teams pay for this in reduced throughput during recovery and engineering complexity to handle graceful shutdown.
 
 Karpenter already manages clusters toward lower compute cost, but it has limited ability to control how much disruption that right-sizing produces. Current disruption controls focus on preventing disruptions that exceed a given rate for a given nodepool or deployment regardless of the cost-savings merits of that action.
 
@@ -46,7 +46,7 @@ Community issues and production reports consistently point to excessive disrupti
 - [aws/karpenter#3927](https://github.com/aws/karpenter/issues/3927) -- Production clusters with 100+ pods per node couldn't consolidate without disrupting running workloads
 - BMW's Karpenter migration across 375+ EKS clusters explicitly called out "excessive pod disruption" as a challenge
 
-Benchmark experiments and simulations show meaningful decreases in disruption rate when using pod deletion cost annotations. The pod disruption tracking being added in [kubernetes-sigs/karpenter#2892](https://github.com/kubernetes-sigs/karpenter/pull/2892) will provide the metrics infrastructure to measure and validate these improvements in production. These gains compound when combined with other proposed features such as consolidation disruption cost thresholds. This feature also pairs with the "MostAllocated" scoring strategy for kube-scheduler.
+Benchmark experiments and simulations show meaningful decreases in disruption rate when using pod deletion cost annotations. The pod disruption tracking being added in [kubernetes-sigs/karpenter#2892](https://github.com/kubernetes-sigs/karpenter/pull/2892) will provide the metrics infrastructure to measure and validate these improvements in production. The effectiveness varies by deployment pattern: clusters with a few large deployments see the strongest benefit, while clusters with many small deployments (where each scale-down removes only 1-2 pods) see less improvement. These gains compound when combined with other proposed features such as consolidation disruption cost thresholds. This feature also pairs well with the "MostAllocated" scoring strategy for kube-scheduler, which concentrates pods onto fewer nodes and amplifies the consolidation benefit.
 
 ## Goals
 
@@ -242,7 +242,7 @@ The ReplicaSet controller's scale-down decisions and Karpenter's consolidation d
 
 ## Risks and Mitigations
 
-- **Annotation conflicts with customer-set pod deletion costs (Medium):** An operator or another controller may have already set `controller.kubernetes.io/pod-deletion-cost` on pods. If Karpenter overwrites those values, it silently breaks the operator's intended behavior. *Mitigation:* Two-annotation protocol. Karpenter also sets `karpenter.sh/managed-deletion-cost: "true"` when it manages a pod. If a pod has a deletion cost but lacks the management annotation, it's treated as customer-managed and skipped entirely. Existing customer annotations are never overwritten.
+- **Annotation conflicts with customer-set pod deletion costs (Medium):** An operator or another controller may have already set `controller.kubernetes.io/pod-deletion-cost` on pods. If Karpenter overwrites those values, it silently breaks the operator's intended behavior. *Mitigation:* Two-annotation protocol. Karpenter also sets `karpenter.sh/managed-deletion-cost: "true"` when it manages a pod. If a pod has a deletion cost but lacks the management annotation, it's treated as customer-managed and skipped entirely. Existing customer annotations are never overwritten. Additionally, Karpenter-managed ranks are always negative (starting at -n), so customer-set positive values naturally take precedence in the RS controller's sort order without any special handling.
 
 - **Ranking oscillation causing excessive API server writes (Medium):** Unstable rankings could update annotations on many pods every 60-second cycle, creating sustained write load and watch event amplification. *Mitigation:* Three layers: (1) change detector skips ranking when cluster state is unchanged (zero API writes in steady state), (2) `sort.SliceStable` with deterministic tie-breaking by node name prevents rank flipping, (3) 60-second reconcile interval bounds write frequency.
 
