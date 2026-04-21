@@ -313,6 +313,26 @@ The feature gate defaults to `false`. When disabled, the controller is not regis
 
 3. **How can we further minimize API server load from annotation updates?** [For Karpenter maintainers / SIG-Scalability] The current design relies on change detection and a 60-second reconcile interval. Additional ideas: diffing current vs. desired annotation values before writing, batching updates, or using server-side apply to reduce conflict retries.
 
+## Future Work
+
+This RFC uses `pod-deletion-cost` annotations as the communication channel between Karpenter and the ReplicaSet controller. Annotations work today with every Kubernetes version and require no upstream changes, but they have known limitations: last-writer-wins semantics, no built-in support for multiple contributors, and the timing constraint that annotations must be set before scale-down starts.
+
+We see annotations as the v1 mechanism, not the end state. Several directions could improve on this foundation:
+
+### Dedicated API for disruption preferences
+
+Multiple systems may want to influence pod deletion priority: the node autoscaler (consolidation targets), a drift controller (nodes needing replacement), a traffic shaper (replicas already being drained), or the scheduler (topology-aware candidates). Today these would all fight over a single annotation.
+
+A dedicated API object (for example, a `PodDisruptionPreference` resource or a new field on NodeClaim) would let each system express its input independently using server-side apply with distinct field managers. A reconciler would merge these inputs into the final `pod-deletion-cost` annotation that the RS controller consumes. This cleanly separates "who has an opinion" from "what the RS controller sees."
+
+### Scheduler library integration
+
+As Karpenter upstreams into the kube-scheduler via the scheduler library, the merging of scale-in signals could happen inside the scheduler itself. The scheduler already has scheduling context (topology spread, affinity, zone distribution). Adding scale-in awareness would let it produce deletion priorities that account for both scheduling constraints and consolidation goals, without requiring an external annotation-management loop.
+
+### Deprecation path
+
+Once a proper API or scheduler integration exists, the annotation-management controller described in this RFC can be deprecated. The controller is designed to be replaceable: it writes standard `pod-deletion-cost` annotations that any future mechanism would also produce. No workload changes would be needed when migrating to a better signal delivery mechanism.
+
 ## Appendix A: Detailed Component Descriptions
 
 **Controller (controller.go):** A singleton reconciler that runs every 60 seconds. On each tick it checks the `PodDeletionCostManagement` feature gate, gathers all Karpenter-managed nodes from the cluster state, optionally runs change detection, ranks nodes, and updates pod annotations.
