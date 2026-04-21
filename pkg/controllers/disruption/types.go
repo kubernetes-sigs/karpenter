@@ -276,7 +276,7 @@ func (c Command) EmitRejectedEvents(recorder events.Recorder, reason string) {
 }
 
 func (c Command) LogValues() []any {
-	podCount := lo.Reduce(c.Candidates, func(_ int, cd *Candidate, _ int) int { return len(cd.reschedulablePods) }, 0)
+	podCount := lo.Reduce(c.Candidates, func(acc int, cd *Candidate, _ int) int { return acc + len(cd.reschedulablePods) }, 0)
 
 	candidateNodes := lo.Map(c.Candidates, func(candidate *Candidate, _ int) interface{} {
 		return map[string]interface{}{

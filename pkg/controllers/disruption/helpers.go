@@ -204,7 +204,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
 			if cloudprovider.IsUnevaluatedNodePoolError(err) {
-				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, node overlies are not applied")
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, node overlays are not applied")
 				continue
 			}
 			// don't error out on building the node pool, we just won't be able to handle any nodes that

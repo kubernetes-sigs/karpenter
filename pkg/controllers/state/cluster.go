@@ -132,7 +132,10 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 			// We want to log every 10s when the cluster hasn't synced for 30s which is long enough for us to think there is an issue
 			if c.clock.Since(c.unsyncedStartTime) > time.Second*30 && c.clock.Since(c.lastUnsyncedLogTime) > time.Second*10 {
 				c.lastUnsyncedLogTime = c.clock.Now()
-				log.FromContext(ctx).WithValues("duration", c.clock.Since(c.unsyncedStartTime).Truncate(time.Second)).Error(fmt.Errorf("waiting on cluster sync"), "cluster is waiting on sync for extended duration")
+				log.FromContext(ctx).Error(
+					fmt.Errorf("waiting on cluster sync"),
+					"cluster is waiting on sync for extended duration",
+					"duration", c.clock.Since(c.unsyncedStartTime).Truncate(time.Second))
 			}
 			ClusterStateUnsyncedTimeSeconds.Set(c.clock.Since(c.unsyncedStartTime).Seconds(), nil)
 		}
