@@ -91,6 +91,9 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	// If any hook is not ready, registration is deferred and the unregistered taint remains.
 	hooksResult, hookErrors := r.checkRegistrationHooks(ctx, nodeClaim)
 	if lo.IsEmpty(hooksResult) && hookErrors == nil {
+		// Re-sync labels after hooks complete since hooks may have mutated nodeClaim labels
+		// (e.g. resolving the placement group partition number from the empty sentinel value).
+		node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)
 		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 			return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
 		})
