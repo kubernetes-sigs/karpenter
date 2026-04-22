@@ -19,14 +19,17 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -34,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -42,11 +46,13 @@ import (
 )
 
 type Registration struct {
-	kubeClient client.Client
-	recorder   events.Recorder
-	npState    *nodepoolhealth.State
+	kubeClient        client.Client
+	recorder          events.Recorder
+	npState           *nodepoolhealth.State
+	registrationHooks []cloudprovider.NodeLifecycleHook
 }
 
+//nolint:gocyclo
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered); !cond.IsUnknown() {
 		// Ensure that we always set the status condition to the latest generation
@@ -71,15 +77,40 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	// if the sync hasn't happened yet and the race protecting startup taint isn't present then log it as missing and proceed
 	// if the sync has happened then the startup taint has been removed if it was present
 	if _, ok := node.Labels[v1.NodeRegisteredLabelKey]; !ok && !hasStartupTaint {
-		log.FromContext(ctx).WithValues("taint", v1.UnregisteredTaintKey).Error(fmt.Errorf("missing taint prevents registration-related race conditions on Karpenter-managed nodes"), "node claim registration error")
+		log.FromContext(ctx).Error(
+			fmt.Errorf("missing taint prevents registration-related race conditions on Karpenter-managed nodes"),
+			"node claim registration error",
+			"taint", v1.UnregisteredTaintKey)
 		r.recorder.Publish(UnregisteredTaintMissingEvent(nodeClaim))
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KObj(node)))
-	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
-		if errors.IsConflict(err) {
-			return reconcile.Result{Requeue: true}, nil
+	stored := node.DeepCopy()
+	// Sync labels, annotations, taints, finalizer, and owner references onto the node.
+	r.syncNode(nodeClaim, node)
+	// Check all registration hooks before completing registration.
+	// If any hook is not ready, registration is deferred and the unregistered taint remains.
+	hooksResult, hookErrors := r.checkRegistrationHooks(ctx, nodeClaim)
+	if lo.IsEmpty(hooksResult) && hookErrors == nil {
+		// Re-sync the node after hooks complete since hooks may have mutated the nodeClaim.
+		r.syncNode(nodeClaim, node)
+		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
+			return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
+		})
+		node.Labels[v1.NodeRegisteredLabelKey] = "true"
+	}
+	if !equality.Semantic.DeepEqual(stored, node) {
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		if err := r.kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("patching node, %w", err)
 		}
-		return reconcile.Result{}, err
+	}
+	// If hooks were not ready, return.
+	if !lo.IsEmpty(hooksResult) || hookErrors != nil {
+		return hooksResult, hookErrors
 	}
 	log.FromContext(ctx).Info("registered nodeclaim")
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
@@ -93,6 +124,48 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, err
+	}
+	return reconcile.Result{}, nil
+}
+
+// checkRegistrationHooks evaluates all registration hooks in parallel. If any hook returns an error,
+// it is returned. If any hook signals it is not ready (non-empty result), the status condition is
+// updated to list all pending hooks and the shortest requeue interval is returned.
+//
+//nolint:gocyclo
+func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+	if len(r.registrationHooks) == 0 {
+		return reconcile.Result{}, nil
+	}
+	results := make([]cloudprovider.NodeLifecycleHookResult, len(r.registrationHooks))
+	errs := make([]error, len(r.registrationHooks))
+
+	workqueue.ParallelizeUntil(ctx, len(r.registrationHooks), len(r.registrationHooks), func(i int) {
+		results[i], errs[i] = r.registrationHooks[i].Registered(ctx, nodeClaim)
+		if errs[i] != nil {
+			errs[i] = fmt.Errorf("registration hook %q failed, %w", r.registrationHooks[i].Name(), errs[i])
+		}
+	})
+
+	// Collect pending and errored hook names and compute the shortest requeue interval
+	var pendingHooks []string
+	mergedResult := reconcile.Result{}
+	for i, result := range results {
+		if errs[i] != nil || !lo.IsEmpty(result) {
+			pendingHooks = append(pendingHooks, r.registrationHooks[i].Name())
+			if errs[i] == nil {
+				if mergedResult.RequeueAfter == 0 || (result.RequeueAfter > 0 && result.RequeueAfter < mergedResult.RequeueAfter) {
+					mergedResult.RequeueAfter = result.RequeueAfter
+				}
+				mergedResult.Requeue = mergedResult.Requeue || result.Requeue //nolint:staticcheck
+			}
+		}
+	}
+
+	if len(pendingHooks) > 0 {
+		log.FromContext(ctx).V(1).Info("awaiting registration hooks", "hooks", pendingHooks)
+		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "RegistrationHookPending", strings.Join(pendingHooks, ", "))
+		return mergedResult, multierr.Combine(errs...)
 	}
 	return reconcile.Result{}, nil
 }
@@ -125,11 +198,11 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 	return nil
 }
 
-func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node) error {
-	stored := node.DeepCopy()
+// syncNode mutates the node in memory to sync labels, annotations, taints, finalizer, and owner references
+// from the NodeClaim.
+func (r *Registration) syncNode(nodeClaim *v1.NodeClaim, node *corev1.Node) {
 	controllerutil.AddFinalizer(node, v1.TerminationFinalizer)
-
-	node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
+	nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
 
 	// We do not sync the taints if this label is present. We instead assume that the karpenter provider
 	// is managing taints. We still manage/remove the unregistered taint to signal the end of syncing.
@@ -140,19 +213,5 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 	}
 
 	node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
-	// Remove karpenter.sh/unregistered taint
-	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
-		return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
-	})
-	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels, map[string]string{
-		v1.NodeRegisteredLabelKey: "true",
-	})
-	if !equality.Semantic.DeepEqual(stored, node) {
-		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
-		// can cause races due to the fact that it fully replaces the list on a change
-		if err := r.kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-			return fmt.Errorf("syncing node, %w", err)
-		}
-	}
-	return nil
+	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)
 }
