@@ -115,3 +115,8 @@ func (d *StaticDrift) Class() string {
 func (d *StaticDrift) ConsolidationType() string {
 	return ""
 }
+
+// Weight returns 0 because StaticDrift is a Phase 1 method that always runs unconditionally.
+func (d *StaticDrift) Weight() float64 {
+	return 0
+}
