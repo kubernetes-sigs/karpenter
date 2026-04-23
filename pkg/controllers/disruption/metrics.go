@@ -128,14 +128,4 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
-	PodsDisruptedTotal = opmetrics.NewPrometheusCounter(
-		crmetrics.Registry,
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: voluntaryDisruptionSubsystem,
-			Name:      "pods_disrupted_total",
-			Help:      "Number of pods disrupted in total by Karpenter disruption actions. Labeled by disruption reason and nodepool.",
-		},
-		[]string{metrics.ReasonLabel, metrics.NodePoolLabel},
-	)
 )

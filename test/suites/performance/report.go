@@ -37,7 +37,7 @@ import (
 func getPodsDisruptedCount(env *common.Environment) int {
 	metrics := env.ExpectPodMetrics()
 	disruptionMetrics := lo.Filter(metrics, func(m common.PrometheusMetric, _ int) bool {
-		return m.Name == "karpenter_voluntary_disruption_pods_disrupted_total"
+		return m.Name == "karpenter_pods_drained_total"
 	})
 
 	totalDisrupted := 0
