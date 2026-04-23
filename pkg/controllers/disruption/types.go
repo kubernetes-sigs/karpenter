@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -131,8 +130,35 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		zone:              node.Labels()[corev1.LabelTopologyZone],
 		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
+		DisruptionCost: costOfWaste(node),
 	}, nil
+}
+
+func costOfWaste(node *state.StateNode) float64 {
+	// Calculate disruption cost based on how full the node is (% CPU used + % memory used)
+	// Lower cost = emptier node (preferred for consolidation)
+	allocatable := node.Allocatable()
+	available := node.Available()
+
+	cpuAllocatable := allocatable[corev1.ResourceCPU]
+	cpuAvailable := available[corev1.ResourceCPU]
+	memAllocatable := allocatable[corev1.ResourceMemory]
+	memAvailable := available[corev1.ResourceMemory]
+
+	var cpuPctUsed, memPctUsed float64
+
+	// Calculate % CPU used
+	if cpuAllocatable.MilliValue() > 0 {
+		cpuPctUsed = 1.0 - (float64(cpuAvailable.MilliValue()) / float64(cpuAllocatable.MilliValue()))
+	}
+
+	// Calculate % memory used
+	if memAllocatable.Value() > 0 {
+		memPctUsed = 1.0 - (float64(memAvailable.Value()) / float64(memAllocatable.Value()))
+	}
+
+	disruptionCost := (cpuPctUsed * 4) + memPctUsed // Range: 0.0 (empty) to 5.0 (full)
+	return disruptionCost
 }
 
 type Replacement struct {
