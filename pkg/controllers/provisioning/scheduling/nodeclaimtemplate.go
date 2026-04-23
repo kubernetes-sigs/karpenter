@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
@@ -35,6 +36,14 @@ import (
 // This would be a mechanism to allow cloud providers to enforce a TerminationGracePeriod on all node
 // provisioned by Karpenter
 var DefaultTerminationGracePeriod *metav1.Duration = nil
+
+// schedulingSimulationKeys are requirement keys added to NodeClaimTemplate solely for
+// DaemonSet scheduling simulation. They must be excluded from NodeClaim labels and
+// spec.requirements to avoid affecting node lifecycle state (e.g. Initialized/Registered).
+var schedulingSimulationKeys = sets.New(
+	v1.NodeRegisteredLabelKey,
+	v1.NodeInitializedLabelKey,
+)
 
 // MaxInstanceTypes is a constant that restricts the number of instance types to be sent for launch. Note that this
 // is intentionally changed to var just to help in testing the code.
@@ -87,7 +96,7 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 func (i *NodeClaimTemplate) resolveCustomLabelsFromRequirements() map[string]string {
 	labels := map[string]string{}
 	for key, requirement := range i.Requirements {
-		if v1.WellKnownLabels.Has(key) || v1.RestrictedLabels.Has(key) {
+		if v1.WellKnownLabels.Has(key) || v1.RestrictedLabels.Has(key) || schedulingSimulationKeys.Has(key) {
 			continue
 		}
 		if value := requirement.Any(); value != "" {
@@ -135,9 +144,9 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	// Karpenter can't reason about which label domains would belong to each instance type.
 	i.Labels = lo.Assign(i.Labels, i.resolveCustomLabelsFromRequirements())
 
-	// Exclude node lifecycle requirements used only for scheduling simulation.
+	// Exclude scheduling-simulation-only requirements from the actual NodeClaim.
 	requirements := scheduling.NewRequirements(lo.Filter(i.Requirements.Values(), func(req *scheduling.Requirement, _ int) bool {
-		return req.Key != v1.NodeRegisteredLabelKey && req.Key != v1.NodeInitializedLabelKey
+		return !schedulingSimulationKeys.Has(req.Key)
 	})...)
 
 	nc := &v1.NodeClaim{
