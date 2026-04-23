@@ -2,7 +2,7 @@
 
 ## Overview
 
-This design proposes an optional setting on NodePools that allows for applying disruption actions without needing to spin up a replacement Node. Currently, Karpenter's drift resolution workflow requires a replacement Node to be spun up and available before the drifted node is terminated, which is not viable in certain static capacity scenarios. 
+This design proposes an optional setting on NodePools that allows for applying drift resolutions without needing to spin up a replacement Node. Currently, Karpenter's drift resolution workflow requires a replacement Node to be spun up and available before the drifted node is terminated, which is not viable in certain static capacity scenarios. 
 
 Fixes https://github.com/kubernetes-sigs/karpenter/issues/2905
 
@@ -17,8 +17,6 @@ Fixes https://github.com/kubernetes-sigs/karpenter/issues/2905
 Karpenter is used to manage automated drift resolution  safely by cluster operators when rolling out new node software (ex. new OS upgrades, Kubernetes versions etc.). Karpenter provides multiple safety controls such as Node disruption budgets and do-not-disrupt annotations on Nodes and pods. In addition, Karpenter also spins up replacement nodes before starting eviction and termination of the drifted node. However, in some scenarios, users have very limited pools of capacity to choose from - two common cases are expensive instance types (ex. GPUs) and capacity reservations (ex. Amazon ODCRs) where it is not desirable to spin up additional high-cost / limited capacity before scaling down the drifted node. 
 
 ## Proposed design
-
-The proposed design is a fairly simple extension over the current NodePool API and disruption controller. 
 
 ### API changes 
 
@@ -58,4 +56,8 @@ With this change, even with strategies where a replacement node is not spun up, 
 
 ** Release recommendation **
 
-We recommend releasing the updates to the disruption calculations behind a feature flag along with the API updates to avoid unexpected regressions
+We recommend releasing the updates to the disruption calculations behind a feature flag (flag driftResolutionPolicy) along with the API updates to avoid unexpected regressions
+
+1. Alpha: Release driftResolutionPolicy API changes behind feature flag. Leverage new NDB calculation when flag is enabled (defaults to false and preserves old calculations).
+2. Beta: NDB Calculations become the new default as feature flag graduates to default true
+3. GA: Flag removed entirely. Old calculation algorithm is deleted.
