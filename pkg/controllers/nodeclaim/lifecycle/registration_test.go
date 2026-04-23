@@ -954,5 +954,41 @@ var _ = Describe("Registration", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 			Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
 		})
+		It("should propagate labels added by a registration hook to both the node and the nodeclaim", func() {
+			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				[]cloudprovider.NodeLifecycleHook{
+					testHook{
+						name: "label-mutating-hook",
+						fn: func(_ context.Context, nc *v1.NodeClaim) (cloudprovider.NodeLifecycleHookResult, error) {
+							nc.Labels["test.karpenter.sh/hook-label"] = "resolved-value"
+							return cloudprovider.NodeLifecycleHookResult{}, nil
+						},
+					},
+				},
+			)
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						"test.karpenter.sh/hook-label": "",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, hookController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.Labels).To(HaveKeyWithValue("test.karpenter.sh/hook-label", "resolved-value"))
+
+			node = ExpectExists(ctx, env.Client, node)
+			Expect(node.Labels).To(HaveKeyWithValue("test.karpenter.sh/hook-label", "resolved-value"))
+		})
 	})
 })
