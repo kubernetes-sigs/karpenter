@@ -425,6 +425,7 @@ func (c *Cluster) PodAckTime(podKey types.NamespacedName) time.Time {
 // It updates podHealthyNodePoolScheduledTime for pods scheduled against nodePool that have
 // NodeRegistrationHealthy=true. This also marks when the pod is first seen as schedulable for pod metrics.
 // We'll only emit a metric for a pod if we haven't done it before.
+// nolint:gocyclo
 func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[*corev1.Pod]error, npPods map[string][]*corev1.Pod, ncPods map[string][]*corev1.Pod) {
 	now := c.clock.Now()
 	for pod := range podErrors {
@@ -450,6 +451,13 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 		}
 		for _, p := range pods {
 			nn := client.ObjectKeyFromObject(p)
+			// Skip pods that are already bound to a node (e.g. pods from deleting nodes
+			// included in the scheduling simulation for capacity planning). Storing a new
+			// timestamp for already-bound pods would cause negative metric values since
+			// their PodScheduled LastTransitionTime is in the past.
+			if podutils.IsScheduled(p) {
+				continue
+			}
 			c.podsSchedulableTimes.LoadOrStore(nn, now)
 			_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, now)
 			// If we already attempted this, we don't need to emit another metric.
