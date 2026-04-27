@@ -426,6 +426,8 @@ var _ = Describe("Integration", func() {
 	Describe("DoNotDisrupt", func() {
 		Context("Grace Period", func() {
 			It("should drain pods according to their grace period durations and block indefinitely for 'true'", func() {
+				const shortGrace = time.Minute
+				const longGrace = 2 * time.Minute
 				// Pod with a 1-minute grace period
 				shortPod := test.Pod(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
@@ -481,18 +483,36 @@ var _ = Describe("Integration", func() {
 				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(longPod.Labels), 1)
 				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(indefinitePod.Labels), 1)
 
+				// Re-fetch pods to get their actual StartTime from the API server.
+				// The do-not-disrupt grace period is measured from pod start time, so we
+				// derive all consistency check windows from the real start times.
+				for _, p := range []*corev1.Pod{shortPod, longPod, indefinitePod} {
+					Expect(env.Client.Get(env, client.ObjectKeyFromObject(p), p)).To(Succeed())
+					Expect(p.Status.StartTime).ToNot(BeNil())
+				}
+				shortExpiry := shortPod.Status.StartTime.Add(shortGrace)
+				longExpiry := longPod.Status.StartTime.Add(longGrace)
+
 				// Delete the nodeclaim to trigger draining
 				env.ExpectDeleted(nodeClaim)
 
-				// During the first minute, all three pods should remain active
-				env.ConsistentlyExpectActivePods(45*time.Second, shortPod, longPod, indefinitePod)
+				// All three pods should remain active until the short grace period expires.
+				shortWindow := time.Until(shortExpiry) - 5*time.Second
+				Expect(shortWindow).To(BeNumerically(">", 0), "short grace period already expired before consistency check")
+				env.ConsistentlyExpectActivePods(shortWindow, shortPod, longPod, indefinitePod)
 
-				// After ~1m the short grace period pod should be drained, but the other two remain
+				// After the short grace period elapses, the short pod should be drained
 				env.EventuallyExpectNotFound(shortPod)
-				env.ConsistentlyExpectActivePods(30*time.Second, longPod, indefinitePod)
 
-				// After ~2m the long grace period pod should be drained, but the indefinite pod remains
+				// The long and indefinite pods should remain active until the long grace period expires.
+				longWindow := time.Until(longExpiry) - 5*time.Second
+				Expect(longWindow).To(BeNumerically(">", 0), "long grace period already expired before consistency check")
+				env.ConsistentlyExpectActivePods(longWindow, longPod, indefinitePod)
+
+				// After the long grace period elapses, the long pod should be drained
 				env.EventuallyExpectNotFound(longPod)
+
+				// The indefinite pod should still be alive indefinitely
 				env.ConsistentlyExpectActivePods(30*time.Second, indefinitePod)
 
 				// The indefinite pod should still be alive — remove the annotation to unblock draining
