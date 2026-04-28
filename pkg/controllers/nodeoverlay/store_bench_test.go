@@ -161,7 +161,7 @@ func BenchmarkStoreApplyCapacityOnly(b *testing.B) {
 
 	for _, it := range instanceTypes {
 		store.updates["default"][it.Name] = &instanceTypeUpdate{
-			Price: nil,
+			Price: map[string]*priceUpdate{},
 			Capacity: &capacityUpdate{
 				OverlayUpdate: corev1.ResourceList{
 					"hugepages-2Mi": resource.MustParse("100Mi"),
