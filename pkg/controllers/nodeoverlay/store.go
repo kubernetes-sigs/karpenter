@@ -146,7 +146,7 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 	}
 
 	// Handle offerings - copy-on-write only for offerings that need price overlay
-	if instanceTypeUpdate.Price != nil {
+	if len(instanceTypeUpdate.Price) != 0 {
 		overriddenInstanceType.Offerings = s.applyPriceOverlays(it.Offerings, instanceTypeUpdate.Price)
 	} else {
 		overriddenInstanceType.Offerings = it.Offerings // Shared - not modified
