@@ -51,7 +51,7 @@ type Controller struct {
 
 	rankingEngine          *RankingEngine
 	annotationMgr          *AnnotationManager
-	changeDetector         *ChangeDetector
+	lastConsolidationState time.Time
 	previouslyLabeledNodes map[string]bool
 }
 
@@ -71,7 +71,6 @@ func NewController(
 		recorder:               recorder,
 		rankingEngine:          NewRankingEngine(),
 		annotationMgr:          NewAnnotationManager(kubeClient, recorder),
-		changeDetector:         NewChangeDetector(),
 		previouslyLabeledNodes: make(map[string]bool),
 	}
 }
@@ -108,7 +107,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	if c.shouldSkipUnchanged(ctx, opts, nodes) {
+	if c.shouldSkipUnchanged(ctx) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
@@ -134,21 +133,17 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }
 
-// shouldSkipUnchanged returns true if change detection is enabled and no changes were detected.
-func (c *Controller) shouldSkipUnchanged(ctx context.Context, opts *options.Options, nodes []*state.StateNode) bool {
-	if !opts.PodDeletionCostChangeDetection {
-		return false
-	}
-	changed, err := c.changeDetector.HasChanged(ctx, c.kubeClient, nodes)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to check for changes")
-		return false
-	}
-	if !changed {
+// shouldSkipUnchanged returns true if cluster state has not changed since the last reconcile.
+// Uses the same ConsolidationState timestamp that gates the disruption controller's consolidation
+// methods, ensuring this controller reacts to the same state changes that trigger consolidation.
+func (c *Controller) shouldSkipUnchanged(ctx context.Context) bool {
+	currentState := c.cluster.ConsolidationState()
+	if currentState.Equal(c.lastConsolidationState) {
 		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
 		SkippedNoChangesTotal.Add(1, map[string]string{})
 		return true
 	}
+	c.lastConsolidationState = currentState
 	return false
 }
 

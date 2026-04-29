@@ -99,8 +99,6 @@ controller:
   # Example: Uncomment to enable Pod Deletion Cost Management
   # - name: POD_DELETION_COST_ENABLED
   #   value: "true"
-  # - name: POD_DELETION_COST_CHANGE_DETECTION
-  #   value: "true"
   envFrom: []
   # -- Resources for the controller pod.
   resources: {}

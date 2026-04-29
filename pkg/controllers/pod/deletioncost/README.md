@@ -29,7 +29,7 @@ Ranks start at `-len(nodes)` and increment sequentially across tiers.
 
 - **RankingEngine** (`ranking.go`) — PodCount-based ranking with three-tier partitioning
 - **AnnotationManager** (`annotation.go`) — Safe pod annotation updates with third-party conflict detection
-- **ChangeDetector** (`changedetector.go`) — Hash-based optimization to skip unchanged state
+- **ChangeDetector** — Uses `ConsolidationState` timestamp from `state.Cluster` to skip ranking when cluster state hasn't changed (O(1) comparison, zero API calls)
 - **Controller** (`controller.go`) — Orchestrates ranking, bounded labeling, and cleanup
 
 ## Configuration
@@ -37,11 +37,6 @@ Ranks start at `-len(nodes)` and increment sequentially across tiers.
 ### Feature Gate
 ```
 --feature-gates=PodDeletionCostManagement=true
-```
-
-### Environment Variables
-```bash
-POD_DELETION_COST_CHANGE_DETECTION=true  # Enable hash-based change detection (default: true)
 ```
 
 ## Annotations
