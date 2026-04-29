@@ -63,18 +63,23 @@ type Controller struct {
 	methods       []Method
 	mu            sync.Mutex
 	lastRun       map[string]time.Time
+	pollingPeriod time.Duration
 }
 
-// pollingPeriod that we inspect cluster to look for opportunities to disrupt
-const pollingPeriod = 10 * time.Second
-
 type ControllerOptions struct {
-	methods []Method
+	methods       []Method
+	pollingPeriod time.Duration
 }
 
 func WithMethods(methods ...Method) option.Function[ControllerOptions] {
 	return func(o *ControllerOptions) {
 		o.methods = methods
+	}
+}
+
+func WithPollingPeriod(period time.Duration) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.pollingPeriod = period
 	}
 }
 
@@ -92,6 +97,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		methods:       o.methods,
+		pollingPeriod: o.pollingPeriod,
 	}
 }
 
@@ -176,7 +182,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	}
 
 	// All methods did nothing, so return nothing to do
-	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
+	return reconciler.Result{RequeueAfter: c.pollingPeriod}, nil
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
