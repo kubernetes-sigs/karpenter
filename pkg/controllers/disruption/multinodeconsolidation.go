@@ -35,6 +35,16 @@ import (
 const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
 const MultiNodeConsolidationType = "multi"
 
+// MultiNodePairwiseSearchTimeoutDuration bounds the latency added by
+// the pairwise non-prefix fallback (see karpenter#1962). The fallback
+// only runs when the primary binary search returns no plan, so this
+// budget is consumed only on cases the existing search misses. With
+// computeConsolidation latency typically 10 to 30ms, 10s allows
+// roughly 300 to 1000 probes, enough for the largest practical batch
+// (max=100) on a healthy cluster. Regret on overloaded clusters where
+// each probe is slower stays bounded by this budget.
+const MultiNodePairwiseSearchTimeoutDuration = 10 * time.Second
+
 type MultiNodeConsolidation struct {
 	consolidation
 	validator Validator
@@ -112,14 +122,53 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	return []Command{cmd}, nil
 }
 
-// firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
-// NodeClaims are sorted by increasing disruption order which correlates to likelihood of being able to consolidate the node
-// nolint:gocyclo
+// firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.
+// It runs the binary search over sorted prefixes first (existing
+// behavior, fast log(N) probes) and falls back to the pairwise
+// non-prefix search only when the binary search returns no plan.
+// This preserves equivalence with prior versions on every input the
+// binary search already handled, and adds the pairwise recovery only
+// for inputs where binary search exits empty (the karpenter#1962
+// shape, where a candidate that blocks joint deletion sits early in
+// the sort order and poisons every prefix probe).
+//
+// Latency contract:
+//   - Binary search: bounded by MultiNodeConsolidationTimeoutDuration (1m).
+//   - Pairwise fallback: bounded by MultiNodePairwiseSearchTimeoutDuration (10s).
+//
+// On a successful binary search no extra latency is paid. On a
+// 1962-shaped failure the additional cost is at most the pairwise
+// timeout, regardless of N. Big-cluster regret is bounded by that
+// 10s budget.
 func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
 	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
 		return Command{}, nil
 	}
+
+	primary, err := m.binarySearchPrefix(ctx, candidates, max)
+	if err != nil {
+		return Command{}, err
+	}
+	if primary.Decision() != NoOpDecision {
+		// Existing behavior: binary search found a feasible prefix.
+		return primary, nil
+	}
+
+	// Binary search exhausted without finding a feasible prefix
+	// (the karpenter#1962 case). Fall back to the pairwise non-prefix
+	// walk, bounded by its own timeout so the latency added on big
+	// clusters stays capped.
+	return m.pairwiseSearchFallback(ctx, candidates, max)
+}
+
+// binarySearchPrefix is the prior firstNConsolidationOption logic:
+// binary search over sorted prefixes [0:mid+1], doubling on success
+// and halving on failure. Preserved verbatim so every input the
+// existing search handled keeps producing the same result.
+//
+// nolint:gocyclo
+func (m *MultiNodeConsolidation) binarySearchPrefix(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
 	min := 1
 	if len(candidates) <= max {
 		max = len(candidates) - 1
@@ -166,6 +215,86 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		} else {
 			max = mid - 1
 		}
+	}
+	return lastSavedCommand, nil
+}
+
+// pairwiseSearchFallback walks candidates in order, simulating the
+// joint deletion of (already accepted plus this candidate) at each
+// step. Accepts the candidate when the simulator returns feasible,
+// skips it otherwise and continues. Non-prefix subsets are reachable
+// because skipping does not narrow the search. This is the recovery
+// for karpenter#1962.
+//
+// Bounded by MultiNodePairwiseSearchTimeoutDuration so the latency
+// added when this fallback runs is capped independently of N. On
+// timeout, returns the last valid command (possibly empty).
+//
+// nolint:gocyclo
+func (m *MultiNodeConsolidation) pairwiseSearchFallback(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
+	if len(candidates) > max {
+		candidates = candidates[:max+1]
+	}
+
+	lastSavedCommand := Command{}
+	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodePairwiseSearchTimeoutDuration)
+	defer cancel()
+
+	accepted := make([]*Candidate, 0, len(candidates))
+
+	for _, c := range candidates {
+		// Bail out early if the pairwise timeout has fired before
+		// we evaluate the next candidate.
+		if err := timeoutCtx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
+				if lastSavedCommand.Candidates == nil {
+					log.FromContext(ctx).V(1).Info("pairwise fallback found no consolidation before timeout", "accepted_size", len(accepted))
+					return Command{}, nil
+				}
+				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("pairwise fallback stopping after timeout, returning last valid command")
+				return lastSavedCommand, nil
+			}
+			return Command{}, err
+		}
+
+		candidatesToConsolidate := append(accepted, c) //nolint:gocritic // intentional new slice per iteration
+
+		cmd, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
+				if lastSavedCommand.Candidates == nil {
+					log.FromContext(ctx).V(1).Info("pairwise fallback found no consolidation before timeout", "accepted_size", len(accepted))
+					return Command{}, nil
+				}
+				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("pairwise fallback stopping after timeout, returning last valid command")
+				return lastSavedCommand, nil
+			}
+			return Command{}, err
+		}
+
+		// ensure that the action is sensical for replacements, see explanation on filterOutSameInstanceType for why this is
+		// required
+		validDecision := cmd.Decision() == DeleteDecision
+		if cmd.Decision() == ReplaceDecision {
+			cmd.Replacements[0], err = filterOutSameInstanceType(cmd.Replacements[0], candidatesToConsolidate)
+			if err == nil && len(cmd.Replacements[0].InstanceTypeOptions) > 0 {
+				validDecision = true
+			}
+		}
+
+		if validDecision {
+			// Joint deletion of (accepted ∪ c) is feasible. Promote
+			// the candidate set and remember the command. Continue
+			// walking; later candidates may compose with this set.
+			accepted = candidatesToConsolidate
+			lastSavedCommand = cmd
+			continue
+		}
+		// Joint deletion failed with c included. Skip c and try the
+		// next candidate. Skipping (rather than narrowing) is what
+		// lets the search reach non-prefix subsets.
 	}
 	return lastSavedCommand, nil
 }
