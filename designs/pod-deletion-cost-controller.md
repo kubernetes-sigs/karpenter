@@ -76,7 +76,7 @@ All new code lives in `pkg/controllers/pod/deletioncost/`. A singleton reconcile
 
 1. Checks the `PodDeletionCostManagement` feature gate
 2. Collects all Karpenter-managed nodes from `state.Cluster`
-3. Runs change detection (SHA-256 hash of node/pod state). If nothing changed, skips with zero API writes
+3. Runs change detection (compares `ConsolidationState` timestamp from `state.Cluster`). If nothing changed, skips with zero API writes
 4. Partitions nodes into Group A (drifted, no do-not-disrupt pods), Group B (not drifted, no do-not-disrupt pods), and Group C (has do-not-disrupt pods)
 5. Ranks each group independently by pod count ascending
 6. Assigns sequential integer ranks starting at -n (where n is the total number of Karpenter-managed nodes) for Group A, continuing for Group B, then Group C
@@ -93,7 +93,7 @@ All new code lives in `pkg/controllers/pod/deletioncost/`. A singleton reconcile
 │                     │ Yes ↓                                     │
 │  State Cluster ──► Collect Nodes                                │
 │                     │                                           │
-│  Change Detector ─► Changed?                                    │
+│  Change Detector ─► Changed?  (ConsolidationState timestamp)    │
 │                     │ No → skip (emit metric) → return          │
 │                     │ Yes ↓                                     │
 │  ┌──────────────────────────────────────┐                       │
@@ -131,7 +131,6 @@ No CRD changes. The feature is purely controller-side, gated behind `PodDeletion
 | Option | CLI Flag | Env Var | Default | Description |
 |--------|----------|---------|---------|-------------|
 | Feature gate | `--feature-gates=PodDeletionCostManagement=true` | `FEATURE_GATES` | `false` | Enables the controller |
-| Change detection | `--pod-deletion-cost-change-detection` | `POD_DELETION_COST_CHANGE_DETECTION` | `true` | Skip ranking when cluster state hasn't changed |
 
 ### Example: Scale-down concentrates deletions on the consolidation target
 
@@ -244,7 +243,7 @@ The ReplicaSet controller's scale-down decisions and Karpenter's consolidation d
 
 - **Annotation conflicts with customer-set pod deletion costs (Medium):** An operator or another controller may have already set `controller.kubernetes.io/pod-deletion-cost` on pods. If Karpenter overwrites those values, it silently breaks the operator's intended behavior. *Mitigation:* Two-annotation protocol. Karpenter also sets `karpenter.sh/managed-deletion-cost: "true"` when it manages a pod. If a pod has a deletion cost but lacks the management annotation, it's treated as customer-managed and skipped entirely. Existing customer annotations are never overwritten. Additionally, Karpenter-managed ranks are always negative (starting at -n), so customer-set positive values naturally take precedence in the RS controller's sort order without any special handling.
 
-- **Ranking oscillation causing excessive API server writes (Medium):** Unstable rankings could update annotations on many pods every 60-second cycle, creating sustained write load and watch event amplification. *Mitigation:* Three layers: (1) change detector skips ranking when cluster state is unchanged (zero API writes in steady state), (2) `sort.SliceStable` with deterministic tie-breaking by node name prevents rank flipping, (3) 60-second reconcile interval bounds write frequency.
+- **Ranking oscillation causing excessive API server writes (Medium):** Unstable rankings could update annotations on many pods every 60-second cycle, creating sustained write load and watch event amplification. *Mitigation:* Three layers: (1) `ConsolidationState` timestamp comparison skips ranking when cluster state is unchanged (zero API writes and zero data collection cost in steady state), (2) `sort.SliceStable` with deterministic tie-breaking by node name prevents rank flipping, (3) 60-second reconcile interval bounds write frequency.
 
 - **Stale annotations after controller is disabled (Low):** Pods retain annotations indefinitely when the feature gate is turned off. *Mitigation:* Annotations live on pods, which are ephemeral. New pods start clean. Staleness is bounded by pod lifetime. Cleanup on disable is a known gap deferred to beta.
 
@@ -252,7 +251,7 @@ The ReplicaSet controller's scale-down decisions and Karpenter's consolidation d
 
 - **Consolidation-optimized deletions may conflict with topology spread constraints (Low):** When the controller concentrates deletions on specific nodes, the resulting pod distribution may temporarily violate `topologySpreadConstraints` until the scheduler places replacement pods. *Mitigation:* This is the same behavior as the current spreading heuristic — neither approach guarantees constraint satisfaction during scale-down. The Kubernetes scheduler enforces topology spread when placing new pods, so any temporary imbalance is corrected on the next scheduling cycle. Operators with strict spreading requirements can leave the feature disabled.
 
-- **Active-scaling fan-out (Medium):** During active scaling events (e.g., HPA-driven burst), many nodes may change pod count simultaneously, causing the controller to re-rank and update annotations on a large fraction of pods in a single reconcile cycle. For a 500-node cluster averaging 30 pods/node, a full re-rank writes ~15,000 pod annotations in one 60-second window (~250 writes/sec). *Mitigation:* Change detection prevents re-ranking when state is stable. During active scaling, the writes are bounded by the reconcile interval (at most once per 60s). The API server write load is comparable to a large Deployment rollout. Clusters with >1,000 nodes should monitor `karpenter_pod_deletion_cost_annotation_duration_seconds` and consider disabling the feature if annotation latency exceeds acceptable thresholds.
+- **Active-scaling fan-out (Medium):** During active scaling events (e.g., HPA-driven burst), many nodes may change pod count simultaneously, causing the controller to re-rank and update annotations on a large fraction of pods in a single reconcile cycle. For a 500-node cluster averaging 30 pods/node, a full re-rank writes ~15,000 pod annotations in one 60-second window (~250 writes/sec). *Mitigation:* ConsolidationState-based change detection prevents re-ranking when state is stable. During active scaling, the writes are bounded by the reconcile interval (at most once per 60s). The API server write load is comparable to a large Deployment rollout. Clusters with >1,000 nodes should monitor `karpenter_pod_deletion_cost_annotation_duration_seconds` and consider disabling the feature if annotation latency exceeds acceptable thresholds.
 
 ### Placement and Spreading Constraints
 
@@ -311,7 +310,7 @@ The feature gate defaults to `false`. When disabled, the controller is not regis
 
 2. **What do we think about the expanded RBAC permissions?** [For Karpenter maintainers / security reviewers] The PR adds `update` and `patch` on pods to Karpenter's ClusterRole. This is a meaningful privilege escalation. Should we explore server-side apply with a dedicated field manager to narrow the effective scope?
 
-3. **How can we further minimize API server load from annotation updates?** [For Karpenter maintainers / SIG-Scalability] The current design relies on change detection and a 60-second reconcile interval. Additional ideas: diffing current vs. desired annotation values before writing, batching updates, or using server-side apply to reduce conflict retries.
+3. **How can we further minimize API server load from annotation updates?** [For Karpenter maintainers / SIG-Scalability] The current design relies on `ConsolidationState` timestamp comparison (O(1), zero API calls) and a 60-second reconcile interval. Additional ideas: diffing current vs. desired annotation values before writing, batching updates, or using server-side apply to reduce conflict retries.
 
 ## Future Work
 
@@ -335,13 +334,13 @@ Once a proper API or scheduler integration exists, the annotation-management con
 
 ## Appendix A: Detailed Component Descriptions
 
-**Controller (controller.go):** A singleton reconciler that runs every 60 seconds. On each tick it checks the `PodDeletionCostManagement` feature gate, gathers all Karpenter-managed nodes from the cluster state, optionally runs change detection, ranks nodes, and updates pod annotations.
+**Controller (controller.go):** A singleton reconciler that runs every 60 seconds. On each tick it checks the `PodDeletionCostManagement` feature gate, gathers all Karpenter-managed nodes from the cluster state, compares the `ConsolidationState` timestamp to skip unchanged state, ranks nodes, and updates pod annotations.
 
 **RankingEngine (ranking.go):** Ranks nodes by pod count (mirroring Karpenter's consolidation candidate sorting). Before ranking, it partitions nodes into three groups: Group A (drifted, no do-not-disrupt pods), Group B (not drifted, no do-not-disrupt pods), and Group C (has at least one do-not-disrupt pod). Each group is ranked independently by pod count ascending. Group A gets the lowest ranks, Group B the middle range, and Group C the highest (continuing sequentially). Uses `sort.SliceStable` with deterministic tie-breaking by node name. Drift status is read from `ConditionTypeDrifted` on the node's `StateNode`.
 
 **AnnotationManager (annotation.go):** Iterates over pods on each ranked node and sets `controller.kubernetes.io/pod-deletion-cost` to the node's rank value. Also sets `karpenter.sh/managed-deletion-cost: "true"`. Pods with customer-set deletion costs (no management annotation) are skipped. Handles NotFound and Conflict errors gracefully.
 
-**ChangeDetector (changedetector.go):** Computes SHA-256 hashes of node names/timestamps/pod-counts and pod-to-node assignments. If neither hash changed since the last reconcile, ranking is skipped entirely. O(n) optimization that avoids O(n log n) ranking when the cluster is stable.
+**Change Detection:** Compares the `ConsolidationState` timestamp from `state.Cluster` against the last-seen value. If unchanged, ranking is skipped entirely. This is the same mechanism used by the disruption controller's consolidation methods. O(1) comparison with zero API calls, and it catches all state changes relevant to consolidation decisions including drift status transitions and do-not-disrupt annotation changes.
 
 ## Appendix B: Additional Example -- Do-Not-Disrupt Partitioning
 
@@ -385,9 +384,9 @@ The ReplicaSet controller removes pods from drifted Node G first (rank -4), then
 
 ### Performance
 
-- **API server write load:** Each reconcile can update up to N pods. With change detection, writes only occur when state changes. Worst case (1,000 nodes, 50 pods/node, constant changes): ~833 pod updates/sec. Mitigated by change detection and potential future annotation value diffing.
-- **Memory:** Negligible. References existing `state.StateNode` objects. Ranking data structures are O(n) and transient. Change detector stores 64 bytes.
-- **CPU:** O(n log n) for sorting by pod count. Hash computation is O(n × pods_per_node).
+- **API server write load:** Each reconcile can update up to N pods. With ConsolidationState-based change detection, writes only occur when cluster state changes. The change detection itself is O(1) with zero API calls. Worst case (1,000 nodes, 50 pods/node, constant changes): ~833 pod updates/sec. Mitigated by change detection and potential future annotation value diffing.
+- **Memory:** Negligible. References existing `state.StateNode` objects. Ranking data structures are O(n) and transient.
+- **CPU:** O(n log n) for sorting by pod count. Change detection is O(1) timestamp comparison.
 - **Watch event amplification:** Annotation updates trigger watch events for other controllers. Bounded by the 60-second reconcile interval. Annotation changes don't affect fields Karpenter's consolidation controller uses for decisions.
 
 ## Appendix D: Metrics, Testing, and Rollout
