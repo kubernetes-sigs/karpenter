@@ -1146,6 +1146,85 @@ var _ = Describe("Consolidation", func() {
 			})
 			Expect(ok).To(BeTrue())
 		})
+		It("can replace spot with spot when NodePool explicitly enables spotToSpotConsolidation (overrides global=false)", func() {
+			// Global disabled, but NodePool explicitly enables
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(false)}}))
+			nodePool.Spec.Disruption.SpotToSpotConsolidation = lo.ToPtr(true)
+
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, spotNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Should have consolidation command because NodePool override enables it
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			// Verify the command targets our spot node
+			Expect(cmds[0].Candidates).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(spotNodeClaim.Name))
+
+			// Process the command and verify replacement works
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, spotNodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, spotNodeClaim)
+
+			// Should have created a replacement and deleted the original
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
+		})
+		It("cannot replace spot with spot when NodePool explicitly disables spotToSpotConsolidation (overrides global=true)", func() {
+			// Global enabled, but NodePool explicitly disables
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(true)}}))
+			nodePool.Spec.Disruption.SpotToSpotConsolidation = lo.ToPtr(false)
+
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, spotNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+
+			// Expect per-NodePool event message
+			_, ok := lo.Find(recorder.Events(), func(e events.Event) bool {
+				return strings.Contains(e.Message, fmt.Sprintf("SpotToSpotConsolidation is disabled for NodePool %q", nodePool.Name))
+			})
+			Expect(ok).To(BeTrue())
+		})
 		It("cannot replace spot with spot if it is part of the 15 cheapest instance types.", func() {
 			cloudProvider.InstanceTypes = lo.Slice(fake.InstanceTypesAssorted(), 0, 20)
 			// Forcefully assign lowest possible instancePrice to make sure we have atleast one instance
@@ -4204,6 +4283,90 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
+		It("excludes spot nodes from NodePool with spotToSpotConsolidation disabled in multi-node consolidation", func() {
+			// Global SpotToSpotConsolidation is enabled (set in BeforeEach)
+			// Create a second NodePool with SpotToSpotConsolidation explicitly disabled
+			// Verify that nodes from the disabled pool are excluded from consolidation
+			disabledNodePool := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot}},
+							},
+						},
+					},
+					Disruption: v1.Disruption{
+						ConsolidationPolicy:     v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+						ConsolidateAfter:        v1.MustParseNillableDuration("0s"),
+						Budgets:                 []v1.Budget{{Nodes: "100%"}},
+						SpotToSpotConsolidation: lo.ToPtr(false), // Explicitly disabled
+					},
+				},
+			})
+			// Create a spot node for the disabled pool
+			disabledNodeClaim, disabledNode := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            disabledNodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			disabledNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+			// Use existing spotNodeClaims/spotNodes from BeforeEach (global enabled via nodePool)
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pods := test.Pods(4, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
+					}},
+			})
+
+			// Apply: 3 nodes from enabled pool (BeforeEach) + 1 node from disabled pool
+			ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3],
+				spotNodeClaims[0], spotNodes[0], spotNodeClaims[1], spotNodes[1], spotNodeClaims[2], spotNodes[2],
+				disabledNodeClaim, disabledNode,
+				nodePool, disabledNodePool)
+			ExpectMakeNodesInitialized(ctx, env.Client, spotNodes[0], spotNodes[1], spotNodes[2], disabledNode)
+			ExpectManualBinding(ctx, env.Client, pods[0], spotNodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], spotNodes[1])
+			ExpectManualBinding(ctx, env.Client, pods[2], spotNodes[2])
+			ExpectManualBinding(ctx, env.Client, pods[3], disabledNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{spotNodes[0], spotNodes[1], spotNodes[2], disabledNode},
+				[]*v1.NodeClaim{spotNodeClaims[0], spotNodeClaims[1], spotNodeClaims[2], disabledNodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// REPLACE commands (spot-to-spot) never include nodes from disabled pool
+			// Note: DELETE commands can include the disabled pool since they don't create new spot nodes
+			cmds := queue.GetCommands()
+			Expect(cmds).ToNot(BeEmpty())
+			for _, cmd := range cmds {
+				if cmd.Decision() == disruption.ReplaceDecision {
+					for _, c := range cmd.Candidates {
+						Expect(c.NodePool.Name).ToNot(Equal(disabledNodePool.Name),
+							"node from disabled NodePool should not be included in REPLACE consolidation")
+					}
+				}
+			}
+
+			// Execute first consolidation command
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, lo.Map(cmds[0].Candidates, func(c *disruption.Candidate, _ int) *v1.NodeClaim { return c.NodeClaim })...)
+		})
 	})
 	Context("Node Lifetime Consideration", func() {
 		var nodeClaims []*v1.NodeClaim
