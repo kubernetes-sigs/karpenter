@@ -52,6 +52,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
+
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -884,6 +886,48 @@ var _ = Describe("Provisioning", func() {
 						corev1.ResourceCPU: resource.MustParse("1.75"),
 					},
 				}})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should not schedule if limits would be exceeded (node)", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Limits: v1.Limits(corev1.ResourceList{resources.Node: resource.MustParse("2")}),
+				},
+			}))
+			// prevent these pods from scheduling on the same node
+			opts := test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "foo"},
+				},
+				PodAntiRequirements: []corev1.PodAffinityTerm{
+					{
+						TopologyKey: corev1.LabelHostname,
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "foo",
+							},
+						},
+					},
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("1.5"),
+					},
+				},
+			}
+			pod := test.UnschedulablePod(opts)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			// A node can be launched
+			ExpectScheduled(ctx, env.Client, pod)
+
+			pod = test.UnschedulablePod(opts)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			// A second node can be launched
+			ExpectScheduled(ctx, env.Client, pod)
+
+			// This pod should not be scheduled since it would require a third provisioned node, but the limit would be exceeded
+			pod = test.UnschedulablePod(opts)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
