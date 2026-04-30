@@ -109,6 +109,19 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+	//nolint:kubeapilinter
+	// DriftPolicy controls how Karpenter sequences drift disruption across topology
+	// domains (e.g. availability zones). When set, Karpenter disrupts one domain at
+	// a time — completing replacements in that domain before moving to the next —
+	// rather than fanning out across all domains simultaneously. This reduces the
+	// blast radius of a fleet-wide drift event such as an AMI update.
+	// DriftPolicy is independent of Budgets: Budgets cap the total number of
+	// in-flight disruptions; DriftPolicy controls the order in which domains are
+	// disrupted. Both can be set together.
+	// When unset, nodes are disrupted in globally oldest-first order (no change to
+	// existing behavior).
+	// +optional
+	DriftPolicy *DriftPolicy `json:"driftPolicy,omitempty" hash:"ignore"`
 }
 
 // Budget defines when Karpenter will restrict the
@@ -151,6 +164,38 @@ type Budget struct {
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
+}
+
+// DriftPolicy configures topology-aware disruption ordering for drifted nodes.
+// When a DriftPolicy is set on a NodePool, Karpenter selects one topology domain
+// at a time and only disrupts nodes within that domain, proceeding to the next
+// domain once the active domain's replacements have completed. The active domain
+// is chosen deterministically in alphabetical order — first by any domain that
+// already has in-flight replacements, then by the alphabetically first domain
+// with drifted candidates. This ensures stable, predictable ordering across
+// controller restarts and mid-roll node replacements.
+// Nodes that do not carry the topology label are unaffected and remain eligible
+// for disruption regardless of which domain is active.
+type DriftPolicy struct {
+	//nolint:kubeapilinter
+	// TopologyKey is the node label used to group nodes into topology domains
+	// (e.g. "topology.kubernetes.io/zone"). Karpenter disrupts one domain at a time,
+	// in alphabetical order of domain values.
+	// Must be a qualified Kubernetes label name.
+	// +required
+	TopologyKey string `json:"topologyKey"`
+	//nolint:kubeapilinter
+	// MaxConcurrentPerDomain caps how many nodes can be simultaneously in-flight
+	// within the active topology domain. Accepts an absolute count ("2") or a
+	// percentage of the domain's total node count ("50%"). Percentage values are
+	// rounded up. Defaults to "1", meaning replacements proceed one node at a time
+	// within each domain.
+	// This limit is evaluated against live cluster state and is orthogonal to the
+	// NodePool-level Budget.
+	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
+	// +kubebuilder:default:="1"
+	// +optional
+	MaxConcurrentPerDomain string `json:"maxConcurrentPerDomain,omitempty"`
 }
 
 type ConsolidationPolicy string
