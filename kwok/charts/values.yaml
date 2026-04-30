@@ -96,6 +96,9 @@ controller:
     digest: ""
   # -- Additional environment variables for the controller pod.
   env: []
+  # Example: Uncomment to enable Pod Deletion Cost Management
+  # - name: POD_DELETION_COST_ENABLED
+  #   value: "true"
   envFrom: []
   # -- Resources for the controller pod.
   resources: {}
