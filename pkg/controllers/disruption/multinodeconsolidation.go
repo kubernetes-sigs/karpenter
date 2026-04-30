@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
@@ -258,8 +259,13 @@ func (m *MultiNodeConsolidation) pairwiseSearchFallback(ctx context.Context, can
 			return Command{}, err
 		}
 
-		candidatesToConsolidate := append(accepted, c) //nolint:gocritic // intentional new slice per iteration
+		candidatesToConsolidate := append(slices.Clone(accepted), c)
 
+		// When accepted is empty this probes a single candidate, which
+		// single-node consolidation already evaluated. The probe is still
+		// needed: the walk uses the result to decide whether to accept or
+		// skip c. Without it, a bad first candidate would poison the
+		// entire accepted set with no way to eject it.
 		cmd, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
