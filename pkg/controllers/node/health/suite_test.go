@@ -250,6 +250,116 @@ var _ = Describe("Node Health", func() {
 		})
 	})
 
+	Context("NodePool Repair Configuration", func() {
+		It("should use NodePool-specific toleration duration instead of CloudProvider default", func() {
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 30 * time.Minute,
+				},
+			}
+			// Override the toleration duration to 10 minutes via NodePool
+			nodePool.Spec.Repair = &v1.RepairSpec{
+				Policies: []v1.NodePoolRepairPolicy{
+					{
+						ConditionType:      "BadNode",
+						ConditionStatus:    corev1.ConditionFalse,
+						TolerationDuration: metav1.Duration{Duration: 10 * time.Minute},
+					},
+				},
+			}
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:               "BadNode",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+			})
+			// Step 15 minutes - past NodePool override (10m) but before CloudProvider default (30m)
+			fakeClock.Step(15 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, healthController, node)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
+		})
+		It("should use NodePool DefaultTolerationDuration when no condition-specific policy exists", func() {
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 30 * time.Minute,
+				},
+			}
+			// Set a default toleration of 10 minutes, no condition-specific policies
+			nodePool.Spec.Repair = &v1.RepairSpec{
+				DefaultTolerationDuration: lo.ToPtr(metav1.Duration{Duration: 10 * time.Minute}),
+			}
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:               "BadNode",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+			})
+			fakeClock.Step(15 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, healthController, node)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
+		})
+		It("should fall back to CloudProvider TolerationDuration when no NodePool repair config exists", func() {
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 30 * time.Minute,
+				},
+			}
+			// No repair config on NodePool
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:               "BadNode",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+			})
+			// Step 20 minutes - before CloudProvider default (30m)
+			fakeClock.Step(20 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, healthController, node)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+		})
+		It("should use condition-specific policy over DefaultTolerationDuration", func() {
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 30 * time.Minute,
+				},
+			}
+			nodePool.Spec.Repair = &v1.RepairSpec{
+				DefaultTolerationDuration: lo.ToPtr(metav1.Duration{Duration: 60 * time.Minute}),
+				Policies: []v1.NodePoolRepairPolicy{
+					{
+						ConditionType:      "BadNode",
+						ConditionStatus:    corev1.ConditionFalse,
+						TolerationDuration: metav1.Duration{Duration: 5 * time.Minute},
+					},
+				},
+			}
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:               "BadNode",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+			})
+			// Step 10 minutes - past condition-specific (5m) but before default (60m)
+			fakeClock.Step(10 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, healthController, node)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
+		})
+	})
 	Context("Forceful termination", func() {
 		It("should ignore node disruption budgets", func() {
 			// Blocking disruption budgets
