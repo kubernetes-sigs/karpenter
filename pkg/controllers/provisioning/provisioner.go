@@ -255,6 +255,9 @@ func (p *Provisioner) NewScheduler(
 		}
 		return np.DeletionTimestamp.IsZero()
 	})
+	if nodeTypes, ok := ctx.Value("filterNodePoolsByStateNodeNodeTypes").([]string); ok {
+		nodePools = filterNodePoolsByStateNodeNodeTypes(nodePools, nodeTypes)
+	}
 	if len(nodePools) == 0 {
 		return nil, ErrNodePoolsNotFound
 	}
@@ -304,6 +307,17 @@ func (p *Provisioner) NewScheduler(
 	}
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
 	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
+}
+
+// speed up computation by only considering pools that have the same "node-type" label as the nodes
+func filterNodePoolsByStateNodeNodeTypes(nodePools []*v1.NodePool, candidateNodeTypes []string) []*v1.NodePool {
+	if lo.Contains(candidateNodeTypes, "") { // something was weird, do not filter
+		return nodePools
+	}
+
+	return lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
+		return lo.Contains(candidateNodeTypes, np.Spec.Template.Labels["node-type"])
+	})
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
