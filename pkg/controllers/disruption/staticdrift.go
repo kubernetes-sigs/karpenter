@@ -90,6 +90,14 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 
 		// Select candidates up to maxAllowedDrifts
 		for _, c := range npCandidates[:maxAllowedDrifts] {
+			// When the drift resolution policy is Terminate, skip replacement creation entirely.
+			// The node will be terminated and Karpenter's provisioning will handle rescheduling.
+			if np.Spec.Disruption.DriftResolutionPolicy == v1.DriftResolutionPolicyTerminate {
+				cmds = append(cmds, Command{
+					Candidates: []*Candidate{c},
+				})
+				continue
+			}
 			nct := scheduling.NewNodeClaimTemplate(np)
 			result := scheduling.Results{
 				NewNodeClaims: []*scheduling.NodeClaim{{NodeClaimTemplate: *nct}},
