@@ -115,7 +115,7 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 // with any stored updates applied. It uses a selective copy-on-write strategy to minimize memory usage:
 // - Shared: Requirements and Overhead (never modified, safe to share)
 // - Selective copy: Offerings (only copied if price overlay applied)
-// - Selective copy: Capacity (only deep copied if capacity overlay applied)
+// - Selective copy: Capacity (only copied if capacity overlay applied)
 func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
 		return &cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
@@ -135,14 +135,13 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 		Name:         it.Name,
 		Requirements: it.Requirements, // Shared - never modified
 		Overhead:     it.Overhead,     // Shared - never modified
+		Capacity:     it.Capacity,
 	}
 
 	// Handle capacity overlay - only deep copy if we're modifying it
-	if len(lo.Keys(instanceTypeUpdate.Capacity.OverlayUpdate)) != 0 {
-		overriddenInstanceType.Capacity = it.Capacity.DeepCopy()
+	if len(instanceTypeUpdate.Capacity.OverlayUpdate) != 0 {
+		// This method replaces overriddenInstanceType.Capacity with a shallow copy
 		overriddenInstanceType.ApplyCapacityOverlay(instanceTypeUpdate.Capacity.OverlayUpdate)
-	} else {
-		overriddenInstanceType.Capacity = it.Capacity // Shared - not modified
 	}
 
 	// Handle offerings - copy-on-write only for offerings that need price overlay
