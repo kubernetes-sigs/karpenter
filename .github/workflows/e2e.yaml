@@ -16,6 +16,11 @@ on:
         type: string
         required: false
         description: "Human-readable test name for job identification"
+      repeat:
+        type: number
+        required: false
+        default: 1
+        description: "Number of iterations to run the test suite (for statistical aggregation)"
 jobs:
   e2e:
     permissions:
@@ -71,19 +76,59 @@ jobs:
       env:
           SUITE: ${{ inputs.suite }}
           FOCUS: ${{ inputs.focus }}
+          ITERATIONS: ${{ inputs.repeat }}
       shell: bash
       run: |
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
-        TEST_SUITE="$SUITE" make e2etests
+        for i in $(seq 1 "${ITERATIONS:-1}"); do
+          echo "=== Iteration $i / ${ITERATIONS:-1} ==="
+          TEST_SUITE="$SUITE" make e2etests
+          iter_dir="$OUTPUT_DIR/iter_${i}"
+          mkdir -p "$iter_dir"
+          # Copy reports from this iteration into a per-iteration subdirectory
+          find "$OUTPUT_DIR" -maxdepth 1 -name "*_performance_report.json" -exec cp {} "$iter_dir/" \;
+        done
+    - name: Aggregate and compare against baseline
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      env:
+        ITERATIONS: ${{ inputs.repeat }}
+        IS_MAIN_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      shell: bash
+      run: |
+        python3 .github/scripts/perf-aggregate.py
+    - name: Download previous benchmark data
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: actions/cache@v4
+      with:
+        path: ./cache
+        key: ${{ runner.os }}-perf-benchmark-${{ inputs.test_name || inputs.suite }}
+    - name: Compare against performance baseline
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        name: Karpenter Performance (${{ inputs.test_name || inputs.suite }})
+        tool: customSmallerIsBetter
+        output-file-path: ${{ env.OUTPUT_DIR }}/benchmark-results.json
+        external-data-json-path: ./cache/benchmark-data.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Alert if batch median is 50% worse than previous batch median
+        alert-threshold: '150%'
+        fail-on-alert: true
+        comment-on-alert: true
+        alert-comment-cc-users: '@nathangeology'
+        # Show comparison in job summary
+        summary-always: true
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
         path: |
-          ${{ env.OUTPUT_DIR }}/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/**/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/aggregated_summary.json
+          ${{ env.OUTPUT_DIR }}/benchmark-results.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
         retention-days: 30
