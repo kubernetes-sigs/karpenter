@@ -61,7 +61,7 @@ func (s *InstanceTypeStore) UpdateStore(updatedStore *internalInstanceTypeStore)
 func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
 
-	if !lo.Contains(internalStore.evaluatedNodePools.UnsortedList(), nodePoolName) {
+	if !internalStore.evaluatedNodePools.Has(nodePoolName) {
 		return []*cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
 	}
 
@@ -82,6 +82,10 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 
 func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
+
+	if !internalStore.evaluatedNodePools.Has(nodePoolName) {
+		return &cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
+	}
 
 	updatedIt, err := internalStore.apply(nodePoolName, it)
 	if err != nil {
@@ -117,10 +121,6 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 // - Selective copy: Offerings (only copied if price overlay applied)
 // - Selective copy: Capacity (only copied if capacity overlay applied)
 func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
-	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
-		return &cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
-	}
-
 	instanceTypeList, ok := s.updates[nodePoolName]
 	if !ok {
 		return it, nil
