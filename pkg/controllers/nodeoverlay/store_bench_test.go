@@ -82,7 +82,7 @@ func BenchmarkStoreApply(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			for _, it := range instanceTypes {
-				_, _ = store.apply("default", it)
+				_ = store.apply("default", it)
 			}
 		}
 	})
@@ -105,7 +105,7 @@ func BenchmarkStoreApplyNoOverlay(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, it := range instanceTypes {
-			_, _ = store.apply("default", it)
+			_ = store.apply("default", it)
 		}
 	}
 }
@@ -141,7 +141,7 @@ func BenchmarkStoreApplyPriceOnly(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, it := range instanceTypes {
-			_, _ = store.apply("default", it)
+			_ = store.apply("default", it)
 		}
 	}
 }
@@ -174,7 +174,7 @@ func BenchmarkStoreApplyCapacityOnly(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, it := range instanceTypes {
-			_, _ = store.apply("default", it)
+			_ = store.apply("default", it)
 		}
 	}
 }
@@ -214,7 +214,7 @@ func BenchmarkStoreApplyBothOverlays(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, it := range instanceTypes {
-			_, _ = store.apply("default", it)
+			_ = store.apply("default", it)
 		}
 	}
 }
@@ -338,7 +338,7 @@ func BenchmarkNodeOverlayControllerScenario(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, np := range nodePools {
 			for _, it := range instanceTypes {
-				_, _ = store.apply(np, it)
+				_ = store.apply(np, it)
 			}
 		}
 	}
