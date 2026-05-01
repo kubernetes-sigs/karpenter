@@ -27,6 +27,8 @@ consolidation regression report.
   `size/XXL` PRs with a `feat:` or `fix:` title prefix. These are the PRs
   most likely to introduce performance regressions.
 - `perf-check` label: manual trigger for reviewers who suspect performance
+- `ok-to-test` label: required for all pull_request triggers. Ensures
+  benchmarks only run on PRs vetted by an org member.
   impact on PRs that don't meet the auto-trigger criteria.
 - `skip-perf` label: allows maintainers to suppress the pre-approval run
   (e.g. large refactors, renames). Does **not** suppress post-merge runs.
@@ -55,8 +57,8 @@ aggregated summary, enabling downstream baseline comparison.
 
 | Trigger | When | Iterations | Can skip? |
 |---|---|---|---|
-| `size/XL` or `size/XXL` + feat/fix PR | Automatic on label | 10 per test | Yes, with `skip-perf` |
-| `perf-check` label | Manual by reviewer | 10 per test | N/A (opt-in) |
+| `size/XL` or `size/XXL` + feat/fix PR | Automatic on label (requires ok-to-test) | 10 per test | Yes, with `skip-perf` |
+| `perf-check` label | Manual by reviewer (requires ok-to-test) | 10 per test | N/A (opt-in) |
 | `/karpenter perf` comment (ApprovalComment) | Manual by reviewer | 10 per test | Yes, with `skip-perf` |
 | Merge to `main` | Automatic | 10 per test | No (always runs) |
 
@@ -68,14 +70,40 @@ depends on the `kubernetes-sigs` org's concurrency limits. This cost is
 incurred only on the triggers above — documentation, CI, and test-only PRs
 are unaffected.
 
-## What this does NOT include
+## Regression detection
 
-- Baseline storage and regression flagging (comparing PR median against
-  rolling baseline median ± 2σ). That requires a persistent store for
-  post-merge run results and is a follow-on task once baseline data
-  accumulates from the 10-iteration post-merge runs.
-- Changes to the hard-coded memory/time thresholds in test files (separate
-  issue).
+Each test runs 10 iterations. The aggregation script computes the batch
+median and emits it as a `customSmallerIsBetter` metric for
+[benchmark-action/github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark).
+
+The action compares the current batch median against the previous commit's
+batch median. If the median is 50% worse (configurable via `alert-threshold`),
+the job fails and a comment is posted on the commit. Benchmark history is
+stored in the GitHub Actions cache (per test, per OS), so no additional
+branches or repo configuration are needed.
+
+This approach has two layers of noise reduction:
+1. The median of 10 runs absorbs per-run variance (CV of 40-60% on kind).
+2. The action compares medians across commits, not individual runs.
+
+A 150% threshold on batch medians is much tighter than 150% on single runs.
+With the observed CV of ~48% on Hostname Spread Consolidation, a single run
+can legitimately vary by 2x. A batch median varies much less.
+
+The `range` field in the benchmark output carries the stddev, and the `extra`
+field carries the full stats (mean, cv, min, max, n). These appear in the
+GitHub Pages chart tooltips and PR comments for context.
+
+**Future improvement:** If the project enables a `gh-pages` branch,
+`benchmark-action` can auto-push results there and generate a time-series
+chart dashboard at `https://kubernetes-sigs.github.io/karpenter/dev/bench/`.
+This gives visual trend tracking across releases and makes it easy to spot
+gradual performance drift. The switch is a one-line change (`auto-push: true`
++ creating the branch). The cache-based approach works without it.
+
+This replaces the per-test hard-coded thresholds (e.g., the 350MB memory
+assertion that flakes on every Hydra run). Multi-run statistics are robust
+to single-run outliers and sensitive to sustained shifts.
 
 ## Testing
 
