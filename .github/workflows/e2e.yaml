@@ -16,6 +16,11 @@ on:
         type: string
         required: false
         description: "Human-readable test name for job identification"
+      repeat:
+        type: number
+        required: false
+        default: 1
+        description: "Number of iterations to run the test suite (for statistical aggregation)"
 jobs:
   e2e:
     permissions:
@@ -71,19 +76,92 @@ jobs:
       env:
           SUITE: ${{ inputs.suite }}
           FOCUS: ${{ inputs.focus }}
+          ITERATIONS: ${{ inputs.repeat }}
       shell: bash
       run: |
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
-        TEST_SUITE="$SUITE" make e2etests
+        for i in $(seq 1 "${ITERATIONS:-1}"); do
+          echo "=== Iteration $i / ${ITERATIONS:-1} ==="
+          TEST_SUITE="$SUITE" make e2etests
+          iter_dir="$OUTPUT_DIR/iter_${i}"
+          mkdir -p "$iter_dir"
+          # Copy reports from this iteration into a per-iteration subdirectory
+          find "$OUTPUT_DIR" -maxdepth 1 -name "*_performance_report.json" -exec cp {} "$iter_dir/" \;
+        done
+    - name: Aggregate performance results
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      shell: bash
+      run: |
+        python3 - <<'EOF'
+        import json, math, os, glob
+
+        output_dir = os.environ["OUTPUT_DIR"]
+        iterations = int("${{ inputs.repeat }}")
+
+        # Collect all per-iteration reports grouped by test name
+        reports_by_test = {}
+        for i in range(1, iterations + 1):
+            pattern = os.path.join(output_dir, f"iter_{i}", "*_performance_report.json")
+            for path in glob.glob(pattern):
+                test_key = os.path.basename(path)
+                reports_by_test.setdefault(test_key, []).append(path)
+
+        summary = {}
+        for test_key, paths in reports_by_test.items():
+            durations = []
+            for path in paths:
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    # Extract consolidation or primary duration field
+                    for field in ("consolidation_duration_seconds", "duration_seconds", "elapsed_seconds"):
+                        if field in data:
+                            durations.append(float(data[field]))
+                            break
+                except Exception:
+                    pass
+
+            if not durations:
+                continue
+
+            n = len(durations)
+            mean = sum(durations) / n
+            sorted_d = sorted(durations)
+            median = sorted_d[n // 2] if n % 2 else (sorted_d[n // 2 - 1] + sorted_d[n // 2]) / 2
+            variance = sum((x - mean) ** 2 for x in durations) / n
+            stddev = math.sqrt(variance)
+
+            summary[test_key] = {
+                "n": n,
+                "mean_s": round(mean, 1),
+                "median_s": round(median, 1),
+                "stddev_s": round(stddev, 1),
+                "min_s": round(min(durations), 1),
+                "max_s": round(max(durations), 1),
+                "values_s": [round(x, 1) for x in sorted_d],
+            }
+
+        out_path = os.path.join(output_dir, "aggregated_summary.json")
+        with open(out_path, "w") as f:
+            json.dump(summary, f, indent=2)
+
+        # Print human-readable table
+        print(f"\n{'Test':<50} {'n':>4} {'Median':>8} {'Mean':>8} {'Stddev':>8} {'Min':>8} {'Max':>8}")
+        print("-" * 100)
+        for test_key, stats in summary.items():
+            name = test_key.replace("_performance_report.json", "")
+            print(f"{name:<50} {stats['n']:>4} {stats['median_s']:>7.1f}s {stats['mean_s']:>7.1f}s {stats['stddev_s']:>7.1f}s {stats['min_s']:>7.1f}s {stats['max_s']:>7.1f}s")
+        EOF
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
       with:
         name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
         path: |
-          ${{ env.OUTPUT_DIR }}/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/**/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/aggregated_summary.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
         retention-days: 30
