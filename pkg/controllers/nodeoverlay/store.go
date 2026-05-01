@@ -61,7 +61,7 @@ func (s *InstanceTypeStore) UpdateStore(updatedStore *internalInstanceTypeStore)
 func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
 
-	if !lo.Contains(internalStore.evaluatedNodePools.UnsortedList(), nodePoolName) {
+	if !internalStore.evaluatedNodePools.Has(nodePoolName) {
 		return []*cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
 	}
 
@@ -73,9 +73,7 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 	}
 
 	for _, it := range its {
-		if updatedIt, err := internalStore.apply(nodePoolName, it); err == nil {
-			result = append(result, updatedIt)
-		}
+		result = append(result, internalStore.apply(nodePoolName, it))
 	}
 	return result, nil
 }
@@ -83,11 +81,11 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	internalStore := lo.FromPtr(s.store.Load())
 
-	updatedIt, err := internalStore.apply(nodePoolName, it)
-	if err != nil {
-		return &cloudprovider.InstanceType{}, err
+	if !internalStore.evaluatedNodePools.Has(nodePoolName) {
+		return &cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
 	}
-	return updatedIt, nil
+
+	return internalStore.apply(nodePoolName, it), nil
 }
 
 // InstanceTypeStore manages instance type updates for node pools.
@@ -115,19 +113,15 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 // with any stored updates applied. It uses a selective copy-on-write strategy to minimize memory usage:
 // - Shared: Requirements and Overhead (never modified, safe to share)
 // - Selective copy: Offerings (only copied if price overlay applied)
-// - Selective copy: Capacity (only deep copied if capacity overlay applied)
-func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
-	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
-		return &cloudprovider.InstanceType{}, cloudprovider.NewUnevaluatedNodePoolError(nodePoolName)
-	}
-
+// - Selective copy: Capacity (only copied if capacity overlay applied)
+func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType) *cloudprovider.InstanceType {
 	instanceTypeList, ok := s.updates[nodePoolName]
 	if !ok {
-		return it, nil
+		return it
 	}
 	instanceTypeUpdate, ok := instanceTypeList[it.Name]
 	if !ok {
-		return it, nil
+		return it
 	}
 
 	// Create a shallow copy of the instance type, sharing immutable fields
@@ -135,24 +129,23 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 		Name:         it.Name,
 		Requirements: it.Requirements, // Shared - never modified
 		Overhead:     it.Overhead,     // Shared - never modified
+		Capacity:     it.Capacity,
 	}
 
 	// Handle capacity overlay - only deep copy if we're modifying it
-	if len(lo.Keys(instanceTypeUpdate.Capacity.OverlayUpdate)) != 0 {
-		overriddenInstanceType.Capacity = it.Capacity.DeepCopy()
+	if len(instanceTypeUpdate.Capacity.OverlayUpdate) != 0 {
+		// This method replaces overriddenInstanceType.Capacity with a shallow copy
 		overriddenInstanceType.ApplyCapacityOverlay(instanceTypeUpdate.Capacity.OverlayUpdate)
-	} else {
-		overriddenInstanceType.Capacity = it.Capacity // Shared - not modified
 	}
 
 	// Handle offerings - copy-on-write only for offerings that need price overlay
-	if instanceTypeUpdate.Price != nil {
+	if len(instanceTypeUpdate.Price) != 0 {
 		overriddenInstanceType.Offerings = s.applyPriceOverlays(it.Offerings, instanceTypeUpdate.Price)
 	} else {
 		overriddenInstanceType.Offerings = it.Offerings // Shared - not modified
 	}
 
-	return overriddenInstanceType, nil
+	return overriddenInstanceType
 }
 
 // applyPriceOverlays creates a new offerings slice with selective copying:
