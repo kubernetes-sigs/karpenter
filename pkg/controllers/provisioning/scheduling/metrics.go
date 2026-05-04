@@ -92,4 +92,17 @@ var (
 			ControllerLabel,
 		},
 	)
+	PendingPodsByEffectiveZone = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: schedulerSubsystem,
+			Name:      "pending_pods_by_effective_zone",
+			Help:      "Pending pods dimensioned by effective zone constraint, or the intersection of pod-level zone signals, volume topology (PVC zones), and topology constraints. Values: specific zone name (e.g., 'us-west-2a'), 'flexible' (multiple zones), or 'none' (no valid intersection).",
+		},
+		[]string{
+			ControllerLabel,
+			"zone",
+		},
+	)
 )
