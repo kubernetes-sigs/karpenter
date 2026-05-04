@@ -249,6 +249,8 @@ func (t *Topology) AddRequirements(p *corev1.Pod, taints []corev1.Taint, podRequ
 
 // GetTopologyZoneConstraints returns the set of valid zones from all topology constraints
 // that use the zone topology key for the given pod.
+//
+//nolint:gocyclo
 func (t *Topology) GetTopologyZoneConstraints(p *corev1.Pod, podRequirements scheduling.Requirements) sets.Set[string] {
 	var result sets.Set[string]
 
