@@ -132,16 +132,18 @@ func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has non-empty consolidation disabled", cn.NodePool.Name))...)
 		return false
 	}
-	// If Balanced is set but the feature gate is disabled, set a status condition and reject
+	// If Balanced is set but the feature gate is disabled, fall back to
+	// WhenEmptyOrUnderutilized semantics. The candidate is still eligible for
+	// consolidation; the rest of the controller path (sortCandidates,
+	// AnyBalancedCandidate, scoring inside multi/single-node consolidation)
+	// reads effectiveBalanced() which returns false when the gate is off, so
+	// the Balanced score gate is not applied. The status condition flags the
+	// fallback to operators so they know their Balanced config is not active.
 	if policy == v1.ConsolidationPolicyBalanced && !options.FromContext(ctx).FeatureGates.BalancedConsolidation {
 		cn.NodePool.StatusConditions().SetTrueWithReason(v1.ConditionTypeConsolidationPolicyUnsupported,
 			"BalancedConsolidationDisabled",
-			"consolidationPolicy is Balanced but the BalancedConsolidation feature gate is disabled; change the policy or re-enable the gate")
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q uses Balanced consolidation but the BalancedConsolidation feature gate is disabled", cn.NodePool.Name))...)
-		return false
-	}
-	// Clear the condition if Balanced is enabled and working
-	if policy == v1.ConsolidationPolicyBalanced {
+			"consolidationPolicy is Balanced but the BalancedConsolidation feature gate is disabled; falling back to WhenEmptyOrUnderutilized semantics")
+	} else if policy == v1.ConsolidationPolicyBalanced {
 		_ = cn.NodePool.StatusConditions().Clear(v1.ConditionTypeConsolidationPolicyUnsupported)
 	}
 	// return true if consolidatable
@@ -149,13 +151,16 @@ func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 }
 
 // sortCandidates sorts candidates for multi-node consolidation. When any candidate
-// uses the Balanced policy, candidates are sorted by price/disruption ratio descending
-// (best consolidation value first) so that the binary search in firstNConsolidationOption
-// is monotonic with balanced scoring. Otherwise, candidates are sorted by disruption cost
-// ascending (lowest disruption first), matching the pre-existing behavior.
+// uses the Balanced policy and the BalancedConsolidation feature gate is enabled,
+// candidates are sorted by price/disruption ratio descending (best consolidation
+// value first) so that the binary search in firstNConsolidationOption is monotonic
+// with balanced scoring. Otherwise, candidates are sorted by disruption cost
+// ascending (lowest disruption first), matching the WhenEmptyOrUnderutilized
+// behavior. Pools that have configured Balanced but have the gate disabled fall
+// into the second branch, consistent with the Balanced fallback in ShouldDisrupt.
 func (c *consolidation) sortCandidates(ctx context.Context, candidates []*Candidate) []*Candidate {
 	hasBalanced := lo.SomeBy(candidates, func(cn *Candidate) bool {
-		return cn.NodePool.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyBalanced
+		return effectiveBalanced(ctx, cn.NodePool)
 	})
 	if hasBalanced {
 		sort.Slice(candidates, func(i int, j int) bool {

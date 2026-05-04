@@ -103,7 +103,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	}
 
 	// Emit balanced consolidation events and metrics per Balanced NodePool
-	if AnyBalancedCandidate(cmd.Candidates) {
+	if AnyBalancedCandidate(ctx, cmd.Candidates) {
 		EmitBalancedMultiNodeEvents(ctx, cmd, m.nodePoolTotals, m.recorder)
 	}
 
@@ -166,7 +166,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			}
 		}
 		// Apply balanced scoring if any candidate uses the Balanced policy
-		if validDecision && AnyBalancedCandidate(candidatesToConsolidate) {
+		if validDecision && AnyBalancedCandidate(ctx, candidatesToConsolidate) {
 			result := EvaluateBalancedMove(ctx, cmd, m.nodePoolTotals)
 			if !result.Approved {
 				validDecision = false
@@ -174,6 +174,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 				// consolidation rejected a batch size
 				for _, poolCandidates := range lo.GroupBy(candidatesToConsolidate, func(c *Candidate) string { return c.NodePool.Name }) {
 					np := poolCandidates[0].NodePool
+					// Gate gating happens at AnyBalancedCandidate above; reaching
+					// here means at least one pool is Balanced with the gate on.
 					if np.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyBalanced {
 						m.recorder.Publish(disruptionevents.BalancedConsolidationRejectedMultiNode(
 							np, result.Score, result.Threshold, result.ConsolidationThreshold,
