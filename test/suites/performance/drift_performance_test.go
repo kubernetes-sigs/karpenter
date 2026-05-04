@@ -60,10 +60,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// Performance assertions for initial deployment
 			Expect(initialReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
 				"Initial deployment should complete within 5 minutes")
-			Expect(initialReport.KarpenterMemoryMB).To(BeNumerically("<", 200+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 200 MB during scale-out")
-			Expect(initialReport.KarpenterCPUNanos).To(BeNumerically("<", 18*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 18s (90%) during scale-out")
+			Expect(initialReport.KarpenterP95MemoryMB).To(BeNumerically("<", 200+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 200 MB during scale-out")
+			Expect(initialReport.KarpenterP95CPUCores).To(BeNumerically("<", 0.90+CPUOverheadCores()),
+				"Karpenter controller P95 CPU should be less than 0.90 cores during scale-out")
 
 			// Allow system to stabilize before triggering drift
 			By("Allowing system to stabilize before triggering drift")
@@ -91,10 +91,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// Drift performance assertions
 			Expect(driftReport.TotalTime).To(BeNumerically("<", 50*time.Minute),
 				"Drift should complete within 50 minutes")
-			Expect(driftReport.KarpenterMemoryMB).To(BeNumerically("<", 250+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 250 MB during drift")
-			Expect(driftReport.KarpenterCPUNanos).To(BeNumerically("<", 24*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 24s (120%) during drift")
+			Expect(driftReport.KarpenterP95MemoryMB).To(BeNumerically("<", 250+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 250 MB during drift")
+			Expect(driftReport.KarpenterP95CPUCores).To(BeNumerically("<", 1.20+CPUOverheadCores()),
+				"Karpenter controller P95 CPU should be less than 1.20 cores during drift")
 
 			// ========== PHASE 3: POST-DRIFT VALIDATION ==========
 			By("Validating post-drift cluster state")
