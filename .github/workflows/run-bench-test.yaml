@@ -29,7 +29,7 @@ jobs:
           {
             cd ${{ inputs.path }}
             mkdir output
-            go test -tags=test_performance -run=1 -bench=. -count=1 -cpuprofile output/cpu.out -memprofile output/mem.out > output/results.txt
+            go test -tags=test_performance -run='^$' -bench=. -count=1 -cpuprofile output/cpu.out -memprofile output/mem.out > output/results.txt
             echo 'OUTPUT<<EOF'
             cat output/results.txt
             echo EOF
