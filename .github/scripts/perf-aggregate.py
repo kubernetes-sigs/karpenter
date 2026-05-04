@@ -19,6 +19,7 @@ METRICS = [
     ("total_nodes", "Final Nodes", "nodes"),
     ("total_reserved_cpu_utilization", "CPU Utilization", "percent"),
     ("resource_efficiency_score", "Efficiency Score", "score"),
+    ("total_reserved_memory_utilization", "Memory Utilization", "percent"),
     ("rounds", "Consolidation Rounds", "rounds"),
 ]
 
