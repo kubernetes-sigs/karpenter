@@ -4200,7 +4200,7 @@ var _ = Context("Scheduling", func() {
 						PersistentVolumeClaims: []string{pvcName},
 					}), []string{"test-zone-1", "test-zone-2"}, "flexible",
 				),
-				Entry("when PVC restrics pod to a single zone",
+				Entry("when PVC restricts pod to a single zone",
 					test.UnschedulablePod(test.PodOptions{
 						Phase:                  corev1.PodPending,
 						PersistentVolumeClaims: []string{pvcName},
