@@ -4170,33 +4170,50 @@ var _ = Context("Scheduling", func() {
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
 			}}
-			It("should report correct zone when PVC restricts pod to a single zone", func() {
+			pvcName := "pvc-name"
+			DescribeTable("should report metric correctly for volume constraints", func(pod *corev1.Pod, scZones []string, expectedZone string) {
 				nodePool = test.NodePool()
 				sc := test.StorageClass(test.StorageClassOptions{
-					ObjectMeta:        metav1.ObjectMeta{Name: "zone-restricted-sc"},
+					ObjectMeta:        metav1.ObjectMeta{Name: "zone-sc"},
 					Provisioner:       lo.ToPtr(csiProvider),
 					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
-					Zones:             []string{"test-zone-1"},
+					Zones:             scZones,
 				})
 				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					ObjectMeta:       metav1.ObjectMeta{Name: "zone-pinned-claim"},
-					StorageClassName: lo.ToPtr("zone-restricted-sc"),
+					ObjectMeta:       metav1.ObjectMeta{Name: pvcName},
+					StorageClassName: lo.ToPtr("zone-sc"),
 				})
 				ExpectApplied(ctx, env.Client, nodePool, sc, pvc)
 
-				pod := test.UnschedulablePod(test.PodOptions{
-					Phase:                  corev1.PodPending,
-					PersistentVolumeClaims: []string{pvc.Name},
-				})
 				ExpectApplied(ctx, env.Client, pod)
 				_, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
 				Expect(err).To(BeNil())
 
 				m, ok := FindMetricWithLabelValues("karpenter_scheduler_pending_pods_by_effective_zone",
-					map[string]string{"controller": "provisioner", "zone": "test-zone-1"})
+					map[string]string{"controller": "provisioner", "zone": expectedZone})
 				Expect(ok).To(BeTrue())
 				Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 1))
-			})
+			},
+				Entry("when PVC does not restrict pod to a single zone",
+					test.UnschedulablePod(test.PodOptions{
+						Phase:                  corev1.PodPending,
+						PersistentVolumeClaims: []string{pvcName},
+					}), []string{"test-zone-1", "test-zone-2"}, "flexible",
+				),
+				Entry("when PVC restrics pod to a single zone",
+					test.UnschedulablePod(test.PodOptions{
+						Phase:                  corev1.PodPending,
+						PersistentVolumeClaims: []string{pvcName},
+					}), []string{"test-zone-1"}, "test-zone-1",
+				),
+				Entry("when PVC restricts pod to no zone",
+					test.UnschedulablePod(test.PodOptions{
+						Phase:                  corev1.PodPending,
+						NodeSelector:           map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+						PersistentVolumeClaims: []string{pvcName},
+					}), []string{"test-zone-2"}, "none",
+				),
+			)
 			DescribeTable("should report zone of pods corectly", func(existingPods []*corev1.Pod, pendingPods []*corev1.Pod, expectedZones map[string]int) {
 				nodePool = test.NodePool()
 				ExpectApplied(ctx, env.Client, nodePool)
