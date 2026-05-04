@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
@@ -122,7 +123,7 @@ func BenchmarkConsolidation_500Nodes_HostnameSpread_9NP(b *testing.B) {
 // --- Implementation ---
 
 func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
-	ctx, env, clk, clusterState, _, prov, candidates := setupConsolidationBench(b, cfg)
+	ctx, kubeClient, clk, clusterState, _, prov, candidates := setupConsolidationBench(b, cfg)
 	rec := events.NewRecorder(&record.FakeRecorder{})
 
 	// Benchmark SimulateScheduling for a single candidate node removal.
@@ -132,7 +133,7 @@ func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = SimulateScheduling(ctx, env.Client, clusterState, prov, clk, rec, candidate)
+		_, _ = SimulateScheduling(ctx, kubeClient, clusterState, prov, clk, rec, candidate)
 	}
 	b.ReportMetric(float64(len(candidate.reschedulablePods)), "pods")
 	b.ReportMetric(float64(cfg.nodeCount), "nodes")
@@ -143,7 +144,7 @@ func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
 // --- Setup ---
 
 func setupConsolidationBench(b *testing.B, cfg benchConfig) (
-	context.Context, *test.Environment, *clock.FakeClock, *state.Cluster,
+	context.Context, client.Client, *clock.FakeClock, *state.Cluster,
 	*fake.CloudProvider, *provisioning.Provisioner, []*Candidate,
 ) {
 	b.Helper()
@@ -153,16 +154,16 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 	env := test.NewEnvironment(test.WithCRDs(coreapis.CRDs...))
 	cp := fake.NewCloudProvider()
 	clk := clock.NewFakeClock(time.Now())
+	instanceTypes := fake.InstanceTypes(100)
+	cp.InstanceTypes = instanceTypes
+
 	clusterState := state.NewCluster(clk, env.Client, cp)
 	rec := events.NewRecorder(&record.FakeRecorder{})
 	prov := provisioning.NewProvisioner(env.Client, rec, cp, clusterState, clk)
 
-	instanceTypes := fake.InstanceTypes(100)
-	cp.InstanceTypes = instanceTypes
-
-	// Create NodePools and register with API server
+	// Create NodePools
 	nodePools := make([]*v1.NodePool, cfg.nodePoolCount)
-	for i := range cfg.nodePoolCount {
+	for i := 0; i < cfg.nodePoolCount; i++ {
 		np := test.NodePool(v1.NodePool{
 			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pool-%d", i)},
 			Spec: v1.NodePoolSpec{
@@ -178,9 +179,9 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 		}
 	}
 
-	// Build candidates with pods (direct construction, no API server needed)
+	// Build candidates with pods
 	var candidates []*Candidate
-	for i := range cfg.nodeCount {
+	for i := 0; i < cfg.nodeCount; i++ {
 		np := nodePools[i%cfg.nodePoolCount]
 		it := instanceTypes[i%len(instanceTypes)]
 
@@ -217,14 +218,14 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 		})
 	}
 
-	return ctx, env, clk, clusterState, cp, prov, candidates
+	return ctx, env.Client, clk, clusterState, cp, prov, candidates
 }
 
 func makeBenchPods(count int, topologyFraction float64, nodeName string) []*corev1.Pod {
 	pods := make([]*corev1.Pod, count)
 	topologyCount := int(float64(count) * topologyFraction)
 
-	for i := range count {
+	for i := 0; i < count; i++ {
 		opts := test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{"app": fmt.Sprintf("bench-%d", i%5)},
