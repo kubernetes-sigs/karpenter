@@ -32,9 +32,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -105,18 +105,30 @@ func BenchmarkConsolidation_100Nodes_HostnameSpread_9NP(b *testing.B) {
 }
 
 func BenchmarkConsolidation_500Nodes_NoTopology(b *testing.B) {
+	if testing.Short() {
+		b.Skip("skipping 500-node benchmark in short mode")
+	}
 	benchmarkConsolidationSim(b, benchConfig{500, 10, 1, 0.0})
 }
 
 func BenchmarkConsolidation_500Nodes_HalfTopology(b *testing.B) {
+	if testing.Short() {
+		b.Skip("skipping 500-node benchmark in short mode")
+	}
 	benchmarkConsolidationSim(b, benchConfig{500, 10, 1, 0.5})
 }
 
 func BenchmarkConsolidation_500Nodes_HostnameSpread_3NP(b *testing.B) {
+	if testing.Short() {
+		b.Skip("skipping 500-node benchmark in short mode")
+	}
 	benchmarkConsolidationSim(b, benchConfig{500, 10, 3, 1.0})
 }
 
 func BenchmarkConsolidation_500Nodes_HostnameSpread_9NP(b *testing.B) {
+	if testing.Short() {
+		b.Skip("skipping 500-node benchmark in short mode")
+	}
 	benchmarkConsolidationSim(b, benchConfig{500, 10, 9, 1.0})
 }
 
@@ -151,15 +163,15 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 	ctx := TestContextWithLogger(b)
 	ctx = options.ToContext(ctx, test.Options())
 
-	env := test.NewEnvironment(test.WithCRDs(coreapis.CRDs...))
 	cp := fake.NewCloudProvider()
 	clk := clock.NewFakeClock(time.Now())
 	instanceTypes := fake.InstanceTypes(100)
 	cp.InstanceTypes = instanceTypes
 
-	clusterState := state.NewCluster(clk, env.Client, cp)
+	kubeClient := fakecr.NewFakeClient()
+	clusterState := state.NewCluster(clk, kubeClient, cp)
 	rec := events.NewRecorder(&record.FakeRecorder{})
-	prov := provisioning.NewProvisioner(env.Client, rec, cp, clusterState, clk)
+	prov := provisioning.NewProvisioner(kubeClient, rec, cp, clusterState, clk)
 
 	// Create NodePools
 	nodePools := make([]*v1.NodePool, cfg.nodePoolCount)
@@ -174,7 +186,7 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 			},
 		})
 		nodePools[i] = np
-		if err := env.Client.Create(ctx, np); err != nil {
+		if err := kubeClient.Create(ctx, np); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -218,7 +230,7 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 		})
 	}
 
-	return ctx, env.Client, clk, clusterState, cp, prov, candidates
+	return ctx, kubeClient, clk, clusterState, cp, prov, candidates
 }
 
 func makeBenchPods(count int, topologyFraction float64, nodeName string) []*corev1.Pod {
