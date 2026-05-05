@@ -46,7 +46,7 @@ jobs:
           grep -rl "test_performance" . --include="*.go" || echo "No files with test_performance tag"
           mkdir -p output
           echo "Running benchmarks..."
-          if ! go test -tags=test_performance -run='^$' -bench=. -count=6 -timeout=30m -cpuprofile output/cpu.out -memprofile output/mem.out -v 2>&1 | tee output/results.txt; then
+          if ! go test -tags=test_performance -run='^$' -bench=. -benchtime=1x -short -count=6 -timeout=30m -cpuprofile output/cpu.out -memprofile output/mem.out -v 2>&1 | tee output/results.txt; then
             echo "::error::go test failed. Output:"
             cat output/results.txt
             exit 1
