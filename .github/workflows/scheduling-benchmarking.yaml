@@ -89,7 +89,7 @@ jobs:
           fi
           echo "regression=$REGRESSED" >> "$GITHUB_OUTPUT"
       - name: Post PR comment
-        if: always() && steps.check.outputs.skip == 'false'
+        if: always() && steps.check.outputs.skip == 'false' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@67d0dec7b07ed060a405f9b2a64b8ab319fdd7db # v2.9.2
         with:
           header: bench-${{ matrix.name }}
