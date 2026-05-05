@@ -2626,12 +2626,15 @@ var _ = Describe("Instance Type Controller", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
-		ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
+		// Reconcile should succeed (skip the failing pool, not abort)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
+		// The failing pool should not be in evaluatedNodePools
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).ToNot(BeNil())
-		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		_, err = store.ApplyAll(nodePool.Name, []*cloudprovider.InstanceType{})
 		Expect(err).ToNot(BeNil())
+		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 0))
 	})
 	It("should not return instance type requirements with nodepool, nodeclass, and custom nodepool labels", func() {
@@ -2664,5 +2667,57 @@ var _ = Describe("Instance Type Controller", func() {
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodePoolLabelKey))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind())))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElements(lo.Keys(nodePool.Spec.Template.Labels)))
+	})
+})
+
+var _ = Describe("Failure Isolation", func() {
+	It("should evaluate healthy NodePools when one NodePool fails GetInstanceTypes", func() {
+		// Create a second NodePool that will fail
+		brokenNodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, nodePool, brokenNodePool)
+
+		// Inject an error for only the broken NodePool
+		cloudProvider.ErrorsForNodePool[brokenNodePool.Name] = fmt.Errorf("resolving node class, AKSNodeClass not found")
+
+		// Reconcile should succeed (not return error)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		// The healthy NodePool should be evaluated and usable
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+
+		// The broken NodePool should NOT be in evaluatedNodePools, so ApplyAll returns UnevaluatedNodePoolError
+		brokenInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, brokenNodePool)
+		Expect(err).ToNot(BeNil()) // ErrorsForNodePool returns error
+		Expect(brokenInstanceTypes).To(BeEmpty())
+		_, err = store.ApplyAll(brokenNodePool.Name, []*cloudprovider.InstanceType{})
+		Expect(err).ToNot(BeNil())
+		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue())
+	})
+	It("should update the store even when one NodePool fails", func() {
+		brokenNodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, nodePool, brokenNodePool)
+
+		cloudProvider.ErrorsForNodePool[brokenNodePool.Name] = fmt.Errorf("resolving node class, AKSNodeClass not found")
+
+		// Reset store to simulate fresh Karpenter startup (empty evaluatedNodePools)
+		store.Reset()
+
+		// Before reconcile, healthy pool should be unevaluated
+		_, err := store.ApplyAll(nodePool.Name, []*cloudprovider.InstanceType{})
+		Expect(err).ToNot(BeNil())
+		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue())
+
+		// After reconcile, healthy pool should be evaluated despite broken pool
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 	})
 })
