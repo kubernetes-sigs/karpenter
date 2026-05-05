@@ -1,0 +1,70 @@
+name: "Aspirational Tests"
+on:
+  pull_request:
+    paths:
+      - "**.go"
+    branches:
+      - main
+  push:
+    branches:
+      - main
+jobs:
+  aspirational:
+    name: Aspirational Tests
+    runs-on: ubuntu-latest
+    # Never block merge - these tests document goals, not requirements
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/install-deps
+        with:
+          k8sVersion: "1.35.x"
+      - name: Run aspirational tests
+        id: run
+        run: |
+          # Run with -v to see individual test pass/fail, don't fail the step
+          go test -tags=test_aspirational -count=1 -timeout=10m -v ./... 2>&1 | tee /tmp/aspirational-output.txt || true
+
+          # Parse results
+          PASSED=$(grep -c '^--- PASS:' /tmp/aspirational-output.txt || echo 0)
+          FAILED=$(grep -c '^--- FAIL:' /tmp/aspirational-output.txt || echo 0)
+          SKIPPED=$(grep -c '^--- SKIP:' /tmp/aspirational-output.txt || echo 0)
+          TOTAL=$((PASSED + FAILED + SKIPPED))
+
+          echo "passed=$PASSED" >> "$GITHUB_OUTPUT"
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
+        if: always()
+        run: |
+          PASSED=${{ steps.run.outputs.passed }}
+          FAILED=${{ steps.run.outputs.failed }}
+          TOTAL=${{ steps.run.outputs.total }}
+
+          {
+            echo "## Aspirational Tests"
+            echo ""
+            echo "These tests represent goals for the project. Passing is good news, not a requirement."
+            echo ""
+            echo "| Passed | Failed | Total |"
+            echo "|--------|--------|-------|"
+            echo "| $PASSED | $FAILED | $TOTAL |"
+            echo ""
+            if [ "$PASSED" -gt 0 ]; then
+              echo "### Newly passing tests"
+              echo "If any of these were previously failing, the underlying issue may be fixed!"
+              echo '```'
+              grep '^--- PASS:' /tmp/aspirational-output.txt || true
+              echo '```'
+            fi
+            if [ "$FAILED" -gt 0 ]; then
+              echo ""
+              echo "<details><summary>Still failing ($FAILED)</summary>"
+              echo ""
+              echo '```'
+              grep '^--- FAIL:' /tmp/aspirational-output.txt || true
+              echo '```'
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
