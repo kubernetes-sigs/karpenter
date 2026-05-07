@@ -113,7 +113,7 @@ type CapacityBufferSpec struct {
 
 	// replicas defines the desired number of buffer chunks to provision.
 	// If neither `replicas` nor `percentage` is set, as many chunks as fit within
-	// defined resource limits (if any) will be created. If both are set, the maximum
+	// defined resource limits (if any) will be created. If both are set, the minimum
 	// of the two will be used.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
@@ -163,7 +163,7 @@ type CapacityBufferStatus struct {
 	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"` //nolint:kubeapilinter
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,4,rep,name=conditions"` //nolint:kubeapilinter
 
 	// provisioningStrategy defines how the buffer should be utilized.
 	// +optional
