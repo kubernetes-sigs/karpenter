@@ -121,6 +121,12 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
 
+	// If some NodePools failed to resolve instance types, requeue sooner to
+	// recover from transient errors (e.g., temporary API failures, NodeClass
+	// not yet created) without waiting for the full 6h polling interval.
+	if len(evaluatedNodePoolItems) < len(nodePoolList.Items) {
+		return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
+	}
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil
 }
 
