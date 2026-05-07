@@ -305,12 +305,12 @@ func (cc *ClusterCost) internalAddOffering(ctx context.Context, npName string, o
 		}
 		oc, exists = cc.npCostMap[npName].offeringCounts[offeringKey]
 		if !exists {
-			oc = OfferingCount{Count: 1, Price: 0.0}
-			log.FromContext(ctx).Error(fmt.Errorf("failed to find offering %q during retry while searching for instance %q in zone %q with capacity %q in nodepool %q", offeringKey, offeringKey.InstanceName, offeringKey.Zone, offeringKey.CapacityType, npName), "offering won't be counted towards total cluster cost")
+			// Start at 0; the unconditional oc.Count += 1 below accounts for this add.
+			oc = OfferingCount{Count: 0, Price: 0.0}
+			log.FromContext(ctx).Error(fmt.Errorf("failed to find offering %q during retry while searching for instance %q in zone %q with capacity %q in nodepool %q", offeringKey, offeringKey.InstanceName, offeringKey.Zone, offeringKey.CapacityType, npName), "offering price unknown after retry — cost tracking will undercount for this nodeclaim until next UpdateOfferings")
 		}
-	} else {
-		oc.Count += 1
 	}
+	oc.Count += 1
 	cc.npCostMap[npName].offeringCounts[offeringKey] = oc
 	cc.npCostMap[npName].cost += oc.Price
 	return nil

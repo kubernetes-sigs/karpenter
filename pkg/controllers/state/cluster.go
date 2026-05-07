@@ -132,7 +132,10 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 			// We want to log every 10s when the cluster hasn't synced for 30s which is long enough for us to think there is an issue
 			if c.clock.Since(c.unsyncedStartTime) > time.Second*30 && c.clock.Since(c.lastUnsyncedLogTime) > time.Second*10 {
 				c.lastUnsyncedLogTime = c.clock.Now()
-				log.FromContext(ctx).WithValues("duration", c.clock.Since(c.unsyncedStartTime).Truncate(time.Second)).Error(fmt.Errorf("waiting on cluster sync"), "cluster is waiting on sync for extended duration")
+				log.FromContext(ctx).Error(
+					fmt.Errorf("waiting on cluster sync"),
+					"cluster is waiting on sync for extended duration",
+					"duration", c.clock.Since(c.unsyncedStartTime).Truncate(time.Second))
 			}
 			ClusterStateUnsyncedTimeSeconds.Set(c.clock.Since(c.unsyncedStartTime).Seconds(), nil)
 		}
@@ -422,6 +425,7 @@ func (c *Cluster) PodAckTime(podKey types.NamespacedName) time.Time {
 // It updates podHealthyNodePoolScheduledTime for pods scheduled against nodePool that have
 // NodeRegistrationHealthy=true. This also marks when the pod is first seen as schedulable for pod metrics.
 // We'll only emit a metric for a pod if we haven't done it before.
+// nolint:gocyclo
 func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[*corev1.Pod]error, npPods map[string][]*corev1.Pod, ncPods map[string][]*corev1.Pod) {
 	now := c.clock.Now()
 	for pod := range podErrors {
@@ -447,6 +451,13 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 		}
 		for _, p := range pods {
 			nn := client.ObjectKeyFromObject(p)
+			// Skip pods that are already bound to a node (e.g. pods from deleting nodes
+			// included in the scheduling simulation for capacity planning). Storing a new
+			// timestamp for already-bound pods would cause negative metric values since
+			// their PodScheduled LastTransitionTime is in the past.
+			if podutils.IsScheduled(p) {
+				continue
+			}
 			c.podsSchedulableTimes.LoadOrStore(nn, now)
 			_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, now)
 			// If we already attempted this, we don't need to emit another metric.
