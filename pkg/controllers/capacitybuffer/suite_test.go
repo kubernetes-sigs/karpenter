@@ -23,6 +23,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -59,28 +62,278 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("CapacityBuffer Controller", func() {
-	It("should set ReadyForProvisioning to True when reconciled with podTemplateRef", func() {
-		cb := &autoscalingv1alpha1.CapacityBuffer{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-buffer",
-				Namespace: "default",
-			},
-			Spec: autoscalingv1alpha1.CapacityBufferSpec{
-				ProvisioningStrategy: lo.ToPtr("buffer.x-k8s.io/active-capacity"),
-				PodTemplateRef:       &autoscalingv1alpha1.LocalObjectRef{Name: "test-template"},
-				Replicas:             lo.ToPtr(int32(5)),
-			},
-		}
-		ExpectApplied(ctx, env.Client, cb)
-		ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+	Context("PodTemplateRef resolution", func() {
+		It("should resolve a PodTemplate and set ReadyForProvisioning=True", func() {
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-template",
+					Namespace: "default",
+				},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{{
+							Name:  "app",
+							Image: "pause:latest",
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU:    resource.MustParse("1"),
+									v1.ResourceMemory: resource.MustParse("1Gi"),
+								},
+							},
+						}},
+					},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ProvisioningStrategy: lo.ToPtr("buffer.x-k8s.io/active-capacity"),
+					PodTemplateRef:       &autoscalingv1alpha1.LocalObjectRef{Name: "test-template"},
+					Replicas:             lo.ToPtr(int32(5)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
 
-		cb = ExpectExists(ctx, env.Client, cb)
-		cond := findCondition(cb.Status.Conditions, ConditionReadyForProvisioning)
-		Expect(cond).ToNot(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal("Resolved"))
-		Expect(cb.Status.ProvisioningStrategy).ToNot(BeNil())
-		Expect(*cb.Status.ProvisioningStrategy).To(Equal("buffer.x-k8s.io/active-capacity"))
+			cb = ExpectExists(ctx, env.Client, cb)
+			cond := findCondition(cb.Status.Conditions, ConditionReadyForProvisioning)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(ReasonResolved))
+			Expect(cb.Status.PodTemplateRef).ToNot(BeNil())
+			Expect(cb.Status.PodTemplateRef.Name).To(Equal("test-template"))
+			Expect(cb.Status.Replicas).ToNot(BeNil())
+			Expect(*cb.Status.Replicas).To(Equal(int32(5)))
+			Expect(cb.Status.ProvisioningStrategy).ToNot(BeNil())
+			Expect(*cb.Status.ProvisioningStrategy).To(Equal("buffer.x-k8s.io/active-capacity"))
+		})
+
+		It("should set ReadyForProvisioning=False when PodTemplate is not found", func() {
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer-missing",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "nonexistent"},
+					Replicas:       lo.ToPtr(int32(3)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			cond := findCondition(cb.Status.Conditions, ConditionReadyForProvisioning)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(ReasonPodTemplateNotFound))
+		})
+	})
+
+	Context("ScalableRef resolution", func() {
+		It("should resolve a Deployment and calculate percentage-based replicas", func() {
+			deploy := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-app",
+					Namespace: "default",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: lo.ToPtr(int32(10)),
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "my-app"}},
+					Template: v1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "my-app"}},
+						Spec: v1.PodSpec{
+							Containers: []v1.Container{{
+								Name:  "app",
+								Image: "pause:latest",
+								Resources: v1.ResourceRequirements{
+									Requests: v1.ResourceList{
+										v1.ResourceCPU:    resource.MustParse("500m"),
+										v1.ResourceMemory: resource.MustParse("256Mi"),
+									},
+								},
+							}},
+						},
+					},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer-scalable",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "my-app",
+					},
+					Percentage: lo.ToPtr(int32(20)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, deploy, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			cond := findCondition(cb.Status.Conditions, ConditionReadyForProvisioning)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cb.Status.Replicas).ToNot(BeNil())
+			// 20% of 10 = 2
+			Expect(*cb.Status.Replicas).To(Equal(int32(2)))
+		})
+
+		It("should set ReadyForProvisioning=False when scalable ref is not found", func() {
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer-missing-ref",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "nonexistent",
+					},
+					Replicas: lo.ToPtr(int32(3)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			cond := findCondition(cb.Status.Conditions, ConditionReadyForProvisioning)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(ReasonScalableRefNotFound))
+		})
+	})
+
+	Context("Replica calculation", func() {
+		It("should use fixed replicas when only replicas is set", func() {
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fixed-template",
+					Namespace: "default",
+				},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{{
+							Name:  "app",
+							Image: "pause:latest",
+						}},
+					},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-fixed-replicas",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "fixed-template"},
+					Replicas:       lo.ToPtr(int32(7)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			Expect(cb.Status.Replicas).ToNot(BeNil())
+			Expect(*cb.Status.Replicas).To(Equal(int32(7)))
+		})
+
+		It("should use the minimum of replicas and limit-based replicas", func() {
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "limit-template",
+					Namespace: "default",
+				},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{{
+							Name:  "app",
+							Image: "pause:latest",
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU: resource.MustParse("1"),
+								},
+							},
+						}},
+					},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-limit-replicas",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "limit-template"},
+					Replicas:       lo.ToPtr(int32(10)),
+					Limits:         autoscalingv1alpha1.Limits{v1.ResourceCPU: resource.MustParse("3")},
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			Expect(cb.Status.Replicas).ToNot(BeNil())
+			// Limit allows 3 CPUs / 1 CPU per pod = 3, but spec.replicas = 10
+			// min(10, 3) = 3
+			Expect(*cb.Status.Replicas).To(Equal(int32(3)))
+		})
+
+		It("should use percentage with minimum of 1 replica", func() {
+			deploy := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "small-app",
+					Namespace: "default",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: lo.ToPtr(int32(1)),
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "small-app"}},
+					Template: v1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "small-app"}},
+						Spec: v1.PodSpec{
+							Containers: []v1.Container{{
+								Name:  "app",
+								Image: "pause:latest",
+								Resources: v1.ResourceRequirements{
+									Requests: v1.ResourceList{
+										v1.ResourceCPU: resource.MustParse("100m"),
+									},
+								},
+							}},
+						},
+					},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pct-min",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "small-app",
+					},
+					Percentage: lo.ToPtr(int32(10)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, deploy, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			Expect(cb.Status.Replicas).ToNot(BeNil())
+			// 10% of 1 = 0.1, ceil = 1, minimum 1
+			Expect(*cb.Status.Replicas).To(Equal(int32(1)))
+		})
 	})
 })
 
