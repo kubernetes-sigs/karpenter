@@ -147,8 +147,8 @@ func (t *TopologyGroup) Record(domains ...string) {
 
 // Counts returns true if the pod would count for the topology, given that it schedule to a node with the provided
 // requirements
-func (t *TopologyGroup) Counts(pod *corev1.Pod, taints []corev1.Taint, requirements scheduling.Requirements, compatabilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
-	return t.selects(pod) && t.nodeFilter.Matches(taints, requirements, compatabilityOptions...)
+func (t *TopologyGroup) Counts(pod *corev1.Pod, taints []corev1.Taint, requirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
+	return t.selects(pod) && t.nodeFilter.Matches(taints, requirements, compatibilityOptions...)
 }
 
 // Register ensures that the topology is aware of the given domain names.

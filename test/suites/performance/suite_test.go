@@ -24,7 +24,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -35,11 +34,6 @@ import (
 var nodePool *v1.NodePool
 var nodeClass *unstructured.Unstructured
 var env *common.Environment
-
-var testLabels = map[string]string{
-	test.DiscoveryLabel: "owned",
-}
-var labelSelector = labels.SelectorFromSet(testLabels)
 
 func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -59,14 +53,14 @@ var _ = BeforeEach(func() {
 	nodePool = env.DefaultNodePool(nodeClass)
 	if env.IsDefaultNodeClassKWOK() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-				Key:      v1alpha1.InstanceSizeLabelKey,
-				Operator: corev1.NodeSelectorOpLt,
-				Values:   []string{"32"},
-			},
+			Key:      v1alpha1.InstanceSizeLabelKey,
+			Operator: corev1.NodeSelectorOpLt,
+			Values:   []string{"32"},
 		})
 	}
 	nodePool.Spec.Limits = v1.Limits{}
+	nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
+	nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 })
 

@@ -40,6 +40,11 @@ import (
 // that uses a StorageClass with any of these unsupported provisioners, Karpenter will skip scheduling that pod.
 var UnsupportedProvisioners = sets.New[string]()
 
+// UnsupportedTopologyKeys is a set of topology keys that are not supported. When a StorageClass has AllowedTopologies
+// containing any of these keys, Karpenter will skip scheduling pods that reference a PVC with that StorageClass, since nodes
+// created by Karpenter will never satisfy the topology requirement.
+var UnsupportedTopologyKeys = sets.New[string]()
+
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
 	return &VolumeTopology{kubeClient: kubeClient}
 }
@@ -48,42 +53,27 @@ type VolumeTopology struct {
 	kubeClient client.Client
 }
 
-func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
+// GetRequirements returns the volume topology requirements for the pod.
+//
+// These requirements should be:
+//   - Added to nodeRequirements (for NodeClaim zone selection)
+//   - NOT added to pod's NodeAffinity (to preserve correct TSC counting)
+func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) (scheduling.Requirements, error) {
 	var requirements []v1.NodeSelectorRequirement
 	for _, volume := range pod.Spec.Volumes {
 		req, err := v.getRequirements(ctx, pod, volume)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		requirements = append(requirements, req...)
 	}
 	if len(requirements) == 0 {
-		return nil
+		return nil, nil
 	}
-	if pod.Spec.Affinity == nil {
-		pod.Spec.Affinity = &v1.Affinity{}
-	}
-	if pod.Spec.Affinity.NodeAffinity == nil {
-		pod.Spec.Affinity.NodeAffinity = &v1.NodeAffinity{}
-	}
-	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &v1.NodeSelector{}
-	}
-	if len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = []v1.NodeSelectorTerm{{}}
-	}
-
-	// We add our volume topology zonal requirement to every node selector term.  This causes it to be AND'd with every existing
-	// requirement so that relaxation won't remove our volume requirement.
-	for i := 0; i < len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms); i++ {
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions = append(
-			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions, requirements...)
-	}
-
 	log.FromContext(ctx).
-		WithValues("Pod", klog.KObj(pod)).
-		V(1).Info(fmt.Sprintf("adding requirements derived from pod volumes, %s", requirements))
-	return nil
+		WithValues("Pod", klog.KObj(pod), "requirements", requirements).
+		V(1).Info("getting requirements from pod volumes")
+	return scheduling.NewNodeSelectorRequirements(requirements...), nil
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {
@@ -201,6 +191,15 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 			if lo.FromPtr(storageClass.VolumeBindingMode) == storagev1.VolumeBindingImmediate {
 				return serrors.Wrap(fmt.Errorf("failed to validate pvc, pvc with immediate volume binding mode must be bound"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
 			}
+			// Reject pods whose StorageClass has AllowedTopologies with unsupported topology keys,
+			// since Karpenter-created nodes will never have matching labels for these keys.
+			for _, term := range storageClass.AllowedTopologies {
+				for _, expr := range term.MatchLabelExpressions {
+					if UnsupportedTopologyKeys.Has(expr.Key) {
+						return serrors.Wrap(fmt.Errorf("failed to validate pvc, storage class uses unsupported topology key"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName), "TopologyKey", expr.Key)
+					}
+				}
+			}
 		}
 		// Finally, validate that the driver is in the set of supported drivers
 		driver, err := scheduling.ResolveDriver(log.IntoContext(ctx, logging.NopLogger), v.kubeClient, pod, vol.Name, pvc, lo.FromPtr(pvc.Spec.StorageClassName))
@@ -220,6 +219,9 @@ func (v *VolumeTopology) validateVolume(ctx context.Context, volumeName string) 
 		pv := &v1.PersistentVolume{}
 		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volumeName}, pv); err != nil {
 			return err
+		}
+		if !pv.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("persistentvolume is being deleted")
 		}
 	}
 	return nil

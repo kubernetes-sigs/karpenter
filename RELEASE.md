@@ -10,7 +10,7 @@ This repository is the home for both of the above components.
 
 ## Versioning Strategy
 
-The versioning strategy for this project is covered in detail in [the release type section of the compatability documentation](https://karpenter.sh/docs/upgrading/compatibility/#release-types).
+The versioning strategy for this project is covered in detail in [the release type section of the compatibility documentation](https://karpenter.sh/docs/upgrading/compatibility/#release-types).
 
 ## Releasing a New Version
 

@@ -18,10 +18,8 @@ package v1_test
 
 import (
 	"math"
-	"strings"
 	"time"
 
-	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -29,6 +27,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var _ = Describe("Budgets", func() {
@@ -85,7 +84,7 @@ var _ = Describe("Budgets", func() {
 			},
 		}
 		nodePool = &NodePool{
-			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
+			ObjectMeta: metav1.ObjectMeta{Name: test.RandomName()},
 			Spec: NodePoolSpec{
 				Disruption: Disruption{
 					Budgets: budgets,

@@ -26,7 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
+//go:generate go tool -modfile=../../go.tools.mod controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 
 // HostPortUsage tracks HostPort usage within a node. On a node, each <hostIP, hostPort, protocol> used by pods bound
 // to the node must be unique. We need to track this to keep an accurate concept of what pods can potentially schedule

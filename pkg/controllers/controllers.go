@@ -21,6 +21,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -60,8 +61,23 @@ import (
 	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 )
+
+type ControllerOptions struct {
+	registrationHooks []cloudprovider.NodeLifecycleHook
+}
+
+// WithRegistrationHook registers a hook that blocks Karpenter from marking a node as registered
+// until the hook's preconditions are satisfied. This is useful when a cloud provider needs to
+// apply well-known labels asynchronously after instance launch (e.g., capacity reservation labels
+// used by topology spread constraints).
+func WithRegistrationHook(hook cloudprovider.NodeLifecycleHook) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.registrationHooks = append(o.registrationHooks, hook)
+	}
+}
 
 func NewControllers(
 	ctx context.Context,
@@ -73,11 +89,14 @@ func NewControllers(
 	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
+	opts ...option.Function[ControllerOptions],
 ) []controller.Controller {
+	o := option.Resolve(opts...)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
-	npState := make(nodepoolhealth.State)
+	npState := nodepoolhealth.NewState()
+	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
@@ -89,8 +108,9 @@ func NewControllers(
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
-		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
-		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster),
+		informer.NewNodePoolController(kubeClient, cloudProvider, cluster, clusterCost),
+		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
+		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider, npState),
@@ -98,7 +118,7 @@ func NewControllers(
 		nodepoolvalidation.NewController(kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState, o.registrationHooks),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
@@ -108,7 +128,7 @@ func NewControllers(
 	if !options.FromContext(ctx).DisableClusterStateObservability {
 		controllers = append(controllers,
 			metricspod.NewController(kubeClient, cluster),
-			metricsnodepool.NewController(kubeClient, cloudProvider),
+			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost),
 			metricsnode.NewController(cluster),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
@@ -138,7 +158,7 @@ func NewControllers(
 
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock))
-		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock))
+		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock, recorder))
 	}
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {

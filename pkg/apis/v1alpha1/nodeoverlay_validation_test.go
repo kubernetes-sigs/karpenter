@@ -31,6 +31,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	. "sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var _ = Describe("CEL/Validation", func() {
@@ -38,9 +39,9 @@ var _ = Describe("CEL/Validation", func() {
 
 	BeforeEach(func() {
 		nodeOverlay = &NodeOverlay{
-			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
+			ObjectMeta: metav1.ObjectMeta{Name: test.RandomName()},
 			Spec: NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
+				Requirements: []NodeSelectorRequirement{
 					{
 						Key:      v1.CapacityTypeLabelKey,
 						Operator: corev1.NodeSelectorOpExists,
@@ -51,28 +52,28 @@ var _ = Describe("CEL/Validation", func() {
 	})
 	Context("Requirements", func() {
 		It("should fail for no values for In operator", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 				{Key: "Test", Operator: corev1.NodeSelectorOpIn},
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).NotTo(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).NotTo(Succeed())
 		})
 		It("should fail for no values for NotIn operator", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 				{Key: "Test", Operator: corev1.NodeSelectorOpNotIn},
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).NotTo(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).NotTo(Succeed())
 		})
 		It("should succeed for valid requirement keys", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 				{Key: "Test", Operator: corev1.NodeSelectorOpExists},
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should succeed for valid requirement keys", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 				{Key: "Test", Operator: corev1.NodeSelectorOpExists},
 				{Key: "test.com/Test", Operator: corev1.NodeSelectorOpExists},
 				{Key: "test.com.com/test", Operator: corev1.NodeSelectorOpExists},
@@ -82,24 +83,24 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should fail for invalid requirement keys", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{{Key: "test.com.com}", Operator: corev1.NodeSelectorOpExists}}
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: "test.com.com}", Operator: corev1.NodeSelectorOpExists}}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{{Key: "Test.com/test", Operator: corev1.NodeSelectorOpExists}}
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: "Test.com/test", Operator: corev1.NodeSelectorOpExists}}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{{Key: "test/test/test", Operator: corev1.NodeSelectorOpExists}}
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: "test/test/test", Operator: corev1.NodeSelectorOpExists}}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{{Key: "test/", Operator: corev1.NodeSelectorOpExists}}
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: "test/", Operator: corev1.NodeSelectorOpExists}}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{{Key: "/test", Operator: corev1.NodeSelectorOpExists}}
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: "/test", Operator: corev1.NodeSelectorOpExists}}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
 		It("should allow for the karpenter.sh/nodepool label", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 				{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
@@ -107,20 +108,22 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail at runtime for requirement keys that are too long", func() {
 			oldnodeOverlay := nodeOverlay.DeepCopy()
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Operator: corev1.NodeSelectorOpExists}}
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Operator: corev1.NodeSelectorOpExists}}
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 			Expect(env.Client.Delete(ctx, nodeOverlay)).To(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 			nodeOverlay = oldnodeOverlay.DeepCopy()
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{{Key: fmt.Sprintf("test.com.test/test-%s", strings.ToLower(randomdata.Alphanumeric(250))), Operator: corev1.NodeSelectorOpExists}}
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{{Key: fmt.Sprintf("test.com.test/test-%s", strings.ToLower(randomdata.Alphanumeric(250))), Operator: corev1.NodeSelectorOpExists}}
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
 		It("should allow supported ops", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpGte, Values: []string{"1"}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpLte, Values: []string{"1"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpExists},
 			}
@@ -129,7 +132,7 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail for unsupported ops", func() {
 			for _, op := range []corev1.NodeSelectorOperator{"unknown"} {
-				nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: corev1.LabelTopologyZone, Operator: op, Values: []string{"test"}},
 				}
 				Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
@@ -138,17 +141,17 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail for restricted domains", func() {
 			for label := range v1.RestrictedLabelDomains {
-				nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: label + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
 				Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 				Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 			}
 		})
-		It("should allow restricted domains exceptions", func() {
+		It("should allow kubernetes domains exceptions", func() {
 			oldnodeOverlay := nodeOverlay.DeepCopy()
-			for label := range v1.LabelDomainExceptions {
-				nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			for _, label := range []string{"kubernetes.io", "k8s.io"} {
+				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: label + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
 				Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
@@ -157,10 +160,10 @@ var _ = Describe("CEL/Validation", func() {
 				nodeOverlay = oldnodeOverlay.DeepCopy()
 			}
 		})
-		It("should allow restricted subdomains exceptions", func() {
+		It("should allow kubernetes subdomains exceptions", func() {
 			oldnodeOverlay := nodeOverlay.DeepCopy()
-			for label := range v1.LabelDomainExceptions {
-				nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			for _, label := range []string{"kubernetes.io", "k8s.io"} {
+				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: "subdomain." + label + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
 				Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
@@ -173,7 +176,7 @@ var _ = Describe("CEL/Validation", func() {
 			oldnodeOverlay := nodeOverlay.DeepCopy()
 			// Capacity Type is runtime validated
 			for label := range v1.WellKnownLabels.Difference(sets.New(v1.NodePoolLabelKey, v1.CapacityTypeLabelKey)) {
-				nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 					{Key: label, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
 				Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
@@ -183,7 +186,7 @@ var _ = Describe("CEL/Validation", func() {
 			}
 		})
 		It("should allow non-empty set after removing overlapped value", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test", "foo"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test", "bar"}},
 			}
@@ -191,7 +194,7 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should allow empty requirements", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+			nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{
 				{
 					Key:      "test",
 					Operator: corev1.NodeSelectorOpExists,
@@ -201,7 +204,7 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should fail with invalid GT or LT values", func() {
-			for _, requirement := range []corev1.NodeSelectorRequirement{
+			for _, requirement := range []NodeSelectorRequirement{
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{"1", "2"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{"a"}},
@@ -211,7 +214,23 @@ var _ = Describe("CEL/Validation", func() {
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpLt, Values: []string{"a"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpLt, Values: []string{"-1"}},
 			} {
-				nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{requirement}
+				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{requirement}
+				Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+				Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+			}
+		})
+		It("should fail with invalid GTE or LTE values", func() {
+			for _, requirement := range []NodeSelectorRequirement{
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpGte, Values: []string{}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpGte, Values: []string{"1", "2"}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpGte, Values: []string{"a"}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpGte, Values: []string{"-1"}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpLte, Values: []string{}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpLte, Values: []string{"1", "2"}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpLte, Values: []string{"a"}},
+				{Key: corev1.LabelTopologyZone, Operator: v1.NodeSelectorOpLte, Values: []string{"-1"}},
+			} {
+				nodeOverlay.Spec.Requirements = []NodeSelectorRequirement{requirement}
 				Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 				Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 			}

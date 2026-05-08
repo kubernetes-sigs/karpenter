@@ -38,13 +38,11 @@ var _ = Describe("StaticCapacity", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values: []string{
-							"c-16x-amd64-linux",
-							"c-16x-arm64-linux",
-						},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values: []string{
+						"c-16x-amd64-linux",
+						"c-16x-arm64-linux",
 					},
 				})
 			}
@@ -129,13 +127,11 @@ var _ = Describe("StaticCapacity", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values: []string{
-							"c-16x-amd64-linux",
-							"c-16x-arm64-linux",
-						},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values: []string{
+						"c-16x-amd64-linux",
+						"c-16x-arm64-linux",
 					},
 				})
 			}
@@ -257,13 +253,11 @@ var _ = Describe("StaticCapacity", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(10))
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values: []string{
-							"c-16x-amd64-linux",
-							"c-16x-arm64-linux",
-						},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values: []string{
+						"c-16x-amd64-linux",
+						"c-16x-arm64-linux",
 					},
 				})
 			}
@@ -338,40 +332,31 @@ var _ = Describe("StaticCapacity", func() {
 		var dynamicNodePool *v1.NodePool
 		var label map[string]string
 		BeforeEach(func() {
-			// Create a static NodePool
-			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values: []string{
-							"c-16x-amd64-linux",
-							"c-16x-arm64-linux",
-						},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values: []string{
+						"c-16x-amd64-linux",
+						"c-16x-arm64-linux",
 					},
 				})
 			}
+
+			// Copy nodePool before applying static-specific modifications
+			dynamicNodePool = test.NodePool(
+				lo.FromPtr(nodePool),
+				v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "dynamic-nodepool"}},
+			)
+
+			// Apply static-specific modifications
+			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 			nodePool.Spec.Template.Spec.Taints = []corev1.Taint{
 				{
 					Key:    "static",
 					Effect: corev1.TaintEffectNoExecute,
 				},
 			}
-			// Create a dynamic NodePool
-			dynamicNodePool = test.NodePool(v1.NodePool{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "dynamic-nodepool",
-				},
-				Spec: v1.NodePoolSpec{
-					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimTemplateSpec{
-							Requirements: nodePool.Spec.Template.Spec.Requirements,
-							NodeClassRef: nodePool.Spec.Template.Spec.NodeClassRef,
-						},
-					},
-				},
-			})
 			label = map[string]string{"app": "large-app"}
 		})
 
@@ -439,13 +424,11 @@ var _ = Describe("StaticCapacity", func() {
 		BeforeEach(func() {
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values: []string{
-							"c-16x-amd64-linux",
-							"c-16x-arm64-linux",
-						},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values: []string{
+						"c-16x-amd64-linux",
+						"c-16x-arm64-linux",
 					},
 				})
 			}
@@ -485,10 +468,12 @@ var _ = Describe("StaticCapacity", func() {
 			env.EventuallyExpectNodeClaimsReady(finalNodeClaims...)
 
 			// All final nodes should have the new annotation (either newly created or replaced due to drift)
-			nodes := env.EventuallyExpectInitializedNodeCount("==", 4)
-			for _, node := range nodes {
-				Expect(node.Annotations).To(HaveKeyWithValue("drift-trigger", "test-value"))
-			}
+			Eventually(func(g Gomega) {
+				nodes := env.EventuallyExpectInitializedNodeCount("==", 4)
+				for _, node := range nodes {
+					g.Expect(node.Annotations).To(HaveKeyWithValue("drift-trigger", "test-value"))
+				}
+			}).WithTimeout(10 * time.Minute).Should(Succeed())
 		})
 
 		It("should handle NodePool deletion gracefully", func() {
@@ -501,6 +486,9 @@ var _ = Describe("StaticCapacity", func() {
 
 			// Delete the NodePool
 			env.ExpectDeleted(nodePool)
+
+			// During deletion, no new NodeClaims should be created - count should only decrease
+			env.ConsistentlyExpectNodeClaimCountNotExceed(30*time.Second, 3)
 
 			// All nodes should eventually be cleaned up
 			env.EventuallyExpectInitializedNodeCount("==", 0)

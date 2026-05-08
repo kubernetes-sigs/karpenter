@@ -5,9 +5,28 @@ Karpenter leverages Github Actions to run our E2E test suites.
 ## Directories
 - `./.github/workflows`: Workflow files run within this repository. Relevant files for E2E testing are prefixed with `e2e-`
 - `./.github/actions/e2e`: Composite actions utilized by the E2E workflows
-- `./test/suites`: Directories defining test suites
-- `./test/pkg`: Common utilities and expectations
-- `./test/hack`: Testing scripts
+- `./test/suites`: Ginkgo suites (`regression`, `performance`)
+- `./test/pkg`: Shared helpers used by suites
+- `./test/pkg/environment`: Default NodePool/NodeClass fixtures and test flag wiring
+- `./test/pkg/debug`: Debug collectors and object dumps used on failures
+- `./hack`: Testing scripts
+
+## Running locally (core repo)
+
+From the repo root, after deploying the controller to your cluster:
+
+```bash
+TEST_SUITE=regression make e2etests
+```
+
+Filter with Ginkgo regexes:
+
+```bash
+FOCUS="DaemonSet" TEST_SUITE=regression make e2etests
+SKIP="Disruption" TEST_SUITE=regression make e2etests
+```
+
+Valid suites are `regression` and `performance`.
 
 # Integrating Karpenter Tests for Cloud Providers
 
@@ -94,7 +113,7 @@ These files follow the same pattern that kubernetes-sigs/karpenter uses for its 
 Add the Karpenter core repository as a dependency in your Go module:
 
 ```bash
-go get github.com/aws/karpenter-core
+go get sigs.k8s.io/karpenter
 ```
 
 ### 4. Configure CI/CD Integration

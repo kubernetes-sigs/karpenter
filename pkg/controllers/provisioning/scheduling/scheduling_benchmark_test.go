@@ -250,6 +250,7 @@ func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.
 		nil,
 		events.NewRecorder(&record.FakeRecorder{}),
 		clock,
+		nil, // volumeReqsByPod
 		opts...,
 	), nil
 }

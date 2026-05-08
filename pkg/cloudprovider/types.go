@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
+//go:generate go tool -modfile=../../go.tools.mod controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 
 var (
 	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
@@ -97,6 +97,23 @@ type CloudProvider interface {
 	// GetSupportedNodeClasses returns CloudProvider NodeClass that implements status.Object
 	// NOTE: It returns a list where the first element should be the default NodeClass
 	GetSupportedNodeClasses() []status.Object
+}
+
+type NodeLifecycleHookResult struct {
+	// Requeue indicates the lifecycle controller should requeue with exponential backoff.
+	Requeue bool
+	// RequeueAfter indicates the lifecycle controller should requeue after the provided duration.
+	// If multiple hooks are provided, the shortest interval is respected.
+	RequeueAfter time.Duration
+}
+
+// NodeLifecycleHook is implemented by cloud providers to gate node registration.
+// All registered hooks must return an empty result before node registration completes.
+type NodeLifecycleHook interface {
+	// Name for the hook.
+	Name() string
+	// Registered returns true if this hook's preconditions are satisfied and can proceed.
+	Registered(context.Context, *v1.NodeClaim) (NodeLifecycleHookResult, error)
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
@@ -582,4 +599,27 @@ func (e *CreateError) Error() string {
 
 func (e *CreateError) Unwrap() error {
 	return e.error
+}
+
+// UnevaluatedNodePoolError is an error when the NodePool isn't ready for evaluation
+type UnevaluatedNodePoolError struct {
+	nodePoolName string
+}
+
+func NewUnevaluatedNodePoolError(nodePoolName string) *UnevaluatedNodePoolError {
+	return &UnevaluatedNodePoolError{
+		nodePoolName: nodePoolName,
+	}
+}
+
+func (e *UnevaluatedNodePoolError) Error() string {
+	return fmt.Sprintf("nodepool %q is awaiting evaluation", e.nodePoolName)
+}
+
+func IsUnevaluatedNodePoolError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var onatnpErr *UnevaluatedNodePoolError
+	return errors.As(err, &onatnpErr)
 }

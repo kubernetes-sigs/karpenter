@@ -28,13 +28,13 @@ import (
 )
 
 var (
-	npState nodepoolhealth.State
+	npState *nodepoolhealth.State
 	npUUID  types.UID
 )
 
 var _ = BeforeSuite(func() {
 	npUUID = uuid.NewUUID()
-	npState = nodepoolhealth.State{}
+	npState = nodepoolhealth.NewState()
 })
 
 var _ = AfterEach(func() {
@@ -47,6 +47,31 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = Describe("NodePoolHealthState", func() {
+	It("should record all concurrent updates correctly", func() {
+		concurrentState := nodepoolhealth.NewState()
+		done := make(chan bool, 4)
+		sameUID := types.UID("test")
+		// Add exactly 2 false values (50% of buffer size 4)
+		for i := 0; i < 2; i++ {
+			go func() {
+				defer func() { done <- true }()
+				concurrentState.Update(sameUID, false)
+			}()
+		}
+		// Add exactly 2 true values
+		for i := 0; i < 2; i++ {
+			go func() {
+				defer func() { done <- true }()
+				concurrentState.Update(sameUID, true)
+			}()
+		}
+		for i := 0; i < 4; i++ {
+			<-done
+		}
+		// With proper locks: exactly 50% false = StatusUnhealthy
+		// Without locks: could lose updates = wrong status
+		Expect(concurrentState.Status(sameUID)).To(Equal(nodepoolhealth.StatusUnhealthy))
+	})
 	It("should expect status unknown for a new nodePool with empty buffer", func() {
 		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusUnknown))
 	})

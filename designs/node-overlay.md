@@ -72,7 +72,7 @@ spec:
 
 **Price Adjustment:** Define a pricing adjustment for instance types that match the specified labels. Users can adjust prices using either:
 - A signed float representing the price adjustment
-- A percentage of the original price (e.g., +10% for increase, -15% for decrees)
+- A percentage of the original price (e.g., +10% for increase, -15% for decrease)
 
 *Karpenter is currency-agnostic, so while these examples use USD, the same principles apply to all currencies.*
 

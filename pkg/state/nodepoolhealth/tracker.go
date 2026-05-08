@@ -63,6 +63,9 @@ func (t *Tracker) Reset() {
 }
 
 func (t *Tracker) Status() Status {
+	t.RLock()
+	defer t.RUnlock()
+
 	if t.buffer.Len() == 0 {
 		return StatusUnknown
 	}
@@ -82,49 +85,73 @@ func (t *Tracker) Status() Status {
 }
 
 func (t *Tracker) SetStatus(status Status) {
+	t.Lock()
+	defer t.Unlock()
+
 	switch status {
 	case StatusUnknown:
 		t.buffer.Reset()
 	case StatusHealthy:
 		t.buffer.Reset()
-		t.Update(true)
+		t.buffer.Insert(true)
 	case StatusUnhealthy:
 		t.buffer.Reset()
 		for range int(BufferSize * ThresholdFalse) {
-			t.Update(false)
+			t.buffer.Insert(false)
 		}
 	}
 }
 
-type State map[types.UID]*Tracker
+type State struct {
+	sync.RWMutex
+	trackers map[types.UID]*Tracker
+}
 
-func (s State) nodePoolNodeRegistration(nodePoolUID types.UID) *Tracker {
-	tracker, exists := s[nodePoolUID]
+func NewState() *State {
+	return &State{
+		trackers: make(map[types.UID]*Tracker),
+	}
+}
+
+func (s *State) nodePoolNodeRegistration(nodePoolUID types.UID) *Tracker {
+	s.RLock()
+	tracker, exists := s.trackers[nodePoolUID]
+	s.RUnlock()
+
 	if !exists {
-		tracker = NewTracker(BufferSize)
-		s[nodePoolUID] = tracker
+		s.Lock()
+		// Double-check after acquiring write lock
+		if tracker, exists = s.trackers[nodePoolUID]; !exists {
+			tracker = NewTracker(BufferSize)
+			s.trackers[nodePoolUID] = tracker
+		}
+		s.Unlock()
 	}
 	return tracker
 }
 
-func (s State) Status(nodePoolUID types.UID) Status {
+func (s *State) Status(nodePoolUID types.UID) Status {
 	return s.nodePoolNodeRegistration(nodePoolUID).Status()
 }
 
-func (s State) Update(nodePoolUID types.UID, launchStatus bool) {
+func (s *State) Update(nodePoolUID types.UID, launchStatus bool) {
 	s.nodePoolNodeRegistration(nodePoolUID).Update(launchStatus)
 }
 
-func (s State) SetStatus(nodePoolUID types.UID, status Status) {
+func (s *State) SetStatus(nodePoolUID types.UID, status Status) {
 	s.nodePoolNodeRegistration(nodePoolUID).SetStatus(status)
 }
 
-func (s State) DryRun(nodePoolUID types.UID, launchStatus bool) *Tracker {
+func (s *State) DryRun(nodePoolUID types.UID, launchStatus bool) *Tracker {
 	trackerCopy := NewTracker(BufferSize)
 	originalTracker := s.nodePoolNodeRegistration(nodePoolUID)
+
+	originalTracker.RLock()
 	for _, item := range originalTracker.buffer.Items() {
 		trackerCopy.buffer.Insert(item)
 	}
+	originalTracker.RUnlock()
+
 	trackerCopy.Update(launchStatus)
 	return trackerCopy
 }

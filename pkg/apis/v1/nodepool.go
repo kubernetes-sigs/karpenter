@@ -40,18 +40,22 @@ import (
 // +kubebuilder:validation:XValidation:rule="!has(self.replicas) || (!has(self.limits) || size(self.limits) == 0 || (size(self.limits) == 1 && 'nodes' in self.limits))",message="only 'limits.nodes' is supported on static NodePools"
 // +kubebuilder:validation:XValidation:rule="!has(self.replicas) || !has(self.weight)",message="'weight' is not supported on static NodePools"
 type NodePoolSpec struct {
+	//nolint:kubeapilinter
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
 	// +required
 	Template NodeClaimTemplate `json:"template"`
+	//nolint:kubeapilinter
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
 	// +kubebuilder:default:={consolidateAfter: "0s"}
 	// +optional
 	Disruption Disruption `json:"disruption"`
+	//nolint:kubeapilinter
 	// Limits define a set of bounds for provisioning capacity.
 	// Limits other than limits.nodes is not supported when replicas is set.
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
+	//nolint:kubeapilinter
 	// Weight is the priority given to the nodepool during scheduling. A higher
 	// numerical weight indicates that this nodepool will be ordered
 	// ahead of other nodepools with lower weights. A nodepool with no weight
@@ -61,6 +65,7 @@ type NodePoolSpec struct {
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	Weight *int32 `json:"weight,omitempty"`
+	//nolint:kubeapilinter
 	// Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will
 	// maintain this fixed number of replicas rather than scaling based on pod demand.
 	// When replicas is set:
@@ -76,6 +81,7 @@ type NodePoolSpec struct {
 }
 
 type Disruption struct {
+	//nolint:kubeapilinter
 	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
@@ -85,6 +91,7 @@ type Disruption struct {
 	// +kubebuilder:validation:Schemaless
 	// +required
 	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
+	//nolint:kubeapilinter
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified
 	// When replicas is set, ConsolidationPolicy is simply ignored
@@ -92,6 +99,7 @@ type Disruption struct {
 	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized}
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
+	//nolint:kubeapilinter
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,
@@ -106,12 +114,14 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
+	//nolint:kubeapilinter
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
 	// allowed reasons are Underutilized, Empty, and Drifted.
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
+	//nolint:kubeapilinter
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
 	// that can be terminating at once. This is calculated by counting nodes that
 	// have a deletion timestamp set, or are actively being deleted by Karpenter.
@@ -122,6 +132,7 @@ type Budget struct {
 	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
 	// +kubebuilder:default:="10%"
 	Nodes string `json:"nodes" hash:"ignore"`
+	//nolint:kubeapilinter
 	// Schedule specifies when a budget begins being active, following
 	// the upstream cronjob syntax. If omitted, the budget is always active.
 	// Timezones are not supported.
@@ -129,6 +140,7 @@ type Budget struct {
 	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
 	// +optional
 	Schedule *string `json:"schedule,omitempty" hash:"ignore"`
+	//nolint:kubeapilinter
 	// Duration determines how long a Budget is active since each Schedule hit.
 	// Only minutes and hours are accepted, as cron does not work in seconds.
 	// If omitted, the budget is always active.
@@ -175,7 +187,8 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 }
 
 type NodeClaimTemplate struct {
-	ObjectMeta `json:"metadata,omitempty"`
+	ObjectMeta `json:"metadata,omitempty"` //nolint:kubeapilinter
+	//nolint:kubeapilinter
 	// +required
 	Spec NodeClaimTemplateSpec `json:"spec"`
 }
@@ -184,27 +197,32 @@ type NodeClaimTemplate struct {
 // NodeClaimTemplateSpec is used in the NodePool's NodeClaimTemplate, with the resource requests omitted since
 // users are not able to set resource requests in the NodePool.
 type NodeClaimTemplateSpec struct {
+	//nolint:kubeapilinter
 	// Taints will be applied to the NodeClaim's node.
 	// +optional
 	Taints []v1.Taint `json:"taints,omitempty"`
+	//nolint:kubeapilinter
 	// StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
 	// within a short period of time, typically by a DaemonSet that tolerates the taint. These are commonly used by
 	// daemonsets to allow initialization and enforce startup ordering.  StartupTaints are ignored for provisioning
 	// purposes in that pods are not required to tolerate a StartupTaint in order to have nodes provisioned for them.
 	// +optional
 	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
+	//nolint:kubeapilinter
 	// Requirements are layered with GetLabels and applied to every node.
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
-	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt' or 'Lt' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
+	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt', 'Lt', 'Gte', or 'Lte' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt' || x.operator == 'Gte' || x.operator == 'Lte') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
 	// +kubebuilder:validation:XValidation:message="requirements with 'minValues' must have at least that many values specified in the 'values' field",rule="self.all(x, (x.operator == 'In' && has(x.minValues)) ? x.values.size() >= x.minValues : true)"
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
 	Requirements []NodeSelectorRequirementWithMinValues `json:"requirements" hash:"ignore"`
+	//nolint:kubeapilinter
 	// NodeClassRef is a reference to an object that defines provider specific configuration
 	// +kubebuilder:validation:XValidation:rule="self.group == oldSelf.group",message="nodeClassRef.group is immutable"
 	// +kubebuilder:validation:XValidation:rule="self.kind == oldSelf.kind",message="nodeClassRef.kind is immutable"
 	// +required
 	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
+	//nolint:kubeapilinter
 	// TerminationGracePeriod is the maximum duration the controller will wait before forcefully deleting the pods on a node, measured from when deletion is first initiated.
 	//
 	// Warning: this feature takes precedence over a Pod's terminationGracePeriodSeconds value, and bypasses any blocked PDBs or the karpenter.sh/do-not-disrupt annotation.
@@ -253,6 +271,7 @@ func (in *NodeClaimTemplate) ToNodeClaim() *NodeClaim {
 }
 
 type ObjectMeta struct {
+	//nolint:kubeapilinter
 	// Map of string keys and values that can be used to organize and categorize
 	// (scope and select) objects. May match selectors of replication controllers
 	// and services.
@@ -260,6 +279,7 @@ type ObjectMeta struct {
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 
+	//nolint:kubeapilinter
 	// Annotations is an unstructured key value map stored with a resource that may be
 	// set by external tools to store and retrieve arbitrary metadata. They are not
 	// queryable and should be preserved when modifying objects.
@@ -283,11 +303,12 @@ type ObjectMeta struct {
 // +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.nodes
 type NodePool struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata,omitempty"` //nolint:kubeapilinter
 
+	//nolint:kubeapilinter
 	// +required
 	Spec   NodePoolSpec   `json:"spec"`
-	Status NodePoolStatus `json:"status,omitempty"`
+	Status NodePoolStatus `json:"status,omitempty"` //nolint:kubeapilinter
 }
 
 // We need to bump the NodePoolHashVersion when we make an update to the NodePool CRD under these conditions:

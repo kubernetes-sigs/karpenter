@@ -366,7 +366,7 @@ var _ = Describe("Drift", Ordered, func() {
 			Spec: v1.NodeClaimTemplateSpec{
 				// since this will overwrite the default requirements, add instance category and family selectors back into requirements
 				Requirements: []v1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot}}},
+					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeSpot}},
 				},
 			},
 		}),

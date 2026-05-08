@@ -115,6 +115,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
+
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil
 }
 
@@ -159,7 +160,9 @@ func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *inte
 }
 
 func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
-	overlayRequirements := scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...)
+	overlayRequirements := scheduling.NewNodeSelectorRequirements(lo.Map(overlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
+		return r.AsNodeSelectorRequirement()
+	})...)
 
 	for _, it := range its {
 		offerings := getOverlaidOfferings(nodePool, it, overlayRequirements)
@@ -182,7 +185,9 @@ func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeSt
 }
 
 func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) {
-	overlayRequirements := scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...)
+	overlayRequirements := scheduling.NewNodeSelectorRequirements(lo.Map(overlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
+		return r.AsNodeSelectorRequirement()
+	})...)
 
 	for _, it := range its {
 		offerings := getOverlaidOfferings(nodePool, it, overlayRequirements)

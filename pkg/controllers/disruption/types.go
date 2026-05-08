@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
@@ -86,14 +87,15 @@ func (c *Candidate) OwnedByStaticNodePool() bool {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
-	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string) (*Candidate, error) {
+	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string,
+) (*Candidate, error) {
 	var err error
 	var pods []*corev1.Pod
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
 	if queue.HasAny(node.ProviderID()) {
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
-	if err = node.ValidateNodeDisruptable(); err != nil {
+	if err = node.ValidateNodeDisruptable(clk); err != nil {
 		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
@@ -111,7 +113,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
-	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
+	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs, clk, recorder); err != nil {
 		// If the NodeClaim has a TerminationGracePeriod set and the disruption class is eventual, the node should be
 		// considered a candidate even if there's a pod that will block eviction. Other error types should still cause
 		// failure creating the candidate.
@@ -137,7 +139,7 @@ type Replacement struct {
 	*scheduling.NodeClaim
 
 	Name string
-	// Use a bool track if a node has already been initialized so we can fire metrics for intialization once.
+	// Use a bool track if a node has already been initialized so we can fire metrics for initialization once.
 	// This intentionally does not capture nodes that go initialized then go NotReady after as other pods can
 	// schedule to this node as well.
 	Initialized bool
@@ -179,8 +181,102 @@ func (c Command) Decision() Decision {
 	}
 }
 
+// SourceNodeNames returns the names of all candidate nodes
+func (c Command) SourceNodeNames() []string {
+	return lo.Map(c.Candidates, func(candidate *Candidate, _ int) string {
+		return candidate.Name()
+	})
+}
+
+// String returns a human-readable representation of the command
+func (c Command) String() string {
+	sources := strings.Join(c.SourceNodeNames(), ", ")
+	nodePools := strings.Join(lo.Uniq(lo.FilterMap(c.Candidates, func(candidate *Candidate, _ int) (string, bool) {
+		if candidate.NodePool == nil {
+			return "", false
+		}
+		return candidate.NodePool.Name, true
+	})), ",")
+
+	// For test commands without Method/ID set, use simple format
+	if c.Method == nil {
+		if len(c.Replacements) > 0 {
+			plural := "replacements"
+			if len(c.Replacements) == 1 {
+				plural = "replacement"
+			}
+			return fmt.Sprintf("%s: [%s] -> [%d %s]", c.Decision(), sources, len(c.Replacements), plural)
+		}
+		return fmt.Sprintf("%s: [%s]", c.Decision(), sources)
+	}
+
+	// Full format with reason, ID, nodepools, and savings
+	if len(c.Replacements) > 0 {
+		plural := "replacements"
+		if len(c.Replacements) == 1 {
+			plural = "replacement"
+		}
+		return fmt.Sprintf("%s/%s: %s: nodepools=[%s]: [%s] -> [%d %s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), nodePools, sources, len(c.Replacements), plural, c.EstimatedSavings())
+	}
+	return fmt.Sprintf("%s/%s: %s: nodepools=[%s]: [%s] (savings: $%.2f)", c.Reason(), c.ID, c.Decision(), nodePools, sources, c.EstimatedSavings())
+}
+
+// StringForNode returns a string representation of the command from the perspective of a single source candidate node.
+// For single-node commands, returns the full command string. For multi-node commands, returns a per-node
+// string with context to avoid listing all nodes.
+//
+// Note: This method only works for source nodes (Candidates being removed). Consolidation destinations can be
+// either new nodes (Replacements) or existing nodes (ExistingNodes in scheduling.Results), but only Replacements
+// are tracked in the Command. Events are currently only emitted for source nodes, not destinations.
+func (c Command) StringForNode(candidate *Candidate) string {
+	if len(c.Candidates) == 1 {
+		return c.String()
+	}
+	// Multi-node: show only this node with context
+	return fmt.Sprintf("%s: [%s] (part of %d-node consolidation)", c.Decision(), candidate.Name(), len(c.Candidates))
+}
+
+// EstimatedSavings returns the estimated cost savings from this consolidation.
+// Returns 0.0 when pricing cannot be determined. getCandidatePrices handles missing
+// offerings by returning 0.0, which causes consolidation to skip the candidate.
+func (c Command) EstimatedSavings() float64 {
+	sourcePrice := getCandidatePrices(c.Candidates)
+
+	// For delete consolidation, all source cost is savings
+	if len(c.Replacements) == 0 {
+		return sourcePrice
+	}
+
+	// For replace consolidation, sum destination costs from all replacement NodeClaims
+	destPrice := 0.0
+	for _, nodeClaim := range c.Results.NewNodeClaims {
+		if len(nodeClaim.InstanceTypeOptions) > 0 {
+			offerings := nodeClaim.InstanceTypeOptions[0].Offerings
+			if len(offerings) > 0 {
+				destPrice += offerings.Cheapest().Price
+			}
+		}
+	}
+
+	return sourcePrice - destPrice
+}
+
+// EmitCandidateEvents emits ConsolidationCandidate events for all candidates in this command
+func (c Command) EmitCandidateEvents(recorder events.Recorder) {
+	for _, candidate := range c.Candidates {
+		recorder.Publish(disruptionevents.ConsolidationCandidate(candidate.Node, candidate.NodeClaim, c.StringForNode(candidate), c.EstimatedSavings())...)
+	}
+}
+
+// EmitRejectedEvents emits ConsolidationRejected events for all candidates in this command
+func (c Command) EmitRejectedEvents(recorder events.Recorder, reason string) {
+	for _, candidate := range c.Candidates {
+		recorder.Publish(disruptionevents.ConsolidationRejected(candidate.Node, candidate.NodeClaim, c.StringForNode(candidate), reason, c.EstimatedSavings())...)
+	}
+}
+
 func (c Command) LogValues() []any {
-	podCount := lo.Reduce(c.Candidates, func(_ int, cd *Candidate, _ int) int { return len(cd.reschedulablePods) }, 0)
+	podCount := lo.Reduce(c.Candidates, func(acc int, cd *Candidate, _ int) int { return acc + len(cd.reschedulablePods) }, 0)
 
 	candidateNodes := lo.Map(c.Candidates, func(candidate *Candidate, _ int) interface{} {
 		return map[string]interface{}{

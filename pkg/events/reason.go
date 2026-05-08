@@ -24,6 +24,8 @@ const (
 	DisruptionTerminating      = "DisruptionTerminating"
 	DisruptionWaitingReadiness = "DisruptionWaitingReadiness"
 	Unconsolidatable           = "Unconsolidatable"
+	ConsolidationCandidate     = "ConsolidationCandidate"
+	ConsolidationRejected      = "ConsolidationRejected"
 
 	// provisioning/scheduling
 	FailedScheduling          = "FailedScheduling"

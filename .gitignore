@@ -8,8 +8,15 @@ go.work
 go.work.sum
 report.json
 *__debug_*
+bin/
 
 # Common in OSs and IDEs
 .idea
 .vscode
 .DS_Store
+.kiro
+
+# Vim swap files
+*.swp
+*.swo
+*~

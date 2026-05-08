@@ -201,9 +201,9 @@ var _ = Describe("Integration", func() {
 				}
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
-			It("should error when a restricted label is used in labels (kubernetes.io/custom-label)", func() {
+			It("should error when a restricted label is used in labels (karpenter.sh/custom-label)", func() {
 				nodePool.Spec.Template.Labels = map[string]string{
-					"kubernetes.io/custom-label": "custom-value",
+					"karpenter.sh/custom-label": "custom-value",
 				}
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
@@ -221,47 +221,58 @@ var _ = Describe("Integration", func() {
 			})
 			It("should error when a requirement references a restricted label (karpenter.sh/nodepool)", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      v1.NodePoolLabelKey,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"default"},
-					}})
+					Key:      v1.NodePoolLabelKey,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"default"},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when a requirement uses In but has no values", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when a requirement uses an unknown operator", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      v1.CapacityTypeLabelKey,
-						Operator: "within",
-						Values:   []string{v1.CapacityTypeSpot},
-					}})
+					Key:      v1.CapacityTypeLabelKey,
+					Operator: "within",
+					Values:   []string{v1.CapacityTypeSpot},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when Gt is used with multiple integer values", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpGt,
-						Values:   []string{"1000000", "2000000"},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpGt,
+					Values:   []string{"1000000", "2000000"},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when Lt is used with multiple integer values", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpLt,
-						Values:   []string{"1000000", "2000000"},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpLt,
+					Values:   []string{"1000000", "2000000"},
+				})
+				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
+			})
+			It("should error when Gte is used with multiple integer values", func() {
+				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpGte,
+					Values:   []string{"1000000", "2000000"},
+				})
+				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
+			})
+			It("should error when Lte is used with multiple integer values", func() {
+				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpLte,
+					Values:   []string{"1000000", "2000000"},
+				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when consolidateAfter is negative", func() {
@@ -276,44 +287,36 @@ var _ = Describe("Integration", func() {
 			})
 			It("should error when minValues for a requirement key is negative", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"insance-type-1", "insance-type-2"},
-					},
+					Key:       corev1.LabelInstanceTypeStable,
+					Operator:  corev1.NodeSelectorOpIn,
+					Values:    []string{"insance-type-1", "insance-type-2"},
 					MinValues: lo.ToPtr(-1)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when minValues for a requirement key is zero", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"insance-type-1", "insance-type-2"},
-					},
+					Key:       corev1.LabelInstanceTypeStable,
+					Operator:  corev1.NodeSelectorOpIn,
+					Values:    []string{"insance-type-1", "insance-type-2"},
 					MinValues: lo.ToPtr(0)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when minValues for a requirement key is more than 50", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"insance-type-1", "insance-type-2"},
-					},
+					Key:       corev1.LabelInstanceTypeStable,
+					Operator:  corev1.NodeSelectorOpIn,
+					Values:    []string{"insance-type-1", "insance-type-2"},
 					MinValues: lo.ToPtr(51)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
 			It("should error when minValues for a requirement key is greater than the values specified within In operator", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"insance-type-1", "insance-type-2"},
-					},
+					Key:       corev1.LabelInstanceTypeStable,
+					Operator:  corev1.NodeSelectorOpIn,
+					Values:    []string{"insance-type-1", "insance-type-2"},
 					MinValues: lo.ToPtr(3)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
@@ -417,6 +420,107 @@ var _ = Describe("Integration", func() {
 
 				env.EventuallyExpectNotFound(pod, node)
 				env.EventuallyExpectHealthyPodCount(selector, numPods)
+			})
+		})
+	})
+	Describe("DoNotDisrupt", func() {
+		Context("Grace Period", func() {
+			It("should drain pods according to their grace period durations and block indefinitely for 'true'", func() {
+				const shortGrace = time.Minute
+				const longGrace = 2 * time.Minute
+				// Pod with a 1-minute grace period
+				shortPod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "short-grace"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "1m",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10m"),
+						},
+					},
+					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+				})
+				// Pod with a 2-minute grace period
+				longPod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "long-grace"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "2m",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10m"),
+						},
+					},
+					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+				})
+				// Pod with indefinite protection
+				indefinitePod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "indefinite-grace"},
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "true",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10m"),
+						},
+					},
+					TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
+				})
+
+				env.ExpectCreated(nodeClass, nodePool, shortPod, longPod, indefinitePod)
+
+				// All three pods should schedule to the same node
+				nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+				env.EventuallyExpectCreatedNodeCount("==", 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(shortPod.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(longPod.Labels), 1)
+				env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(indefinitePod.Labels), 1)
+
+				// Re-fetch pods to get their actual StartTime from the API server.
+				// The do-not-disrupt grace period is measured from pod start time, so we
+				// derive all consistency check windows from the real start times.
+				for _, p := range []*corev1.Pod{shortPod, longPod, indefinitePod} {
+					Expect(env.Client.Get(env, client.ObjectKeyFromObject(p), p)).To(Succeed())
+					Expect(p.Status.StartTime).ToNot(BeNil())
+				}
+				shortExpiry := shortPod.Status.StartTime.Add(shortGrace)
+				longExpiry := longPod.Status.StartTime.Add(longGrace)
+
+				// Delete the nodeclaim to trigger draining
+				env.ExpectDeleted(nodeClaim)
+
+				// All three pods should remain active until the short grace period expires.
+				shortWindow := time.Until(shortExpiry) - 5*time.Second
+				Expect(shortWindow).To(BeNumerically(">", 0), "short grace period already expired before consistency check")
+				env.ConsistentlyExpectActivePods(shortWindow, shortPod, longPod, indefinitePod)
+
+				// After the short grace period elapses, the short pod should be drained
+				env.EventuallyExpectNotFound(shortPod)
+
+				// The long and indefinite pods should remain active until the long grace period expires.
+				longWindow := time.Until(longExpiry) - 5*time.Second
+				Expect(longWindow).To(BeNumerically(">", 0), "long grace period already expired before consistency check")
+				env.ConsistentlyExpectActivePods(longWindow, longPod, indefinitePod)
+
+				// After the long grace period elapses, the long pod should be drained
+				env.EventuallyExpectNotFound(longPod)
+
+				// The indefinite pod should still be alive indefinitely
+				env.ConsistentlyExpectActivePods(30*time.Second, indefinitePod)
+
+				// The indefinite pod should still be alive — remove the annotation to unblock draining
+				delete(indefinitePod.Annotations, v1.DoNotDisruptAnnotationKey)
+				env.ExpectUpdated(indefinitePod)
+
+				// Now the indefinite pod should be drained
+				env.EventuallyExpectNotFound(indefinitePod)
 			})
 		})
 	})

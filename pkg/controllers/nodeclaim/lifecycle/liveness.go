@@ -41,7 +41,7 @@ import (
 type Liveness struct {
 	clock      clock.Clock
 	kubeClient client.Client
-	npState    nodepoolhealth.State
+	npState    *nodepoolhealth.State
 }
 
 // registrationTimeout is a heuristic time that we expect the node to register within

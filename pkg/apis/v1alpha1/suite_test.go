@@ -64,7 +64,7 @@ var _ = Describe("NodeOverlay", func() {
 				return test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
 						Weight: lo.ToPtr[int32](int32(rand.IntN(100) + 1)), //nolint:gosec
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      "test",
 								Operator: corev1.NodeSelectorOpExists,
@@ -92,7 +92,7 @@ var _ = Describe("NodeOverlay", func() {
 				return test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
 						Weight: lo.ToPtr[int32](10),
-						Requirements: []corev1.NodeSelectorRequirement{
+						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      "test",
 								Operator: corev1.NodeSelectorOpExists,

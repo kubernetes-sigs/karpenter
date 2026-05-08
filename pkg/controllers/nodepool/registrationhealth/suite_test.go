@@ -46,7 +46,7 @@ var (
 	cloudProvider *fake.CloudProvider
 	nodePool      *v1.NodePool
 	nodeClass     *v1alpha1.TestNodeClass
-	npState       nodepoolhealth.State
+	npState       *nodepoolhealth.State
 )
 
 func TestAPIs(t *testing.T) {
@@ -58,7 +58,7 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
-	npState = nodepoolhealth.State{}
+	npState = nodepoolhealth.NewState()
 	controller = registrationhealth.NewController(env.Client, cloudProvider, npState)
 })
 var _ = AfterEach(func() {

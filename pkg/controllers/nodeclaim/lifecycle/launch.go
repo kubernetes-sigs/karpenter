@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 type Launch struct {
@@ -128,7 +127,6 @@ func PopulateNodeClaimDetails(nodeClaim, retrieved *v1.NodeClaim) *v1.NodeClaim 
 	// or the static nodeClaim labels
 	nodeClaim.Labels = lo.Assign(
 		retrieved.Labels, // CloudProvider-resolved labels
-		scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Labels(), // Single-value requirement resolved labels
 		nodeClaim.Labels, // User-defined labels
 	)
 	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, retrieved.Annotations)

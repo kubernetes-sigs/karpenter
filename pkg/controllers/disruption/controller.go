@@ -103,7 +103,7 @@ func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Clien
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
 		NewStaticDrift(cluster, provisioner, cp),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-		NewDrift(kubeClient, cluster, provisioner, recorder),
+		NewDrift(kubeClient, cluster, provisioner, recorder, clk),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 		NewMultiNodeConsolidation(c),
 		// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
@@ -111,15 +111,19 @@ func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Clien
 	}
 }
 
+func (c *Controller) Name() string {
+	return "disruption"
+}
+
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("disruption").
+		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
-	ctx = injection.WithControllerName(ctx, "disruption")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	// this won't catch if the reconciler loop hangs forever, but it will catch other issues
 	c.logAbnormalRuns(ctx)
@@ -238,7 +242,7 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 	defer c.mu.Unlock()
 	for name, runTime := range c.lastRun {
 		if timeSince := c.clock.Since(runTime); timeSince > AbnormalTimeLimit {
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abnormal time between runs of %s = %s", name, timeSince))
+			log.FromContext(ctx).V(1).Info("abnormal time between runs", "name", name, "time_since", timeSince)
 		}
 	}
 }

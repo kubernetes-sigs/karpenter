@@ -24,7 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-//go:generate controller-gen crd object:headerFile="../../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
+//go:generate go tool -modfile=../../../go.tools.mod controller-gen crd object:headerFile="../../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
 var (
 	//go:embed crds/karpenter.test.sh_testnodeclasses.yaml
 	TestNodeClassCRD []byte

@@ -48,6 +48,7 @@ func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOp
 	}
 }
 
+// nolint:gocyclo
 func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if m.IsConsolidated() {
 		return []Command{}, nil
@@ -100,9 +101,10 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		return []Command{}, nil
 	}
 
-	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
+	if cmd, err = m.validator.Validate(ctx, cmd, commandValidationDelay); err != nil {
 		if IsValidationError(err) {
-			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
+			reason := getValidationFailureReason(err)
+			cmd.EmitRejectedEvents(m.recorder, reason)
 			return []Command{}, nil
 		}
 		return []Command{}, fmt.Errorf("validating consolidation, %w", err)
@@ -138,7 +140,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			if errors.Is(err, context.DeadlineExceeded) {
 				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
 				if lastSavedCommand.Candidates == nil {
-					log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
+					log.FromContext(ctx).V(1).Info("failed to find a multi-node consolidation after timeout", "last_batch_size", (min+max)/2)
 					return Command{}, nil
 				}
 				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")

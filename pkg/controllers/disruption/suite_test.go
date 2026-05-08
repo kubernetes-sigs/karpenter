@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
@@ -63,8 +64,10 @@ import (
 
 var ctx context.Context
 var env *test.Environment
+var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
 var disruptionController *disruption.Controller
+var pricingController *informer.PricingController
 var prov *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
@@ -92,9 +95,11 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
+	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
 	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
@@ -107,6 +112,8 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	cloudProvider.Reset()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
+	clusterCost.Reset()
+	ExpectSingletonReconciled(ctx, pricingController)
 
 	recorder.Reset() // Reset the events that we captured during the run
 
@@ -160,6 +167,7 @@ var _ = AfterEach(func() {
 
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
+	disruption.NodepoolDecisionsPerformed.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -235,7 +243,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(Succeed())
 
-		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, candidate)
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, fakeClock, recorder, candidate)
 		Expect(err).To(Succeed())
 		Expect(results.PodErrors[pod]).To(BeNil())
 	})
@@ -281,10 +289,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		})
 		// Set a partition so that each node pool fits one node
 		nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-				Key:      "test-partition",
-				Operator: corev1.NodeSelectorOpExists,
-			},
+			Key:      "test-partition",
+			Operator: corev1.NodeSelectorOpExists,
 		})
 
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
@@ -579,6 +585,7 @@ var _ = Describe("Disruption Taints", func() {
 			currentInstance,
 			replacementInstance,
 		}
+		ExpectSingletonReconciled(ctx, pricingController)
 		nodePool.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(time.Duration(0))
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		ExpectApplied(ctx, env.Client, nodeClaim, nodePool)
@@ -1777,8 +1784,7 @@ var _ = Describe("Candidate Filtering", func() {
 				},
 			},
 		})
-		// Don't apply the NodePool
-		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		// Mock the NodePool not existing by removing it from the nodePool and nodePoolInstanceTypes maps
@@ -1878,7 +1884,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
-		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.DeepCopyNodes()[0], NodePool: nodePool}}, Replacements: nil}
+		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.DeepCopyNodes()[0], NodePool: nodePool}}, Replacements: nil}
 		Expect(queue.StartCommand(ctx, cmd))
 
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1938,6 +1944,11 @@ var _ = Describe("Metrics", func() {
 			"decision":          "delete",
 			metrics.ReasonLabel: "empty",
 		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "delete",
+			metrics.ReasonLabel:   "empty",
+		})
 	})
 	It("should fire metrics for single node delete disruption", func() {
 		nodeClaims, nodes = nodeClaims[:2], nodes[:2]
@@ -1963,6 +1974,11 @@ var _ = Describe("Metrics", func() {
 			"decision":          "delete",
 			metrics.ReasonLabel: "drifted",
 		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "delete",
+			metrics.ReasonLabel:   "drifted",
+		})
 	})
 	It("should fire metrics for single node replace disruption", func() {
 		nodeClaim, node := nodeClaims[0], nodes[0]
@@ -1986,6 +2002,11 @@ var _ = Describe("Metrics", func() {
 			"decision":          "replace",
 			metrics.ReasonLabel: "drifted",
 		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "replace",
+			metrics.ReasonLabel:   "drifted",
+		})
 	})
 	It("should fire metrics for multi-node empty disruption", func() {
 		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
@@ -1997,6 +2018,12 @@ var _ = Describe("Metrics", func() {
 			"decision":           "delete",
 			metrics.ReasonLabel:  "empty",
 			"consolidation_type": "empty",
+		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "delete",
+			metrics.ReasonLabel:   "empty",
+			"consolidation_type":  "empty",
 		})
 	})
 	It("should fire metrics for multi-node delete disruption", func() {
@@ -2032,6 +2059,12 @@ var _ = Describe("Metrics", func() {
 			"decision":           "delete",
 			metrics.ReasonLabel:  "underutilized",
 			"consolidation_type": "multi",
+		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "delete",
+			metrics.ReasonLabel:   "underutilized",
+			"consolidation_type":  "multi",
 		})
 	})
 	It("should fire metrics for multi-node replace disruption", func() {
@@ -2087,6 +2120,12 @@ var _ = Describe("Metrics", func() {
 			"decision":           "replace",
 			metrics.ReasonLabel:  "underutilized",
 			"consolidation_type": "multi",
+		})
+		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+			"decision":            "replace",
+			metrics.ReasonLabel:   "underutilized",
+			"consolidation_type":  "multi",
 		})
 	})
 	It("should stop multi-node consolidation after context deadline is reached", func() {

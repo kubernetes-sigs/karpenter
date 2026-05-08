@@ -52,6 +52,7 @@ var _ = Describe("Options", func() {
 		"KUBE_CLIENT_QPS",
 		"KUBE_CLIENT_BURST",
 		"ENABLE_PROFILING",
+		"DISABLE_CONTROLLER_WARMUP",
 		"DISABLE_LEADER_ELECTION",
 		"DISABLE_CLUSTER_STATE_OBSERVABILITY",
 		"LEADER_ELECTION_NAMESPACE",
@@ -106,6 +107,7 @@ var _ = Describe("Options", func() {
 				KubeClientQPS:                    lo.ToPtr(200),
 				KubeClientBurst:                  lo.ToPtr(300),
 				EnableProfiling:                  lo.ToPtr(false),
+				DisableControllerWarmup:          lo.ToPtr(true),
 				DisableLeaderElection:            lo.ToPtr(false),
 				DisableClusterStateObservability: lo.ToPtr(false),
 				LeaderElectionName:               lo.ToPtr("karpenter-leader-election"),
@@ -140,6 +142,7 @@ var _ = Describe("Options", func() {
 				"--kube-client-qps", "0",
 				"--kube-client-burst", "0",
 				"--enable-profiling",
+				"--disable-controller-warmup=false",
 				"--disable-leader-election=true",
 				"--disable-cluster-state-observability=true",
 				"--leader-election-name=karpenter-controller",
@@ -162,6 +165,7 @@ var _ = Describe("Options", func() {
 				KubeClientQPS:                    lo.ToPtr(0),
 				KubeClientBurst:                  lo.ToPtr(0),
 				EnableProfiling:                  lo.ToPtr(true),
+				DisableControllerWarmup:          lo.ToPtr(false),
 				DisableLeaderElection:            lo.ToPtr(true),
 				DisableClusterStateObservability: lo.ToPtr(true),
 				LeaderElectionName:               lo.ToPtr("karpenter-controller"),
@@ -192,6 +196,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_QPS", "0")
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
+			os.Setenv("DISABLE_CONTROLLER_WARMUP", "false")
 			os.Setenv("DISABLE_LEADER_ELECTION", "true")
 			os.Setenv("DISABLE_CLUSTER_STATE_OBSERVABILITY", "true")
 			os.Setenv("LEADER_ELECTION_NAME", "karpenter-controller")
@@ -218,6 +223,7 @@ var _ = Describe("Options", func() {
 				KubeClientQPS:                    lo.ToPtr(0),
 				KubeClientBurst:                  lo.ToPtr(0),
 				EnableProfiling:                  lo.ToPtr(true),
+				DisableControllerWarmup:          lo.ToPtr(false),
 				DisableLeaderElection:            lo.ToPtr(true),
 				DisableClusterStateObservability: lo.ToPtr(true),
 				LeaderElectionName:               lo.ToPtr("karpenter-controller"),
@@ -247,6 +253,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_QPS", "0")
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
+			os.Setenv("DISABLE_CONTROLLER_WARMUP", "false")
 			os.Setenv("DISABLE_LEADER_ELECTION", "true")
 			os.Setenv("DISABLE_CLUSTER_STATE_OBSERVABILITY", "true")
 			os.Setenv("MEMORY_LIMIT", "0")
@@ -276,6 +283,7 @@ var _ = Describe("Options", func() {
 				KubeClientQPS:                    lo.ToPtr(0),
 				KubeClientBurst:                  lo.ToPtr(0),
 				EnableProfiling:                  lo.ToPtr(true),
+				DisableControllerWarmup:          lo.ToPtr(false),
 				DisableLeaderElection:            lo.ToPtr(true),
 				DisableClusterStateObservability: lo.ToPtr(true),
 				LeaderElectionName:               lo.ToPtr("karpenter-leader-election"),
@@ -381,6 +389,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.KubeClientQPS).To(Equal(optsB.KubeClientQPS))
 	Expect(optsA.KubeClientBurst).To(Equal(optsB.KubeClientBurst))
 	Expect(optsA.EnableProfiling).To(Equal(optsB.EnableProfiling))
+	Expect(optsA.DisableControllerWarmup).To(Equal(optsB.DisableControllerWarmup))
 	Expect(optsA.DisableLeaderElection).To(Equal(optsB.DisableLeaderElection))
 	Expect(optsA.DisableClusterStateObservability).To(Equal(optsB.DisableClusterStateObservability))
 	Expect(optsA.MemoryLimit).To(Equal(optsB.MemoryLimit))

@@ -22,6 +22,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -66,10 +67,14 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, recorder ev
 
 // Reconcile the resource
 // Requeue after computing Static NodePool to ensure we don't miss any events
-func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "static.provisioning")
+func (c *Controller) Name() string {
+	return "static.provisioning"
+}
 
-	if !nodepoolutils.IsManaged(np, c.cloudProvider) || !np.StatusConditions().Root().IsTrue() || np.Spec.Replicas == nil {
+func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, c.Name())
+
+	if !nodepoolutils.IsManaged(np, c.cloudProvider) || !np.StatusConditions().Root().IsTrue() || np.Spec.Replicas == nil || !np.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
 
@@ -118,7 +123,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("static.provisioning").
+		Named(c.Name()).
 		// Reoncile on NodePool Create and Update (when replicas change or when NodePool status moves from NotReady to Ready)
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), nodepoolutils.IsStaticPredicateFuncs(),
 			predicate.Funcs{
@@ -157,5 +162,18 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func HasNodePoolReplicaOrStatusChanged(oldNP, newNP *v1.NodePool) bool {
-	return lo.FromPtr(oldNP.Spec.Replicas) != lo.FromPtr(newNP.Spec.Replicas) || (!oldNP.StatusConditions().Root().IsTrue() && newNP.StatusConditions().Root().IsTrue())
+	if lo.FromPtr(oldNP.Spec.Replicas) != lo.FromPtr(newNP.Spec.Replicas) {
+		return true
+	}
+	// np.StatusConditions.Root() may mutate the np which is unsafe when operating directly against the informer cache
+	isReady := func(np *v1.NodePool) bool {
+		for i := range np.Status.Conditions {
+			if np.Status.Conditions[i].Type != status.ConditionReady {
+				continue
+			}
+			return np.Status.Conditions[i].IsTrue()
+		}
+		return false
+	}
+	return !isReady(oldNP) && isReady(newNP)
 }

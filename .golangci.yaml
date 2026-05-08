@@ -13,6 +13,7 @@ linters:
     - gocyclo
     - goheader
     - gosec
+    - kubeapilinter
     - misspell
     - nilerr
     - revive
@@ -23,6 +24,13 @@ linters:
   disable:
     - prealloc
   settings:
+    custom:
+      kubeapilinter:
+        type: "module"
+        description: Kube API Linter lints Kube like APIs based on API conventions and best practices.
+        settings:
+          linters: {}
+          lintersConfig: {}
     gocyclo:
       min-complexity: 11
     goheader:
@@ -70,6 +78,9 @@ linters:
         path: scheduling_benchmark_test.go
       - path: (.+)\.go$
         text: declaration of "(err|ctx)" shadows declaration at
+      - path-except: pkg/apis/
+        linters:
+          - kubeapilinter
     paths:
       - tools
       - website
@@ -81,6 +92,8 @@ linters:
       - examples$
 issues:
   fix: true
+  fix-by-linter:
+    - kubeapilinter: false
 formatters:
   enable:
     - goimports

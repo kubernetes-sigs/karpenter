@@ -41,13 +41,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -55,11 +58,15 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
+var clusterCost *cost.ClusterCost
 var nodeClaimController *informer.NodeClaimController
 var nodeController *informer.NodeController
 var podController *informer.PodController
 var nodePoolController *informer.NodePoolController
 var daemonsetController *informer.DaemonSetController
+var nodeOverlayStore *nodeoverlay.InstanceTypeStore
+var nodeOverlayController *nodeoverlay.Controller
+var pricingController *informer.PricingController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1.NodePool
 
@@ -79,11 +86,15 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
+	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
-	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
+	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost)
+	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
+	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
+	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 })
 
 var _ = AfterSuite(func() {
@@ -147,6 +158,15 @@ var _ = Describe("Pod Healthy NodePool", func() {
 		// Delete the pod
 		cluster.DeletePod(client.ObjectKeyFromObject(pod))
 		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod)).IsZero()).To(BeTrue())
+	})
+	It("should not store scheduling times for pods that are already bound to a node", func() {
+		pod := test.Pod(test.PodOptions{NodeName: "test-node"})
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		ExpectApplied(ctx, env.Client, pod, nodePool)
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
+		nn := client.ObjectKeyFromObject(pod)
+		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(nn).IsZero()).To(BeTrue())
+		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
 	})
 })
 
@@ -935,18 +955,14 @@ var _ = Describe("Node Resource Level", func() {
 			Spec: v1.NodeClaimSpec{
 				Requirements: []v1.NodeSelectorRequirementWithMinValues{
 					{
-						NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-							Key:      corev1.LabelInstanceTypeStable,
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{cloudProvider.InstanceTypes[0].Name},
-						},
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{cloudProvider.InstanceTypes[0].Name},
 					},
 					{
-						NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-							Key:      corev1.LabelTopologyZone,
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"test-zone-1"},
-						},
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1"},
 					},
 				},
 				NodeClassRef: &v1.NodeClassReference{
@@ -1002,11 +1018,11 @@ var _ = Describe("Node Resource Level", func() {
 		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
 		// Expect that the node is now nominated
-		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeTrue())
-		time.Sleep(time.Second * 10) // nomination window is 20s so it should still be nominated
-		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeTrue())
-		time.Sleep(time.Second * 11) // past 20s, node should no longer be nominated
-		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeFalse())
+		Expect(ExpectStateNodeExists(cluster, node).Nominated(fakeClock)).To(BeTrue())
+		fakeClock.Step(time.Second * 10) // nomination window is 20s so it should still be nominated
+		Expect(ExpectStateNodeExists(cluster, node).Nominated(fakeClock)).To(BeTrue())
+		fakeClock.Step(time.Second * 11) // past 20s, node should no longer be nominated
+		Expect(ExpectStateNodeExists(cluster, node).Nominated(fakeClock)).To(BeFalse())
 	})
 	It("should handle a node changing from no providerID to registering a providerID", func() {
 		node := test.Node()
@@ -1717,7 +1733,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })
@@ -2879,6 +2895,77 @@ var _ = Describe("NodePoolState Tracking", func() {
 			running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 			Expect(running + deleting + pendingdisruption).To(Equal(1)) // Should have exactly one NodeClaim
 		})
+	})
+})
+
+var _ = Describe("StateNode Capacity", func() {
+	It("should include resources.Node in capacity for an initialized node", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("4"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectMakeNodesInitialized(ctx, env.Client, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		stateNode := ExpectStateNodeExists(cluster, node)
+		capacity := stateNode.Capacity()
+
+		Expect(capacity[resources.Node]).To(Equal(resource.MustParse("1")))
+	})
+	It("should include resources.Node in capacity for a NodeClaim without a Node", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("4"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
+		capacity := stateNode.Capacity()
+
+		Expect(capacity[resources.Node]).To(Equal(resource.MustParse("1")))
+	})
+	It("should include resources.Node in capacity for uninitialized node with NodeClaim", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("4"),
+				},
+			},
+		})
+		// Don't initialize - leave as uninitialized
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		stateNode := ExpectStateNodeExists(cluster, node)
+		capacity := stateNode.Capacity()
+
+		Expect(capacity[resources.Node]).To(Equal(resource.MustParse("1")))
 	})
 })
 

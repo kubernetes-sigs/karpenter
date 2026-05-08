@@ -42,9 +42,7 @@ var _ = Describe("Expiration", func() {
 			Replicas: int32(numPods),
 			PodOptions: test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "my-app",
-					},
+					Labels: map[string]string{"app": "my-app"},
 				},
 				TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
 			},
