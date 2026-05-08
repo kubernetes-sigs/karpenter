@@ -59,6 +59,25 @@ If a third party modifies a Karpenter-managed pod's deletion cost annotation:
 - Skips the pod on future reconciles
 - Emits a `PodDeletionCostThirdPartyConflict` warning event
 
+## Consolidation Priority Migration
+
+With this controller auto-managing `pod-deletion-cost` for RS coordination, users who
+previously set `pod-deletion-cost` to steer consolidation behavior should migrate to:
+
+```yaml
+annotations:
+  karpenter.sh/consolidation-priority: "2147483647"  # high = expensive to disrupt
+```
+
+The consolidation scoring path (`EvictionCost`) applies this precedence:
+1. `karpenter.sh/consolidation-priority` — if set, used directly
+2. `controller.kubernetes.io/pod-deletion-cost` — used only if NOT auto-managed (no sentinel)
+3. Default cost of 1.0
+
+Auto-managed pods (those with `karpenter.sh/managed-deletion-cost: "true"`) have their
+`pod-deletion-cost` ignored for consolidation scoring since it reflects RS coordination
+ranking, not user intent about disruption cost.
+
 ## Bounded Node Labeling
 
 Each reconcile cycle annotates at most **50 nodes**. When nodes drop out of the

@@ -900,6 +900,37 @@ var _ = Describe("Pod Eviction Cost", func() {
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
+	It("should prefer consolidation-priority over pod-deletion-cost", func() {
+		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost:                          "100",
+				disruptionutils.ConsolidationPriorityAnnotation: "2000000000",
+			}},
+		})
+		costWithOnlyDeletionCost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost: "100",
+			}},
+		})
+		Expect(cost).To(BeNumerically(">", costWithOnlyDeletionCost))
+	})
+	It("should ignore auto-managed pod-deletion-cost for consolidation scoring", func() {
+		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost:                       "2000000000",
+				disruptionutils.ManagedDeletionCostAnnotation: "true",
+			}},
+		})
+		Expect(cost).To(BeNumerically("==", standardPodCost))
+	})
+	It("should use pod-deletion-cost when not auto-managed", func() {
+		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost: "100",
+			}},
+		})
+		Expect(cost).To(BeNumerically(">", standardPodCost))
+	})
 })
 
 var _ = Describe("Candidate Filtering", func() {

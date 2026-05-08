@@ -27,7 +27,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+)
+
+const (
+	// ConsolidationPriorityAnnotation is the user-facing annotation for expressing
+	// consolidation disruption cost, separate from the auto-managed pod-deletion-cost.
+	ConsolidationPriorityAnnotation = apis.Group + "/consolidation-priority"
+	// ManagedDeletionCostAnnotation indicates the pod-deletion-cost is managed by Karpenter's
+	// deletion cost controller (for RS coordination), not user-set for consolidation steering.
+	ManagedDeletionCostAnnotation = apis.Group + "/managed-deletion-cost"
 )
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the ExpireAfter
@@ -45,26 +55,35 @@ func LifetimeRemaining(clock clock.Clock, nodePool *v1.NodePool, nodeClaim *v1.N
 }
 
 // EvictionCost returns the disruption cost computed for evicting the given pod.
+// When karpenter.sh/consolidation-priority is set, it takes precedence over pod-deletion-cost
+// for consolidation scoring. When pod-deletion-cost is auto-managed by Karpenter (indicated by
+// the managed-deletion-cost sentinel), it is ignored for consolidation scoring since it reflects
+// RS coordination ranking, not user intent about disruption cost.
 func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 	cost := 1.0
-	podDeletionCostStr, ok := p.Annotations[corev1.PodDeletionCost]
-	if ok {
-		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
+	if costStr, ok := p.Annotations[ConsolidationPriorityAnnotation]; ok {
+		parsedCost, err := strconv.ParseFloat(costStr, 64)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed parsing pod deletion cost",
-				"annotation", corev1.PodDeletionCost, "value", podDeletionCostStr, "pod", client.ObjectKeyFromObject(p))
+			log.FromContext(ctx).Error(err, "failed parsing consolidation priority",
+				"annotation", ConsolidationPriorityAnnotation, "value", costStr, "pod", client.ObjectKeyFromObject(p))
 		} else {
-			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
-			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
-			cost += podDeletionCost / math.Pow(2, 27.0)
+			cost += parsedCost / math.Pow(2, 27.0)
+		}
+	} else if podDeletionCostStr, ok := p.Annotations[corev1.PodDeletionCost]; ok {
+		if _, managed := p.Annotations[ManagedDeletionCostAnnotation]; !managed {
+			podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
+			if err != nil {
+				log.FromContext(ctx).Error(err, "failed parsing pod deletion cost",
+					"annotation", corev1.PodDeletionCost, "value", podDeletionCostStr, "pod", client.ObjectKeyFromObject(p))
+			} else {
+				cost += podDeletionCost / math.Pow(2, 27.0)
+			}
 		}
 	}
-	// the scheduling priority is in [-2147483648, 1000000000]
 	if p.Spec.Priority != nil {
 		cost += float64(*p.Spec.Priority) / math.Pow(2, 25)
 	}
 
-	// overall we clamp the pod cost to the range [-10.0, 10.0] with the default being 1.0
 	return lo.Clamp(cost, -10.0, 10.0)
 }
 
