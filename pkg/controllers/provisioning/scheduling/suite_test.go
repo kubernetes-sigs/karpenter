@@ -4189,7 +4189,7 @@ var _ = Context("Scheduling", func() {
 				_, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
 				Expect(err).To(BeNil())
 
-				m, ok := FindMetricWithLabelValues("karpenter_scheduler_pending_pods_by_effective_zone",
+				m, ok := FindMetricWithLabelValues("karpenter_scheduler_pending_pods_by_effective_zone_count",
 					map[string]string{"controller": "provisioner", "zone": expectedZone})
 				Expect(ok).To(BeTrue())
 				Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 1))
@@ -4235,7 +4235,7 @@ var _ = Context("Scheduling", func() {
 				Expect(err).To(BeNil())
 
 				for expectedZone, count := range expectedZones {
-					m, ok := FindMetricWithLabelValues("karpenter_scheduler_pending_pods_by_effective_zone",
+					m, ok := FindMetricWithLabelValues("karpenter_scheduler_pending_pods_by_effective_zone_count",
 						map[string]string{"controller": "provisioner", "zone": expectedZone})
 					Expect(ok).To(BeTrue())
 					Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", count))
