@@ -20,8 +20,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
@@ -241,6 +243,267 @@ var _ = Describe("Ranking", func() {
 			Expect(normalCount).To(Equal(2))
 			Expect(dndCount).To(Equal(2))
 			Expect(maxNormalRank).To(BeNumerically("<", minDNDRank))
+		})
+	})
+
+	Context("Group A: Disrupted + PDB-blocked nodes", func() {
+		It("should rank disrupted+PDB-blocked nodes below all other groups", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// Node 0: disrupted (has taint) + PDB-blocked pod
+			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodes[0])
+
+			pdbBlockedPod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "blocked"},
+				},
+				NodeName: nodes[0].Name,
+			})
+			ExpectApplied(ctx, env.Client, pdbBlockedPod)
+
+			// Create a PDB that blocks all disruptions for the pod
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "block-all",
+					Namespace: pdbBlockedPod.Namespace,
+				},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{
+					DisruptionsAllowed: 0,
+				},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+
+			// Node 1: normal pod
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[1].Name}))
+			// Node 2: normal pod
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
+			// Node 3: do-not-disrupt pod
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
+				NodeName:   nodes[3].Name,
+			}))
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			engine := deletioncost.NewRankingEngine()
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := engine.RankNodes(ctx, env.Client, stateNodes)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(4))
+
+			// Find the rank for node 0 (disrupted+blocked) - should be the lowest
+			var disruptedBlockedRank int
+			var otherRanks []int
+			for _, r := range ranks {
+				if r.Node.Node.Name == nodes[0].Name {
+					disruptedBlockedRank = r.Rank
+				} else {
+					otherRanks = append(otherRanks, r.Rank)
+				}
+			}
+			for _, rank := range otherRanks {
+				Expect(disruptedBlockedRank).To(BeNumerically("<", rank))
+			}
+		})
+
+		It("should not classify disrupted node without PDB-blocked pods as Group A", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// Node 0: disrupted taint but no PDB-blocked pods
+			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[0].Name}))
+
+			// Node 1: normal
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[1].Name}))
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			engine := deletioncost.NewRankingEngine()
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := engine.RankNodes(ctx, env.Client, stateNodes)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(2))
+
+			// Both should be in the normal tier (no Group A) since there's no PDB blocking
+			for _, r := range ranks {
+				Expect(r.HasDoNotDisrupt).To(BeFalse())
+			}
+		})
+
+		It("should rank multiple disrupted+PDB-blocked nodes by pod count ascending", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// Both node 0 and node 1 are disrupted + PDB-blocked
+			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			nodes[1].Spec.Taints = append(nodes[1].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodes[0], nodes[1])
+
+			// Node 0: 3 PDB-blocked pods
+			for i := 0; i < 3; i++ {
+				ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+					NodeName:   nodes[0].Name,
+				}))
+			}
+			// Node 1: 1 PDB-blocked pod
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+				NodeName:   nodes[1].Name,
+			}))
+
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "block-all",
+					Namespace: "default",
+				},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{
+					DisruptionsAllowed: 0,
+				},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+
+			// Node 2: normal
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			engine := deletioncost.NewRankingEngine()
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := engine.RankNodes(ctx, env.Client, stateNodes)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(3))
+
+			// Find ranks for disrupted+blocked nodes
+			var node0Rank, node1Rank, node2Rank int
+			for _, r := range ranks {
+				switch r.Node.Node.Name {
+				case nodes[0].Name:
+					node0Rank = r.Rank
+				case nodes[1].Name:
+					node1Rank = r.Rank
+				case nodes[2].Name:
+					node2Rank = r.Rank
+				}
+			}
+			// Node 1 (fewer pods) should rank lower than Node 0 (more pods)
+			Expect(node1Rank).To(BeNumerically("<", node0Rank))
+			// Both disrupted+blocked nodes should rank lower than normal node
+			Expect(node0Rank).To(BeNumerically("<", node2Rank))
+			Expect(node1Rank).To(BeNumerically("<", node2Rank))
+		})
+
+		It("should place Group A below Group B (drifted) in ordering", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// Node 0: disrupted + PDB-blocked (Group A)
+			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+				NodeName:   nodes[0].Name,
+			}))
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "block-all",
+					Namespace: "default",
+				},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{
+					DisruptionsAllowed: 0,
+				},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+
+			// Node 1: drifted (Group B)
+			nodeClaims[1].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, nodeClaims[1])
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[1].Name}))
+
+			// Node 2: normal (Group C)
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			engine := deletioncost.NewRankingEngine()
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := engine.RankNodes(ctx, env.Client, stateNodes)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(3))
+
+			var groupARank, groupBRank, groupCRank int
+			for _, r := range ranks {
+				switch r.Node.Node.Name {
+				case nodes[0].Name:
+					groupARank = r.Rank
+				case nodes[1].Name:
+					groupBRank = r.Rank
+				case nodes[2].Name:
+					groupCRank = r.Rank
+				}
+			}
+			// Group A < Group B < Group C
+			Expect(groupARank).To(BeNumerically("<", groupBRank))
+			Expect(groupBRank).To(BeNumerically("<", groupCRank))
 		})
 	})
 })

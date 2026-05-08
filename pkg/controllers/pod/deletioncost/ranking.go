@@ -20,6 +20,11 @@ import (
 	"context"
 	"sort"
 
+	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -35,7 +40,7 @@ type NodeRank struct {
 	HasDoNotDisrupt bool
 }
 
-// RankingEngine implements PodCount-based node ranking with three-tier drift partitioning
+// RankingEngine implements PodCount-based node ranking with four-tier partitioning
 type RankingEngine struct{}
 
 // NewRankingEngine creates a new RankingEngine
@@ -43,10 +48,11 @@ func NewRankingEngine() *RankingEngine {
 	return &RankingEngine{}
 }
 
-// RankNodes ranks nodes using PodCount strategy with three-tier partitioning:
-// Tier 1 (lowest cost): Drifted nodes — sorted by pod count ascending
-// Tier 2 (middle):      Normal nodes — sorted by pod count ascending
-// Tier 3 (highest):     Do-not-disrupt nodes — sorted by pod count ascending
+// RankNodes ranks nodes using PodCount strategy with four-tier partitioning:
+// Group A (lowest cost): Disrupted + PDB-blocked nodes, sorted by pod count ascending
+// Group B (low cost):    Drifted nodes, sorted by pod count ascending
+// Group C (middle):      Normal nodes, sorted by pod count ascending
+// Group D (highest):     Do-not-disrupt nodes, sorted by pod count ascending
 func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) ([]NodeRank, error) {
 	if len(nodes) == 0 {
 		return []NodeRank{}, nil
@@ -54,22 +60,24 @@ func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client,
 
 	defer metrics.Measure(RankingDurationSeconds, map[string]string{})()
 
-	// Partition into three tiers
-	drifted, normal, doNotDisrupt, err := partitionNodes(ctx, kubeClient, nodes)
+	disruptedBlocked, drifted, normal, doNotDisrupt, err := partitionNodes(ctx, kubeClient, nodes)
 	if err != nil {
 		return nil, err
 	}
 
-	// Sort each tier by pod count ascending, tiebreak by node name
+	sortByPodCount(ctx, kubeClient, disruptedBlocked)
 	sortByPodCount(ctx, kubeClient, drifted)
 	sortByPodCount(ctx, kubeClient, normal)
 	sortByPodCount(ctx, kubeClient, doNotDisrupt)
 
-	// BaseRank = -n where n is total managed nodes
 	baseRank := -len(nodes)
 	currentRank := baseRank
 	result := make([]NodeRank, 0, len(nodes))
 
+	for _, node := range disruptedBlocked {
+		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: false})
+		currentRank++
+	}
 	for _, node := range drifted {
 		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: false})
 		currentRank++
@@ -87,6 +95,7 @@ func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client,
 
 	log.FromContext(ctx).V(1).WithValues(
 		"totalNodes", len(result),
+		"disruptedBlockedNodes", len(disruptedBlocked),
 		"driftedNodes", len(drifted),
 		"normalNodes", len(normal),
 		"doNotDisruptNodes", len(doNotDisrupt),
@@ -95,19 +104,32 @@ func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client,
 	return result, nil
 }
 
-// partitionNodes splits nodes into three tiers:
-// 1. Drifted — NodeClaim has ConditionTypeDrifted=True
-// 2. Normal — not drifted, no do-not-disrupt pods
-// 3. DoNotDisrupt — has do-not-disrupt pods (regardless of drift)
-func partitionNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) (drifted, normal, doNotDisrupt []*state.StateNode, err error) {
+// partitionNodes splits nodes into four tiers:
+// A. DisruptedBlocked - has karpenter.sh/disrupted taint AND at least one pod blocked by a PDB
+// B. Drifted - NodeClaim has ConditionTypeDrifted=True (but not disrupted+blocked)
+// C. Normal - not drifted, no do-not-disrupt pods
+// D. DoNotDisrupt - has do-not-disrupt pods (regardless of drift)
+func partitionNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode, err error) {
 	for _, node := range nodes {
 		hasDND, err := hasDoNotDisruptPods(ctx, kubeClient, node)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		if hasDND {
 			doNotDisrupt = append(doNotDisrupt, node)
-		} else if isDrifted(node) {
+			continue
+		}
+		if isDisrupted(node) {
+			blocked, err := hasPDBBlockedPods(ctx, kubeClient, node)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			if blocked {
+				disruptedBlocked = append(disruptedBlocked, node)
+				continue
+			}
+		}
+		if isDrifted(node) {
 			drifted = append(drifted, node)
 		} else {
 			normal = append(normal, node)
@@ -116,12 +138,57 @@ func partitionNodes(ctx context.Context, kubeClient client.Client, nodes []*stat
 	return
 }
 
+// isDisrupted returns true if the node has the karpenter.sh/disrupted taint,
+// indicating Karpenter has already committed to disrupting this node.
+func isDisrupted(node *state.StateNode) bool {
+	if node.Node == nil {
+		return false
+	}
+	_, found := lo.Find(node.Node.Spec.Taints, func(t corev1.Taint) bool {
+		return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
+	})
+	return found
+}
+
 // isDrifted returns true if the node's NodeClaim has ConditionTypeDrifted=True
 func isDrifted(node *state.StateNode) bool {
 	if node.NodeClaim == nil {
 		return false
 	}
 	return node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
+}
+
+// hasPDBBlockedPods checks if a node has at least one pod whose eviction is blocked by a PDB.
+func hasPDBBlockedPods(ctx context.Context, kubeClient client.Client, node *state.StateNode) (bool, error) {
+	pods, err := node.Pods(ctx, kubeClient)
+	if err != nil {
+		return false, err
+	}
+	if len(pods) == 0 {
+		return false, nil
+	}
+
+	var pdbList policyv1.PodDisruptionBudgetList
+	if err := kubeClient.List(ctx, &pdbList); err != nil {
+		return false, err
+	}
+
+	for _, pod := range pods {
+		for i := range pdbList.Items {
+			pdb := &pdbList.Items[i]
+			if pdb.Namespace != pod.Namespace {
+				continue
+			}
+			selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
+			if err != nil {
+				continue
+			}
+			if selector.Matches(labels.Set(pod.Labels)) && pdb.Status.DisruptionsAllowed == 0 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // hasDoNotDisruptPods checks if a node has at least one pod with the do-not-disrupt annotation
