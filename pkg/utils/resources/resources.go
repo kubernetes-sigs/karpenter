@@ -130,6 +130,27 @@ func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 	return resourceList
 }
 
+// MinResources returns the minimum quantities for resources present in all lists (intersection of resources)
+// Ex: MinResources({cpu: 1}, {cpu: 2, gpu: 1}) = {cpu: 1}
+func MinResources(resources ...v1.ResourceList) v1.ResourceList {
+	if len(resources) == 0 {
+		return v1.ResourceList{}
+	}
+	resourceList := resources[0].DeepCopy()
+	for _, rl := range resources[1:] {
+		for resourceName, quantity := range resourceList {
+			if rlQuantity, exists := rl[resourceName]; exists {
+				if rlQuantity.Cmp(quantity) < 0 {
+					resourceList[resourceName] = rlQuantity.DeepCopy()
+				}
+			} else {
+				delete(resourceList, resourceName)
+			}
+		}
+	}
+	return resourceList
+}
+
 // Quantity parses the string value into a *Quantity
 func Quantity(value string) *resource.Quantity {
 	r := resource.MustParse(value)

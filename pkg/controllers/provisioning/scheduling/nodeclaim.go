@@ -164,7 +164,7 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	n.InstanceTypeOptions = instanceTypes
-	// Daemon overhead is excluded here to avoid double-counting; it's added once in ToNodeClaim().
+	// Daemon overhead is excluded here to avoid double-counting
 	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 	n.Requirements = nodeClaimRequirements
 	n.topology.Register(corev1.LabelHostname, n.hostname)
@@ -176,35 +176,6 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
 	n.releaseReservedOfferings(n.reservedOfferings, offeringsToReserve)
 	n.reservedOfferings = offeringsToReserve
-}
-
-// ToNodeClaim overrides NodeClaimTemplate.ToNodeClaim to add the minimum daemon overhead
-// across remaining candidates. Daemon overhead is excluded during bin packing to avoid double-counting.
-func (n *NodeClaim) ToNodeClaim() *v1.NodeClaim {
-	var minDaemonOverhead corev1.ResourceList
-	first := true
-	for _, it := range n.InstanceTypeOptions {
-		if dr, ok := n.daemonResources[it.Name]; ok {
-			if first {
-				minDaemonOverhead = dr.DeepCopy()
-				first = false
-			} else {
-				for resourceName, quantity := range minDaemonOverhead {
-					if drQuantity, exists := dr[resourceName]; exists {
-						if drQuantity.Cmp(quantity) < 0 {
-							minDaemonOverhead[resourceName] = drQuantity.DeepCopy()
-						}
-					} else {
-						delete(minDaemonOverhead, resourceName)
-					}
-				}
-			}
-		}
-	}
-	if len(minDaemonOverhead) > 0 {
-		n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, minDaemonOverhead)
-	}
-	return n.NodeClaimTemplate.ToNodeClaim()
 }
 
 // releaseReservedOfferings releases all offerings which are present in the current reserved offerings, but are not
@@ -275,6 +246,23 @@ func (n *NodeClaim) offeringsToReserve(
 	return reservedOfferings, nil
 }
 
+// Add min daemon resource requests (min across instance types)
+func (n *NodeClaim) addDaemonRequests() {
+	var minDaemonOverhead corev1.ResourceList
+	for _, it := range n.InstanceTypeOptions {
+		if dr, ok := n.daemonResources[it.Name]; ok {
+			if len(minDaemonOverhead) == 0 {
+				minDaemonOverhead = dr.DeepCopy()
+			} else {
+				minDaemonOverhead = resources.MinResources(minDaemonOverhead, dr)
+			}
+		}
+	}
+	if len(minDaemonOverhead) > 0 {
+		n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, minDaemonOverhead)
+	}
+}
+
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
 // necessary before its requirements are used for instance launching
 func (n *NodeClaim) FinalizeScheduling() {
@@ -293,6 +281,10 @@ func (n *NodeClaim) FinalizeScheduling() {
 			lo.Map(n.reservedOfferings, func(o *cloudprovider.Offering, _ int) string { return o.ReservationID() })...,
 		))
 	}
+	// Add min Daemon resource requests
+	// Daemon resource requests are excluded during bin packing to avoid double-counting
+	// Adding during bin-packing would add it every time a pod is added
+	n.addDaemonRequests()
 }
 
 func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {
@@ -340,7 +332,7 @@ type InstanceTypeFilterError struct {
 	// We capture podRequests here since when a pod can't schedule due to requests, it's because the pod
 	// was on its own on the simulated Node and exceeded the available resources for any instance type for this NodePool
 	podRequests corev1.ResourceList
-	// Min and max daemon overhead bounds for error reporting.
+	// We capture the min and max daemonRequests since this contributes to the resources that are required to schedule to this NodePool. The min/max DaemonRequests are the min / max across all instance types.
 	minDaemonRequests corev1.ResourceList
 	maxDaemonRequests corev1.ResourceList
 }
@@ -352,14 +344,8 @@ func (e *InstanceTypeFilterError) trackDaemonOverhead(dr corev1.ResourceList) {
 		e.maxDaemonRequests = dr.DeepCopy()
 		return
 	}
-	for rn, q := range dr {
-		if cur, ok := e.minDaemonRequests[rn]; !ok || q.Cmp(cur) < 0 {
-			e.minDaemonRequests[rn] = q.DeepCopy()
-		}
-		if cur, ok := e.maxDaemonRequests[rn]; !ok || q.Cmp(cur) > 0 {
-			e.maxDaemonRequests[rn] = q.DeepCopy()
-		}
-	}
+	e.minDaemonRequests = resources.MinResources(e.minDaemonRequests, dr)
+	e.maxDaemonRequests = resources.MaxResources(e.maxDaemonRequests, dr)
 }
 
 // Returns total resource requirements as a formatted string, showing min/max bounds when they differ.
