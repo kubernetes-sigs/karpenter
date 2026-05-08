@@ -33,6 +33,7 @@ require (
 	k8s.io/csi-translation-lib v0.35.0
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/utils v0.0.0-20251222233032-718f0e51e6d2
+	pgregory.net/rapid v1.2.0
 	sigs.k8s.io/controller-runtime v0.22.4
 	sigs.k8s.io/yaml v1.6.0
 )
