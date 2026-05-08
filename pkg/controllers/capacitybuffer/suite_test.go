@@ -27,6 +27,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
@@ -50,7 +51,7 @@ func TestCapacityBuffer(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
-	cbController = NewController(env.Client)
+	cbController = NewController(env.Client, &fakeTrigger{})
 })
 
 var _ = AfterEach(func() {
@@ -383,6 +384,49 @@ var _ = Describe("CapacityBuffer Controller", func() {
 		})
 	})
 
+	Context("Provisioner trigger", func() {
+		It("should trigger the provisioner after a successful reconcile", func() {
+			trigger := &fakeTrigger{}
+			ctrl := NewController(env.Client, trigger)
+
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "trig-template", Namespace: "default"},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{Containers: []v1.Container{{Name: "c", Image: "p"}}},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "trig-buffer", Namespace: "default"},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "trig-template"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			Expect(trigger.calls).To(ContainElement(cb.UID))
+		})
+
+		It("should NOT trigger the provisioner when resolution fails", func() {
+			trigger := &fakeTrigger{}
+			ctrl := NewController(env.Client, trigger)
+
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "no-trig-buffer", Namespace: "default"},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "does-not-exist"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, cb)
+			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+
+			Expect(trigger.calls).To(BeEmpty())
+		})
+	})
+
 	Context("podTemplateToBuffers mapping", func() {
 		It("should return no requests when no buffers reference the template", func() {
 			pt := &v1.PodTemplate{
@@ -473,4 +517,13 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 		}
 	}
 	return nil
+}
+
+// fakeTrigger records which buffer UIDs had Trigger called on them.
+type fakeTrigger struct {
+	calls []types.UID
+}
+
+func (f *fakeTrigger) Trigger(uid types.UID) {
+	f.calls = append(f.calls, uid)
 }

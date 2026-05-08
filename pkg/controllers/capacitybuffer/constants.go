@@ -16,26 +16,28 @@ limitations under the License.
 
 package capacitybuffer
 
-// Mirrors upstream Cluster Autoscaler constants at
-// k8s.io/autoscaler/cluster-autoscaler/capacitybuffer/constants.go
-// so that any downstream consumer (e.g. the future provisioner) can import
-// the same names instead of hardcoding strings.
+import autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+
+// Re-exports of shared API-level constants so existing call sites in this
+// package keep working. New code should import from the API package directly.
 const (
-	ActiveProvisioningStrategy = "buffer.x-k8s.io/active-capacity"
-	CapacityBufferKind         = "CapacityBuffer"
-	CapacityBufferApiVersion   = "autoscaling.x-k8s.io/v1alpha1"
+	ActiveProvisioningStrategy    = autoscalingv1alpha1.ActiveProvisioningStrategy
+	ReadyForProvisioningCondition = autoscalingv1alpha1.ReadyForProvisioningCondition
+	ProvisioningCondition         = autoscalingv1alpha1.ProvisioningCondition
+	LimitedByQuotasCondition      = autoscalingv1alpha1.LimitedByQuotasCondition
 
-	// Condition types.
-	ReadyForProvisioningCondition = "ReadyForProvisioning"
-	// ProvisioningCondition is set by the provisioner (not this controller) once
-	// virtual pods have been injected into the scheduling loop.
-	ProvisioningCondition = "Provisioning"
-	// LimitedByQuotasCondition is reserved for future ResourceQuota integration.
-	LimitedByQuotasCondition = "LimitedByQuotas"
+	CapacityBufferKind       = "CapacityBuffer"
+	CapacityBufferApiVersion = "autoscaling.x-k8s.io/v1alpha1"
 
-	// Reasons currently emitted by this controller.
+	// Reasons emitted by this controller on ReadyForProvisioning.
 	ReasonResolved            = "Resolved"
 	ReasonScalableRefNotFound = "ScalableRefNotFound"
 	ReasonPodTemplateNotFound = "PodTemplateNotFound"
 	ReasonResolutionFailed    = "ResolutionFailed"
+
+	// Reasons emitted by the provisioner on the Provisioning condition.
+	ReasonFitsExistingCapacity    = "FitsExistingCapacity"
+	ReasonRequiresNewCapacity     = "RequiresNewCapacity"
+	ReasonNotReadyForProvisioning = "NotReadyForProvisioning"
+	ReasonBufferEmpty             = "BufferEmpty"
 )

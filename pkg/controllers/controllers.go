@@ -167,7 +167,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
-		controllers = append(controllers, capacitybuffer.NewController(kubeClient))
+		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p))
 	}
 
 	return controllers
