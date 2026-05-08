@@ -1,4 +1,4 @@
-# NodeOverlay Price Adjustment Stacking
+# NodeOverlay `priceAdjustments`
 
 ## Summary
 
