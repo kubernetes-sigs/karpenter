@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -57,10 +58,6 @@ type CloudProvider struct {
 
 func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
 	// Create the Node because KwoK nodes don't have a kubelet, which is what Karpenter normally relies on to create the node.
-	node, err := c.toNode(nodeClaim)
-	if err != nil {
-		return nil, fmt.Errorf("translating nodeclaim to node, %w", err)
-	}
 	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -71,6 +68,12 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1
 	if status := nodeClass.StatusConditions().Get(status.ConditionReady); status.IsFalse() {
 		return nil, cloudprovider.NewNodeClassNotReadyError(stderrors.New(status.Message))
 	}
+
+	node, err := c.toNode(nodeClaim, nodeClass)
+	if err != nil {
+		return nil, fmt.Errorf("translating nodeclaim to node, %w", err)
+	}
+
 	// Kick-off a goroutine to allow us to asynchronously register nodes
 	// We're fine to leak this because failed registration can also happen in real providers
 	go func() {
@@ -140,7 +143,27 @@ func (c CloudProvider) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 
 // Return the hard-coded instance types.
 func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
-	return c.instanceTypes, nil
+	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
+	if err != nil {
+		return nil, fmt.Errorf("could not resolve node class: %w", err)
+	}
+
+	instanceTypesFromClass := lo.Map(c.instanceTypes, func(it *cloudprovider.InstanceType, _ int) *cloudprovider.InstanceType {
+		return applyNodeClassValues(it, nodeClass)
+	})
+	return instanceTypesFromClass, nil
+}
+
+func (c CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePool *v1.NodePool) (*v1alpha1.KWOKNodeClass, error) {
+	nodeClass := &v1alpha1.KWOKNodeClass{}
+	nodeClassName := nodePool.Spec.Template.Spec.NodeClassRef.Name
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClassName}, nodeClass); err != nil {
+		return nil, err
+	}
+	if !nodeClass.DeletionTimestamp.IsZero() {
+		return nil, fmt.Errorf("NodeClass %s is being terminated", nodeClassName)
+	}
+	return nodeClass, nil
 }
 
 // Return nothing since there's no cloud provider drift.
@@ -182,7 +205,7 @@ func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.
 	return it, nil
 }
 
-func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
+func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim, nodeClass *v1alpha1.KWOKNodeClass) (*corev1.Node, error) {
 	//nolint
 	newName := fmt.Sprintf("kwok-%s-%s-%d", nodeClaim.Name, kwokutils.RandomName(), rand.Uint32())
 
@@ -212,6 +235,8 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 			instanceType = it
 		}
 	}
+
+	instanceType = applyNodeClassValues(instanceType, nodeClass)
 
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -302,4 +327,17 @@ func (c CloudProvider) toNodeClaim(node *corev1.Node) (*v1.NodeClaim, error) {
 			Allocatable: node.Status.Allocatable,
 		},
 	}, nil
+}
+
+func applyNodeClassValues(instanceType *cloudprovider.InstanceType, nodeClass *v1alpha1.KWOKNodeClass) *cloudprovider.InstanceType {
+	newInstanceType := instanceType.DeepCopy()
+	if resources := nodeClass.Spec.ReservedResources; resources != nil {
+		newInstanceType.Overhead = &cloudprovider.InstanceTypeOverhead{
+			KubeReserved: reservedResources(nodeClass.Spec.ReservedResources),
+		}
+	}
+	if maxPods := nodeClass.Spec.MaxPods; maxPods != nil {
+		newInstanceType.Capacity[corev1.ResourcePods] = *resource.NewQuantity(*maxPods, resource.DecimalSI)
+	}
+	return newInstanceType
 }
