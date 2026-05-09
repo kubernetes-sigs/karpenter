@@ -35,6 +35,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -83,11 +84,20 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
-	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+	labels := map[string]string{
 		metrics.ReasonLabel:       strings.ToLower(metrics.ExpiredReason),
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-	})
+	}
+	metrics.NodeClaimsDisruptedTotal.Inc(labels)
+	// Pods that haven't started draining yet still appear bound to the node, so the
+	// list call here captures the pre-disruption state. Errors are logged but do not
+	// fail the reconcile — the metric just reports 0 for this disruption event.
+	podCount, err := nodeutils.CountReschedulablePodsOnNode(ctx, c.kubeClient, nodeClaim.Status.NodeName)
+	if err != nil {
+		log.FromContext(ctx).V(1).Info("counting reschedulable pods for disruption metric", "error", err.Error())
+	}
+	metrics.PodsDisruptedTotal.Add(float64(podCount), labels)
 	// We sleep here after the delete operation since we want to ensure that we are able to read our own writes so that
 	// we avoid duplicating metrics and log lines due to quick re-queues.
 	// USE CAUTION when determining whether to increase this timeout or remove this line
