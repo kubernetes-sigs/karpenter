@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Pallinder/go-randomdata"
 	"github.com/imdario/mergo"
@@ -69,7 +70,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	store = NewInstanceTypeStore()
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
-	nodeOverlayController = NewController(env.Client, cloudProvider, store, cluster)
+	nodeOverlayController = NewController(env.Clock, env.Client, cloudProvider, store, cluster)
 })
 
 var _ = BeforeEach(func() {

@@ -260,7 +260,7 @@ var _ = Describe("Eviction/Queue", func() {
 			// Set the termination time 1 hour in the past: remaining = -3600s.
 			// Without the clamp the grace period would be <=0, sending gracePeriodSeconds=0
 			// to the API (force-delete). The clamp must produce >= 1.
-			pastTerminationTime := fakeClock.Now().Add(-1 * time.Hour)
+			pastTerminationTime := env.Clock.Now().Add(-1 * time.Hour)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &pastTerminationTime)).To(Succeed())
 
 			// Verify the delete was graceful (not a force-delete): the Disrupted event must have

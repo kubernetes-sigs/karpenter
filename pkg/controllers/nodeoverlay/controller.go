@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -49,6 +51,7 @@ type Controller struct {
 	cloudProvider     cloudprovider.CloudProvider
 	clusterState      *state.Cluster
 	instanceTypeStore *InstanceTypeStore
+	clock             clock.Clock
 }
 
 func (c *Controller) Name() string {
@@ -56,12 +59,13 @@ func (c *Controller) Name() string {
 }
 
 // NewController constructs a controller for node overlay validation
-func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore, clusterState *state.Cluster) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore, clusterState *state.Cluster) *Controller {
 	return &Controller{
 		kubeClient:        kubeClient,
 		cloudProvider:     cp,
 		instanceTypeStore: instanceTypeStore,
 		clusterState:      clusterState,
+		clock:             clk,
 	}
 }
 
@@ -268,11 +272,11 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 	errs := make([]error, 0, len(overlayList))
 	for i := range overlayList {
 		stored := overlayList[i].DeepCopy()
-		overlayList[i].StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+		overlayList[i].StatusConditions(status.WithClock(c.clock)).SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 		if err, ok := overlayWithRuntimeValidationFailure[overlayList[i].Name]; ok {
-			overlayList[i].StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
+			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
 		} else if lo.Contains(overlaysWithConflict, overlayList[i].Name) {
-			overlayList[i].StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
+			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
 		}
 
 		if !equality.Semantic.DeepEqual(stored, overlayList[i]) {
