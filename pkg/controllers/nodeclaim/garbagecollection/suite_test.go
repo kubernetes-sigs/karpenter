@@ -28,7 +28,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -50,7 +49,6 @@ var (
 	nodeClaimController         *nodeclaimlifcycle.Controller
 	garbageCollectionController *nodeclaimgarbagecollection.Controller
 	env                         *test.Environment
-	fakeClock                   *clock.FakeClock
 	cloudProvider               *fake.CloudProvider
 )
 
@@ -61,12 +59,11 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	garbageCollectionController = nodeclaimgarbagecollection.NewController(fakeClock, env.Client, cloudProvider)
-	nodeClaimController = nodeclaimlifcycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil)
+	garbageCollectionController = nodeclaimgarbagecollection.NewController(env.Clock, env.Client, cloudProvider)
+	nodeClaimController = nodeclaimlifcycle.NewController(env.Clock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil)
 })
 
 var _ = AfterSuite(func() {
@@ -74,7 +71,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 	ExpectCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
 })
@@ -99,10 +96,10 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// Mark the node as NotReady after the launch
-		ExpectMakeNodesNotReady(ctx, env.Client, node)
+		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, node)
 
 		// Step forward to move past the cache eventual consistency timeout
-		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+		env.Clock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Delete the nodeClaim from the cloudprovider
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
@@ -126,7 +123,7 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// Step forward to move past the cache eventual consistency timeout
-		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+		env.Clock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Delete the nodeClaim from the cloudprovider
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
@@ -157,11 +154,11 @@ var _ = Describe("GarbageCollection", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// Mark the node as NotReady after the launch
-			ExpectMakeNodesNotReady(ctx, env.Client, node)
+			ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, node)
 		})
 
 		// Step forward to move past the cache eventual consistency timeout
-		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+		env.Clock.SetTime(time.Now().Add(time.Second * 20))
 
 		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 			defer GinkgoRecover()
@@ -191,7 +188,7 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// Step forward to move past the cache eventual consistency timeout
-		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+		env.Clock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Delete the nodeClaim from the cloudprovider
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
@@ -216,7 +213,7 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(env.Client.Delete(ctx, node)).To(Succeed())
 
 		// Step forward to move past the cache eventual consistency timeout
-		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+		env.Clock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Reconcile the NodeClaim. It should not be deleted by this flow since it has never been registered
 		ExpectSingletonReconciled(ctx, garbageCollectionController)

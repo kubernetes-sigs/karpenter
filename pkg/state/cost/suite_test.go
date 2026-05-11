@@ -30,7 +30,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -52,7 +51,6 @@ import (
 
 var ctx context.Context
 var env *test.Environment
-var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var nodeOverlayStore *nodeoverlay.InstanceTypeStore
 var nodeOverlayController *nodeoverlay.Controller
@@ -72,8 +70,7 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
 	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
 	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)

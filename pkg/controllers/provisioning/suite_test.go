@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -59,7 +58,6 @@ import (
 
 var (
 	ctx                 context.Context
-	fakeClock           *clock.FakeClock
 	cluster             *state.Cluster
 	nodeController      *informer.NodeController
 	daemonsetController *informer.DaemonSetController
@@ -79,10 +77,9 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
@@ -96,10 +93,10 @@ var _ = BeforeEach(func() {
 	cloudProvider.Reset()
 
 	// ensure any waiters on our clock are allowed to proceed before resetting our clock time
-	for fakeClock.HasWaiters() {
-		fakeClock.Step(1 * time.Minute)
+	for env.Clock.HasWaiters() {
+		env.Clock.Step(1 * time.Minute)
 	}
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 	state.PodSchedulingDecisionSeconds.Reset()
 	pscheduling.DefaultTerminationGracePeriod = nil
 })
@@ -127,7 +124,7 @@ var _ = Describe("Provisioning", func() {
 
 			// Step the clock forward to exceed the batch idle duration
 			// This should cause the batcher to complete and allow provisioning
-			fakeClock.Step(11 * time.Second)
+			env.Clock.Step(11 * time.Second)
 
 			// Use the standard provisioning expectation which handles the reconciliation
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -145,32 +142,32 @@ var _ = Describe("Provisioning", func() {
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
-			Expect(fakeClock.HasWaiters()).To(BeFalse())
+			Expect(env.Clock.HasWaiters()).To(BeFalse())
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 
 				// Have a waiter on the first trigger and trigger the batcher
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod.UID)
 
 				time.Sleep(time.Second) // give the process time to make it to the next batching section
 
 				// Fall-through to the second batching section
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 
 				// Step the clock by 3 seconds which is within the batch idle duration of 5s and then add the same pod again.
-				fakeClock.Step(3 * time.Second)
-				// We expect to have waiters on the fakeClock since this is still within the batch idle duration of 5s.
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				env.Clock.Step(3 * time.Second)
+				// We expect to have waiters on the env.Clock since this is still within the batch idle duration of 5s.
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod.UID)
 
 				time.Sleep(time.Second) // give the process time to iterate on the batching section
 
 				// Step the clock again by 3s to just cross the batch idle duration. We should be able to get out of the
 				// provisioning loop because the same pod will not cause the idle duration to reset.
-				fakeClock.Step(3 * time.Second)
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeFalse())
+				env.Clock.Step(3 * time.Second)
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeFalse())
 			}()
 			ExpectSingletonReconciled(ctx, prov)
 			wg.Wait()
@@ -188,36 +185,36 @@ var _ = Describe("Provisioning", func() {
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
-			Expect(fakeClock.HasWaiters()).To(BeFalse())
+			Expect(env.Clock.HasWaiters()).To(BeFalse())
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 
 				// Have a waiter on the first trigger and trigger the batcher
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod.UID)
 
 				time.Sleep(time.Second) // give the process time to make it to the next batching section
 
 				// Fall-through to the second batching section
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 
 				// Step the clock by 3 seconds which is within the batch idle duration of 5s and then add a new pod
-				fakeClock.Step(3 * time.Second)
-				// We expect to have waiters on the fakeClock since this is still within the batch idle duration of 5s.
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				env.Clock.Step(3 * time.Second)
+				// We expect to have waiters on the env.Clock since this is still within the batch idle duration of 5s.
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod2.UID)
 
 				time.Sleep(time.Second) // give the process time to iterate on the batching section
 
 				// Step the clock by 3s as we expect provisioning to not happen until another 5s because the
 				// batch idle duration was reset due to a new pod being added.
-				fakeClock.Step(3 * time.Second)
-				Consistently(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				env.Clock.Step(3 * time.Second)
+				Consistently(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				// Stepping the clock again by 3s. We should be able to get out of the
 				// provisioning loop at this point (since we have exceeded the idle duration)
-				fakeClock.Step(3 * time.Second)
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeFalse())
+				env.Clock.Step(3 * time.Second)
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeFalse())
 			}()
 			ExpectSingletonReconciled(ctx, prov)
 			wg.Wait()

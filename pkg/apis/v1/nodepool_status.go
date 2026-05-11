@@ -53,11 +53,11 @@ type NodePoolStatus struct {
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
-func (in *NodePool) StatusConditions() status.ConditionSet {
+func (in *NodePool) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	return status.NewReadyConditions(
 		ConditionTypeValidationSucceeded,
 		ConditionTypeNodeClassReady,
-	).For(in)
+	).For(in, opts...)
 }
 
 func (in *NodePool) GetConditions() []status.Condition {

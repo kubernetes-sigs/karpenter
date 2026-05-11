@@ -132,20 +132,20 @@ func NewControllers(
 			metricsnode.NewController(cluster),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.EmitDeprecatedMetrics,
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey)...),
 			),
 			status.NewController[*v1.NodePool](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.EmitDeprecatedMetrics,
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 			),
 			status.NewGenericObjectController[*corev1.Node](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey, v1.NodeInitializedLabelKey)...)),
 		)

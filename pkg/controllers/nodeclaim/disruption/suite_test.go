@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	clock "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -46,7 +45,6 @@ import (
 var ctx context.Context
 var nodeClaimDisruptionController *nodeclaimdisruption.Controller
 var env *test.Environment
-var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
 var it *cloudprovider.InstanceType
 
@@ -57,11 +55,10 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
-	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cp)
+	nodeClaimDisruptionController = nodeclaimdisruption.NewController(env.Clock, env.Client, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -99,7 +96,7 @@ var _ = BeforeEach(func() {
 	})
 	cp.InstanceTypes = append(cp.InstanceTypes, it)
 	ctx = options.ToContext(ctx, test.Options())
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 })
 
 var _ = AfterEach(func() {
@@ -124,19 +121,19 @@ var _ = Describe("Disruption", func() {
 			},
 		})
 		// set the lastPodEvent to 5 minutes in the past
-		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
+		nodeClaim.Status.LastPodEventTime.Time = env.Clock.Now().Add(-5 * time.Minute)
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = "drifted"
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 
 		// step forward to make the node empty
-		fakeClock.Step(60 * time.Second)
+		env.Clock.Step(60 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -155,18 +152,18 @@ var _ = Describe("Disruption", func() {
 			},
 		})
 		// set the lastPodEvent to 5 minutes in the past
-		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
+		nodeClaim.Status.LastPodEventTime.Time = env.Clock.Now().Add(-5 * time.Minute)
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 
 		cp.Drifted = "drifted"
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 
 		// step forward to make the node empty
-		fakeClock.Step(60 * time.Second)
+		env.Clock.Step(60 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -180,7 +177,7 @@ var _ = Describe("Disruption", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)

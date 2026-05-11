@@ -81,7 +81,7 @@ var _ = Describe("Liveness", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 			// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
-			fakeClock.Step(time.Minute * 20)
+			env.Clock.Step(time.Minute * 20)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 			if isManagedNodeClaim {
@@ -122,7 +122,7 @@ var _ = Describe("Liveness", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Node and nodeClaim should still exist
-		fakeClock.Step(time.Minute * 20)
+		env.Clock.Step(time.Minute * 20)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
@@ -151,7 +151,7 @@ var _ = Describe("Liveness", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't launched in the launch timeout timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 6)
+		env.Clock.Step(time.Minute * 6)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
@@ -180,7 +180,7 @@ var _ = Describe("Liveness", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// try again a minute later but before the launch timeout
-		fakeClock.Step(time.Minute * 1)
+		env.Clock.Step(time.Minute * 1)
 		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		// expect that the nodeclaim was not deleted
 		ExpectExists(ctx, env.Client, nodeClaim)
@@ -212,13 +212,13 @@ var _ = Describe("Liveness", func() {
 		conditions := nodeClaim.Status.Conditions
 		newConditions := make([]status.Condition, len(conditions))
 		for i, condition := range conditions {
-			condition.LastTransitionTime = metav1.NewTime(fakeClock.Now().Add(10 * time.Minute))
+			condition.LastTransitionTime = metav1.NewTime(env.Clock.Now().Add(10 * time.Minute))
 			newConditions[i] = condition
 		}
 		nodeClaim.Status.Conditions = newConditions
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		// advance the clock to show that the timeout is not based on creation timestamp when considering launch timeout
-		fakeClock.Step(12 * time.Minute)
+		env.Clock.Step(12 * time.Minute)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		// expect that the nodeclaim was not deleted after the timeout
@@ -250,13 +250,13 @@ var _ = Describe("Liveness", func() {
 		conditions := nodeClaim.Status.Conditions
 		newConditions := make([]status.Condition, len(conditions))
 		for i, condition := range conditions {
-			condition.LastTransitionTime = metav1.NewTime(fakeClock.Now().Add(10 * time.Minute))
+			condition.LastTransitionTime = metav1.NewTime(env.Clock.Now().Add(10 * time.Minute))
 			newConditions[i] = condition
 		}
 		nodeClaim.Status.Conditions = newConditions
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		// advance the clock to show that the timeout is not based on creation timestamp when considering registration timeout
-		fakeClock.Step(16 * time.Minute)
+		env.Clock.Step(16 * time.Minute)
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		Expect(result.RequeueAfter).To(Not(Equal(0 * time.Second)))
 		Expect(result.RequeueAfter > 0*time.Second && result.RequeueAfter < 15*time.Minute).To(BeTrue())
@@ -306,7 +306,7 @@ var _ = Describe("Liveness", func() {
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 6)
+		env.Clock.Step(time.Minute * 6)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim1)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
 
@@ -355,7 +355,7 @@ var _ = Describe("Liveness", func() {
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 6)
+		env.Clock.Step(time.Minute * 6)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim1)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
 
@@ -407,7 +407,7 @@ var _ = Describe("Liveness", func() {
 		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionUnknown})
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 20)
+		env.Clock.Step(time.Minute * 20)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionUnknown})
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)

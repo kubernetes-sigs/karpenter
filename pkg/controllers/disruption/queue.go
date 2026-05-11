@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
@@ -265,7 +266,7 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 				return e
 			}
 			stored := nodeClaim.DeepCopy()
-			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(cmd.Reason()), string(cmd.Reason()))
+			nodeClaim.StatusConditions(status.WithClock(q.clock)).SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(cmd.Reason()), string(cmd.Reason()))
 			return q.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored))
 		}); err != nil {
 			errs[i] = client.IgnoreNotFound(err)

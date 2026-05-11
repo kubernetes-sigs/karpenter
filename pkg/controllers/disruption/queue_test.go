@@ -88,7 +88,7 @@ var _ = Describe("Queue", func() {
 	Context("Reconcile", func() {
 		It("should keep nodes tainted when replacements haven't finished initialization", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
 			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
@@ -100,8 +100,8 @@ var _ = Describe("Queue", func() {
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
@@ -122,7 +122,7 @@ var _ = Describe("Queue", func() {
 		})
 		It("should not return an error when handling commands before the timeout", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -134,8 +134,8 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
@@ -147,7 +147,7 @@ var _ = Describe("Queue", func() {
 		})
 		It("should not return an error when the NodeClaim doesn't exist but the NodeCliam is in cluster state", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -159,8 +159,8 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
@@ -178,7 +178,7 @@ var _ = Describe("Queue", func() {
 		})
 		It("should untaint nodes when a command times out", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -190,8 +190,8 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
@@ -200,7 +200,7 @@ var _ = Describe("Queue", func() {
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			// Step the clock to trigger the timeout.
-			fakeClock.Step(11 * time.Minute)
+			env.Clock.Step(11 * time.Minute)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
@@ -208,7 +208,7 @@ var _ = Describe("Queue", func() {
 		})
 		It("should fully handle a command when replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -220,8 +220,8 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
@@ -240,7 +240,7 @@ var _ = Describe("Queue", func() {
 			Expect(recorder.DetectedEvent(disruptionevents.Launching(replacementNodeClaim, string(cmd.Reason())).Message)).To(BeTrue())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(replacementNodeClaim).Message)).To(BeTrue())
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
 				[]*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
 
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
@@ -256,7 +256,7 @@ var _ = Describe("Queue", func() {
 		})
 		It("should only finish a command when all replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -273,8 +273,8 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
@@ -294,14 +294,14 @@ var _ = Describe("Queue", func() {
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode1}, []*v1.NodeClaim{replacementNodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode1}, []*v1.NodeClaim{replacementNodeClaim1})
 
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementNodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementNodeClaim2})
 
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
@@ -313,12 +313,12 @@ var _ = Describe("Queue", func() {
 		})
 		It("should not wait for replacements when none are needed", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
@@ -338,7 +338,7 @@ var _ = Describe("Queue", func() {
 		})
 		It("should finish two commands in order as replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			stateNode2 := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim2)
 
@@ -354,8 +354,8 @@ var _ = Describe("Queue", func() {
 			}}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
@@ -363,8 +363,8 @@ var _ = Describe("Queue", func() {
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 			cmd2 := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
-				CreationTimestamp: fakeClock.Now(),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
 				Candidates:        []*disruption.Candidate{{StateNode: stateNode2, NodePool: nodePool}},
@@ -388,7 +388,7 @@ var _ = Describe("Queue", func() {
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim2).Message)).To(BeTrue())
 
 			// Make the first command's node initialized
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode1}, []*v1.NodeClaim{replacementNodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode1}, []*v1.NodeClaim{replacementNodeClaim1})
 			// Reconcile the second command and expect nothing to be initialized
 			ExpectObjectReconciled(ctx, env.Client, queue, cmd2.Candidates[0].NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
@@ -405,7 +405,7 @@ var _ = Describe("Queue", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
 
 			// Make the second command's node initialized
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementNodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementNodeClaim2})
 
 			// Reconcile the second command and expect the replacement to be initialized
 			ExpectObjectReconciled(ctx, env.Client, queue, cmd2.Candidates[0].NodeClaim)
@@ -419,7 +419,7 @@ var _ = Describe("Queue", func() {
 		Context("CalculateRetryDuration", func() {
 			DescribeTable("should calculate correct timeout based on queue length",
 				func(numCommands int, expectedDuration time.Duration) {
-					q := disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
+					q := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
 					q.Lock()
 					for i := range numCommands {
 						q.ProviderIDToCommand[strconv.Itoa(i)] = &disruption.Command{}

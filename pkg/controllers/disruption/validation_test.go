@@ -34,7 +34,7 @@ import (
 )
 
 func NewMethodsWithRealValidator() []disruption.Method {
-	return disruption.NewMethods(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+	return disruption.NewMethods(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
 }
 
 type NopValidator struct{}
@@ -44,14 +44,14 @@ func (n NopValidator) Validate(_ context.Context, command disruption.Command, _ 
 }
 
 func NewMethodsWithNopValidator() []disruption.Method {
-	c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+	c := disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
 	emptiness := disruption.NewEmptiness(c, disruption.WithValidator(NopValidator{}))
 	multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	return []disruption.Method{
 		emptiness,
 		disruption.NewStaticDrift(cluster, prov, cloudProvider),
-		disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock),
+		disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
 		multiNodeConsolidation,
 		singleNodeConsolidation,
 	}
@@ -92,7 +92,7 @@ func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim,
 		nodes:      nodes,
 		nodeClaims: nodeClaims,
 		nodePool:   nodePool,
-		emptiness:  disruption.NewEmptinessValidator(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)),
+		emptiness:  disruption.NewEmptinessValidator(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)),
 	}
 	for _, opt := range opts {
 		opt(v)
@@ -143,11 +143,11 @@ func WithUnderutilizedNodeNomination() TestConsolidationValidatorOption {
 }
 
 func NewTestSingleConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.Validator {
-	return newTestConsolidationValidator(nodePool, disruption.NewSingleConsolidationValidator(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)), opts...)
+	return newTestConsolidationValidator(nodePool, disruption.NewSingleConsolidationValidator(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)), opts...)
 }
 
 func NewTestMultiConsolidationValidator(nodePool *v1.NodePool, opts ...TestConsolidationValidatorOption) disruption.Validator {
-	return newTestConsolidationValidator(nodePool, disruption.NewMultiConsolidationValidator(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)), opts...)
+	return newTestConsolidationValidator(nodePool, disruption.NewMultiConsolidationValidator(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)), opts...)
 }
 
 func newTestConsolidationValidator(nodePool *v1.NodePool, c *disruption.ConsolidationValidator, opts ...TestConsolidationValidatorOption) disruption.Validator {
@@ -184,7 +184,7 @@ func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruptio
 
 func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 	var pods []*corev1.Pod
-	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	rs := test.ReplicaSet()
 	ExpectApplied(ctx, env.Client, rs)
 	pods = test.Pods(1, test.PodOptions{
@@ -213,7 +213,7 @@ func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 }
 
 func blockingBudget(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool) {
-	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{
 		Nodes: "0%",
 	}}
@@ -221,7 +221,7 @@ func blockingBudget(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *
 }
 
 func nominated(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
-	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	for i := range nodes {
 		cluster.NominateNodeForPod(ctx, nodes[i].Spec.ProviderID)
 		cluster.NominateNodeForPod(ctx, nodes[i].Spec.ProviderID)

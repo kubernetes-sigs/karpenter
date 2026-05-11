@@ -139,7 +139,7 @@ var _ = Describe("Termination", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		// Initialize the NodeClaim
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
 		node.Status.Capacity = corev1.ResourceList{

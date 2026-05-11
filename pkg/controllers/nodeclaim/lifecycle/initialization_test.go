@@ -78,7 +78,7 @@ var _ = Describe("Initialization", func() {
 			ExpectApplied(ctx, env.Client, node)
 
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-			ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+			ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 
 			// If we're testing that Karpenter correctly ignores unmanaged NodeClaims, we must set the registered
 			// status condition manually since the registration sub-reconciler should also ignore it.
@@ -128,7 +128,7 @@ var _ = Describe("Initialization", func() {
 
 		// does not error but will not be registered because this reconcile returned multiple nodes
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node1, node2) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node1, node2) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
@@ -200,7 +200,7 @@ var _ = Describe("Initialization", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		node = ExpectExists(ctx, env.Client, node)
@@ -294,7 +294,7 @@ var _ = Describe("Initialization", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -345,7 +345,7 @@ var _ = Describe("Initialization", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
@@ -414,7 +414,7 @@ var _ = Describe("Initialization", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 
 		// Should add the startup taints to the node
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -487,7 +487,7 @@ var _ = Describe("Initialization", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 
 		// Shouldn't consider the node ready since the startup taints still exist
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
