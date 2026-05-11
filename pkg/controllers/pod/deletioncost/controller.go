@@ -115,7 +115,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to rank nodes")
 		c.recorder.Publish(DisabledEvent(fmt.Sprintf("failed to rank nodes: %v", err)))
-		return reconciler.Result{RequeueAfter: reconcileInterval}, err
+		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
 	c.recorder.Publish(RankingCompletedEvent(len(nodeRanks)))
@@ -125,7 +125,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err := c.annotationMgr.UpdatePodDeletionCosts(ctx, activeRanks); err != nil {
 		log.FromContext(ctx).Error(err, "failed to update pod deletion costs")
 		c.recorder.Publish(DisabledEvent(fmt.Sprintf("failed to update pod deletion costs: %v", err)))
-		return reconciler.Result{RequeueAfter: reconcileInterval}, err
+		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
 	log.FromContext(ctx).V(1).WithValues("nodeCount", len(activeRanks)).Info("updated pod deletion costs")
