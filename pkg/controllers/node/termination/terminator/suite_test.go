@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	clock "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -50,7 +49,6 @@ var queue *terminator.Queue
 var pdb *policyv1.PodDisruptionBudget
 var pod *corev1.Pod
 var node *corev1.Node
-var fakeClock *clock.FakeClock
 var terminatorInstance *terminator.Terminator
 
 func TestAPIs(t *testing.T) {
@@ -60,7 +58,6 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(
 		test.WithCRDs(apis.CRDs...),
 		test.WithCRDs(v1alpha1.CRDs...),
@@ -69,7 +66,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewQueue(env.Client, recorder)
-	terminatorInstance = terminator.NewTerminator(fakeClock, env.Client, queue, recorder)
+	terminatorInstance = terminator.NewTerminator(env.Clock, env.Client, queue, recorder)
 })
 
 var _ = AfterSuite(func() {

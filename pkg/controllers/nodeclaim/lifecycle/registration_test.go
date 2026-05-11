@@ -568,7 +568,7 @@ var _ = Describe("Registration", func() {
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 6)
+		env.Clock.Step(time.Minute * 6)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim1)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
 
@@ -666,7 +666,7 @@ var _ = Describe("Registration", func() {
 	})
 	Context("RegistrationHooks", func() {
 		It("should complete registration when a single hook passes", func() {
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
@@ -695,7 +695,7 @@ var _ = Describe("Registration", func() {
 			Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
 		})
 		It("should defer registration when a hook returns false", func() {
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
@@ -731,7 +731,7 @@ var _ = Describe("Registration", func() {
 			Expect(node.Spec.Taints).To(ContainElement(v1.UnregisteredNoExecuteTaint))
 		})
 		It("should return error when a hook returns an error", func() {
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
@@ -760,7 +760,7 @@ var _ = Describe("Registration", func() {
 			Expect(nodeClaim.Status.NodeName).To(Equal(""))
 		})
 		It("should defer registration when the second hook returns false with multiple hooks", func() {
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
@@ -797,7 +797,7 @@ var _ = Describe("Registration", func() {
 			Expect(nodeClaim.Status.NodeName).To(Equal(""))
 		})
 		It("should complete registration when multiple hooks all pass", func() {
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
@@ -833,7 +833,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should call all hooks in parallel and list all pending hooks in status", func() {
 			var secondHookCalls atomic.Int32
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
@@ -875,7 +875,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should complete registration after a hook transitions from not ready to ready", func() {
 			ready := atomic.Bool{}
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
@@ -915,7 +915,7 @@ var _ = Describe("Registration", func() {
 			Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
 		})
 		It("should complete registration with empty hooks slice", func() {
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), []cloudprovider.NodeLifecycleHook{})
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -935,7 +935,7 @@ var _ = Describe("Registration", func() {
 			Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
 		})
 		It("should complete registration with nil hooks slice", func() {
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -955,7 +955,7 @@ var _ = Describe("Registration", func() {
 			Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
 		})
 		It("should propagate labels added by a registration hook to both the node and the nodeclaim", func() {
-			hookController := nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider,
+			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
 				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
