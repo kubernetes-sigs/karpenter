@@ -32,9 +32,9 @@ import (
 )
 
 const (
-	// ConsolidationPriorityAnnotation is the user-facing annotation for expressing
-	// consolidation disruption cost, separate from the auto-managed pod-deletion-cost.
-	ConsolidationPriorityAnnotation = apis.Group + "/consolidation-priority"
+	// DisruptionCostAnnotation is the user-facing annotation for expressing
+	// disruption cost, separate from the auto-managed pod-deletion-cost.
+	DisruptionCostAnnotation = apis.Group + "/disruption-cost"
 	// ManagedDeletionCostAnnotation indicates the pod-deletion-cost is managed by Karpenter's
 	// deletion cost controller (for RS coordination), not user-set for consolidation steering.
 	ManagedDeletionCostAnnotation = apis.Group + "/managed-deletion-cost"
@@ -55,17 +55,17 @@ func LifetimeRemaining(clock clock.Clock, nodePool *v1.NodePool, nodeClaim *v1.N
 }
 
 // EvictionCost returns the disruption cost computed for evicting the given pod.
-// When karpenter.sh/consolidation-priority is set, it takes precedence over pod-deletion-cost
+// When karpenter.sh/disruption-cost is set, it takes precedence over pod-deletion-cost
 // for consolidation scoring. When pod-deletion-cost is auto-managed by Karpenter (indicated by
 // the managed-deletion-cost sentinel), it is ignored for consolidation scoring since it reflects
 // RS coordination ranking, not user intent about disruption cost.
 func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 	cost := 1.0
-	if costStr, ok := p.Annotations[ConsolidationPriorityAnnotation]; ok {
+	if costStr, ok := p.Annotations[DisruptionCostAnnotation]; ok {
 		parsedCost, err := strconv.ParseFloat(costStr, 64)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed parsing consolidation priority",
-				"annotation", ConsolidationPriorityAnnotation, "value", costStr, "pod", client.ObjectKeyFromObject(p))
+			log.FromContext(ctx).Error(err, "failed parsing disruption cost",
+				"annotation", DisruptionCostAnnotation, "value", costStr, "pod", client.ObjectKeyFromObject(p))
 		} else {
 			cost += parsedCost / math.Pow(2, 27.0)
 		}

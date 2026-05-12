@@ -66,11 +66,11 @@ previously set `pod-deletion-cost` to steer consolidation behavior should migrat
 
 ```yaml
 annotations:
-  karpenter.sh/consolidation-priority: "2147483647"  # high = expensive to disrupt
+  karpenter.sh/disruption-cost: "2147483647"  # high = expensive to disrupt
 ```
 
 The consolidation scoring path (`EvictionCost`) applies this precedence:
-1. `karpenter.sh/consolidation-priority` — if set, used directly
+1. `karpenter.sh/disruption-cost` — if set, used directly
 2. `controller.kubernetes.io/pod-deletion-cost` — used only if NOT auto-managed (no sentinel)
 3. Default cost of 1.0
 

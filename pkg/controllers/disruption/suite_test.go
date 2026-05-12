@@ -900,11 +900,11 @@ var _ = Describe("Pod Eviction Cost", func() {
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
-	It("should prefer consolidation-priority over pod-deletion-cost", func() {
+	It("should prefer disruption-cost over pod-deletion-cost", func() {
 		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				corev1.PodDeletionCost:                          "100",
-				disruptionutils.ConsolidationPriorityAnnotation: "2000000000",
+				corev1.PodDeletionCost:                    "100",
+				disruptionutils.DisruptionCostAnnotation: "2000000000",
 			}},
 		})
 		costWithOnlyDeletionCost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
