@@ -171,11 +171,7 @@ The feature gate defaults to `false`. When disabled, the controller is not regis
 
 ## Open Questions
 
-1. How to incorporate other priorities into the node rankings (e.g. topology or other scheduling contraints.), planning to address this for beta. 
-
-## Future Work
-
-Annotations are the v1 mechanism, not the end state. They have known limitations (last-writer-wins, no multi-contributor support, timing constraints). Future directions include: a dedicated `PodDisruptionPreference` API for multi-system input, scheduler library integration (merging scale-in signals inside the scheduler with full topology awareness), and deprecation of the annotation controller once a proper API exists. The controller is designed to be replaceable: it writes standard annotations that any future mechanism would also produce. See Appendix D for details.
+1. How to incorporate other priorities into the node rankings (e.g. topology or other scheduling contraints.), planning to address this for beta.
 
 ## Appendix A: Security and Performance Implications
 
