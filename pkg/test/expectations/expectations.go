@@ -39,6 +39,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -257,6 +258,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&testv1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
 		&v1alpha1.NodeOverlay{},
+		&resourcev1.ResourceClaim{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
