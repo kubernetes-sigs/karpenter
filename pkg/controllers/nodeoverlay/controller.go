@@ -85,7 +85,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	for i := range nodePoolList.Items {
 		its, err := c.cloudProvider.GetInstanceTypes(ctx, &nodePoolList.Items[i])
 		if err != nil {
-			// instead of returning here we should still evalaute non-error NodePools
 			return reconcile.Result{}, fmt.Errorf("listing instance types, %w", err)
 		}
 		nodePoolToInstanceTypes[nodePoolList.Items[i].Name] = its

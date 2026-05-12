@@ -769,27 +769,46 @@ func (s *Scheduler) sortExistingNodes() {
 // computeEffectiveZoneFromPod calculates the effective zone constraint by intersecting
 // pod-level zone signals, PVC volume zones, and TSC valid domains. This can be the
 // specific zone name if exactly one zone, "flexible" if multiple zones, "none" if no intersection.
+//
+//nolint:gocyclo
 func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
 	podData := s.cachedPodData[pod.UID]
 	tscZoneValidDomains := s.topology.GetTopologyZoneConstraints(pod, podData.Requirements)
 
 	zoneReq := podData.StrictRequirements.Get(corev1.LabelTopologyZone)
-	if volZoneReq, ok := podData.VolumeRequirements[corev1.LabelTopologyZone]; ok {
-		zoneReq = zoneReq.Intersection(volZoneReq)
-	}
-	if len(tscZoneValidDomains) > 0 {
-		tscZoneReq := scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, sets.List(tscZoneValidDomains)...)
-		zoneReq = zoneReq.Intersection(tscZoneReq)
-	}
+	volZoneReq, hasVol := podData.VolumeRequirements[corev1.LabelTopologyZone]
 
-	switch {
-	case zoneReq.Len() == 1:
-		return zoneReq.Values()[0]
-	case zoneReq.Len() == 0:
-		return "none"
-	default:
+	var zonalValues []string
+	if zoneReq.Operator() == corev1.NodeSelectorOpIn {
+		zonalValues = zoneReq.Values()
+	} else if hasVol && volZoneReq.Operator() == corev1.NodeSelectorOpIn {
+		zonalValues = volZoneReq.Values()
+	} else if len(tscZoneValidDomains) > 0 {
+		zonalValues = sets.List(tscZoneValidDomains)
+	} else {
 		return "flexible"
 	}
+
+	var matchCount int
+	var matchedZone string
+	for _, zone := range zonalValues {
+		if !zoneReq.Has(zone) {
+			continue
+		}
+		if hasVol && !volZoneReq.Has(zone) {
+			continue
+		}
+		if len(tscZoneValidDomains) > 0 && !tscZoneValidDomains.Has(zone) {
+			continue
+		}
+		matchCount++
+		if matchCount == 1 {
+			matchedZone = zone
+		} else {
+			return "flexible"
+		}
+	}
+	return lo.Ternary(matchCount == 1, matchedZone, "none")
 }
 
 // parallelizeUntil is an implementation of workqueue.ParallelizeUntil that modifies the
