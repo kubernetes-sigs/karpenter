@@ -249,13 +249,13 @@ The [kubernetes/enhancements#5982](https://github.com/kubernetes/enhancements/is
 - Can be feature-gated and iterated on independently
 - Tradeoff: operational complexity (annotation management, change detection, three-annotation protocol)
 
-**KEP (long-term):**
+**KEP (on hold):**
 - Eliminates the need for an external annotation-management controller
 - Zero API server overhead (no annotation writes, no reconcile loop)
 - Applies universally to all ReplicaSets, not just those on Karpenter-managed nodes
 - Tradeoff: upstream timeline (KEP, sig-apps review, multi-release graduation)
+- Also not a great place for centralizing all the different factors (autoscaling/scheduling) when picking which pods to scale-in. 
 
-The two are complementary. The RS controller's sort order already checks `pod-deletion-cost` before its built-in heuristics, so both can coexist. The recommended path is: ship this RFC now, pursue upstream collaboration in the RS controller and scheduler work.
 
 ## Appendix D: Future Work (Detailed)
 
