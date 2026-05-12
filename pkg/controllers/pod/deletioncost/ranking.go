@@ -54,14 +54,17 @@ func NewRankingEngine() *RankingEngine {
 // Group B (low cost):    Drifted nodes, sorted by pod count ascending
 // Group C (middle):      Normal nodes, sorted by pod count ascending
 // Group D (highest):     Do-not-disrupt nodes, sorted by pod count ascending
-func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) ([]NodeRank, error) {
+//
+// nodePoolMap provides a mapping from NodePool name to NodePool object for
+// budget and consolidation policy checks.
+func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool) ([]NodeRank, error) {
 	if len(nodes) == 0 {
 		return []NodeRank{}, nil
 	}
 
 	defer metrics.Measure(RankingDurationSeconds, map[string]string{})()
 
-	disruptedBlocked, drifted, normal, doNotDisrupt, err := partitionNodes(ctx, kubeClient, nodes)
+	disruptedBlocked, drifted, normal, doNotDisrupt, err := partitionNodes(ctx, kubeClient, nodes, nodePoolMap)
 	if err != nil {
 		return nil, err
 	}
@@ -114,10 +117,16 @@ func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client,
 // D. DoNotDisrupt - has node-level do-not-disrupt annotation, do-not-disrupt pods,
 //
 //	or belongs to a NodePool with consolidation disabled
-func partitionNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode, err error) {
+func partitionNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode, err error) {
 	for _, node := range nodes {
 		// Node-level do-not-disrupt annotation sends to Group D
 		if hasNodeDoNotDisrupt(node) {
+			doNotDisrupt = append(doNotDisrupt, node)
+			continue
+		}
+		// NodePool with consolidateAfter=Never (nil Duration) means consolidation
+		// is disabled, so the node belongs in Group D
+		if isConsolidationDisabled(node, nodePoolMap) {
 			doNotDisrupt = append(doNotDisrupt, node)
 			continue
 		}
@@ -155,6 +164,20 @@ func hasNodeDoNotDisrupt(node *state.StateNode) bool {
 		return false
 	}
 	return annotations[v1.DoNotDisruptAnnotationKey] == "true"
+}
+
+// isConsolidationDisabled returns true if the node's NodePool has consolidateAfter
+// set to Never (nil Duration), meaning consolidation is disabled for that pool.
+func isConsolidationDisabled(node *state.StateNode, nodePoolMap map[string]*v1.NodePool) bool {
+	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
+	if nodePoolName == "" {
+		return false
+	}
+	np, ok := nodePoolMap[nodePoolName]
+	if !ok {
+		return false
+	}
+	return np.Spec.Disruption.ConsolidateAfter.Duration == nil
 }
 
 // isDisrupted returns true if the node has the karpenter.sh/disrupted taint,

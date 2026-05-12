@@ -29,11 +29,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 const (
@@ -111,7 +113,14 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	nodeRanks, err := c.rankingEngine.RankNodes(ctx, c.kubeClient, nodes)
+	nodePoolMap, err := c.buildNodePoolMap(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to build node pool map")
+		c.recorder.Publish(DisabledEvent(fmt.Sprintf("failed to build node pool map: %v", err)))
+		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
+	}
+
+	nodeRanks, err := c.rankingEngine.RankNodes(ctx, c.kubeClient, nodes, nodePoolMap)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to rank nodes")
 		c.recorder.Publish(DisabledEvent(fmt.Sprintf("failed to rank nodes: %v", err)))
@@ -145,6 +154,19 @@ func (c *Controller) shouldSkipUnchanged(ctx context.Context) bool {
 	}
 	c.lastConsolidationState = currentState
 	return false
+}
+
+// buildNodePoolMap lists all managed NodePools and returns a map keyed by name.
+func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodePool, error) {
+	nodePools, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
+	if err != nil {
+		return nil, fmt.Errorf("listing node pools, %w", err)
+	}
+	nodePoolMap := map[string]*v1.NodePool{}
+	for _, np := range nodePools {
+		nodePoolMap[np.Name] = np
+	}
+	return nodePoolMap, nil
 }
 
 // boundAndCleanup limits the ranked nodes to maxNodesPerCycle and cleans up annotations
