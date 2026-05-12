@@ -120,7 +120,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	nodeRanks, err := c.rankingEngine.RankNodes(ctx, c.kubeClient, nodes, nodePoolMap)
+	nodeRanks, err := c.rankingEngine.RankNodes(ctx, c.kubeClient, nodes, nodePoolMap, c.clock, c.cluster)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to rank nodes")
 		c.recorder.Publish(DisabledEvent(fmt.Sprintf("failed to rank nodes: %v", err)))

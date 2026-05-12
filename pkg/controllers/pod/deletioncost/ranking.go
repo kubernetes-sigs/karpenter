@@ -26,12 +26,14 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 )
 
 // NodeRank represents a node with its assigned rank for pod deletion cost
@@ -56,8 +58,9 @@ func NewRankingEngine() *RankingEngine {
 // Group D (highest):     Do-not-disrupt nodes, sorted by pod count ascending
 //
 // nodePoolMap provides a mapping from NodePool name to NodePool object for
-// budget and consolidation policy checks.
-func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool) ([]NodeRank, error) {
+// budget and consolidation policy checks. clk and cluster are used to
+// compute per-NodePool disruption budget limits.
+func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, clk clock.Clock, cluster *state.Cluster) ([]NodeRank, error) {
 	if len(nodes) == 0 {
 		return []NodeRank{}, nil
 	}
@@ -73,6 +76,11 @@ func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client,
 	sortByPodCount(ctx, kubeClient, drifted)
 	sortByPodCount(ctx, kubeClient, normal)
 	sortByPodCount(ctx, kubeClient, doNotDisrupt)
+
+	// Apply per-NodePool disruption budget limits to Groups B and C.
+	// Nodes that exceed the budget are moved to Group D.
+	drifted, normal, budgetOverflow := applyBudgetLimits(ctx, drifted, normal, nodePoolMap, clk, cluster)
+	doNotDisrupt = append(doNotDisrupt, budgetOverflow...)
 
 	// Group A nodes (disrupted+PDB-blocked) all get math.MinInt32 so they
 	// do not count against the annotation budget.
@@ -178,6 +186,99 @@ func isConsolidationDisabled(node *state.StateNode, nodePoolMap map[string]*v1.N
 		return false
 	}
 	return np.Spec.Disruption.ConsolidateAfter.Duration == nil
+}
+
+// applyBudgetLimits enforces per-NodePool disruption budgets on Groups B and C.
+// Group B (drifted) nodes are bounded by the drift disruption budget and
+// Group C (normal) nodes are bounded by the consolidation (Underutilized) budget.
+// Nodes that exceed the budget are returned in the overflow slice so the caller
+// can move them to Group D. The function computes node counts and disrupting
+// counts across the cluster, mirroring the approach in BuildDisruptionBudgetMapping.
+func applyBudgetLimits(
+	ctx context.Context,
+	drifted, normal []*state.StateNode,
+	nodePoolMap map[string]*v1.NodePool,
+	clk clock.Clock,
+	cluster *state.Cluster,
+) (boundedDrifted, boundedNormal, overflow []*state.StateNode) {
+	numNodes, disrupting := countNodePoolStats(cluster)
+
+	driftBudget := buildBudgetForReason(nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonDrifted)
+	consolBudget := buildBudgetForReason(nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonUnderutilized)
+
+	// Track consumed slots per NodePool per reason
+	driftUsed := map[string]int{}
+	consolUsed := map[string]int{}
+
+	for _, node := range drifted {
+		poolName := node.Labels()[v1.NodePoolLabelKey]
+		if driftUsed[poolName] < driftBudget[poolName] {
+			boundedDrifted = append(boundedDrifted, node)
+			driftUsed[poolName]++
+		} else {
+			overflow = append(overflow, node)
+		}
+	}
+	for _, node := range normal {
+		poolName := node.Labels()[v1.NodePoolLabelKey]
+		if consolUsed[poolName] < consolBudget[poolName] {
+			boundedNormal = append(boundedNormal, node)
+			consolUsed[poolName]++
+		} else {
+			overflow = append(overflow, node)
+		}
+	}
+
+	if len(overflow) > 0 {
+		log.FromContext(ctx).V(1).WithValues(
+			"overflowNodes", len(overflow),
+		).Info("moved nodes exceeding disruption budget to Group D")
+	}
+
+	return boundedDrifted, boundedNormal, overflow
+}
+
+// countNodePoolStats counts initialized, managed nodes per NodePool and how many
+// of those are currently disrupting (NotReady or marked for deletion).
+func countNodePoolStats(cluster *state.Cluster) (numNodes, disrupting map[string]int) {
+	numNodes = map[string]int{}
+	disrupting = map[string]int{}
+	for _, node := range cluster.DeepCopyNodes() {
+		if !node.Managed() || !node.Initialized() {
+			continue
+		}
+		if node.NodeClaim != nil && node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+			continue
+		}
+		poolName := node.Labels()[v1.NodePoolLabelKey]
+		numNodes[poolName]++
+		if node.Node != nil {
+			if cond := nodeutils.GetCondition(node.Node, corev1.NodeReady); cond.Status != corev1.ConditionTrue || node.MarkedForDeletion() {
+				disrupting[poolName]++
+			}
+		}
+	}
+	return numNodes, disrupting
+}
+
+// buildBudgetForReason computes the allowed disruption count per NodePool for a
+// given disruption reason, subtracting nodes already disrupting.
+func buildBudgetForReason(
+	nodePoolMap map[string]*v1.NodePool,
+	numNodes, disrupting map[string]int,
+	clk clock.Clock,
+	reason v1.DisruptionReason,
+) map[string]int {
+	budget := map[string]int{}
+	for name, np := range nodePoolMap {
+		allowed := np.MustGetAllowedDisruptions(clk, numNodes[name], reason)
+		remaining := allowed - disrupting[name]
+		if remaining < 0 {
+			remaining = 0
+		}
+		budget[name] = remaining
+	}
+	return budget
 }
 
 // isDisrupted returns true if the node has the karpenter.sh/disrupted taint,
