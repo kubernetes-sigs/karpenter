@@ -111,9 +111,16 @@ func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client,
 // A. DisruptedBlocked - has karpenter.sh/disrupted taint AND at least one pod blocked by a PDB
 // B. Drifted - NodeClaim has ConditionTypeDrifted=True (but not disrupted+blocked)
 // C. Normal - not drifted, no do-not-disrupt pods
-// D. DoNotDisrupt - has do-not-disrupt pods (regardless of drift)
+// D. DoNotDisrupt - has node-level do-not-disrupt annotation, do-not-disrupt pods,
+//
+//	or belongs to a NodePool with consolidation disabled
 func partitionNodes(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode, err error) {
 	for _, node := range nodes {
+		// Node-level do-not-disrupt annotation sends to Group D
+		if hasNodeDoNotDisrupt(node) {
+			doNotDisrupt = append(doNotDisrupt, node)
+			continue
+		}
 		hasDND, err := hasDoNotDisruptPods(ctx, kubeClient, node)
 		if err != nil {
 			return nil, nil, nil, nil, err
@@ -139,6 +146,15 @@ func partitionNodes(ctx context.Context, kubeClient client.Client, nodes []*stat
 		}
 	}
 	return
+}
+
+// hasNodeDoNotDisrupt returns true if the Node itself has the karpenter.sh/do-not-disrupt annotation.
+func hasNodeDoNotDisrupt(node *state.StateNode) bool {
+	annotations := node.Annotations()
+	if annotations == nil {
+		return false
+	}
+	return annotations[v1.DoNotDisruptAnnotationKey] == "true"
 }
 
 // isDisrupted returns true if the node has the karpenter.sh/disrupted taint,
