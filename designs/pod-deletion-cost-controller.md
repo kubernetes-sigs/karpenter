@@ -68,10 +68,6 @@ The benefit of this feature varies by consolidation policy. For `ConsolidateWhen
 
 We introduce a new feature-gated controller (`pod.deletioncost`) that automatically manages the `controller.kubernetes.io/pod-deletion-cost` annotation on pods running on Karpenter-managed nodes. The controller ranks nodes using Karpenter's consolidation candidate ranking, assigns deletion cost values to pods so that Kubernetes' ReplicaSet scale-down logic preferentially removes pods from the best consolidation targets first, and partitions nodes Karpenter cannot act on separately to protect them from early eviction.
 
-### Ranking strategy
-
-The controller ranks nodes the same way Karpenter ranks consolidation candidates. The ranking partitions nodes into four priority tiers before sorting. At the top priority: nodes already committed to disruption but blocked by PDBs, since every pod removed directly unblocks an in-progress operation. Next: drifted nodes that need replacement. Then normal consolidation candidates. Finally, nodes Karpenter cannot act on. As Karpenter's consolidation candidate sorting evolves, the ranking here follows it.
-
 ### How it works
 
 All new code lives in `pkg/controllers/pod/deletioncost/`. A singleton reconciler runs every 60 seconds. The 60-second interval balances annotation freshness against API server write load. fast enough to react to scale events within one HPA evaluation period, slow enough to avoid amplifying watch events during steady state. On each tick it:
