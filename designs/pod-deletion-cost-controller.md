@@ -151,15 +151,7 @@ The ranking function should be factored into a shared package (e.g., `pkg/rankin
 
 - **Stale annotations after controller is disabled (Low):** Pods retain annotations indefinitely when the feature gate is turned off. *Mitigation:* Annotations live on pods, which are ephemeral. New pods start clean. Staleness is bounded by pod lifetime. Cleanup on disable is a known gap deferred to beta.
 
-- **Consolidation-optimized deletions may temporarily violate topology spread constraints (Low):** When the controller concentrates deletions on specific nodes, the resulting pod distribution may temporarily violate `topologySpreadConstraints` until the scheduler places replacement pods. This is the same behavior as the current spreading heuristic; neither approach guarantees constraint satisfaction during scale-down. The Kubernetes scheduler enforces topology spread when placing new pods, so any temporary imbalance is corrected on the next scheduling cycle. Operators with strict spreading requirements can leave the feature disabled. This is tracked as a follow-up item. Graduation criteria: "Beta: evaluate whether topology-aware ranking factors should be added."
-
-### Placement and Spreading Constraints
-
-See the topology spread risk above.
-
-### Backward compatibility
-
-The feature gate defaults to `false`. When disabled, the controller is not registered, no annotations are written, no metrics are emitted, and all existing behavior is unchanged. When enabled, the controller only adds annotations. It never removes customer annotations, modifies pod specs, or changes node state.
+- **Consolidation-optimized deletions may temporarily violate topology spread constraints (Low):** When the controller concentrates deletions on specific nodes, the resulting pod distribution may temporarily violate `topologySpreadConstraints` until the scheduler places replacement pods. This is the same behavior as the current spreading heuristic; neither approach guarantees constraint satisfaction during scale-down. The Kubernetes scheduler enforces topology spread when placing new pods, so any temporary imbalance is corrected on the next scheduling cycle. Operators with strict spreading requirements can leave the feature disabled. This is tracked as a follow-up item. Graduation criteria: "Beta: evaluate whether topology-aware ranking factors should be added.
 
 ## Open Questions
 
