@@ -91,6 +91,18 @@ func (a *AnnotationManager) UpdatePodDeletionCosts(ctx context.Context, nodeRank
 			continue
 		}
 
+		// Group D (do-not-disrupt) nodes: clear any existing Karpenter-managed
+		// annotations instead of assigning a rank.
+		if nodeRank.HasDoNotDisrupt {
+			for _, pod := range pods {
+				activePods[pod.UID] = true
+				if err := a.clearManagedAnnotations(ctx, pod); err != nil {
+					errorCount++
+				}
+			}
+			continue
+		}
+
 		for _, pod := range pods {
 			activePods[pod.UID] = true
 			switch a.processSinglePod(ctx, pod, nodeRank.Rank) {
@@ -201,6 +213,32 @@ func (a *AnnotationManager) isExternallyModified(pod *corev1.Pod) bool {
 		return false
 	}
 	return currentVal != lastVal
+}
+
+// clearManagedAnnotations removes both the deletion cost and sentinel annotations from a
+// Karpenter-managed pod. Used for Group D (do-not-disrupt) nodes that should not carry
+// any Karpenter-set deletion cost.
+func (a *AnnotationManager) clearManagedAnnotations(ctx context.Context, pod *corev1.Pod) error {
+	if pod.Annotations == nil {
+		return nil
+	}
+	if _, ok := pod.Annotations[KarpenterManagedDeletionCostAnnotation]; !ok {
+		return nil
+	}
+	updated := pod.DeepCopy()
+	delete(updated.Annotations, KarpenterManagedDeletionCostAnnotation)
+	delete(updated.Annotations, PodDeletionCostAnnotation)
+	if err := a.kubeClient.Update(ctx, updated); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		log.FromContext(ctx).WithValues("pod", klog.KObj(pod)).Error(err, "failed to clear managed annotations on do-not-disrupt node")
+		return err
+	}
+	a.mu.Lock()
+	delete(a.lastAssignedValues, pod.UID)
+	a.mu.Unlock()
+	return nil
 }
 
 // removeSentinelAnnotation removes the Karpenter management sentinel from a pod

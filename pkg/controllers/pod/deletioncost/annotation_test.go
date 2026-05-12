@@ -273,6 +273,112 @@ var _ = Describe("Annotation", func() {
 		})
 	})
 
+	Context("Group D (do-not-disrupt) annotation clearing", func() {
+		It("should clear managed annotations on do-not-disrupt nodes", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// Pod previously managed by Karpenter (has both annotations)
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						deletioncost.PodDeletionCostAnnotation:              "5",
+						deletioncost.KarpenterManagedDeletionCostAnnotation: "true",
+					},
+				},
+				NodeName: nodes[0].Name,
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: 10, HasDoNotDisrupt: true}}
+			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+
+			// Both managed annotations should be removed
+			updatedPod := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
+			Expect(updatedPod.Annotations).ToNot(HaveKey(deletioncost.PodDeletionCostAnnotation))
+			Expect(updatedPod.Annotations).ToNot(HaveKey(deletioncost.KarpenterManagedDeletionCostAnnotation))
+		})
+
+		It("should not modify unmanaged pods on do-not-disrupt nodes", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// Pod with customer-set cost but no sentinel
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						deletioncost.PodDeletionCostAnnotation: "100",
+					},
+				},
+				NodeName: nodes[0].Name,
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: 10, HasDoNotDisrupt: true}}
+			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+
+			// Customer annotation should be preserved
+			updatedPod := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
+			Expect(updatedPod.Annotations[deletioncost.PodDeletionCostAnnotation]).To(Equal("100"))
+			Expect(updatedPod.Annotations).ToNot(HaveKey(deletioncost.KarpenterManagedDeletionCostAnnotation))
+		})
+
+		It("should skip pods without annotations on do-not-disrupt nodes", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: 10, HasDoNotDisrupt: true}}
+			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+
+			// Pod should remain unchanged (no annotations added)
+			updatedPod := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
+			Expect(updatedPod.Annotations).ToNot(HaveKey(deletioncost.PodDeletionCostAnnotation))
+			Expect(updatedPod.Annotations).ToNot(HaveKey(deletioncost.KarpenterManagedDeletionCostAnnotation))
+		})
+	})
+
 	Context("Third-party conflict detection", func() {
 		It("should detect externally modified annotation and remove sentinel", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
