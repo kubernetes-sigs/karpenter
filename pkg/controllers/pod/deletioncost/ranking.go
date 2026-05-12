@@ -18,6 +18,7 @@ package deletioncost
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	"github.com/samber/lo"
@@ -70,13 +71,15 @@ func (r *RankingEngine) RankNodes(ctx context.Context, kubeClient client.Client,
 	sortByPodCount(ctx, kubeClient, normal)
 	sortByPodCount(ctx, kubeClient, doNotDisrupt)
 
-	baseRank := -len(nodes)
+	// Group A nodes (disrupted+PDB-blocked) all get math.MinInt32 so they
+	// do not count against the annotation budget.
+	remaining := len(drifted) + len(normal) + len(doNotDisrupt)
+	baseRank := -remaining
 	currentRank := baseRank
 	result := make([]NodeRank, 0, len(nodes))
 
 	for _, node := range disruptedBlocked {
-		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: false})
-		currentRank++
+		result = append(result, NodeRank{Node: node, Rank: math.MinInt32, HasDoNotDisrupt: false})
 	}
 	for _, node := range drifted {
 		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: false})

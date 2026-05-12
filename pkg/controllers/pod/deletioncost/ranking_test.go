@@ -17,6 +17,8 @@ limitations under the License.
 package deletioncost_test
 
 import (
+	"math"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -308,18 +310,13 @@ var _ = Describe("Ranking", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(4))
 
-			// Find the rank for node 0 (disrupted+blocked) - should be the lowest
-			var disruptedBlockedRank int
-			var otherRanks []int
+			// Find the rank for node 0 (disrupted+blocked) - should be math.MinInt32
 			for _, r := range ranks {
 				if r.Node.Node.Name == nodes[0].Name {
-					disruptedBlockedRank = r.Rank
+					Expect(r.Rank).To(Equal(math.MinInt32))
 				} else {
-					otherRanks = append(otherRanks, r.Rank)
+					Expect(r.Rank).To(BeNumerically(">", math.MinInt32))
 				}
-			}
-			for _, rank := range otherRanks {
-				Expect(disruptedBlockedRank).To(BeNumerically("<", rank))
 			}
 		})
 
@@ -430,11 +427,11 @@ var _ = Describe("Ranking", func() {
 					node2Rank = r.Rank
 				}
 			}
-			// Node 1 (fewer pods) should rank lower than Node 0 (more pods)
-			Expect(node1Rank).To(BeNumerically("<", node0Rank))
-			// Both disrupted+blocked nodes should rank lower than normal node
-			Expect(node0Rank).To(BeNumerically("<", node2Rank))
-			Expect(node1Rank).To(BeNumerically("<", node2Rank))
+			// Both disrupted+blocked nodes should get math.MinInt32
+			Expect(node0Rank).To(Equal(math.MinInt32))
+			Expect(node1Rank).To(Equal(math.MinInt32))
+			// Normal node should have a rank greater than math.MinInt32
+			Expect(node2Rank).To(BeNumerically(">", math.MinInt32))
 		})
 
 		It("should place Group A below Group B (drifted) in ordering", func() {
@@ -501,8 +498,8 @@ var _ = Describe("Ranking", func() {
 					groupCRank = r.Rank
 				}
 			}
-			// Group A < Group B < Group C
-			Expect(groupARank).To(BeNumerically("<", groupBRank))
+			// Group A gets math.MinInt32, Group B < Group C
+			Expect(groupARank).To(Equal(math.MinInt32))
 			Expect(groupBRank).To(BeNumerically("<", groupCRank))
 		})
 	})
