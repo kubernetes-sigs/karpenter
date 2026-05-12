@@ -13,17 +13,20 @@ When enabled via the `PodDeletionCostManagement` feature gate, this controller:
 4. Detects third-party annotation conflicts and releases management
 5. Bounds annotation updates to the top 50 nodes per cycle with cleanup
 
-## Ranking: Three-Tier Drift Partitioning
+## Ranking: Four-Tier Partitioning
 
-Nodes are partitioned into three tiers, each sorted by pod count ascending:
+Nodes are partitioned into four groups, each sorted by pod count ascending:
 
-| Tier | Nodes | Deletion Cost |
-|------|-------|---------------|
-| 1 (lowest) | Drifted nodes | Deleted first |
-| 2 (middle) | Normal nodes | Deleted second |
-| 3 (highest) | Do-not-disrupt nodes | Deleted last |
+| Group | Nodes | Deletion Cost |
+|-------|-------|---------------|
+| A (floor) | Disrupted + PDB-blocked | `math.MinInt32` (excluded from budget) |
+| B (lowest) | Drifted nodes | Sequential rank, deleted first |
+| C (middle) | Normal nodes | Sequential rank, deleted second |
+| D (cleared) | Do-not-disrupt nodes | Annotations cleared, not ranked |
 
-Ranks start at `-len(nodes)` and increment sequentially across tiers.
+Groups B and C receive sequential ranks starting at `-len(B+C+D)`.
+Group A nodes get `math.MinInt32` and do not count against the annotation budget.
+Group D nodes have any existing Karpenter-managed annotations removed.
 
 ## Components
 
