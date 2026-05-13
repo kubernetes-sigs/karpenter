@@ -44,8 +44,8 @@ type NodeClaim struct {
 	Pods               []*corev1.Pod
 	reservationManager *ReservationManager
 	topology           *Topology
-	hostPortUsage      *scheduling.HostPortUsage
-	daemonResources    corev1.ResourceList
+	hostPortUsage      map[string]*scheduling.HostPortUsage
+	daemonResources    map[string]corev1.ResourceList
 	hostname           string
 
 	// We store the reserved offerings rather than appending reservation ID labels for two reasons:
@@ -84,8 +84,8 @@ var nodeID int64
 func NewNodeClaim(
 	nodeClaimTemplate *NodeClaimTemplate,
 	topology *Topology,
-	daemonResources corev1.ResourceList,
-	hostPortUsage *scheduling.HostPortUsage,
+	daemonResources map[string]corev1.ResourceList,
+	hostPortUsage map[string]*scheduling.HostPortUsage,
 	instanceTypes []*cloudprovider.InstanceType,
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
@@ -96,7 +96,7 @@ func NewNodeClaim(
 	template.Requirements.Add(nodeClaimTemplate.Requirements.Values()...)
 	template.Requirements.Add(scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
-	template.Spec.Resources.Requests = daemonResources
+	template.Spec.Resources.Requests = corev1.ResourceList{}
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
 		hostPortUsage:        hostPortUsage,
@@ -118,11 +118,6 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 		return nil, nil, nil, err
 	}
 
-	// exposed host ports on the node
-	hostPorts := scheduling.GetHostPorts(pod)
-	if err := n.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
-		return nil, nil, nil, fmt.Errorf("checking host port usage, %w", err)
-	}
 	nodeClaimRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
 
 	// Check NodeClaim Affinity Requirements
@@ -153,7 +148,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 
-	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, podData.Requests, n.daemonResources, requests, relaxMinValues)
+	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, pod, podData.Requests, n.daemonResources, n.hostPortUsage, requests, relaxMinValues)
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
 		for key, minValues := range unsatisfiableKeys {
@@ -179,11 +174,15 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	n.InstanceTypeOptions = instanceTypes
+	// Daemon overhead is excluded here to avoid double-counting
 	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 	n.Requirements = nodeClaimRequirements
 	n.topology.Register(corev1.LabelHostname, n.hostname)
 	n.topology.Record(pod, n.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
-	n.hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
+	hostPorts := scheduling.GetHostPorts(pod)
+	for _, it := range instanceTypes {
+		n.hostPortUsage[it.Name].Add(pod, hostPorts)
+	}
 	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
 	n.releaseReservedOfferings(n.reservedOfferings, offeringsToReserve)
 	n.reservedOfferings = offeringsToReserve
@@ -257,6 +256,23 @@ func (n *NodeClaim) offeringsToReserve(
 	return reservedOfferings, nil
 }
 
+// Add min daemon resource requests (min across instance types)
+func (n *NodeClaim) addDaemonRequests() {
+	var minDaemonOverhead corev1.ResourceList
+	for _, it := range n.InstanceTypeOptions {
+		if dr, ok := n.daemonResources[it.Name]; ok {
+			if len(minDaemonOverhead) == 0 {
+				minDaemonOverhead = dr.DeepCopy()
+			} else {
+				minDaemonOverhead = resources.MinResources(minDaemonOverhead, dr)
+			}
+		}
+	}
+	if len(minDaemonOverhead) > 0 {
+		n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, minDaemonOverhead)
+	}
+}
+
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
 // necessary before its requirements are used for instance launching
 func (n *NodeClaim) FinalizeScheduling() {
@@ -275,6 +291,10 @@ func (n *NodeClaim) FinalizeScheduling() {
 			lo.Map(n.reservedOfferings, func(o *cloudprovider.Offering, _ int) string { return o.ReservationID() })...,
 		))
 	}
+	// Add min Daemon resource requests
+	// Daemon resource requests are excluded during bin packing to avoid double-counting
+	// Adding during bin-packing would add it every time a pod is added
+	n.addDaemonRequests()
 }
 
 func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {
@@ -322,39 +342,66 @@ type InstanceTypeFilterError struct {
 	// We capture podRequests here since when a pod can't schedule due to requests, it's because the pod
 	// was on its own on the simulated Node and exceeded the available resources for any instance type for this NodePool
 	podRequests corev1.ResourceList
-	// We capture daemonRequests since this contributes to the resources that are required to schedule to this NodePool
-	daemonRequests corev1.ResourceList
+	// We capture the min and max daemonRequests since this contributes to the resources that are required to schedule to this NodePool. The min/max DaemonRequests are the min / max across all instance types.
+	minDaemonRequests corev1.ResourceList
+	maxDaemonRequests corev1.ResourceList
+}
+
+// Updates the min/max daemon overhead bounds for error reporting.
+func (e *InstanceTypeFilterError) trackDaemonOverhead(dr corev1.ResourceList) {
+	if len(e.maxDaemonRequests) == 0 {
+		e.minDaemonRequests = dr.DeepCopy()
+		e.maxDaemonRequests = dr.DeepCopy()
+		return
+	}
+	e.minDaemonRequests = resources.MinResources(e.minDaemonRequests, dr)
+	e.maxDaemonRequests = resources.MaxResources(e.maxDaemonRequests, dr)
+}
+
+// Returns total resource requirements as a formatted string, showing min/max bounds when they differ.
+func (e InstanceTypeFilterError) resourcesString() string {
+	if len(e.minDaemonRequests) == 0 {
+		return resources.String(e.podRequests)
+	}
+	minTotal := resources.Merge(e.minDaemonRequests, e.podRequests)
+	maxTotal := resources.Merge(e.maxDaemonRequests, e.podRequests)
+	minStr := resources.String(minTotal)
+	maxStr := resources.String(maxTotal)
+	if minStr == maxStr {
+		return minStr
+	}
+	return fmt.Sprintf("min=%s, max=%s", minStr, maxStr)
 }
 
 //nolint:gocyclo
 func (e InstanceTypeFilterError) Error() string {
 	// minValues is specified in the requirements and is not met
 	if e.minValuesIncompatibleErr != nil {
-		return fmt.Sprintf("%s, requirements=%s, resources=%s", e.minValuesIncompatibleErr.Error(), e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("%s, requirements=%s, resources=%s", e.minValuesIncompatibleErr.Error(), e.requirements, e.resourcesString())
 	}
 	// no instance type met any of the three criteria, meaning each criteria was enough to completely prevent
 	// this pod from scheduling
 	if !e.requirementsMet && !e.fits && !e.hasOffering {
-		return fmt.Sprintf("no instance type met the scheduling requirements or had enough resources or had a required offering, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type met the scheduling requirements or had enough resources or had a required offering, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	// check the other pairwise criteria
 	if !e.requirementsMet && !e.fits {
-		return fmt.Sprintf("no instance type met the scheduling requirements or had enough resources, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type met the scheduling requirements or had enough resources, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	if !e.requirementsMet && !e.hasOffering {
-		return fmt.Sprintf("no instance type met the scheduling requirements or had a required offering, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type met the scheduling requirements or had a required offering, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	if !e.fits && !e.hasOffering {
-		return fmt.Sprintf("no instance type had enough resources or had a required offering, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type had enough resources or had a required offering, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	// and then each individual criteria. These are sort of the same as above in that each one indicates that no
 	// instance type matched that criteria at all, so it was enough to exclude all instance types.  I think it's
 	// helpful to have these separate, since we can report the multiple excluding criteria above.
 	if !e.requirementsMet {
-		return fmt.Sprintf("no instance type met all requirements, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type met all requirements, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	if !e.fits {
-		msg := fmt.Sprintf("no instance type has enough resources, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		msg := fmt.Sprintf("no instance type has enough resources, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 		// special case for a user typo I saw reported once
 		if e.podRequests.Cpu().Cmp(resource.MustParse("1M")) >= 0 {
 			msg += " (CPU request >= 1 Million, m vs M typo?)"
@@ -362,25 +409,25 @@ func (e InstanceTypeFilterError) Error() string {
 		return msg
 	}
 	if !e.hasOffering {
-		return fmt.Sprintf("no instance type has the required offering, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type has the required offering, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	// see if any pair of criteria was enough to exclude all instances
 	if e.requirementsAndFits {
-		return fmt.Sprintf("no instance type which met the scheduling requirements and had enough resources, had a required offering, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type which met the scheduling requirements and had enough resources, had a required offering, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	if e.fitsAndOffering {
-		return fmt.Sprintf("no instance type which had enough resources and the required offering met the scheduling requirements, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type which had enough resources and the required offering met the scheduling requirements, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	if e.requirementsAndOffering {
-		return fmt.Sprintf("no instance type which met the scheduling requirements and the required offering had the required resources, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+		return fmt.Sprintf("no instance type which met the scheduling requirements and the required offering had the required resources, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 	}
 	// finally all instances were filtered out, but we had at least one instance that met each criteria, and met each
 	// pairwise set of criteria, so the only thing that remains is no instance which met all three criteria simultaneously
-	return fmt.Sprintf("no instance type met the requirements/resources/offering tuple, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
+	return fmt.Sprintf("no instance type met the requirements/resources/offering tuple, requirements=%s, resources=%s", e.requirements, e.resourcesString())
 }
 
 //nolint:gocyclo
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, podRequests, daemonRequests, totalRequests corev1.ResourceList, relaxMinValues bool) (cloudprovider.InstanceTypes, map[string]int, error) {
+func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, pod *corev1.Pod, podRequests corev1.ResourceList, daemonRequests map[string]corev1.ResourceList, hostPortUsage map[string]*scheduling.HostPortUsage, totalRequests corev1.ResourceList, relaxMinValues bool) (cloudprovider.InstanceTypes, map[string]int, error) {
 	unsatisfiableKeys := map[string]int{}
 	// We hold the results of our scheduling simulation inside of this InstanceTypeFilterError struct
 	// to reduce the CPU load of having to generate the error string for a failed scheduling simulation
@@ -393,17 +440,33 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		requirementsAndOffering: false,
 		fitsAndOffering:         false,
 
-		requirements:   requirements,
-		podRequests:    podRequests,
-		daemonRequests: daemonRequests,
+		requirements: requirements,
+		podRequests:  podRequests,
 	}
 	remaining := cloudprovider.InstanceTypes{}
 
 	for _, it := range instanceTypes {
+		hostPortUsageForInstanceType := lo.ValueOr(hostPortUsage, it.Name, &scheduling.HostPortUsage{})
+		// exposed host ports on the pod
+		hostPorts := scheduling.GetHostPorts(pod)
+		if err := hostPortUsageForInstanceType.Conflicts(pod, hostPorts); err != nil {
+			continue
+		}
+
+		var totalRequestsForInstanceType corev1.ResourceList
+		daemonRequestsForInstanceType := daemonRequests[it.Name]
+		if len(daemonRequestsForInstanceType) != 0 {
+			err.trackDaemonOverhead(daemonRequestsForInstanceType)
+			totalRequestsForInstanceType = resources.MergeInto(totalRequestsForInstanceType, totalRequests)
+			totalRequestsForInstanceType = resources.MergeInto(totalRequestsForInstanceType, daemonRequestsForInstanceType)
+		} else {
+			totalRequestsForInstanceType = totalRequests
+		}
+
 		// the tradeoff to not short-circuiting on the filtering is that we can report much better error messages
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
-		itFits := fits(it, totalRequests)
+		itFits := fits(it, totalRequestsForInstanceType)
 
 		// By using this iterative approach vs. the Available() function it prevents allocations
 		// which have to be garbage collected and slow down Karpenter's scheduling algorithm
