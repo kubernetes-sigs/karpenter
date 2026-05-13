@@ -365,41 +365,60 @@ func TestEvaluateBalancedMove_AllPoolsMustApprove(t *testing.T) {
 }
 
 // TestAnyBalancedCandidate verifies AnyBalancedCandidate returns true when
-// any candidate uses Balanced, false when none do.
+// any candidate uses Balanced AND the BalancedConsolidation feature gate is
+// enabled, and false when either condition fails. The gate gating means
+// disabling the gate implicitly downgrades Balanced pools to
+// WhenEmptyOrUnderutilized for the rest of the controller path.
 func TestAnyBalancedCandidate(t *testing.T) {
 	balancedNP := makeNodePool("balanced", v1.ConsolidationPolicyBalanced)
 	emptyNP := makeNodePool("empty", v1.ConsolidationPolicyWhenEmpty)
 	underutilizedNP := makeNodePool("underutilized", v1.ConsolidationPolicyWhenEmptyOrUnderutilized)
 
-	// All non-Balanced => false
+	gateOn := options.ToContext(context.Background(), &options.Options{
+		FeatureGates: options.FeatureGates{BalancedConsolidation: true},
+	})
+	gateOff := options.ToContext(context.Background(), &options.Options{
+		FeatureGates: options.FeatureGates{BalancedConsolidation: false},
+	})
+
+	// All non-Balanced returns false regardless of gate.
 	candidates := []*Candidate{
 		makeCandidate("n1", emptyNP, nil, nil),
 		makeCandidate("n2", underutilizedNP, nil, nil),
 	}
-	if AnyBalancedCandidate(candidates) {
-		t.Errorf("expected false when no Balanced candidates, got true")
+	if AnyBalancedCandidate(gateOn, candidates) {
+		t.Errorf("expected false when no Balanced candidates (gate on), got true")
+	}
+	if AnyBalancedCandidate(gateOff, candidates) {
+		t.Errorf("expected false when no Balanced candidates (gate off), got true")
 	}
 
-	// Mix with one Balanced => true
+	// Mix with one Balanced. True when gate on, false when gate off.
 	candidates = append(candidates, makeCandidate("n3", balancedNP, nil, nil))
-	if !AnyBalancedCandidate(candidates) {
-		t.Errorf("expected true when Balanced candidate present, got false")
+	if !AnyBalancedCandidate(gateOn, candidates) {
+		t.Errorf("expected true when Balanced candidate present and gate on, got false")
+	}
+	if AnyBalancedCandidate(gateOff, candidates) {
+		t.Errorf("expected false when gate is off even with Balanced candidate, got true")
 	}
 
-	// All Balanced => true
+	// All Balanced. Same gate split.
 	allBalanced := []*Candidate{
 		makeCandidate("n4", balancedNP, nil, nil),
 		makeCandidate("n5", balancedNP, nil, nil),
 	}
-	if !AnyBalancedCandidate(allBalanced) {
-		t.Errorf("expected true when all candidates are Balanced, got false")
+	if !AnyBalancedCandidate(gateOn, allBalanced) {
+		t.Errorf("expected true when all candidates are Balanced and gate on, got false")
+	}
+	if AnyBalancedCandidate(gateOff, allBalanced) {
+		t.Errorf("expected false when gate is off even with all Balanced candidates, got true")
 	}
 
-	// Empty list => false
-	if AnyBalancedCandidate(nil) {
+	// Empty list returns false regardless of gate.
+	if AnyBalancedCandidate(gateOn, nil) {
 		t.Errorf("expected false for nil candidates, got true")
 	}
-	if AnyBalancedCandidate([]*Candidate{}) {
+	if AnyBalancedCandidate(gateOn, []*Candidate{}) {
 		t.Errorf("expected false for empty candidates, got true")
 	}
 }
@@ -558,35 +577,42 @@ func makeShouldDisruptCandidate(np *v1.NodePool, policy v1.ConsolidationPolicy) 
 
 // TestShouldDisrupt_FeatureGateDisabled_RejectsBalanced verifies that when
 // BalancedConsolidation feature gate is false, a candidate with
-// consolidationPolicy: Balanced is rejected by ShouldDisrupt and an
-// Unconsolidatable event is published.
-func TestShouldDisrupt_FeatureGateDisabled_RejectsBalanced(t *testing.T) {
+// consolidationPolicy: Balanced is still eligible for consolidation, but the
+// controller falls back to WhenEmptyOrUnderutilized semantics. The status
+// condition ConsolidationPolicyUnsupported is set so operators can see that
+// their Balanced configuration is not active. No Unconsolidatable event is
+// published for the gate disagreement, since consolidation continues.
+func TestShouldDisrupt_FeatureGateDisabled_FallsBackToWhenEmptyOrUnderutilized(t *testing.T) {
 	rec := &mockRecorder{}
 	c := consolidation{recorder: rec}
 
 	np := makeNodePool("test-pool", v1.ConsolidationPolicyBalanced)
 	candidate := makeShouldDisruptCandidate(np, v1.ConsolidationPolicyBalanced)
 
-	// Context with BalancedConsolidation disabled (default is false)
 	ctx := options.ToContext(context.Background(), &options.Options{
 		FeatureGates: options.FeatureGates{BalancedConsolidation: false},
 	})
 
 	result := c.ShouldDisrupt(ctx, candidate)
-	if result {
-		t.Errorf("expected ShouldDisrupt to return false when BalancedConsolidation feature gate is disabled")
+	if !result {
+		t.Errorf("expected ShouldDisrupt to return true when Balanced is configured but gate is disabled (fallback to WhenEmptyOrUnderutilized)")
 	}
 
-	// Verify an Unconsolidatable event was published with the expected message
-	found := false
+	// The status condition flags the fallback to operators.
+	cond := candidate.NodePool.StatusConditions().Get(v1.ConditionTypeConsolidationPolicyUnsupported)
+	if cond == nil || !cond.IsTrue() {
+		t.Errorf("expected ConsolidationPolicyUnsupported condition to be True, got %v", cond)
+	}
+	if cond != nil && cond.Reason != "BalancedConsolidationDisabled" {
+		t.Errorf("expected reason BalancedConsolidationDisabled, got %q", cond.Reason)
+	}
+
+	// No Unconsolidatable event for the gate disagreement, since the candidate
+	// is not being rejected.
 	for _, e := range rec.events {
 		if strings.Contains(e.Message, "BalancedConsolidation feature gate is disabled") {
-			found = true
-			break
+			t.Errorf("expected no Unconsolidatable event for the gate disagreement, got %q", e.Message)
 		}
-	}
-	if !found {
-		t.Errorf("expected Unconsolidatable event mentioning disabled feature gate, got events: %v", eventMessages(rec.events))
 	}
 }
 
@@ -630,14 +656,6 @@ func TestShouldDisrupt_WhenEmptyOrUnderutilized_UnaffectedByGate(t *testing.T) {
 	}
 }
 
-func eventMessages(evts []events.Event) []string {
-	msgs := make([]string, len(evts))
-	for i, e := range evts {
-		msgs[i] = e.Message
-	}
-	return msgs
-}
-
 // --- Test 5: Score-based ranking ---
 
 // TestSortCandidates_BalancedSortsBySavingsRatio verifies that when candidates
@@ -669,8 +687,11 @@ func TestSortCandidates_BalancedSortsBySavingsRatio(t *testing.T) {
 	candC.DisruptionCost = 50.0
 
 	c := consolidation{}
+	ctx := options.ToContext(context.Background(), &options.Options{
+		FeatureGates: options.FeatureGates{BalancedConsolidation: true},
+	})
 	candidates := []*Candidate{candB, candC, candA}
-	sorted := c.sortCandidates(context.Background(), candidates)
+	sorted := c.sortCandidates(ctx, candidates)
 
 	// Expected order: A (ratio 5.0) > C (ratio 1.25) > B (ratio 0.11)
 	if sorted[0] != candA {
@@ -700,8 +721,11 @@ func TestSortCandidates_NonBalancedSortsByDisruptionCost(t *testing.T) {
 	candC.DisruptionCost = 5.0
 
 	c := consolidation{}
+	ctx := options.ToContext(context.Background(), &options.Options{
+		FeatureGates: options.FeatureGates{BalancedConsolidation: true},
+	})
 	candidates := []*Candidate{candA, candB, candC}
-	sorted := c.sortCandidates(context.Background(), candidates)
+	sorted := c.sortCandidates(ctx, candidates)
 
 	// Expected order: B (1.0) < C (5.0) < A (10.0)
 	if sorted[0] != candB {
@@ -712,6 +736,34 @@ func TestSortCandidates_NonBalancedSortsByDisruptionCost(t *testing.T) {
 	}
 	if sorted[2] != candA {
 		t.Errorf("expected third candidate to be A (highest cost), got %s", sorted[2].Node.Name)
+	}
+}
+
+// TestSortCandidates_BalancedFallsBackWhenGateDisabled verifies that
+// candidates with consolidationPolicy: Balanced are sorted by DisruptionCost
+// (the WhenEmptyOrUnderutilized ordering) when the BalancedConsolidation
+// feature gate is off. This matches the fallback that ShouldDisrupt applies
+// when the gate is disabled, so the entire controller path uses the same
+// effective policy.
+func TestSortCandidates_BalancedFallsBackWhenGateDisabled(t *testing.T) {
+	balancedNP := makeNodePool("balanced", v1.ConsolidationPolicyBalanced)
+	it := makeInstanceType("m7i.xlarge", 4.84)
+
+	candA := makeCandidate("a", balancedNP, it, nil)
+	candA.DisruptionCost = 10.0
+	candB := makeCandidate("b", balancedNP, it, nil)
+	candB.DisruptionCost = 1.0
+
+	c := consolidation{}
+	ctx := options.ToContext(context.Background(), &options.Options{
+		FeatureGates: options.FeatureGates{BalancedConsolidation: false},
+	})
+	sorted := c.sortCandidates(ctx, []*Candidate{candA, candB})
+
+	// With the gate off, ratio sort does not apply and the order falls back
+	// to DisruptionCost ascending.
+	if sorted[0] != candB {
+		t.Errorf("expected lowest-disruption candidate first under gate-off fallback, got %s", sorted[0].Node.Name)
 	}
 }
 
@@ -731,8 +783,11 @@ func TestSortCandidates_MixedPoliciesSortsBySavingsRatio(t *testing.T) {
 	candDefault := makeCandidate("node-default", defaultNP, itCheap, []*corev1.Pod{makePod("p2", "")})
 
 	c := consolidation{}
+	ctx := options.ToContext(context.Background(), &options.Options{
+		FeatureGates: options.FeatureGates{BalancedConsolidation: true},
+	})
 	candidates := []*Candidate{candDefault, candBalanced}
-	sorted := c.sortCandidates(context.Background(), candidates)
+	sorted := c.sortCandidates(ctx, candidates)
 
 	// Balanced candidate has higher ratio, should come first
 	if sorted[0] != candBalanced {

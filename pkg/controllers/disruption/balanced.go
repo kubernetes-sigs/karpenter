@@ -26,6 +26,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 )
@@ -168,12 +169,28 @@ func GetConsolidationThreshold(nodePool *v1.NodePool) int32 {
 	return v1.DefaultConsolidationThreshold
 }
 
+// effectiveBalanced returns true when the NodePool uses the Balanced
+// consolidation policy AND the BalancedConsolidation feature gate is enabled.
+// When the gate is disabled, Balanced is treated as if it were
+// WhenEmptyOrUnderutilized so the controller falls back to the prior
+// consolidation behavior rather than refusing to act on the pool. The status
+// condition ConsolidationPolicyUnsupported, set in ShouldDisrupt, communicates
+// the fallback to operators.
+func effectiveBalanced(ctx context.Context, np *v1.NodePool) bool {
+	if np.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyBalanced {
+		return false
+	}
+	return options.FromContext(ctx).FeatureGates.BalancedConsolidation
+}
+
 // AnyBalancedCandidate returns true if any candidate in the list uses the
-// Balanced consolidation policy. This handles cross-NodePool batches where
-// only some candidates may use Balanced.
-func AnyBalancedCandidate(candidates []*Candidate) bool {
+// Balanced consolidation policy with the BalancedConsolidation feature gate
+// enabled. This handles cross-NodePool batches where only some candidates may
+// use Balanced, and it honors the feature gate so the rest of the controller
+// path applies WhenEmptyOrUnderutilized semantics when the gate is off.
+func AnyBalancedCandidate(ctx context.Context, candidates []*Candidate) bool {
 	return lo.SomeBy(candidates, func(c *Candidate) bool {
-		return c.NodePool.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyBalanced
+		return effectiveBalanced(ctx, c.NodePool)
 	})
 }
 
@@ -199,6 +216,8 @@ func EvaluateBalancedMove(ctx context.Context, cmd Command, nodePoolTotals map[s
 
 	for poolName, poolCandidates := range byPool {
 		nodePool := poolCandidates[0].NodePool
+		// Filter to Balanced pools. Gate gating happens at the entry point
+		// in AnyBalancedCandidate, which is the only path that reaches here.
 		if nodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyBalanced {
 			continue
 		}
@@ -253,6 +272,7 @@ func EmitBalancedMultiNodeEvents(ctx context.Context, cmd Command, nodePoolTotal
 
 	for poolName, poolCandidates := range byPool {
 		nodePool := poolCandidates[0].NodePool
+		// Filter to Balanced pools. Gate gating happens at the entry point.
 		if nodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyBalanced {
 			continue
 		}

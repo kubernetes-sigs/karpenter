@@ -102,7 +102,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 			continue
 		}
 		// Apply balanced scoring if the NodePool uses the Balanced policy
-		if AnyBalancedCandidate(cmd.Candidates) {
+		if AnyBalancedCandidate(ctx, cmd.Candidates) {
 			result := EvaluateBalancedMove(ctx, cmd, s.nodePoolTotals)
 			poolName := cmd.Candidates[0].NodePool.Name
 			decisionLabel := "approved"
