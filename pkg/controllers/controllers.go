@@ -98,8 +98,6 @@ func NewControllers(
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
-	deviceAllocationController := deviceallocation.NewController(kubeClient)
-
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
@@ -125,7 +123,10 @@ func NewControllers(
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
 		nodehydration.NewController(kubeClient, cloudProvider),
-		deviceAllocationController,
+	}
+
+	if !options.FromContext(ctx).IgnoreDRARequests {
+		controllers = append(controllers, deviceallocation.NewController(kubeClient))
 	}
 
 	if !options.FromContext(ctx).DisableClusterStateObservability {

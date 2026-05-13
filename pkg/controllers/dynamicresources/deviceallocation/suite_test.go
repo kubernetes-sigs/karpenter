@@ -54,6 +54,9 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
+	if env.Version.Minor() < 34 {
+		Skip("ResourceClaims are only available starting in K8s version >= 1.34.x")
+	}
 	ctx = options.ToContext(ctx, test.Options())
 })
 
