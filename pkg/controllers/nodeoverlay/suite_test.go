@@ -2626,8 +2626,10 @@ var _ = Describe("Instance Type Controller", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
-		// Reconcile should succeed (skip the failing pool, not abort)
-		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+		// Reconcile returns the per-NodePool errors as a multierr so they
+		// get surfaced by controller-runtime, but the healthy pools are
+		// still evaluated and the store is still updated.
+		ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
 
 		// The failing pool should not be in evaluatedNodePools
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
@@ -2679,10 +2681,10 @@ var _ = Describe("Failure Isolation", func() {
 		// Inject an error for only the broken NodePool
 		cloudProvider.ErrorsForNodePool[brokenNodePool.Name] = fmt.Errorf("resolving node class, AKSNodeClass not found")
 
-		// Reconcile should succeed (not return error)
-		result := ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
-
-		// Should requeue sooner to retry the failing pool (transient error recovery)
+		// Reconcile returns the aggregated per-NodePool errors so they
+		// are logged by controller-runtime, but still asks for a sooner
+		// requeue to retry the failing pool quickly.
+		result := ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
 		Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
 
 		// The healthy NodePool should be evaluated and usable
@@ -2714,8 +2716,9 @@ var _ = Describe("Failure Isolation", func() {
 		Expect(err).ToNot(BeNil())
 		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue())
 
-		// After reconcile, healthy pool should be evaluated despite broken pool
-		result := ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+		// After reconcile, healthy pool should be evaluated despite broken pool.
+		// The reconciler returns the per-NodePool error as a multierr.
+		result := ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
 		Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
 
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
@@ -2736,9 +2739,10 @@ var _ = Describe("Failure Isolation", func() {
 		brokenNodePool := test.NodePool()
 		ExpectApplied(ctx, env.Client, nodePool, brokenNodePool)
 
-		// First reconcile: one pool fails
+		// First reconcile: one pool fails, so the reconciler returns the
+		// multierr but still requeues sooner.
 		cloudProvider.ErrorsForNodePool[brokenNodePool.Name] = fmt.Errorf("resolving node class, AKSNodeClass not found")
-		result := ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+		result := ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
 		Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
 
 		// Verify broken pool is unevaluated

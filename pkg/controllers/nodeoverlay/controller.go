@@ -27,12 +27,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -85,10 +83,15 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	nodePoolToInstanceTypes := map[string][]*cloudprovider.InstanceType{}
 
 	evaluatedNodePoolItems := make([]v1.NodePool, 0, len(nodePoolList.Items))
+	nodePoolErrs := make([]error, 0, len(nodePoolList.Items))
 	for i := range nodePoolList.Items {
 		its, err := c.cloudProvider.GetInstanceTypes(ctx, &nodePoolList.Items[i])
 		if err != nil {
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(&nodePoolList.Items[i])).Error(err, "skipping, unable to list instance types for nodepool")
+			// Track the error so we can return it as a multierr below. We keep
+			// going so that a single broken NodePool (for example a missing
+			// NodeClass) does not block overlays from being applied to the
+			// healthy ones.
+			nodePoolErrs = append(nodePoolErrs, fmt.Errorf("listing instance types for nodepool %q, %w", nodePoolList.Items[i].Name, err))
 			continue
 		}
 		nodePoolToInstanceTypes[nodePoolList.Items[i].Name] = its
@@ -121,11 +124,14 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
 
-	// If some NodePools failed to resolve instance types, requeue sooner to
-	// recover from transient errors (e.g., temporary API failures, NodeClass
-	// not yet created) without waiting for the full 6h polling interval.
-	if len(evaluatedNodePoolItems) < len(nodePoolList.Items) {
-		return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
+	// If some NodePools failed to resolve instance types, return the
+	// aggregated errors so controller-runtime logs them via its standard
+	// "Reconciler error" path, and requeue sooner to recover from transient
+	// errors (for example temporary API failures or a NodeClass that has
+	// not been created yet) without waiting for the full 6h polling
+	// interval.
+	if len(nodePoolErrs) > 0 {
+		return reconcile.Result{RequeueAfter: 1 * time.Minute}, multierr.Combine(nodePoolErrs...)
 	}
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil
 }
