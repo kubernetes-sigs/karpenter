@@ -40,6 +40,18 @@ func EvictPod(pod *corev1.Pod, reason string) events.Event {
 	}
 }
 
+// RolloutRestartedPod records that a pod was drained by triggering a rollout restart
+// on its singleton owner (Deployment or StatefulSet), rather than via the eviction API.
+func RolloutRestartedPod(pod *corev1.Pod, ownerKind, ownerName string) events.Event {
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.RolloutRestarted,
+		Message:        fmt.Sprintf("Triggered rollout restart of %s %q to drain singleton pod", ownerKind, ownerName),
+		DedupeValues:   []string{pod.Name},
+	}
+}
+
 func DisruptPodDelete(pod *corev1.Pod, gracePeriodSeconds *int64, nodeGracePeriodTerminationTime *time.Time) events.Event {
 	return events.Event{
 		InvolvedObject: pod,

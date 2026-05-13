@@ -25,9 +25,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	clock "k8s.io/utils/clock/testing"
@@ -246,6 +248,182 @@ var _ = Describe("Eviction/Queue", func() {
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
 			ExpectNotFound(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
+		})
+	})
+
+	Context("Rollout Restart Drain Strategy", func() {
+		const restartAnnotation = "kubectl.kubernetes.io/restartedAt"
+
+		// buildDeploymentPod stitches together a Deployment, its owning ReplicaSet, and a pod
+		// referencing the ReplicaSet. Returns the three objects plus the pod so callers can
+		// vary replicas / pre-set annotations / etc. as needed.
+		buildDeploymentPod := func(name string, replicas int32) (*appsv1.Deployment, *appsv1.ReplicaSet, *corev1.Pod) {
+			dep := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: lo.ToPtr(replicas),
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx"}}},
+					},
+				},
+			}
+			rs := &appsv1.ReplicaSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name + "-rs", Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: name, UID: types.UID(name + "-uid")}},
+				},
+				Spec: appsv1.ReplicaSetSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx"}}},
+					},
+				},
+			}
+			p := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name + "-pod", Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: types.UID(rs.Name + "-uid")}},
+				},
+				NodeName: node.Name,
+			})
+			return dep, rs, p
+		}
+
+		It("falls through to eviction when the feature gate is off, even for a singleton Deployment", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{RolloutRestartDrainStrategy: lo.ToPtr(false)},
+			}))
+			dep, rs, p := buildDeploymentPod("singleton", 1)
+			ExpectApplied(ctx, env.Client, dep, rs, p, node)
+			queue.Add(p)
+			ExpectObjectReconciled(ctx, env.Client, queue, p)
+
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
+			Expect(recorder.Calls(events.RolloutRestarted)).To(Equal(0))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, dep)).To(Succeed())
+			Expect(dep.Spec.Template.Annotations[restartAnnotation]).To(BeEmpty())
+		})
+
+		It("rollout-restarts the Deployment and skips eviction for a singleton Deployment", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{RolloutRestartDrainStrategy: lo.ToPtr(true)},
+			}))
+			dep, rs, p := buildDeploymentPod("singleton", 1)
+			ExpectApplied(ctx, env.Client, dep, rs, p, node)
+			queue.Add(p)
+			ExpectObjectReconciled(ctx, env.Client, queue, p)
+
+			Expect(recorder.Calls(events.Evicted)).To(Equal(0))
+			Expect(recorder.Calls(events.RolloutRestarted)).To(Equal(1))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, dep)).To(Succeed())
+			Expect(dep.Spec.Template.Annotations[restartAnnotation]).ToNot(BeEmpty())
+			Expect(queue.Has(p)).To(BeFalse())
+		})
+
+		It("evicts pods owned by a multi-replica Deployment instead of rollout-restarting", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{RolloutRestartDrainStrategy: lo.ToPtr(true)},
+			}))
+			dep, rs, p := buildDeploymentPod("multi", 3)
+			ExpectApplied(ctx, env.Client, dep, rs, p, node)
+			queue.Add(p)
+			ExpectObjectReconciled(ctx, env.Client, queue, p)
+
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
+			Expect(recorder.Calls(events.RolloutRestarted)).To(Equal(0))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, dep)).To(Succeed())
+			Expect(dep.Spec.Template.Annotations[restartAnnotation]).To(BeEmpty())
+		})
+
+		buildStatefulSetPod := func(name string, replicas int32) (*appsv1.StatefulSet, *corev1.Pod) {
+			ss := &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec: appsv1.StatefulSetSpec{
+					Replicas: lo.ToPtr(replicas),
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx"}}},
+					},
+				},
+			}
+			p := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name + "-pod", Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: name, UID: types.UID(name + "-uid")}},
+				},
+				NodeName: node.Name,
+			})
+			return ss, p
+		}
+
+		It("rollout-restarts a singleton StatefulSet instead of evicting (drain progress under blocking PDBs)", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{RolloutRestartDrainStrategy: lo.ToPtr(true)},
+			}))
+			ss, p := buildStatefulSetPod("singleton-ss", 1)
+			ExpectApplied(ctx, env.Client, ss, p, node)
+			queue.Add(p)
+			ExpectObjectReconciled(ctx, env.Client, queue, p)
+
+			Expect(recorder.Calls(events.Evicted)).To(Equal(0))
+			Expect(recorder.Calls(events.RolloutRestarted)).To(Equal(1))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: ss.Name, Namespace: ss.Namespace}, ss)).To(Succeed())
+			Expect(ss.Spec.Template.Annotations[restartAnnotation]).ToNot(BeEmpty())
+			Expect(queue.Has(p)).To(BeFalse())
+		})
+
+		It("evicts pods owned by a multi-replica StatefulSet instead of rollout-restarting", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{RolloutRestartDrainStrategy: lo.ToPtr(true)},
+			}))
+			ss, p := buildStatefulSetPod("multi-ss", 3)
+			ExpectApplied(ctx, env.Client, ss, p, node)
+			queue.Add(p)
+			ExpectObjectReconciled(ctx, env.Client, queue, p)
+
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
+			Expect(recorder.Calls(events.RolloutRestarted)).To(Equal(0))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: ss.Name, Namespace: ss.Namespace}, ss)).To(Succeed())
+			Expect(ss.Spec.Template.Annotations[restartAnnotation]).To(BeEmpty())
+		})
+
+		It("skips the patch when the Deployment was already rollout-restarted within the dedup window", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{RolloutRestartDrainStrategy: lo.ToPtr(true)},
+			}))
+			recent := time.Now().UTC().Add(-30 * time.Second).Format(time.RFC3339)
+			dep, rs, p := buildDeploymentPod("recent", 1)
+			dep.Spec.Template.Annotations = map[string]string{restartAnnotation: recent}
+			ExpectApplied(ctx, env.Client, dep, rs, p, node)
+			queue.Add(p)
+			ExpectObjectReconciled(ctx, env.Client, queue, p)
+
+			// Pod drained via the rollout-restart branch (event published, queue cleared),
+			// but the Deployment template annotation is unchanged.
+			Expect(recorder.Calls(events.RolloutRestarted)).To(Equal(1))
+			Expect(queue.Has(p)).To(BeFalse())
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, dep)).To(Succeed())
+			Expect(dep.Spec.Template.Annotations[restartAnnotation]).To(Equal(recent))
+		})
+
+		It("re-patches when the prior rollout-restart annotation is older than the dedup window", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{RolloutRestartDrainStrategy: lo.ToPtr(true)},
+			}))
+			stale := time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339)
+			dep, rs, p := buildDeploymentPod("stale", 1)
+			dep.Spec.Template.Annotations = map[string]string{restartAnnotation: stale}
+			ExpectApplied(ctx, env.Client, dep, rs, p, node)
+			queue.Add(p)
+			ExpectObjectReconciled(ctx, env.Client, queue, p)
+
+			Expect(recorder.Calls(events.RolloutRestarted)).To(Equal(1))
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, dep)).To(Succeed())
+			Expect(dep.Spec.Template.Annotations[restartAnnotation]).ToNot(Equal(stale))
 		})
 	})
 })

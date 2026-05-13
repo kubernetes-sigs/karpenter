@@ -48,6 +48,7 @@ import (
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -60,6 +61,16 @@ const (
 	maxReconciles          = 5000
 
 	multiplePodDisruptionBudgetsError = "This pod has more than one PodDisruptionBudget, which the eviction subresource does not support."
+
+	// rolloutRestartAnnotation matches the annotation `kubectl rollout restart` writes onto
+	// the workload's pod template; setting it triggers the Deployment controller to surge a
+	// fresh pod and delete the old one.
+	rolloutRestartAnnotation = "kubectl.kubernetes.io/restartedAt"
+	// rolloutRestartDedupWindow suppresses redundant restart patches while a prior rollout
+	// is still propagating. The Deployment controller may need a moment to set the pod's
+	// deletionTimestamp; without this guard, subsequent Drain passes could re-patch the
+	// Deployment and trigger repeated rollouts.
+	rolloutRestartDedupWindow = 2 * time.Minute
 )
 
 type NodeDrainError struct {
@@ -167,6 +178,13 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		//controller can reconcile on it
 		return reconcile.Result{}, nil
 	}
+	handled, err := q.tryRolloutRestart(ctx, pod)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if handled {
+		return reconcile.Result{}, nil
+	}
 	// Evict the pod
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		pod,
@@ -218,6 +236,53 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	defer q.Unlock()
 	q.set.Delete(NewQueueKey(pod))
 	return reconcile.Result{}, nil
+}
+
+// tryRolloutRestart drains a pod via rollout restart of its singleton owner when the
+// feature gate is enabled. Returns (true, nil) when the pod was handled and eviction
+// should be skipped, (false, nil) when not applicable, and a non-nil error for the
+// caller to surface as a reconcile failure. See the package-level rationale in
+// `pkg/utils/pod/scheduling.go` for the Deployment-vs-StatefulSet trade-offs.
+func (q *Queue) tryRolloutRestart(ctx context.Context, pod *corev1.Pod) (bool, error) {
+	if !options.FromContext(ctx).FeatureGates.RolloutRestartDrainStrategy {
+		return false, nil
+	}
+	target, err := podutils.SingletonRolloutTargetForPod(ctx, q.kubeClient, pod)
+	if err != nil {
+		return false, err
+	}
+	if target == nil {
+		return false, nil
+	}
+	if err := q.rolloutRestart(ctx, target); err != nil {
+		return false, err
+	}
+	q.recorder.Publish(terminatorevents.RolloutRestartedPod(pod, target.Kind, target.Object.GetName()))
+	q.Lock()
+	defer q.Unlock()
+	q.set.Delete(NewQueueKey(pod))
+	return true, nil
+}
+
+// rolloutRestart patches a singleton workload (Deployment or StatefulSet) with the
+// standard restartedAt annotation, matching `kubectl rollout restart`. The patch is
+// skipped if the workload was already restarted within rolloutRestartDedupWindow, so
+// concurrent Drain passes don't churn the rollout while the previous one is still
+// propagating.
+func (q *Queue) rolloutRestart(ctx context.Context, target *podutils.SingletonRolloutTarget) error {
+	if existing := target.TemplateAnnotations[rolloutRestartAnnotation]; existing != "" {
+		if t, err := time.Parse(time.RFC3339, existing); err == nil && time.Since(t) < rolloutRestartDedupWindow {
+			return nil
+		}
+	}
+	patch := []byte(fmt.Sprintf(
+		`{"spec":{"template":{"metadata":{"annotations":{%q:%q}}}}}`,
+		rolloutRestartAnnotation, time.Now().UTC().Format(time.RFC3339),
+	))
+	if err := q.kubeClient.Patch(ctx, target.Object, client.RawPatch(types.StrategicMergePatchType, patch)); err != nil {
+		return fmt.Errorf("rollout-restarting %s %s/%s: %w", target.Kind, target.Object.GetNamespace(), target.Object.GetName(), err)
+	}
+	return nil
 }
 
 func evictionReason(ctx context.Context, pod *corev1.Pod, kubeClient client.Client) string {

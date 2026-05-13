@@ -17,12 +17,18 @@ limitations under the License.
 package pod
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -183,6 +189,107 @@ func IsOwnedBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
 		}
 	}
 	return false
+}
+
+// SingletonRolloutTarget identifies a workload owner of a pod that is configured
+// with spec.replicas == 1 and can be drained by triggering a rollout restart on
+// the owner (writing `kubectl.kubernetes.io/restartedAt` into its pod template).
+//
+// Object is the typed Deployment or StatefulSet ready to be Patched; Kind is the
+// human-readable workload kind for events/logs; TemplateAnnotations is the
+// owner's current spec.template.metadata.annotations, which callers use to
+// dedupe re-patching when a prior rollout is still in flight.
+type SingletonRolloutTarget struct {
+	Object              client.Object
+	Kind                string
+	TemplateAnnotations map[string]string
+}
+
+// SingletonRolloutTargetForPod returns the workload owner of the pod iff:
+//   - the pod is owned (directly) by an apps/v1 StatefulSet with spec.replicas == 1, OR
+//   - the pod is owned (transitively, via its ReplicaSet) by an apps/v1 Deployment
+//     with spec.replicas == 1.
+//
+// Returns (nil, nil) when no qualifying owner exists or when the owner chain
+// points at missing objects. Transient API errors are returned so the caller can
+// retry. The replicas==1 gate keeps blast radius small: for multi-replica
+// workloads, the existing eviction + PDB path handles draining gracefully on a
+// per-pod basis, and bumping the template would needlessly roll every pod across
+// the fleet for a single node drain.
+//
+// Why include StatefulSets even though they don't surge? A singleton StatefulSet
+// behind a PDB that forbids disruption (e.g. minAvailable=1) cannot be drained
+// via the eviction API at all — the API server returns 429 indefinitely and the
+// node drain stalls until forceful termination. Triggering a rollout restart
+// causes the StatefulSet controller to delete the pod through the pods API,
+// which bypasses PDB, and recreate it elsewhere (the draining node is already
+// tainted). The cost is one pod-lifetime of downtime — the same downtime a
+// successful eviction would have caused, traded against an otherwise-stalled
+// drain. Zero-downtime is achievable only for Deployments, where maxSurge lets
+// the controller bring up the replacement before deleting the old pod.
+func SingletonRolloutTargetForPod(ctx context.Context, c client.Client, pod *corev1.Pod) (*SingletonRolloutTarget, error) {
+	if target, err := singletonStatefulSetOwner(ctx, c, pod); target != nil || err != nil {
+		return target, err
+	}
+	return singletonDeploymentOwner(ctx, c, pod)
+}
+
+// appsOwnerName returns the name of the first owner with the given Kind and apps/v1
+// APIVersion, or "" if none is present.
+func appsOwnerName(owners []metav1.OwnerReference, kind string) string {
+	for _, o := range owners {
+		if o.Kind == kind && o.APIVersion == "apps/v1" {
+			return o.Name
+		}
+	}
+	return ""
+}
+
+func singletonStatefulSetOwner(ctx context.Context, c client.Client, pod *corev1.Pod) (*SingletonRolloutTarget, error) {
+	name := appsOwnerName(pod.OwnerReferences, "StatefulSet")
+	if name == "" {
+		return nil, nil
+	}
+	ss := &appsv1.StatefulSet{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: name}, ss); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if ss.Spec.Replicas == nil || *ss.Spec.Replicas != 1 {
+		return nil, nil
+	}
+	return &SingletonRolloutTarget{Object: ss, Kind: "StatefulSet", TemplateAnnotations: ss.Spec.Template.Annotations}, nil
+}
+
+func singletonDeploymentOwner(ctx context.Context, c client.Client, pod *corev1.Pod) (*SingletonRolloutTarget, error) {
+	rsName := appsOwnerName(pod.OwnerReferences, "ReplicaSet")
+	if rsName == "" {
+		return nil, nil
+	}
+	rs := &appsv1.ReplicaSet{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: rsName}, rs); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	depName := appsOwnerName(rs.OwnerReferences, "Deployment")
+	if depName == "" {
+		return nil, nil
+	}
+	dep := &appsv1.Deployment{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: depName}, dep); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 1 {
+		return nil, nil
+	}
+	return &SingletonRolloutTarget{Object: dep, Kind: "Deployment", TemplateAnnotations: dep.Spec.Template.Annotations}, nil
 }
 
 // parseDoNotDisrupt parses the do-not-disrupt annotation value as a duration.
