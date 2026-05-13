@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -97,7 +98,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			continue
 		}
 
-		if !c.validateAndUpdateInstanceTypeOverrides(temporaryStore, nodePoolList.Items, nodePoolToInstanceTypes, overlayList.Items[i]) {
+		if !c.validateAndUpdateInstanceTypeOverrides(ctx, temporaryStore, nodePoolList.Items, nodePoolToInstanceTypes, overlayList.Items[i]) {
 			overlaysWithConflict = append(overlaysWithConflict, overlayList.Items[i].Name)
 		}
 	}
@@ -139,7 +140,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return b.Complete(c)
 }
 
-func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *internalInstanceTypeStore, nodePoolList []v1.NodePool, nodePoolToInstanceTypes map[string][]*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
+func (c *Controller) validateAndUpdateInstanceTypeOverrides(ctx context.Context, temporaryStore *internalInstanceTypeStore, nodePoolList []v1.NodePool, nodePoolToInstanceTypes map[string][]*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
 	// Due to reserved capacity type offering being dynamically injected as part of the GetInstanceTypes call
 	// We will need to make sure we are validating against each nodepool to make sure. This will ensure that
 	// overlays that are targeting reserved instance offerings will be able to apply the offering.
@@ -153,7 +154,7 @@ func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *inte
 	// This two-step process verifies that all instance types across all NodePools are valid before
 	// applying any updates, ensuring atomicity of the operation.
 	for i := range nodePoolList {
-		c.storeUpdatesForInstanceTypeOverride(temporaryStore, nodePoolList[i], nodePoolToInstanceTypes[nodePoolList[i].Name], overlay)
+		c.storeUpdatesForInstanceTypeOverride(ctx, temporaryStore, nodePoolList[i], nodePoolToInstanceTypes[nodePoolList[i].Name], overlay)
 	}
 
 	return true
@@ -184,7 +185,7 @@ func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeSt
 	return true
 }
 
-func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) {
+func (c *Controller) storeUpdatesForInstanceTypeOverride(ctx context.Context, store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) {
 	overlayRequirements := scheduling.NewNodeSelectorRequirements(lo.Map(overlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
 		return r.AsNodeSelectorRequirement()
 	})...)
@@ -197,7 +198,11 @@ func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstance
 			continue
 		}
 
-		store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings)
+		if err := store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings); err != nil {
+			// CEL compilation errors should have been caught by RuntimeValidate; log and skip.
+			log.FromContext(ctx).Error(err, "skipping offering update", "overlay", overlay.Name, "instanceType", it.Name)
+			continue
+		}
 		store.updateInstanceTypeCapacity(nodePool.Name, it.Name, overlay)
 	}
 }
