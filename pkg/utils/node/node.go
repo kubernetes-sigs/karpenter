@@ -150,6 +150,29 @@ func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (
 	return nodeClaims[0], nil
 }
 
+// CountReschedulablePodsOnNode returns the number of pods bound to the named node that
+// satisfy the pod.IsReschedulable criteria (active or stateful-set-terminating, not
+// owned by a DaemonSet, not a mirror pod). This mirrors the semantics of
+// disruption.Candidate.reschedulablePods so per-disruption-reason metrics across
+// queue/expiration/health/GC controllers count pods consistently. An empty nodeName
+// returns 0 with no error so callers operating on un-registered NodeClaims don't fail.
+func CountReschedulablePodsOnNode(ctx context.Context, kubeClient client.Client, nodeName string) (int, error) {
+	if nodeName == "" {
+		return 0, nil
+	}
+	var podList corev1.PodList
+	if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
+		return 0, fmt.Errorf("listing pods on node %q, %w", nodeName, err)
+	}
+	count := 0
+	for i := range podList.Items {
+		if pod.IsReschedulable(&podList.Items[i]) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // GetCurrentlyReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
 func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, clk clock.Clock, recorder events.Recorder, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
 	pods, err := GetPods(ctx, kubeClient, nodes...)
