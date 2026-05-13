@@ -133,7 +133,7 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.apply(np, it)
 					}
 				}
 			}
@@ -178,7 +178,7 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 			for i := 0; i < 100; i++ {
 				for _, it := range instanceTypes {
-					_, _ = store.apply("default", it)
+					_ = store.apply("default", it)
 				}
 			}
 
@@ -215,7 +215,7 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 			for i := 0; i < 100; i++ {
 				for _, it := range instanceTypes {
-					_, _ = store.apply("default", it)
+					_ = store.apply("default", it)
 				}
 			}
 
@@ -237,7 +237,7 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.apply(np, it)
 					}
 				}
 			}
@@ -273,7 +273,7 @@ var _ = Describe("Memory Usage Scale With NodePools", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.apply(np, it)
 					}
 				}
 			}
@@ -312,7 +312,7 @@ var _ = Describe("Memory Usage Scale With InstanceTypes", func() {
 			for i := 0; i < 100; i++ {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.apply(np, it)
 					}
 				}
 			}
