@@ -29,16 +29,17 @@ import (
 type NodeSelectorRequirement struct {
 	//nolint:kubeapilinter
 	// The label key that the selector applies to.
+	// +kubebuilder:validation:MaxLength:=316
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(\/))?([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$`
+	// +kubebuilder:validation:XValidation:message="label domain \"karpenter.sh\" is restricted",rule="self in [\"karpenter.sh/capacity-type\", \"karpenter.sh/nodepool\"] || !self.find(\"^([^/]+)\").endsWith(\"karpenter.sh\")"
+	// +kubebuilder:validation:XValidation:message="label \"kubernetes.io/hostname\" is restricted",rule="self != \"kubernetes.io/hostname\""
 	// +required
 	Key string `json:"key"`
-
-	// NOTE below: The code generator works strangely, and will union these
-	// enum values into the ones already defined on v1.NodeSelectorOperator
 
 	//nolint:kubeapilinter
 	// Represents a key's relationship to a set of values.
 	// Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
-	// +kubebuilder:validation:Enum:=Gte;Lte
+	// +kubebuilder:validation:Enum:=In;NotIn;Exists;DoesNotExist;Gt;Lt;Gte;Lte
 	// +required
 	Operator corev1.NodeSelectorOperator `json:"operator,omitempty"`
 	//nolint:kubeapilinter
@@ -76,6 +77,15 @@ type NodeOverlaySpec struct {
 	// +optional
 	PriceAdjustment *string `json:"priceAdjustment,omitempty"`
 	//nolint:kubeapilinter
+	// PriceAdjustments specifies an ordered list of price changes applied sequentially to matching instance types.
+	// Each entry follows the same format as PriceAdjustment. Adjustments are applied in order, with each one
+	// using the result of the previous as its input price.
+	// Cannot be set together with 'price' or 'priceAdjustment'.
+	// +kubebuilder:validation:MaxItems:=20
+	// +kubebuilder:validation:items:Pattern=`^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$`
+	// +optional
+	PriceAdjustments []string `json:"priceAdjustments,omitempty"`
+	//nolint:kubeapilinter
 	// Price specifies amount for an instance types that match the specified labels. Users can override prices using a signed float representing the price override
 	// +kubebuilder:validation:Pattern=`^\d+(\.\d+)?$`
 	// +optional
@@ -112,6 +122,8 @@ type NodeOverlay struct {
 
 	//nolint:kubeapilinter
 	// +kubebuilder:validation:XValidation:message="cannot set both 'price' and 'priceAdjustment'",rule="!has(self.price) || !has(self.priceAdjustment)"
+	// +kubebuilder:validation:XValidation:message="cannot set both 'price' and 'priceAdjustments'",rule="!has(self.price) || !has(self.priceAdjustments) || self.priceAdjustments.size() == 0"
+	// +kubebuilder:validation:XValidation:message="cannot set both 'priceAdjustment' and 'priceAdjustments'",rule="!has(self.priceAdjustment) || !has(self.priceAdjustments) || self.priceAdjustments.size() == 0"
 	Spec   NodeOverlaySpec   `json:"spec"`
 	Status NodeOverlayStatus `json:"status,omitempty"` //nolint:kubeapilinter
 }

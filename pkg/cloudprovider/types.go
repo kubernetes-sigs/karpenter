@@ -383,6 +383,11 @@ func (o *Offering) ApplyPriceOverlay(UpdatedPrice string) {
 	o.priceOverlayApplied = true
 }
 
+func (o *Offering) ApplyPriceAdjustments(adjustments []string) {
+	o.Price = AdjustedPriceList(o.Price, adjustments)
+	o.priceOverlayApplied = true
+}
+
 func AdjustedPrice(instanceTypePrice float64, change string) float64 {
 	// if price or price adjustment is not defined, then we will return the same price
 	if change == "" {
@@ -415,6 +420,14 @@ func AdjustedPrice(instanceTypePrice float64, change string) float64 {
 
 	// Apply the adjustment
 	return lo.Ternary(adjustedPrice >= 0, adjustedPrice, 0)
+}
+
+func AdjustedPriceList(instanceTypePrice float64, changes []string) float64 {
+	price := instanceTypePrice
+	for _, change := range changes {
+		price = AdjustedPrice(price, change)
+	}
+	return price
 }
 
 func (o *Offering) IsPriceOverlaid() bool {

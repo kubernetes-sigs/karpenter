@@ -100,6 +100,11 @@ func (in *NodeOverlaySpec) DeepCopyInto(out *NodeOverlaySpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.PriceAdjustments != nil {
+		in, out := &in.PriceAdjustments, &out.PriceAdjustments
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Price != nil {
 		in, out := &in.Price, &out.Price
 		*out = new(string)

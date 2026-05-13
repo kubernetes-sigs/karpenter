@@ -234,6 +234,99 @@ var _ = Describe("Store Apply Correctness", func() {
 		})
 	})
 
+	Context("with priceAdjustments list overlay", func() {
+		It("should apply multiple adjustments sequentially", func() {
+			originalPrice := 10.0
+			instanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "m5.large",
+				Offerings: []*cloudprovider.Offering{
+					{
+						Requirements: scheduling.NewRequirements(
+							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+						),
+						Price:     originalPrice,
+						Available: true,
+					},
+				},
+			})
+
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
+			store.updates = map[string]map[string]*instanceTypeUpdate{
+				"default": {
+					instanceType.Name: &instanceTypeUpdate{
+						Price: map[string]*priceUpdate{
+							instanceType.Offerings[0].Requirements.String(): {
+								PriceAdjustments: []string{"-10%", "+0.5"},
+								lowestWeight:     lo.ToPtr(int32(10)),
+							},
+						},
+						Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
+					},
+				},
+			}
+
+			result, err := store.apply("default", instanceType)
+			Expect(err).ToNot(HaveOccurred())
+
+			// -10% on 10.0 -> 9.0, then +0.5 -> 9.5
+			Expect(result.Offerings[0].Price).To(BeNumerically("~", 9.5, 0.0001))
+			Expect(result.Offerings[0].IsPriceOverlaid()).To(BeTrue())
+			// Original not mutated
+			Expect(instanceType.Offerings[0].Price).To(BeNumerically("==", originalPrice))
+		})
+
+		It("should apply priceAdjustments independently per offering", func() {
+			originalPrice := 10.0
+			instanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "m5.large",
+				Offerings: []*cloudprovider.Offering{
+					{
+						Requirements: scheduling.NewRequirements(
+							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+						),
+						Price:     originalPrice,
+						Available: true,
+					},
+					{
+						Requirements: scheduling.NewRequirements(
+							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
+							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "spot"),
+						),
+						Price:     originalPrice,
+						Available: true,
+					},
+				},
+			})
+
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
+			store.updates = map[string]map[string]*instanceTypeUpdate{
+				"default": {
+					instanceType.Name: &instanceTypeUpdate{
+						Price: map[string]*priceUpdate{
+							instanceType.Offerings[0].Requirements.String(): {
+								PriceAdjustments: []string{"-10%", "+0.5"},
+								lowestWeight:     lo.ToPtr(int32(10)),
+							},
+						},
+						Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
+					},
+				},
+			}
+
+			result, err := store.apply("default", instanceType)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(result.Offerings[0].Price).To(BeNumerically("~", 9.5, 0.0001))
+			// Second offering not in price updates - should be shared/unchanged
+			Expect(result.Offerings[1].Price).To(BeNumerically("==", originalPrice))
+			Expect(result.Offerings[1]).To(BeIdenticalTo(instanceType.Offerings[1]))
+		})
+	})
+
 	Context("with capacity overlay", func() {
 		It("should correctly apply capacity overlay", func() {
 			originalMemory := resource.MustParse("8Gi")
@@ -354,6 +447,45 @@ var _ = Describe("Store Apply Unevaluated NodePool", func() {
 		_, err := store.apply("unevaluated", instanceType)
 		Expect(err).To(HaveOccurred(), "expected error for unevaluated node pool")
 		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue(), "expected UnevaluatedNodePoolError")
+	})
+})
+
+var _ = Describe("updateInstanceTypeOffering with PriceAdjustments", func() {
+	It("should store priceAdjustments list when NodeOverlay.Spec.PriceAdjustments is set", func() {
+		instanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "m5.large",
+			Offerings: []*cloudprovider.Offering{
+				{
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+					),
+					Price:     10.0,
+					Available: true,
+				},
+			},
+		})
+
+		internalStore := newInternalInstanceTypeStore()
+		internalStore.evaluatedNodePools.Insert("default")
+
+		overlay := v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Weight:           lo.ToPtr(int32(100)),
+				PriceAdjustments: []string{"-10%", "+0.5"},
+			},
+		}
+		internalStore.updateInstanceTypeOffering("default", "m5.large", overlay, instanceType.Offerings)
+
+		publicStore := NewInstanceTypeStore()
+		publicStore.UpdateStore(internalStore)
+
+		results, err := publicStore.ApplyAll("default", []*cloudprovider.InstanceType{instanceType})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(results[0].Offerings[0].Price).To(BeNumerically("~", 9.5, 0.0001))
+		Expect(results[0].Offerings[0].IsPriceOverlaid()).To(BeTrue())
+		// Original must not be mutated
+		Expect(instanceType.Offerings[0].Price).To(BeNumerically("==", 10.0))
 	})
 })
 

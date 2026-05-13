@@ -78,6 +78,17 @@ spec:
                     - A percentage modifier (e.g., +10% for increase, -15% for decrease)
                   pattern: ^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$
                   type: string
+                priceAdjustments:
+                  description: |-
+                    PriceAdjustments specifies an ordered list of price changes applied sequentially to matching instance types.
+                    Each entry follows the same format as PriceAdjustment. Adjustments are applied in order, with each one
+                    using the result of the previous as its input price.
+                    Cannot be set together with 'price' or 'priceAdjustment'.
+                  items:
+                    pattern: ^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$
+                    type: string
+                  maxItems: 20
+                  type: array
                 requirements:
                   description: |-
                     Requirements constrain when this NodeOverlay is applied during scheduling simulations.
@@ -91,10 +102,14 @@ spec:
                     properties:
                       key:
                         description: The label key that the selector applies to.
-                        type: string
                         maxLength: 316
                         pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(\/))?([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$
+                        type: string
                         x-kubernetes-validations:
+                          - message: label domain "karpenter.sh" is restricted
+                            rule: self in ["karpenter.sh/capacity-type", "karpenter.sh/nodepool"] || !self.find("^([^/]+)").endsWith("karpenter.sh")
+                          - message: label "kubernetes.io/hostname" is restricted
+                            rule: self != "kubernetes.io/hostname"
                           - message: label domain "karpenter.sh" is restricted
                             rule: self in ["karpenter.sh/capacity-type", "karpenter.sh/nodepool"] || !self.find("^([^/]+)").endsWith("karpenter.sh")
                           - message: label "kubernetes.io/hostname" is restricted
@@ -104,6 +119,12 @@ spec:
                           Represents a key's relationship to a set of values.
                           Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
                         enum:
+                          - In
+                          - NotIn
+                          - Exists
+                          - DoesNotExist
+                          - Gt
+                          - Lt
                           - Gte
                           - Lte
                           - In
@@ -154,6 +175,10 @@ spec:
               x-kubernetes-validations:
                 - message: cannot set both 'price' and 'priceAdjustment'
                   rule: '!has(self.price) || !has(self.priceAdjustment)'
+                - message: cannot set both 'price' and 'priceAdjustments'
+                  rule: '!has(self.price) || !has(self.priceAdjustments) || self.priceAdjustments.size() == 0'
+                - message: cannot set both 'priceAdjustment' and 'priceAdjustments'
+                  rule: '!has(self.priceAdjustment) || !has(self.priceAdjustments) || self.priceAdjustments.size() == 0'
             status:
               description: NodeOverlayStatus defines the observed state of NodeOverlay
               properties:
