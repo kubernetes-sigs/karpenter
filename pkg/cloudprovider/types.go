@@ -21,12 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"unique"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"

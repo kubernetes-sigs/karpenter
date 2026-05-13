@@ -1,12 +1,26 @@
+/*
+Copyright The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package deviceallocation
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"iter"
 	"sync"
-	"time"
 	"unique"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -23,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 )
@@ -90,8 +105,7 @@ func (c *Controller) Hydrate(ctx context.Context) {
 	claimList := &resourcev1.ResourceClaimList{}
 	lo.Must0(c.kubeClient.List(ctx, claimList, client.UnsafeDisableDeepCopy))
 	for i := range claimList.Items {
-		claim := &claimList.Items[i]
-		c.reconcileClaim(ctx, client.ObjectKeyFromObject(claim), claim)
+		c.reconcileClaim(ctx, client.ObjectKeyFromObject(&claimList.Items[i]), &claimList.Items[i])
 	}
 	close(c.hydrationCh)
 }
@@ -169,20 +183,20 @@ func (c *Controller) finalizeClaim(ctx context.Context, nn types.NamespacedName)
 		}
 	}
 	delete(c.devicesPerClaim, nn)
-	log.FromContext(ctx).V(1).Info(
-		"updated tracked devices for claim",
-		"ResourceClaim", klog.KRef(nn.Namespace, nn.Name),
-		"added", []string{},
-		"removed", lo.Map(lo.Keys(devices), deviceIDToString),
-		"tracked", []string{},
-	)
+	if log.FromContext(ctx).V(1).Enabled() {
+		log.FromContext(ctx).V(1).Info(
+			"updated tracked devices for claim",
+			"ResourceClaim", klog.KRef(nn.Namespace, nn.Name),
+			"added", []string{},
+			"removed", lo.Map(lo.Keys(devices), deviceIDToString),
+			"tracked", []string{},
+		)
+	}
 }
 
 // AllocatedDevices returns an iterator over all allocated devices and their metadata. The read lock is held for the
 // duration of iteration and released when the iterator completes or the caller breaks out of the loop.
 func (c *Controller) AllocatedDevices(ctx context.Context) (iter.Seq2[cloudprovider.DeviceID, Metadata], error) {
-	ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Second, errors.New("timed out awaiting allocated device hydration"))
-	defer cancel()
 	select {
 	case <-c.hydrationCh:
 		return func(yield func(cloudprovider.DeviceID, Metadata) bool) {
