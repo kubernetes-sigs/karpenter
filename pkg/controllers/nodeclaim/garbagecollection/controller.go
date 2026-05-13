@@ -109,11 +109,20 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			"Node", klog.KRef("", nodeClaims[i].Status.NodeName),
 			"provider-id", nodeClaims[i].Status.ProviderID,
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
-		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+		labels := map[string]string{
 			metrics.ReasonLabel:       "garbage_collected",
 			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1.CapacityTypeLabelKey],
-		})
+		}
+		metrics.NodeClaimsDisruptedTotal.Inc(labels)
+		// GC runs when the cloudprovider node is gone or NotReady; pod records may
+		// linger or already be cleaned up. CountReschedulablePodsOnNode handles the
+		// empty-nodename case and any list error by returning 0 with a logged error.
+		podCount, podErr := nodeutils.CountReschedulablePodsOnNode(ctx, c.kubeClient, nodeClaims[i].Status.NodeName)
+		if podErr != nil {
+			log.FromContext(ctx).V(1).Info("counting reschedulable pods for disruption metric", "error", podErr.Error())
+		}
+		metrics.PodsDisruptedTotal.Add(float64(podCount), labels)
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconciler.Result{}, err
