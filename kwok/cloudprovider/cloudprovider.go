@@ -27,7 +27,6 @@ import (
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -38,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+	kwokutils "sigs.k8s.io/karpenter/kwok/utils"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -183,9 +183,8 @@ func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.
 }
 
 func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
-	newName := strings.ReplaceAll(namesgenerator.GetRandomName(0), "_", "-")
 	//nolint
-	newName = fmt.Sprintf("%s-%d", newName, rand.Uint32())
+	newName := fmt.Sprintf("kwok-%s-%s-%d", nodeClaim.Name, kwokutils.RandomName(), rand.Uint32())
 
 	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	req, found := lo.Find(nodeClaim.Spec.Requirements, func(req v1.NodeSelectorRequirementWithMinValues) bool {
