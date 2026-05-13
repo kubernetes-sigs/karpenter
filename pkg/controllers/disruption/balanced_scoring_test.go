@@ -656,14 +656,6 @@ func TestShouldDisrupt_WhenEmptyOrUnderutilized_UnaffectedByGate(t *testing.T) {
 	}
 }
 
-func eventMessages(evts []events.Event) []string {
-	msgs := make([]string, len(evts))
-	for i, e := range evts {
-		msgs[i] = e.Message
-	}
-	return msgs
-}
-
 // --- Test 5: Score-based ranking ---
 
 // TestSortCandidates_BalancedSortsBySavingsRatio verifies that when candidates
