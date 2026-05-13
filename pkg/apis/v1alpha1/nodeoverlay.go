@@ -81,6 +81,14 @@ type NodeOverlaySpec struct {
 	// +optional
 	Price *string `json:"price,omitempty"`
 	//nolint:kubeapilinter
+	// PriceExpression specifies a CEL expression for computing the adjusted price.
+	// The expression has access to self.price (the original instance type price as a double)
+	// and must evaluate to a non-negative numeric value.
+	// Example: "(self.price * 0.9 + 0.05) * 1.03"
+	// Cannot be set together with price or priceAdjustment.
+	// +optional
+	PriceExpression *string `json:"priceExpression,omitempty"`
+	//nolint:kubeapilinter
 	// Capacity adds extended resources only, and does not replace any existing resources.
 	// These extended resources are appended to the node's existing resource list.
 	// Note: This field does not modify or override standard resources like cpu, memory, ephemeral-storage, or pods.
@@ -112,6 +120,8 @@ type NodeOverlay struct {
 
 	//nolint:kubeapilinter
 	// +kubebuilder:validation:XValidation:message="cannot set both 'price' and 'priceAdjustment'",rule="!has(self.price) || !has(self.priceAdjustment)"
+	// +kubebuilder:validation:XValidation:message="cannot set both 'price' and 'priceExpression'",rule="!has(self.price) || !has(self.priceExpression)"
+	// +kubebuilder:validation:XValidation:message="cannot set both 'priceAdjustment' and 'priceExpression'",rule="!has(self.priceAdjustment) || !has(self.priceExpression)"
 	Spec   NodeOverlaySpec   `json:"spec"`
 	Status NodeOverlayStatus `json:"status,omitempty"` //nolint:kubeapilinter
 }
