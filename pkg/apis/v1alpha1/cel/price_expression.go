@@ -32,9 +32,9 @@ import (
 )
 
 var (
-	priceEnv  *cel.Env
-	envOnce   sync.Once
-	envErr    error
+	priceEnv *cel.Env
+	envOnce  sync.Once
+	envErr   error
 )
 
 func env() (*cel.Env, error) {
@@ -49,8 +49,8 @@ func env() (*cel.Env, error) {
 
 // PriceExpression holds a compiled CEL program for evaluating price expressions.
 type PriceExpression struct {
-	prog cel.Program
-	expr string
+	prog cel.Program //nolint:kubeapilinter
+	expr string      //nolint:kubeapilinter
 }
 
 // Compile parses and type-checks a price CEL expression.
