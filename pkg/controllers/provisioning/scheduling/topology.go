@@ -193,29 +193,61 @@ func (t *Topology) Update(ctx context.Context, p *corev1.Pod) error {
 	return nil
 }
 
-// Record records the topology changes given that pod p schedule on a node with the given requirements
-func (t *Topology) Record(p *corev1.Pod, taints []corev1.Taint, requirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) {
+// TopologyDelta captures the exact mutations that Topology.Record performed
+// for a single pod: which TopologyGroup had which domains incremented.
+// Passing a delta slice back into Topology.Unrecord replays the decrements
+// without re-deriving anything from the pod's requirements — safe even if
+// the claim's requirements have tightened since Record was called.
+type TopologyDelta struct {
+	group   *TopologyGroup
+	domains []string
+}
+
+// Record records the topology changes given that pod p schedule on a node
+// with the given requirements. Returns the per-group deltas so a caller
+// can later reverse them via Unrecord (see NodeClaim optimization revert).
+func (t *Topology) Record(p *corev1.Pod, taints []corev1.Taint, requirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) []TopologyDelta {
+	var deltas []TopologyDelta
 	// once we've committed to a domain, we record the usage in every topology that cares about it
 	for _, tg := range t.topologyGroups {
-		if tg.Counts(p, taints, requirements, compatibilityOptions...) {
-			domains := requirements.Get(tg.Key)
-			if tg.Type == TopologyTypePodAntiAffinity {
-				// for anti-affinity topologies we need to block out all possible domains that the pod could land in
-				tg.Record(domains.Values()...)
-			} else {
-				// but for affinity & topology spread, we can only record the domain if we know the specific domain we land in
-				if domains.Len() == 1 {
-					tg.Record(domains.Values()[0])
-				}
-			}
+		if !tg.Counts(p, taints, requirements, compatibilityOptions...) {
+			continue
+		}
+		domains := requirements.Get(tg.Key)
+		switch {
+		case tg.Type == TopologyTypePodAntiAffinity:
+			// for anti-affinity topologies we need to block out all possible domains that the pod could land in
+			vals := domains.Values()
+			tg.Record(vals...)
+			deltas = append(deltas, TopologyDelta{group: tg, domains: vals})
+		case domains.Len() == 1:
+			// but for affinity & topology spread, we can only record the domain if we know the specific domain we land in
+			v := domains.Values()[0]
+			tg.Record(v)
+			deltas = append(deltas, TopologyDelta{group: tg, domains: []string{v}})
 		}
 	}
 	// for anti-affinities, we record where the pods could be, even if
 	// requirements haven't collapsed to a single value.
 	for _, tg := range t.inverseTopologyGroups {
 		if tg.IsOwnedBy(p.UID) {
-			tg.Record(requirements.Get(tg.Key).Values()...)
+			vals := requirements.Get(tg.Key).Values()
+			tg.Record(vals...)
+			deltas = append(deltas, TopologyDelta{group: tg, domains: vals})
 		}
+	}
+	return deltas
+}
+
+// Unrecord reverses the mutations captured in deltas. Each delta decrements
+// the exact domains that Record incremented for one pod, on the exact
+// TopologyGroup instance; no re-derivation from current requirements.
+// This makes Record/Unrecord safe even when n.Requirements has tightened
+// across subsequent Adds, which would otherwise change the domain set the
+// guards in Record evaluate.
+func (t *Topology) Unrecord(deltas []TopologyDelta) {
+	for _, d := range deltas {
+		d.group.Unrecord(d.domains...)
 	}
 }
 

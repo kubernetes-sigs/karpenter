@@ -58,6 +58,7 @@ type FeatureGates struct {
 	SpotToSpotConsolidation *bool
 	NodeOverlay             *bool
 	StaticCapacity          *bool
+	NodeClaimOptimization   *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -94,6 +95,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
 			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
 			StaticCapacity:          lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
+			NodeClaimOptimization:   lo.FromPtrOr(opts.FeatureGates.NodeClaimOptimization, false),
 		},
 	}
 }
