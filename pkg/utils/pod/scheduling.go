@@ -191,42 +191,28 @@ func IsOwnedBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
 	return false
 }
 
-// SingletonRolloutTarget identifies a workload owner of a pod that is configured
-// with spec.replicas == 1 and can be drained by triggering a rollout restart on
-// the owner (writing `kubectl.kubernetes.io/restartedAt` into its pod template).
-//
-// Object is the typed Deployment or StatefulSet ready to be Patched; Kind is the
-// human-readable workload kind for events/logs; TemplateAnnotations is the
-// owner's current spec.template.metadata.annotations, which callers use to
-// dedupe re-patching when a prior rollout is still in flight.
+// SingletonRolloutTarget identifies a workload owner with spec.replicas == 1 that can be drained by
+// triggering a rollout restart (writing `kubectl.kubernetes.io/restartedAt` into its pod template).
+// Callers must skip patching when RolloutInProgress is true — otherwise a second patch creates a
+// third revision that kills the in-flight replacement before it becomes Ready.
 type SingletonRolloutTarget struct {
-	Object              client.Object
-	Kind                string
-	TemplateAnnotations map[string]string
+	Object            client.Object
+	Kind              string
+	RolloutInProgress bool
 }
 
-// SingletonRolloutTargetForPod returns the workload owner of the pod iff:
-//   - the pod is owned (directly) by an apps/v1 StatefulSet with spec.replicas == 1, OR
-//   - the pod is owned (transitively, via its ReplicaSet) by an apps/v1 Deployment
-//     with spec.replicas == 1.
+// SingletonRolloutTargetForPod returns the workload owner of the pod iff it's an apps/v1
+// StatefulSet with spec.replicas == 1 (direct owner) or an apps/v1 Deployment with spec.replicas
+// == 1 (transitive owner via the pod's ReplicaSet). Returns (nil, nil) when no qualifying owner
+// exists or the owner chain points at missing objects; transient API errors are surfaced so the
+// caller can retry. The replicas==1 gate keeps blast radius small — multi-replica workloads drain
+// fine through eviction + PDB, and bumping their template would roll every pod across the fleet.
 //
-// Returns (nil, nil) when no qualifying owner exists or when the owner chain
-// points at missing objects. Transient API errors are returned so the caller can
-// retry. The replicas==1 gate keeps blast radius small: for multi-replica
-// workloads, the existing eviction + PDB path handles draining gracefully on a
-// per-pod basis, and bumping the template would needlessly roll every pod across
-// the fleet for a single node drain.
-//
-// Why include StatefulSets even though they don't surge? A singleton StatefulSet
-// behind a PDB that forbids disruption (e.g. minAvailable=1) cannot be drained
-// via the eviction API at all — the API server returns 429 indefinitely and the
-// node drain stalls until forceful termination. Triggering a rollout restart
-// causes the StatefulSet controller to delete the pod through the pods API,
-// which bypasses PDB, and recreate it elsewhere (the draining node is already
-// tainted). The cost is one pod-lifetime of downtime — the same downtime a
-// successful eviction would have caused, traded against an otherwise-stalled
-// drain. Zero-downtime is achievable only for Deployments, where maxSurge lets
-// the controller bring up the replacement before deleting the old pod.
+// StatefulSets are included even though they don't surge: a singleton SS behind a PDB that forbids
+// disruption (e.g. minAvailable=1) can't be drained via eviction at all (429 forever). Rollout
+// restart deletes the pod through the pods API, bypassing PDB, at the cost of one pod-lifetime of
+// downtime — the same downtime a successful eviction would have caused. Zero-downtime is only
+// achievable for Deployments, where maxSurge brings up the replacement before deleting the old pod.
 func SingletonRolloutTargetForPod(ctx context.Context, c client.Client, pod *corev1.Pod) (*SingletonRolloutTarget, error) {
 	if target, err := singletonStatefulSetOwner(ctx, c, pod); target != nil || err != nil {
 		return target, err
@@ -260,7 +246,11 @@ func singletonStatefulSetOwner(ctx context.Context, c client.Client, pod *corev1
 	if ss.Spec.Replicas == nil || *ss.Spec.Replicas != 1 {
 		return nil, nil
 	}
-	return &SingletonRolloutTarget{Object: ss, Kind: "StatefulSet", TemplateAnnotations: ss.Spec.Template.Annotations}, nil
+	return &SingletonRolloutTarget{
+		Object:            ss,
+		Kind:              "StatefulSet",
+		RolloutInProgress: statefulSetRolloutInProgress(ss),
+	}, nil
 }
 
 func singletonDeploymentOwner(ctx context.Context, c client.Client, pod *corev1.Pod) (*SingletonRolloutTarget, error) {
@@ -289,7 +279,36 @@ func singletonDeploymentOwner(ctx context.Context, c client.Client, pod *corev1.
 	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 1 {
 		return nil, nil
 	}
-	return &SingletonRolloutTarget{Object: dep, Kind: "Deployment", TemplateAnnotations: dep.Spec.Template.Annotations}, nil
+	return &SingletonRolloutTarget{
+		Object:            dep,
+		Kind:              "Deployment",
+		RolloutInProgress: deploymentRolloutInProgress(dep),
+	}, nil
+}
+
+// deploymentRolloutInProgress / statefulSetRolloutInProgress mirror `kubectl rollout status`. Both
+// flag latest-spec-not-observed, updated-pods-not-yet-created, and new-pods-not-yet-ready; they
+// diverge on the surge phase. Deployments surge by default — after the new pod is Ready the old
+// one lingers while the controller tears it down, and UpdatedReplicas already equals Spec.Replicas
+// in that window. Status.Replicas > Status.UpdatedReplicas covers it; missing this check is what
+// caused the deploy-loop on slow-booting Spring Boot workloads. StatefulSets replace in place, so
+// we just need ReadyReplicas to catch up and the revision pair to converge. We don't special-case
+// rollingUpdate.partition (would make a partial rollout look in-progress forever) — partition use
+// on a singleton is vanishingly rare.
+func deploymentRolloutInProgress(dep *appsv1.Deployment) bool {
+	desired := *dep.Spec.Replicas
+	return dep.Generation > dep.Status.ObservedGeneration ||
+		dep.Status.UpdatedReplicas < desired ||
+		dep.Status.Replicas > dep.Status.UpdatedReplicas ||
+		dep.Status.AvailableReplicas < dep.Status.UpdatedReplicas
+}
+
+func statefulSetRolloutInProgress(ss *appsv1.StatefulSet) bool {
+	desired := *ss.Spec.Replicas
+	return ss.Generation > ss.Status.ObservedGeneration ||
+		ss.Status.UpdatedReplicas < desired ||
+		ss.Status.ReadyReplicas < desired ||
+		ss.Status.CurrentRevision != ss.Status.UpdateRevision
 }
 
 // parseDoNotDisrupt parses the do-not-disrupt annotation value as a duration.

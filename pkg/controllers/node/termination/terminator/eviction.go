@@ -66,11 +66,6 @@ const (
 	// the workload's pod template; setting it triggers the Deployment controller to surge a
 	// fresh pod and delete the old one.
 	rolloutRestartAnnotation = "kubectl.kubernetes.io/restartedAt"
-	// rolloutRestartDedupWindow suppresses redundant restart patches while a prior rollout
-	// is still propagating. The Deployment controller may need a moment to set the pod's
-	// deletionTimestamp; without this guard, subsequent Drain passes could re-patch the
-	// Deployment and trigger repeated rollouts.
-	rolloutRestartDedupWindow = 2 * time.Minute
 )
 
 type NodeDrainError struct {
@@ -238,11 +233,16 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	return reconcile.Result{}, nil
 }
 
-// tryRolloutRestart drains a pod via rollout restart of its singleton owner when the
-// feature gate is enabled. Returns (true, nil) when the pod was handled and eviction
-// should be skipped, (false, nil) when not applicable, and a non-nil error for the
-// caller to surface as a reconcile failure. See the package-level rationale in
-// `pkg/utils/pod/scheduling.go` for the Deployment-vs-StatefulSet trade-offs.
+// tryRolloutRestart drains a pod via rollout restart of its singleton owner when the feature gate
+// is on. Returns (true, nil) when handled (skip eviction), (false, nil) when not applicable, and a
+// non-nil error to surface as a reconcile failure. See pkg/utils/pod/scheduling.go for the
+// Deployment-vs-StatefulSet trade-offs.
+//
+// If the owner already has a rollout in flight, we don't patch — that would create a third revision
+// and kill the in-flight replacement before it becomes Ready. We still return handled=true so the
+// caller doesn't fall through to eviction (which would force-kill the old pod and defeat the
+// surge), and drop the pod from the local queue so the drain controller's next pass re-Adds it
+// and we re-check Status.
 func (q *Queue) tryRolloutRestart(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	if !options.FromContext(ctx).FeatureGates.RolloutRestartDrainStrategy {
 		return false, nil
@@ -254,6 +254,13 @@ func (q *Queue) tryRolloutRestart(ctx context.Context, pod *corev1.Pod) (bool, e
 	if target == nil {
 		return false, nil
 	}
+	if target.RolloutInProgress {
+		q.recorder.Publish(terminatorevents.RolloutRestartInProgress(pod, target.Kind, target.Object.GetName()))
+		q.Lock()
+		defer q.Unlock()
+		q.set.Delete(NewQueueKey(pod))
+		return true, nil
+	}
 	if err := q.rolloutRestart(ctx, target); err != nil {
 		return false, err
 	}
@@ -264,17 +271,10 @@ func (q *Queue) tryRolloutRestart(ctx context.Context, pod *corev1.Pod) (bool, e
 	return true, nil
 }
 
-// rolloutRestart patches a singleton workload (Deployment or StatefulSet) with the
-// standard restartedAt annotation, matching `kubectl rollout restart`. The patch is
-// skipped if the workload was already restarted within rolloutRestartDedupWindow, so
-// concurrent Drain passes don't churn the rollout while the previous one is still
-// propagating.
+// rolloutRestart patches a singleton workload with the standard restartedAt annotation, matching
+// `kubectl rollout restart`. Caller must gate on target.RolloutInProgress to avoid clobbering an
+// in-flight rollout.
 func (q *Queue) rolloutRestart(ctx context.Context, target *podutils.SingletonRolloutTarget) error {
-	if existing := target.TemplateAnnotations[rolloutRestartAnnotation]; existing != "" {
-		if t, err := time.Parse(time.RFC3339, existing); err == nil && time.Since(t) < rolloutRestartDedupWindow {
-			return nil
-		}
-	}
 	patch := []byte(fmt.Sprintf(
 		`{"spec":{"template":{"metadata":{"annotations":{%q:%q}}}}}`,
 		rolloutRestartAnnotation, time.Now().UTC().Format(time.RFC3339),

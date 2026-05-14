@@ -52,6 +52,19 @@ func RolloutRestartedPod(pod *corev1.Pod, ownerKind, ownerName string) events.Ev
 	}
 }
 
+// RolloutRestartInProgress records that we observed an in-flight rollout on the pod's singleton
+// owner and skipped patching so the previous rollout can finish. Look for this when diagnosing
+// "why isn't this node draining yet?" on slow-booting workloads.
+func RolloutRestartInProgress(pod *corev1.Pod, ownerKind, ownerName string) events.Event {
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.RolloutRestartInProgress,
+		Message:        fmt.Sprintf("Waiting on in-flight rollout of %s %q before draining singleton pod", ownerKind, ownerName),
+		DedupeValues:   []string{pod.Name},
+	}
+}
+
 func DisruptPodDelete(pod *corev1.Pod, gracePeriodSeconds *int64, nodeGracePeriodTerminationTime *time.Time) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
