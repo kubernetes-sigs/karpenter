@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,16 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"strings"
-	"time"
-
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
-
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -38,13 +33,11 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
+	"math"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-
-	"sigs.k8s.io/karpenter/pkg/operator/options"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -52,11 +45,15 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/daemonset"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
+	"strings"
+	"time"
 )
 
 // LaunchOptions are the set of options that can be used to trigger certain
@@ -456,7 +453,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	// requeue. This can race with controller-runtime's internal cache as it watches events on the cluster
 	// to then trigger cluster state updates. Triggering it manually ensures that Karpenter waits for the
 	// internal cache to sync before moving onto another disruption loop.
-	p.cluster.UpdateNodeClaim(nodeClaim)
+	p.cluster.UpdateNodeClaim(nodeClaimForState(nodeClaim, n.InstanceTypeOptions))
 	if option.Resolve(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
 			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
@@ -599,4 +596,18 @@ func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm)
 		}
 	}
 	return errs
+}
+func nodeClaimForState(nodeClaim *v1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) *v1.NodeClaim {
+	if nodeClaim.Status.ProviderID != "" || len(instanceTypes) == 0 {
+		return nodeClaim
+	}
+	tracked := nodeClaim.DeepCopy()
+	tracked.Status.ProviderID = tracked.Name
+	tracked.Status.Capacity = resources.MaxResources(lo.Map(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) corev1.ResourceList {
+		return instanceType.Capacity
+	})...)
+	tracked.Status.Allocatable = resources.MaxResources(lo.Map(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) corev1.ResourceList {
+		return instanceType.Allocatable()
+	})...)
+	return tracked
 }
