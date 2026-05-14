@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
@@ -622,4 +623,16 @@ func IsUnevaluatedNodePoolError(err error) bool {
 	}
 	var onatnpErr *UnevaluatedNodePoolError
 	return errors.As(err, &onatnpErr)
+}
+
+// DeviceID is a hashable, unique ID for a device. This ID is absolute - depending on the driver, pool, and device
+// names - as opposed to relative - depending on in-memory indexes.
+type DeviceID struct {
+	Driver unique.Handle[string]
+	Pool   unique.Handle[string]
+	Device unique.Handle[string]
+}
+
+func (id DeviceID) String() string {
+	return fmt.Sprintf("%s/%s/%s", id.Driver.Value(), id.Pool.Value(), id.Device.Value())
 }
