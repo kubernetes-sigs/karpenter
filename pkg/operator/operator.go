@@ -245,7 +245,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)),
+		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)), //nolint:staticcheck // TODO: migrate to mgr.GetEventRecorder once karpenter events.NewRecorder accepts events.EventRecorder
 		Clock:               clock.RealClock{},
 		InstanceTypeStore:   instanceTypeStore,
 	}
