@@ -65,6 +65,10 @@ type Method interface {
 	Reason() v1.DisruptionReason
 	Class() string
 	ConsolidationType() string
+	// Weight returns the CFS scheduling weight for this method. Phase 1 methods (Emptiness,
+	// StaticDrift) return 0 and always run unconditionally. Phase 2 methods (Drift, Multi,
+	// Single) return their relative weight: higher weight = more controller time = higher priority.
+	Weight() float64
 }
 
 type CandidateFilter func(context.Context, *Candidate) bool

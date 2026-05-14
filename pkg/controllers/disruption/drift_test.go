@@ -829,6 +829,9 @@ var _ = Describe("Drift", func() {
 		})
 		It("should drift empty nodes before non-empty nodes", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
+			// Limit to 1 disruption per cycle so we can verify that empty nodes are
+			// prioritized over non-empty nodes when the budget is constrained.
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 
 			labels := map[string]string{
@@ -1105,6 +1108,8 @@ var _ = Describe("Drift", func() {
 				LastTransitionTime: metav1.Time{Time: time.Now().Add(-time.Hour)},
 			})
 
+			// Limit to 1 disruption per cycle so we can verify ordering (earliest drifted node first).
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], nodeClaim, node, nodeClaim2, node2, nodePool)
 
 			// bind pods to node so that they're not empty and don't disrupt in parallel.

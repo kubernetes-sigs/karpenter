@@ -135,6 +135,11 @@ func (s *SingleNodeConsolidation) ConsolidationType() string {
 	return SingleNodeConsolidationType
 }
 
+// Weight returns 1, giving SingleNodeConsolidation the lowest CFS priority (Drift=3, Multi=2, Single=1).
+func (s *SingleNodeConsolidation) Weight() float64 {
+	return 1
+}
+
 // sortCandidates interweaves candidates from different nodepools and prioritizes nodepools
 // that timed out in previous runs
 func (s *SingleNodeConsolidation) SortCandidates(ctx context.Context, candidates []*Candidate) []*Candidate {

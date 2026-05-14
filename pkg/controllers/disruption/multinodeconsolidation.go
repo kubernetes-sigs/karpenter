@@ -236,3 +236,8 @@ func (m *MultiNodeConsolidation) Class() string {
 func (m *MultiNodeConsolidation) ConsolidationType() string {
 	return MultiNodeConsolidationType
 }
+
+// Weight returns 2, giving MultiNodeConsolidation medium CFS priority (Drift=3, Multi=2, Single=1).
+func (m *MultiNodeConsolidation) Weight() float64 {
+	return 2
+}

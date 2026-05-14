@@ -113,3 +113,8 @@ func (e *Emptiness) Class() string {
 func (e *Emptiness) ConsolidationType() string {
 	return "empty"
 }
+
+// Weight returns 0 because Emptiness is a Phase 1 method that always runs unconditionally.
+func (e *Emptiness) Weight() float64 {
+	return 0
+}
