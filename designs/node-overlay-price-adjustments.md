@@ -1,12 +1,8 @@
-# NodeOverlay `priceAdjustments`
+# NodeOverlay `priceExpression`
 
 ## Summary
 
-This RFC proposes two approaches for enabling cumulative price adjustment stacking across matching NodeOverlays, solving the combinatorial problem that arises when multiple independent cost dimensions (enterprise discounts, licensing fees, regional surcharges) need to be modeled independently but applied together.
-
-**Option 1 (preferred)** introduces a `spec.priceAdjustments` field—an ordered list of adjustments applied sequentially within a single overlay. This is the recommended approach: it requires no cross-overlay coordination, has a simple and explicit ordering model, and avoids the policy-mixing error states inherent in Option 2.
-
-**Option 2** introduces a `spec.resolutionPolicy` field that controls how multiple overlays with `priceAdjustment` are resolved when more than one matches an instance type.
+This RFC proposes replacing the existing single `spec.priceAdjustment` field with a `spec.priceExpression` field that accepts a CEL (Common Expression Language) expression. The expression receives the instance type's base price as `self.price` and must evaluate to a non-negative numeric value, giving operators full control over order of operations while collapsing all adjustments into a single, readable formula.
 
 ## Motivation
 
@@ -32,19 +28,21 @@ This directly limits the utility of NodeOverlays as a cost-modeling tool and was
 
 ### Use Cases
 
-1. **Layered enterprise discounts**: A global EDP overlay applies a -15% base reduction, and a separate Graviton-specific overlay applies a further -5%. Both should contribute to the final simulated price.
+1. **Layered enterprise discounts**: A global EDP overlay applies a -15% base reduction, and a Graviton-specific overlay applies a further -5% on top. Both can be expressed in one expression with explicit ordering.
 
-2. **Per-node licensing fees**: A security agent charges a flat $0.069/hr per node regardless of instance size. This fee should stack on top of any existing discount overlays rather than compete with them.
+2. **Per-node licensing fees**: A security agent charges a flat $0.069/hr per node regardless of instance size. The fee is added after percentage discounts are applied.
 
-3. **Regional surcharges**: An overlay adds +3% for instances in a specific availability zone for compliance cost modeling. This should compose with capacity-type discounts without displacing them.
+3. **Regional surcharges**: An overlay adds +3% for instances in a specific availability zone for compliance cost modeling. The expression makes the order of operations explicit.
 
 4. **Spot vs on-demand gap refinement**: An on-demand reservation discount narrows the price gap with spot. Modeled accurately, Karpenter can make more correct capacity-type decisions during provisioning.
 
-## Option 1: `priceAdjustments` Ordered List ⭐ Preferred
+## Proposed Solution: `priceExpression` CEL Field
 
 ### Overview
 
-Replace the single `spec.priceAdjustment` field with a `spec.priceAdjustments` list. Adjustments are applied to the instance type's price sequentially in list order, with each step operating on the running result of the previous step. This approach requires no cross-overlay coordination and expresses layered cost modeling entirely within a single overlay resource.
+Replace `spec.priceAdjustment` with a `spec.priceExpression` field that accepts a CEL expression string. The expression exposes a single variable `self` with a `price` field (double) representing the instance type's base price for the current offering. The expression must evaluate to a non-negative numeric value, which becomes the new simulated price.
+
+This approach was suggested by @jmdeal in [kubernetes-sigs/karpenter#3004](https://github.com/kubernetes-sigs/karpenter/pull/3004) as a cleaner alternative to maintaining a structured list of adjustments.
 
 ### API
 
@@ -59,179 +57,88 @@ spec:
     - key: karpenter.sh/capacity-type
       operator: In
       values: ["on-demand"]
-  priceAdjustments:
-    - "-10%"    # EDP enterprise discount
-    - "+0.05"   # licensed security agent fee ($/hr flat)
-    - "+3%"     # AZ compliance surcharge
+  priceExpression: "(self.price * 0.9 + 0.05) * 1.03"
 ```
 
-The existing `priceAdjustment` (singular) field is retained for backward compatibility. If both are specified, validation will reject the resource. Operators migrating from `priceAdjustment` simply wrap the single value in a list.
+The three-factor example from the motivation section (−10% EDP, +$0.05 agent fee, +3% AZ surcharge) is expressed as a single formula. The operator controls order of operations directly via parenthesization.
+
+The existing `priceAdjustment` and `price` fields are retained for backward compatibility. Specifying `priceExpression` alongside either is a validation error.
+
+### Expression Environment
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `self.price` | `double` | The offering's base price (cloud provider price, or the value set by a `spec.price` override on a higher-weight overlay) |
+
+The CEL environment is deliberately minimal. No other variables are exposed. The expression must return a `double`, `int`, or `uint`. Returning a negative value is a validation error at admission time and also guarded at evaluation time.
 
 ### Resolution Rules
 
 For a given instance type offering, let $M$ be the set of all matching NodeOverlays sorted by weight descending (alphabetical by name to break ties):
 
-1. **Base price**: The cloud provider's price is the initial value. If any overlay in $M$ specifies `spec.price`, the highest-weight such overlay's value becomes the new base.
+1. **Base price**: The cloud provider's price is the initial value. If any overlay in $M$ specifies `spec.price`, the highest-weight such overlay's value becomes the base.
 
-2. **Overlay application**: For each overlay in $M$ (descending weight order), apply its `priceAdjustments` entries in list order, each entry operating on the running price.
+2. **`priceExpression`**: If the highest-weight overlay in $M$ specifies `priceExpression`, it is evaluated with `self.price` set to the base price. The result becomes the new simulated price. Lower-weight overlays are not applied (same highest-weight-wins semantics as today).
 
-3. **Highest-weight-wins for `priceAdjustment` (singular)**: Overlays using the legacy singular field retain current override semantics—only the highest-weight match applies.
+3. **Legacy `priceAdjustment`**: Overlays using the legacy field retain current override semantics—only the highest-weight match applies.
 
 ### Mathematical Order of Operations
 
-| Overlay | Field | Adjustment | Calculation | Result |
-|---------|-------|------------|-------------|--------|
-| `on-demand-cost-model` | `priceAdjustments[0]` | −10% | $1.000 × 0.90 | $0.900 |
-| `on-demand-cost-model` | `priceAdjustments[1]` | +$0.05 | $0.900 + $0.05 | $0.950 |
-| `on-demand-cost-model` | `priceAdjustments[2]` | +3% | $0.950 × 1.03 | $0.979 |
+The operator fully controls order of operations via the expression. For the motivating example with a $1.00 base price:
 
-When multiple overlays each carry `priceAdjustments`, they are applied in descending weight order, with each overlay's full list executing before moving to the next overlay.
+| Expression | Calculation | Result |
+|------------|-------------|--------|
+| `(self.price * 0.9 + 0.05) * 1.03` | (1.00 × 0.90 + 0.05) × 1.03 | $0.9785 |
+| `self.price * 0.9 * 1.03 + 0.05` | 1.00 × 0.90 × 1.03 + 0.05 | $0.9770 |
+| `self.price * (1 - 0.10 + 0.03) + 0.05` | 1.00 × 0.93 + 0.05 | $0.9800 |
+
+The operator chooses which form accurately models their cost structure. This is the core advantage over a fixed ordered-list approach: there is no ambiguity about what "apply in order" means across multipliers and additive fees.
 
 ### Design Details
 
-**Controller Changes**
+**Compilation model**
 
-1. Fetch all active NodeOverlay resources.
-2. For each instance type, collect all matching overlays sorted by weight descending, name ascending.
-3. Apply `spec.price` from the highest-weight overlay that sets it (resets base price).
-4. For each overlay in order, iterate its `priceAdjustments` list, applying each entry to the running price.
-5. For overlays using the legacy `priceAdjustment` field, apply only the highest-weight match (current behavior).
-6. Cache the resolved `SimulatedPrice` per InstanceType.
+CEL expressions are compiled once when the NodeOverlay controller reconciles, not on every scheduling decision. The compiled `cel.Program` is stored alongside the price update in the instance type store. This makes evaluation at scheduling time cheap (a single map lookup and numeric computation) with no repeated parsing overhead.
+
+**Controller changes**
+
+1. On reconcile, call `cel.Compile(overlay.Spec.PriceExpression)` for each overlay with a `priceExpression`.
+2. If compilation fails, mark the overlay not-Ready with a descriptive message (same path as existing runtime validation failures).
+3. Store the compiled `cel.Program` in the `priceUpdate` struct alongside the overlay update string.
+4. At scheduling time, evaluate `program.Eval(map["self"]["price"] = basePrice)` to produce the adjusted price.
 
 **Validation**
 
-- **`priceAdjustments`**: Must be a non-empty list if specified. Each entry must be a valid absolute (`+0.05`, `-0.10`) or percentage (`+3%`, `-10%`) adjustment.
-- **Mutual exclusion**: Specifying both `priceAdjustment` and `priceAdjustments` on the same resource is a validation error.
-- **Negative price handling**: Negative resolved prices are allowed. If the resolved price for an instance type is ≤ 0 after applying all adjustments, Karpenter will emit a warning event on the NodeOverlay resource and continue scheduling normally. Operators should treat a negative price as a misconfiguration signal and correct their adjustments.
+- **`priceExpression` syntax**: Validated at admission time via `RuntimeValidate`. Any CEL parse or type-check error surfaces as a validation error on the overlay resource before it is applied.
+- **Return type**: The expression must return a numeric type (`double`, `int`, or `uint`). Expressions returning booleans, strings, or other types are rejected at compile time.
+- **Negative price**: Expressions that evaluate to a negative value are rejected at evaluation time. The offering retains its previous price, and a warning event is emitted on the overlay.
+- **Mutual exclusion**: Specifying `priceExpression` alongside `price` or `priceAdjustment` on the same resource is a validation error.
 
 **Backward Compatibility**
 
-The existing `priceAdjustment` (singular) field is unchanged. All existing NodeOverlay resources continue to behave exactly as today. Operators opt in to `priceAdjustments` explicitly.
+The existing `priceAdjustment` and `price` fields are unchanged. All existing NodeOverlay resources continue to behave exactly as today. Operators opt in to `priceExpression` explicitly.
 
 ### Pros and Cons
 
 **Pros**
-- No cross-overlay coordination required; all adjustments are self-contained in one resource.
-- Ordering is explicit and unambiguous—list index determines application order.
-- Simple mental model: one overlay, one ordered list of cost transformations.
-- No new policy concept to learn; no mixing/conflict errors across resources.
+- Operator has complete, explicit control over order of operations—no ambiguity about how multipliers and additive fees interact.
+- All adjustments for a cost model live in one expression, with no implicit coupling across overlay resources.
+- Consistent with CEL usage elsewhere in Kubernetes (admission webhooks, `kubeReserved`/`systemReserved` in the AWS provider).
+- Expressions are compiled once at reconcile time; evaluation at scheduling time is a single cheap numeric computation.
+- Simpler API surface than a structured list: one string field, standard language semantics.
 
 **Cons**
-- All cost dimensions must be managed within a single overlay per selector combination, which may not suit organizations where different teams own different cost components.
-- Cannot express "this adjustment only if another adjustment is also active" without combining them into a single overlay.
+- CEL is less approachable than structured fields for operators unfamiliar with expression languages. A typo produces a compile error rather than a field-level validation message.
+- Harder to introspect programmatically (e.g. "what discounts apply to this instance type?") than a structured list of named adjustments.
+- Cannot compose adjustments across independently owned overlays—teams that want separate overlays for separate cost dimensions still need to merge them into a single expression (or use the weight-based highest-wins model at coarser granularity).
+- Expressions that are syntactically valid but semantically wrong (e.g. `self.price * 0.0`) will produce correct-but-unexpected prices with no warning.
 
----
+### Migration from `priceAdjustment`
 
-## Option 2: `resolutionPolicy` Field
+Existing single-adjustment overlays migrate trivially:
 
-### Overview
-
-Introduce `spec.resolutionPolicy` on NodeOverlay to control how multiple matching overlays are resolved when computing instance type prices. The two policies are `Override` (current behavior: highest weight wins) and `Stack` (new: weight-ordered cumulative application). `Override` remains the default for backward compatibility.
-
-**Scope**: `resolutionPolicy` governs resolution of `spec.priceAdjustment` only. It has no effect on `spec.price` or `spec.capacity`, which retain their existing resolution semantics:
-
-- `spec.price` always uses highest-weight-wins, since it is an absolute replacement value rather than a modifier.
-- `spec.capacity` always uses merge-by-weight.
-
-### API
-
-```yaml
-apiVersion: karpenter.sh/v1alpha1
-kind: NodeOverlay
-metadata:
-  name: edp-discount
-spec:
-  weight: 100
-  resolutionPolicy: Stack   # Override | Stack; defaults to Override
-  requirements:
-    - key: karpenter.sh/capacity-type
-      operator: In
-      values: ["on-demand"]
-  priceAdjustment: "-10%"
----
-apiVersion: karpenter.sh/v1alpha1
-kind: NodeOverlay
-metadata:
-  name: agent-fee
-spec:
-  weight: 50
-  resolutionPolicy: Stack
-  requirements:
-    - key: kubernetes.io/os
-      operator: In
-      values: ["linux"]
-  priceAdjustment: "+0.05"
----
-apiVersion: karpenter.sh/v1alpha1
-kind: NodeOverlay
-metadata:
-  name: az-surcharge
-spec:
-  weight: 10
-  resolutionPolicy: Stack
-  requirements:
-    - key: topology.kubernetes.io/zone
-      operator: In
-      values: ["us-east-1a"]
-  priceAdjustment: "+3%"
-```
-
-### Resolution Rules
-
-For a given instance type offering, let $M$ be the set of all matching NodeOverlays sorted by weight descending (alphabetical by name to break ties):
-
-1. **Base price**: The cloud provider's price is the initial value. If any overlay in $M$ specifies `spec.price`, the highest-weight such overlay's value becomes the new base.
-
-2. **Policy uniformity**: All overlays in $M$ that specify `priceAdjustment` must share the same `resolutionPolicy`. Mixing `Override` and `Stack` overlays that match the same instance type is invalid and is reported via the `Ready` status condition on each conflicting overlay. Resolution falls back to highest-weight-wins (fail-open) when a conflict is detected.
-
-3. **Override**: Only the highest-weight overlay's `priceAdjustment` is applied. All others are ignored. This is the current behavior.
-
-4. **Stack**: All overlays' `priceAdjustment` values are applied in descending weight order, each operating on the result of the previous step.
-
-### Mathematical Order of Operations
-
-| Overlay | Policy | Weight | Adjustment | Calculation | Result |
-|---------|--------|--------|------------|-------------|--------|
-| Provider | — | — | Base price | $1.000 | $1.000 |
-| `base-override` | Override | 70 | −20% | $1.000 × 0.80 | $0.800 |
-| `edp-discount` | Stack | 60 | −10% | $0.800 × 0.90 | $0.720 |
-| `agent-fee` | Stack | 50 | +$0.05 | $0.720 + $0.05 | $0.770 |
-| `az-surcharge` | Stack | 10 | +3% | $0.770 × 1.03 | $0.793 |
-
-If no `Override` overlay is present, `Stack` overlays apply directly to the provider base price.
-
-### Design Details
-
-**Controller Changes**
-
-1. Fetch all active NodeOverlay resources.
-2. For each instance type, collect all matching overlays sorted by weight descending, name ascending.
-3. Identify the highest-weight overlay with `spec.price`; use it to reset the base if present.
-4. Check that all matching overlays with `priceAdjustment` share the same `resolutionPolicy`. If not, mark conflicting overlays not-Ready and fall back to highest-weight-wins.
-5. If policy is `Override`, apply only the highest-weight overlay's `priceAdjustment`. If policy is `Stack`, iterate all matching overlays in descending weight order, applying each `priceAdjustment` to the running price.
-6. Cache the resolved `SimulatedPrice` per InstanceType. Invalidate only when a NodeOverlay is created, updated, or deleted, or when the cloud provider returns updated instance type data.
-
-**Validation**
-
-- **`resolutionPolicy`**: Must be `Override` or `Stack`. Defaults to `Override` when omitted, preserving backward compatibility.
-- **Negative price handling**: Negative resolved prices are allowed. If the resolved price for an instance type is ≤ 0 after applying all adjustments, Karpenter will emit a warning event on the NodeOverlay resource and continue scheduling normally. Operators should treat a negative price as a misconfiguration signal and correct their adjustments.
-- **`resolutionPolicy` scope**: Only affects `spec.priceAdjustment`. Setting `resolutionPolicy: Stack` on an overlay that only sets `spec.price` or `spec.capacity` has no effect and a warning will be surfaced via the `Ready` status condition.
-- **Policy mixing**: If overlays matching the same instance type have conflicting `resolutionPolicy` values (some `Override`, some `Stack`), all conflicting overlays will have their `Ready` status condition set to false with a descriptive message. Resolution falls back to highest-weight-wins for that instance type until the conflict is resolved.
-- **Conflict reporting**: The existing `Ready` status condition on NodeOverlay resources continues to report equal-weight conflicts. This behavior is unchanged.
-
-**Backward Compatibility**
-
-`resolutionPolicy` defaults to `Override`, so all existing NodeOverlay resources behave exactly as they do today without any changes. Operators opt in to stacking explicitly per-overlay.
-
-### Pros and Cons
-
-**Pros**
-- Different teams can independently manage separate overlays (e.g. finance owns `edp-discount`, security team owns `agent-fee`) without touching each other's resources.
-- Overlays can carry independent selectors, allowing fine-grained per-dimension matching.
-
-**Cons**
-- Requires all co-matching overlays to agree on `resolutionPolicy`, creating implicit cross-resource coupling.
-- Policy mixing is an error state that is hard to detect without observing runtime status conditions.
-- Application order depends on weight assignment across independently owned resources, which may produce surprising results when teams adjust weights for unrelated reasons.
-
----
+| Before | After |
+|--------|-------|
+| `priceAdjustment: "-10%"` | `priceExpression: "self.price * 0.9"` |
+| `priceAdjustment: "+0.05"` | `priceExpression: "self.price + 0.05"` |
+| `price: "0.75"` | `price: "0.75"` (unchanged) |
