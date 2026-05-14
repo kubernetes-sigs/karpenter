@@ -47,6 +47,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -212,7 +213,8 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	PodsEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
 	reason := evictionReason(ctx, pod, q.kubeClient)
 	q.recorder.Publish(terminatorevents.EvictPod(pod, reason))
-	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: reason})
+	nodePoolName := nodePoolForPod(ctx, pod, q.kubeClient)
+	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: reason, metrics.NodePoolLabel: nodePoolName})
 
 	q.Lock()
 	defer q.Unlock()
@@ -235,4 +237,15 @@ func evictionReason(ctx context.Context, pod *corev1.Pod, kubeClient client.Clie
 		return cond.Reason
 	}
 	return "Forceful Termination"
+}
+
+func nodePoolForPod(ctx context.Context, pod *corev1.Pod, kubeClient client.Client) string {
+	node, err := podutils.NodeForPod(ctx, kubeClient, pod)
+	if err != nil {
+		return ""
+	}
+	if np, ok := node.Labels[v1.NodePoolLabelKey]; ok {
+		return np
+	}
+	return ""
 }
