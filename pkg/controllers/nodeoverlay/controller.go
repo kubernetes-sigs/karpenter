@@ -224,7 +224,7 @@ func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, 
 }
 
 func (c *Controller) isPriceUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) bool {
-	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil {
+	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil && len(overlay.Spec.PriceAdjustments) == 0 {
 		return false
 	}
 

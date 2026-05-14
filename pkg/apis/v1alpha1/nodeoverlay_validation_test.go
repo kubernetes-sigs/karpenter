@@ -241,6 +241,30 @@ var _ = Describe("CEL/Validation", func() {
 		nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+10%")
 		Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 	})
+	It("should not be able to set both price and priceAdjustments", func() {
+		nodeOverlay.Spec.Price = lo.ToPtr("0.432")
+		nodeOverlay.Spec.PriceAdjustments = []string{"+10%"}
+		Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+	})
+	It("should not be able to set both priceAdjustment and priceAdjustments", func() {
+		nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+5%")
+		nodeOverlay.Spec.PriceAdjustments = []string{"+10%"}
+		Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+	})
+	Context("priceAdjustments", func() {
+		It("should allow a valid list of adjustments", func() {
+			nodeOverlay.Spec.PriceAdjustments = []string{"-10%", "+0.5", "+3%"}
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+		})
+		It("should allow a single adjustment", func() {
+			nodeOverlay.Spec.PriceAdjustments = []string{"+5%"}
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+		})
+		It("should not allow an unsigned adjustment in the list", func() {
+			nodeOverlay.Spec.PriceAdjustments = []string{"10%"}
+			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+		})
+	})
 	Context("priceAdjustment", func() {
 		DescribeTable("Invalid Input",
 			func(input string) {

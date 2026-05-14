@@ -18,14 +18,15 @@ package v1alpha1_test
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"testing"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
@@ -59,9 +60,9 @@ var _ = AfterSuite(func() {
 var _ = Describe("NodeOverlay", func() {
 	Context("OrderByWeight", func() {
 		It("should order the NodeOverlay by weight", func() {
-			// Generate 10 NodeOverlay that have random weights, some might have the same weights
-			nos := lo.Times(10, func(_ int) *v1alpha1.NodeOverlay {
-				return test.NodeOverlay(v1alpha1.NodeOverlay{
+			nos := lo.Times(10, func(i int) v1alpha1.NodeOverlay {
+				return v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("overlay-%d", i)},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Weight: lo.ToPtr[int32](int32(rand.IntN(100) + 1)), //nolint:gosec
 						Requirements: []v1alpha1.NodeSelectorRequirement{
@@ -71,13 +72,9 @@ var _ = Describe("NodeOverlay", func() {
 							},
 						},
 					},
-				})
+				}
 			})
-			lo.ForEach(nos, func(overlay *v1alpha1.NodeOverlay, _ int) {
-				ExpectApplied(ctx, env.Client, overlay)
-			})
-			overlayList := &v1alpha1.NodeOverlayList{}
-			Expect(env.Client.List(ctx, overlayList)).To(BeNil())
+			overlayList := &v1alpha1.NodeOverlayList{Items: nos}
 			overlayList.OrderByWeight()
 
 			lastWeight := 101 // This is above the allowed weight values
@@ -87,9 +84,9 @@ var _ = Describe("NodeOverlay", func() {
 			}
 		})
 		It("should order the NodeOverlay by name when the weights are the same", func() {
-			// Generate 10 NodePools with the same weight
-			nos := lo.Times(10, func(_ int) *v1alpha1.NodeOverlay {
-				return test.NodeOverlay(v1alpha1.NodeOverlay{
+			nos := lo.Times(10, func(i int) v1alpha1.NodeOverlay {
+				return v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("overlay-%d", i)},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Weight: lo.ToPtr[int32](10),
 						Requirements: []v1alpha1.NodeSelectorRequirement{
@@ -99,13 +96,9 @@ var _ = Describe("NodeOverlay", func() {
 							},
 						},
 					},
-				})
+				}
 			})
-			lo.ForEach(nos, func(overlay *v1alpha1.NodeOverlay, _ int) {
-				ExpectApplied(ctx, env.Client, overlay)
-			})
-			overlayList := &v1alpha1.NodeOverlayList{}
-			Expect(env.Client.List(ctx, overlayList)).To(BeNil())
+			overlayList := &v1alpha1.NodeOverlayList{Items: nos}
 			overlayList.OrderByWeight()
 
 			lastName := "zzzzzzzzzzzzzzzzzzzzzzzz" // large string value

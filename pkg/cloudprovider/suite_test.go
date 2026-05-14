@@ -138,6 +138,27 @@ var _ = Describe("Instance Type", func() {
 			Expect(adjustedPrice).To(BeNumerically("==", 82781))
 		})
 	})
+	Context("AdjustedPriceList", func() {
+		It("should apply adjustments sequentially", func() {
+			// -10% on 10.0 -> 9.0, then +0.5 -> 9.5
+			adjustedPrice := cloudprovider.AdjustedPriceList(10.0, []string{"-10%", "+0.5"})
+			Expect(adjustedPrice).To(BeNumerically("~", 9.5, 0.0001))
+		})
+		It("should apply multiple percentage adjustments sequentially", func() {
+			// -10% on 10.0 -> 9.0, then -10% -> 8.1
+			adjustedPrice := cloudprovider.AdjustedPriceList(10.0, []string{"-10%", "-10%"})
+			Expect(adjustedPrice).To(BeNumerically("~", 8.1, 0.0001))
+		})
+		It("should return original price for empty list", func() {
+			adjustedPrice := cloudprovider.AdjustedPriceList(10.0, []string{})
+			Expect(adjustedPrice).To(BeNumerically("==", 10.0))
+		})
+		It("should clamp to zero when an adjustment drives price negative", func() {
+			// 10.0 - 5 = 5.0, 5.0 - 5 = 0.0, 0.0 - 5 = -5 clamped to 0.0
+			adjustedPrice := cloudprovider.AdjustedPriceList(10.0, []string{"-5", "-5", "-5"})
+			Expect(adjustedPrice).To(BeNumerically("==", 0.0))
+		})
+	})
 })
 
 type BaseError struct {

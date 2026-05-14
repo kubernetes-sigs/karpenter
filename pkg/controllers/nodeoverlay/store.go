@@ -28,8 +28,9 @@ import (
 )
 
 type priceUpdate struct {
-	OverlayUpdate *string
-	lowestWeight  *int32
+	OverlayUpdate    *string
+	PriceAdjustments []string
+	lowestWeight     *int32
 }
 
 type capacityUpdate struct {
@@ -163,7 +164,11 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 				Available:           offering.Available,
 				ReservationCapacity: offering.ReservationCapacity,
 			}
-			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
+			if len(overlay.PriceAdjustments) > 0 {
+				copiedOffering.ApplyPriceAdjustments(overlay.PriceAdjustments)
+			} else {
+				copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
+			}
 			result[i] = copiedOffering
 		} else {
 			// Not modified - share the pointer
@@ -238,8 +243,9 @@ func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName str
 // updateInstanceTypeOffering add a new Price overlay update to the associated instance type.
 // NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
 func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings) {
+	hasPriceAdjustments := len(nodeOverlay.Spec.PriceAdjustments) > 0
 	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
-	if price == nil {
+	if price == nil && !hasPriceAdjustments {
 		return
 	}
 
@@ -257,10 +263,13 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 			update.lowestWeight = nodeOverlay.Spec.Weight
 			continue
 		}
-		i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()] = &priceUpdate{
-			OverlayUpdate: price,
-			lowestWeight:  nodeOverlay.Spec.Weight,
+		update := &priceUpdate{lowestWeight: nodeOverlay.Spec.Weight}
+		if hasPriceAdjustments {
+			update.PriceAdjustments = nodeOverlay.Spec.PriceAdjustments
+		} else {
+			update.OverlayUpdate = price
 		}
+		i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()] = update
 	}
 }
 
