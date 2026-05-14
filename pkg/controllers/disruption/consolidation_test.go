@@ -177,6 +177,7 @@ var _ = Describe("Consolidation", func() {
 	Context("Metrics", func() {
 		BeforeEach(func() {
 			disruption.FailedValidationsTotal.Reset()
+			disruption.ConsolidationSkippedTotal.Reset()
 		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
@@ -332,6 +333,177 @@ var _ = Describe("Consolidation", func() {
 			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
 			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination()),
 		)
+		Context("ConsolidationSkippedTotal", func() {
+			It("should increment metric when single node consolidation is skipped due to NoCheaperReplacement", func() {
+				// Use the least expensive instance type so there's no cheaper replacement
+				nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("1"),
+							corev1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				rs := test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+				pod := test.Pod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("100m"),
+						},
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: labels,
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "ReplicaSet",
+								Name:               rs.Name,
+								UID:                rs.UID,
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
+							},
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				ExpectSingletonReconciled(ctx, disruptionController)
+
+				ExpectMetricCounterValue(disruption.ConsolidationSkippedTotal, 1, map[string]string{
+					disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType,
+					metrics.ReasonLabel:              "NoCheaperReplacement",
+				})
+			})
+			It("should increment metric when spot-to-spot consolidation is skipped due to SpotToSpotConsolidationDisabled", func() {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(false)}}))
+
+				rs := test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+				pod := test.Pod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("100m"),
+						},
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: labels,
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "ReplicaSet",
+								Name:               rs.Name,
+								UID:                rs.UID,
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
+							},
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
+				ExpectManualBinding(ctx, env.Client, pod, spotNode)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
+				ExpectSingletonReconciled(ctx, disruptionController)
+
+				ExpectMetricCounterValue(disruption.ConsolidationSkippedTotal, 1, map[string]string{
+					disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType,
+					metrics.ReasonLabel:              "SpotToSpotConsolidationDisabled",
+				})
+			})
+			It("should increment metric when spot-to-spot consolidation is skipped due to SpotToSpotInsufficientCheaperOptions", func() {
+				// Forcefully shrink the possible instanceTypes to be lower than 15 to replace a nodeclaim
+				cloudProvider.InstanceTypes = lo.Slice(fake.InstanceTypesAssorted(), 0, 5)
+				// Forcefully assign lowest possible instancePrice to make sure we have at least one instance
+				// that is lower than the current node.
+				cloudProvider.InstanceTypes[0].Offerings[0].Price = 0.001
+				cloudProvider.InstanceTypes[0].Offerings[0].Requirements[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(
+					v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot)
+				spotInstances := lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+					for _, o := range i.Offerings {
+						if o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == v1.CapacityTypeSpot {
+							return true
+						}
+					}
+					return false
+				})
+				// Sort the spot instances by pricing from low to high
+				sort.Slice(spotInstances, func(i, j int) bool {
+					return spotInstances[i].Offerings.Cheapest().Price < spotInstances[j].Offerings.Cheapest().Price
+				})
+				mostExpSpotInstance := spotInstances[len(spotInstances)-1]
+				mostExpSpotOffering := mostExpSpotInstance.Offerings.Cheapest()
+
+				spotNodeClaim, spotNode = test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: mostExpSpotInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("1"),
+							corev1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				spotNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				rs := test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+				pod := test.Pod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("100m"),
+						},
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: labels,
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "ReplicaSet",
+								Name:               rs.Name,
+								UID:                rs.UID,
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
+							},
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
+				ExpectManualBinding(ctx, env.Client, pod, spotNode)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
+				ExpectSingletonReconciled(ctx, disruptionController)
+
+				ExpectMetricCounterValue(disruption.ConsolidationSkippedTotal, 1, map[string]string{
+					disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType,
+					metrics.ReasonLabel:              "SpotToSpotInsufficientCheaperOptions",
+				})
+			})
+		})
 	})
 	Context("Budgets", func() {
 		var numNodes = 10
