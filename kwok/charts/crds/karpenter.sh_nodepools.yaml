@@ -158,6 +158,18 @@ spec:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
                       type: string
+                    driftResolutionPolicy:
+                      default: CreateReplacement
+                      description: |-
+                        DriftResolutionPolicy describes what action Karpenter takes to resolve a drifted node.
+                        This policy defaults to "CreateReplacement" if not specified.
+                        - CreateReplacement (default): Karpenter spins up a replacement node before terminating the drifted one.
+                        - Terminate: Karpenter terminates the node without spinning up a replacement.
+                          If evicted pods are unable to be placed, Karpenter's auto-scaling will spin up a replacement node.
+                      enum:
+                        - CreateReplacement
+                        - Terminate
+                      type: string
                   required:
                     - consolidateAfter
                   type: object
