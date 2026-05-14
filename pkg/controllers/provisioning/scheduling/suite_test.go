@@ -3012,6 +3012,45 @@ var _ = Context("Scheduling", func() {
 			Expect(node1.Labels[corev1.LabelTopologyZone]).To(BeElementOf("test-zone-1", "test-zone-2"))
 			Expect(node0.Labels[corev1.LabelTopologyZone]).ToNot(Equal(node1.Labels[corev1.LabelTopologyZone]))
 		})
+		It("should schedule pods when a valid multi-volume topology alternative remains after pruning disjoint branches", func() {
+			cloudProvider.InstanceTypes = fake.InstanceTypes(5)
+
+			scA := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta:        metav1.ObjectMeta{Name: "pruned-overlap-a"},
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: fake.ExoticInstanceLabelKey, Values: []string{"required"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: fake.ExoticInstanceLabelKey, Values: []string{"optional"}}}},
+				},
+			})
+			scB := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta:        metav1.ObjectMeta{Name: "pruned-overlap-b"},
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: corev1.LabelTopologyZone, Values: []string{"test-zone-1"}}, {Key: fake.ExoticInstanceLabelKey, Values: []string{"optional"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: corev1.LabelTopologyZone, Values: []string{"test-zone-2"}}, {Key: fake.ExoticInstanceLabelKey, Values: []string{"required"}}}},
+				},
+			})
+			pvcA := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta:       metav1.ObjectMeta{Name: "pruned-overlap-pvc-a"},
+				StorageClassName: lo.ToPtr(scA.Name),
+			})
+			pvcB := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta:       metav1.ObjectMeta{Name: "pruned-overlap-pvc-b"},
+				StorageClassName: lo.ToPtr(scB.Name),
+			})
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:             metav1.ObjectMeta{Name: "pruned-overlap-pod"},
+				PersistentVolumeClaims: []string{pvcA.Name, pvcB.Name},
+			})
+
+			ExpectApplied(ctx, env.Client, nodePool, scA, scB, pvcA, pvcB, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-1"))
+			Expect(node.Labels).To(HaveKeyWithValue(fake.ExoticInstanceLabelKey, "optional"))
+		})
 		It("should launch nodes for pods with ephemeral volume using the specified storage class name", func() {
 			// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
 			sc := test.StorageClass(test.StorageClassOptions{
