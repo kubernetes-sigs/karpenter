@@ -138,6 +138,15 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	if err != nil {
 		return reconciler.Result{}, err
 	}
+	// Update CapacityBuffer provisioning status based on whether the simulation
+	// placed each buffer's virtual pods onto existing capacity or required new
+	// NodeClaims. Runs even when len(NewNodeClaims) == 0 so buffers that fit on
+	// existing capacity flip to Provisioning=True.
+	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
+		if err := p.updateBufferProvisioningStatus(ctx, results); err != nil {
+			log.FromContext(ctx).Error(err, "updating CapacityBuffer provisioning status")
+		}
+	}
 	if len(results.NewNodeClaims) == 0 {
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
@@ -194,6 +203,12 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	})
 	scheduler.IgnoredPodCount.Set(float64(len(rejectedPods)), nil)
 	p.consolidationWarnings(ctx, pods)
+	// Inject CapacityBuffer virtual pods AFTER the Validate filter so we don't
+	// run PVC topology checks on synthetic pods or pollute cluster state with
+	// their "decisions". Gated by the feature flag.
+	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
+		pods = p.appendVirtualPods(ctx, pods)
+	}
 	return pods, nil
 }
 
