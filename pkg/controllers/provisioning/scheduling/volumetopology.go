@@ -207,6 +207,12 @@ func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, po
 			requirements = lo.Reject(requirements, func(req v1.NodeSelectorRequirement, _ int) bool {
 				return req.Key == v1.LabelHostname
 			})
+			if len(term.MatchExpressions) > 0 && len(requirements) == 0 {
+				// Preserve hostname-only terms as unconstrained alternatives, since hostname affinity
+				// is intentionally ignored for Local and HostPath volumes.
+				alternatives = append(alternatives, scheduling.NewRequirements())
+				continue
+			}
 		}
 		if len(requirements) > 0 {
 			alternatives = append(alternatives, scheduling.NewNodeSelectorRequirements(requirements...))

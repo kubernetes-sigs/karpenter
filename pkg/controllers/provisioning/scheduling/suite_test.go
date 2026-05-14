@@ -2920,25 +2920,25 @@ var _ = Context("Scheduling", func() {
 			Expect(nodeList.Items).To(HaveLen(1))
 		})
 		It("should schedule pods using a PV with multiple zones", func() {
-			// Create a PV with multiple node selector terms so the zones are ORed.
-			pv := test.PersistentVolume(test.PersistentVolumeOptions{
-				ObjectMeta: metav1.ObjectMeta{Name: "multi-zone-pv"},
-				NodeSelectorTerms: []corev1.NodeSelectorTerm{
-					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}},
-					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}},
-				},
-			})
+			// Use multiple node selector terms so the PV zones are ORed.
+			nodeSelectorTerms := []corev1.NodeSelectorTerm{
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}},
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}},
+			}
 
-			// Create a PVC binding to the PV
-			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				ObjectMeta: metav1.ObjectMeta{Name: "multi-zone-pvc"},
-				VolumeName: pv.Name,
-			})
-			ExpectApplied(ctx, env.Client, pv, pvc)
-
-			// Create two pods using the PVC with anti-affinity to force them into different zones
+			// Create two pods using separate PVCs with anti-affinity to force them into different zones
 			var pods []*corev1.Pod
 			for i := range 2 {
+				pv := test.PersistentVolume(test.PersistentVolumeOptions{
+					ObjectMeta:        metav1.ObjectMeta{Name: fmt.Sprintf("multi-zone-pv-%d", i)},
+					NodeSelectorTerms: nodeSelectorTerms,
+				})
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("multi-zone-pvc-%d", i)},
+					VolumeName: pv.Name,
+				})
+				ExpectApplied(ctx, env.Client, pv, pvc)
+
 				pods = append(pods, test.UnschedulablePod(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:   fmt.Sprintf("pod-%d", i),
@@ -2965,6 +2965,31 @@ var _ = Context("Scheduling", func() {
 			Expect(node1.Labels[corev1.LabelTopologyZone]).To(BeElementOf("test-zone-1", "test-zone-2"))
 			Expect(node0.Labels[corev1.LabelTopologyZone]).ToNot(Equal(node1.Labels[corev1.LabelTopologyZone]))
 		})
+		DescribeTable("should preserve unconstrained PV alternatives after ignoring hostname affinity",
+			func(volumeOptions test.PersistentVolumeOptions) {
+				volumeOptions.ObjectMeta = metav1.ObjectMeta{Name: "hostname-or-zone-pv"}
+				volumeOptions.NodeSelectorTerms = []corev1.NodeSelectorTerm{
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelHostname, Operator: corev1.NodeSelectorOpIn, Values: []string{"existing-host"}}}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid-zone"}}}},
+				}
+				pv := test.PersistentVolume(volumeOptions)
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					ObjectMeta: metav1.ObjectMeta{Name: "hostname-or-zone-pvc"},
+					VolumeName: pv.Name,
+				})
+				pod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta:             metav1.ObjectMeta{Name: "hostname-or-zone-pod"},
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, pv, pvc, pod)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+
+				ExpectScheduled(ctx, env.Client, pod)
+			},
+			Entry("for local volumes", test.PersistentVolumeOptions{UseLocal: true}),
+			Entry("for hostpath volumes", test.PersistentVolumeOptions{UseHostPath: true}),
+		)
 		It("should schedule pods using a StorageClass with multiple zones in AllowedTopologies", func() {
 			// Create a StorageClass with multiple allowed topology terms so the zones are ORed.
 			sc := test.StorageClass(test.StorageClassOptions{
