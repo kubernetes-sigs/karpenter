@@ -420,6 +420,7 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 
 		// Simulate what the controller does
 		internalStore.updateInstanceTypeCapacity("default", "m5.large", overlay)
+		//nolint:errcheck
 		internalStore.updateInstanceTypeOffering("default", "m5.large", overlay, instanceTypes[0].Offerings[1:2]) // Only spot offering
 
 		publicStore.UpdateStore(internalStore)

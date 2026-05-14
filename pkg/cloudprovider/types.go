@@ -383,6 +383,12 @@ func (o *Offering) ApplyPriceOverlay(UpdatedPrice string) {
 	o.priceOverlayApplied = true
 }
 
+// SetPriceOverlayApplied marks the offering as having a price overlay applied.
+// Use this when the new price has already been set directly (e.g. via a CEL expression).
+func (o *Offering) SetPriceOverlayApplied() {
+	o.priceOverlayApplied = true
+}
+
 func AdjustedPrice(instanceTypePrice float64, change string) float64 {
 	// if price or price adjustment is not defined, then we will return the same price
 	if change == "" {

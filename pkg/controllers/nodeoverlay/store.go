@@ -17,6 +17,7 @@ limitations under the License.
 package nodeoverlay
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"github.com/samber/lo"
@@ -24,12 +25,14 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1/cel"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
 type priceUpdate struct {
-	OverlayUpdate *string
-	lowestWeight  *int32
+	OverlayUpdate   *string
+	PriceExpression *cel.PriceExpression
+	lowestWeight    *int32
 }
 
 type capacityUpdate struct {
@@ -156,14 +159,24 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 	result := make(cloudprovider.Offerings, len(offerings))
 	for i, offering := range offerings {
 		if overlay, ok := priceUpdates[offering.Requirements.String()]; ok {
-			// This offering needs modification - create a copy
 			copiedOffering := &cloudprovider.Offering{
 				Requirements:        offering.Requirements, // Shared - requirements are immutable
 				Price:               offering.Price,
 				Available:           offering.Available,
 				ReservationCapacity: offering.ReservationCapacity,
 			}
-			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
+			if overlay.PriceExpression != nil {
+				newPrice, err := overlay.PriceExpression.Evaluate(offering.Price)
+				if err != nil {
+					// Evaluation errors are surfaced via RuntimeValidate at admission time; skip silently here.
+					result[i] = offering
+					continue
+				}
+				copiedOffering.Price = newPrice
+				copiedOffering.SetPriceOverlayApplied()
+			} else {
+				copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
+			}
 			result[i] = copiedOffering
 		} else {
 			// Not modified - share the pointer
@@ -237,11 +250,24 @@ func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName str
 
 // updateInstanceTypeOffering add a new Price overlay update to the associated instance type.
 // NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
-func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings) {
-	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
-	if price == nil {
-		return
+func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings) error {
+	hasPriceField := nodeOverlay.Spec.Price != nil || nodeOverlay.Spec.PriceAdjustment != nil
+	hasPriceExpr := nodeOverlay.Spec.PriceExpression != nil
+	if !hasPriceField && !hasPriceExpr {
+		return nil
 	}
+
+	var compiled *cel.PriceExpression
+	if hasPriceExpr {
+		var err error
+		compiled, err = cel.Compile(*nodeOverlay.Spec.PriceExpression)
+		if err != nil {
+			// Should have been caught by RuntimeValidate; surface here as a safety net.
+			return fmt.Errorf("compiling priceExpression for overlay %q: %w", nodeOverlay.Name, err)
+		}
+	}
+
+	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
 
 	_, ok := i.updates[nodePoolName]
 	if !ok {
@@ -258,10 +284,12 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 			continue
 		}
 		i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()] = &priceUpdate{
-			OverlayUpdate: price,
-			lowestWeight:  nodeOverlay.Spec.Weight,
+			OverlayUpdate:   price,
+			PriceExpression: compiled,
+			lowestWeight:    nodeOverlay.Spec.Weight,
 		}
 	}
+	return nil
 }
 
 func (i *internalInstanceTypeStore) isOfferingUpdateConflicting(nodePoolName string, instanceTypeName string, of *cloudprovider.Offering, nodeOverlay v1alpha1.NodeOverlay) bool {

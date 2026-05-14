@@ -78,6 +78,14 @@ spec:
                     - A percentage modifier (e.g., +10% for increase, -15% for decrease)
                   pattern: ^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$
                   type: string
+                priceExpression:
+                  description: |-
+                    PriceExpression specifies a CEL expression for computing the adjusted price.
+                    The expression has access to self.price (the original instance type price as a double)
+                    and must evaluate to a non-negative numeric value.
+                    Example: "(self.price * 0.9 + 0.05) * 1.03"
+                    Cannot be set together with price or priceAdjustment.
+                  type: string
                 requirements:
                   description: |-
                     Requirements constrain when this NodeOverlay is applied during scheduling simulations.
@@ -154,6 +162,10 @@ spec:
               x-kubernetes-validations:
                 - message: cannot set both 'price' and 'priceAdjustment'
                   rule: '!has(self.price) || !has(self.priceAdjustment)'
+                - message: cannot set both 'price' and 'priceExpression'
+                  rule: '!has(self.price) || !has(self.priceExpression)'
+                - message: cannot set both 'priceAdjustment' and 'priceExpression'
+                  rule: '!has(self.priceAdjustment) || !has(self.priceExpression)'
             status:
               description: NodeOverlayStatus defines the observed state of NodeOverlay
               properties:
