@@ -22,14 +22,36 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.githubSha }}
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+      - name: Install envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          ENVTEST_PATH=$(setup-envtest use -p path 1.31.x)
+          sudo mkdir -p /usr/local/kubebuilder/bin
+          sudo cp -r "$ENVTEST_PATH"/* /usr/local/kubebuilder/bin/
       - name: Run Test
         id: test-run
         shell: bash
+        env:
+          GOTOOLCHAIN: auto
         run: |
+          echo "Go version: $(go version)"
+          echo "Working directory: $(pwd)"
+          cd ${{ inputs.path }}
+          echo "Test directory: $(pwd)"
+          echo "Listing test files with build tag:"
+          grep -rl "test_performance" . --include="*.go" || echo "No files with test_performance tag"
+          mkdir -p output
+          echo "Running benchmarks..."
+          if ! go test -tags=test_performance -run='^$' -bench=. -benchtime=1x -short -count=6 -timeout=30m -cpuprofile output/cpu.out -memprofile output/mem.out -v 2>&1 | tee output/results.txt; then
+            echo "::error::go test failed. Output:"
+            cat output/results.txt
+            exit 1
+          fi
           {
-            cd ${{ inputs.path }}
-            mkdir output
-            go test -tags=test_performance -run=1 -bench=. -count=1 -cpuprofile output/cpu.out -memprofile output/mem.out > output/results.txt
             echo 'OUTPUT<<EOF'
             cat output/results.txt
             echo EOF
