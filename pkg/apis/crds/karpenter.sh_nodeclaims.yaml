@@ -381,6 +381,14 @@ spec:
                 providerID:
                   description: ProviderID of the corresponding node object
                   type: string
+                terminationTime:
+                  description: |-
+                    TerminationTime is the time at which the NodeClaim will be forcefully terminated,
+                    bypassing pod terminationGracePeriodSeconds, PDBs, and the do-not-disrupt annotation.
+                    This is set when a NodeClaim with a terminationGracePeriod begins terminating, or when
+                    node repair initiates forced termination.
+                  format: date-time
+                  type: string
               type: object
           required:
             - spec
