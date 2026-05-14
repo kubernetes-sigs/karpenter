@@ -49,4 +49,10 @@ const (
 	InsufficientCapacityError = "InsufficientCapacityError"
 	UnregisteredTaintMissing  = "UnregisteredTaintMissing"
 	NodeClassNotReady         = "NodeClassNotReady"
+
+	// pod/deletioncost
+	PodDeletionCostRankingCompleted   = "PodDeletionCostRankingCompleted"
+	PodDeletionCostUpdateFailed       = "PodDeletionCostUpdateFailed"
+	PodDeletionCostDisabled           = "PodDeletionCostDisabled"
+	PodDeletionCostThirdPartyConflict = "PodDeletionCostThirdPartyConflict"
 )
