@@ -217,7 +217,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -275,7 +275,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiNodeConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := multiNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -318,7 +318,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, singleNodeConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := singleNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -726,7 +726,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -789,7 +789,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -814,7 +814,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -877,7 +877,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -901,7 +901,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, singleConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := singleConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -964,7 +964,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, singleConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			cmds, err := singleConsolidation.ComputeCommands(ctx, budgets, candidates...)
@@ -2462,7 +2462,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			candidates, _, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			// this test validator invalidates the command because it creates pod churn during validaiton

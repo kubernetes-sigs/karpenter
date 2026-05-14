@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 )
 
 // commandValidationDelay is the time we wait between creating a consolidation command and validating that it still works.
@@ -59,6 +61,19 @@ type consolidation struct {
 	cloudProvider          cloudprovider.CloudProvider
 	recorder               events.Recorder
 	lastConsolidationState time.Time
+	// nodePoolTotals holds precomputed totals for all NodePools (from all candidates,
+	// before ShouldDisrupt filtering). Set by the controller before ComputeCommands.
+	nodePoolTotals map[string]NodePoolTotals
+}
+
+// NodePoolTotalsSetter is implemented by disruption methods that need precomputed
+// NodePool totals for balanced consolidation scoring.
+type NodePoolTotalsSetter interface {
+	SetNodePoolTotals(map[string]NodePoolTotals)
+}
+
+func (c *consolidation) SetNodePoolTotals(totals map[string]NodePoolTotals) {
+	c.nodePoolTotals = totals
 }
 
 func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
@@ -85,7 +100,7 @@ func (c *consolidation) markConsolidated() {
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
-func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
+func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 	// Disable consolidation for static NodePool
 	if cn.OwnedByStaticNodePool() {
 		return false
@@ -111,23 +126,67 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.NodePool.Name))...)
 		return false
 	}
-	// If we don't have the "WhenEmptyOrUnderutilized" policy set, we should not do any of the consolidation methods, but
-	// we should also not fire an event here to users since this can be confusing when the field on the NodePool
-	// is named "consolidationPolicy"
-	if cn.NodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyWhenEmptyOrUnderutilized {
+	// Check if the policy enables non-empty consolidation (WhenEmptyOrUnderutilized or Balanced)
+	policy := cn.NodePool.Spec.Disruption.ConsolidationPolicy
+	if policy != v1.ConsolidationPolicyWhenEmptyOrUnderutilized && policy != v1.ConsolidationPolicyBalanced {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has non-empty consolidation disabled", cn.NodePool.Name))...)
 		return false
+	}
+	// If Balanced is set but the feature gate is disabled, fall back to
+	// WhenEmptyOrUnderutilized semantics. The candidate is still eligible for
+	// consolidation; the rest of the controller path (sortCandidates,
+	// AnyBalancedCandidate, scoring inside multi/single-node consolidation)
+	// reads effectiveBalanced() which returns false when the gate is off, so
+	// the Balanced score gate is not applied. The status condition flags the
+	// fallback to operators so they know their Balanced config is not active.
+	if policy == v1.ConsolidationPolicyBalanced && !options.FromContext(ctx).FeatureGates.BalancedConsolidation {
+		cn.NodePool.StatusConditions().SetTrueWithReason(v1.ConditionTypeConsolidationPolicyUnsupported,
+			"BalancedConsolidationDisabled",
+			"consolidationPolicy is Balanced but the BalancedConsolidation feature gate is disabled; falling back to WhenEmptyOrUnderutilized semantics")
+	} else if policy == v1.ConsolidationPolicyBalanced {
+		_ = cn.NodePool.StatusConditions().Clear(v1.ConditionTypeConsolidationPolicyUnsupported)
 	}
 	// return true if consolidatable
 	return cn.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
-// sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result
-func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].DisruptionCost < candidates[j].DisruptionCost
+// sortCandidates sorts candidates for multi-node consolidation. When any candidate
+// uses the Balanced policy and the BalancedConsolidation feature gate is enabled,
+// candidates are sorted by price/disruption ratio descending (best consolidation
+// value first) so that the binary search in firstNConsolidationOption is monotonic
+// with balanced scoring. Otherwise, candidates are sorted by disruption cost
+// ascending (lowest disruption first), matching the WhenEmptyOrUnderutilized
+// behavior. Pools that have configured Balanced but have the gate disabled fall
+// into the second branch, consistent with the Balanced fallback in ShouldDisrupt.
+func (c *consolidation) sortCandidates(ctx context.Context, candidates []*Candidate) []*Candidate {
+	hasBalanced := lo.SomeBy(candidates, func(cn *Candidate) bool {
+		return effectiveBalanced(ctx, cn.NodePool)
 	})
+	if hasBalanced {
+		sort.Slice(candidates, func(i int, j int) bool {
+			ri := candidateSavingsRatio(ctx, candidates[i])
+			rj := candidateSavingsRatio(ctx, candidates[j])
+			return ri > rj // descending: best value first
+		})
+	} else {
+		sort.Slice(candidates, func(i int, j int) bool {
+			return candidates[i].DisruptionCost < candidates[j].DisruptionCost
+		})
+	}
 	return candidates
+}
+
+// candidateSavingsRatio returns node price / disruption cost for sorting.
+// Higher ratio means better consolidation value (more savings per unit disruption).
+// Uses the same disruption cost formula as balanced scoring: per-node base of 1.0
+// plus sum(max(0, EvictionCost(pod))) for reschedulable pods.
+func candidateSavingsRatio(ctx context.Context, c *Candidate) float64 {
+	price := candidatePrice(c)
+	dc := 1.0 // per-node base
+	for _, p := range c.reschedulablePods {
+		dc += math.Max(0, disruptionutils.EvictionCost(ctx, p))
+	}
+	return price / dc
 }
 
 // computeConsolidation computes a consolidation action to take

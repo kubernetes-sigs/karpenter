@@ -169,24 +169,29 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
 }
 
-// GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
+// GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool.
+// It also returns NodePoolTotals computed from ALL candidates (before the ShouldDisrupt filter) so that
+// balanced consolidation scoring normalizes against the full NodePool, not just the filtered subset.
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue,
-) ([]*Candidate, error) {
+) ([]*Candidate, map[string]NodePoolTotals, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pdbs, err := pdb.NewLimits(ctx, kubeClient)
 	if err != nil {
-		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+		return nil, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	candidates := lo.FilterMap(cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
+	allCandidates := lo.FilterMap(cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil
 	})
+	// Compute NodePool totals from ALL candidates before filtering
+	nodePoolTotals := computeNodePoolTotals(ctx, allCandidates)
 	// Filter only the valid candidates that we should disrupt
-	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) }), nil
+	filtered := lo.Filter(allCandidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) })
+	return filtered, nodePoolTotals, nil
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
