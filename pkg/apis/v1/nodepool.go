@@ -66,6 +66,12 @@ type NodePoolSpec struct {
 	// +optional
 	Weight *int32 `json:"weight,omitempty"`
 	//nolint:kubeapilinter
+	// Repair configures the repair policies for nodes in this NodePool.
+	// When specified, NodePool-level repair policies can override the CloudProvider's
+	// default TolerationDuration for specific node conditions.
+	// +optional
+	Repair *RepairSpec `json:"repair,omitempty"`
+	//nolint:kubeapilinter
 	// Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will
 	// maintain this fixed number of replicas rather than scaling based on pod demand.
 	// When replicas is set:
@@ -159,6 +165,46 @@ const (
 	ConsolidationPolicyWhenEmpty                ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenEmptyOrUnderutilized ConsolidationPolicy = "WhenEmptyOrUnderutilized"
 )
+
+// RepairSpec defines the repair configuration for nodes in a NodePool.
+// This allows users to override the CloudProvider's default TolerationDuration
+// for specific node conditions or set a default for all conditions.
+type RepairSpec struct {
+	//nolint:kubeapilinter
+	// Policies defines the repair policies for different node conditions.
+	// These policies override the CloudProvider's default TolerationDuration.
+	// +listType=atomic
+	// +optional
+	Policies []NodePoolRepairPolicy `json:"policies,omitempty"`
+	//nolint:kubeapilinter
+	// DefaultTolerationDuration is the default duration to wait before repairing
+	// nodes for any condition not explicitly configured in Policies.
+	// If not specified, uses the CloudProvider's default TolerationDuration.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	DefaultTolerationDuration *metav1.Duration `json:"defaultTolerationDuration,omitempty"`
+}
+
+// NodePoolRepairPolicy defines a repair policy for a specific node condition.
+type NodePoolRepairPolicy struct {
+	// conditionType specifies the node condition to monitor, e.g. "Ready", "DiskPressure".
+	// Must match a ConditionType defined in the CloudProvider's RepairPolicies.
+	// +required
+	ConditionType v1.NodeConditionType `json:"conditionType,omitempty"`
+	// conditionStatus specifies the condition status that indicates unhealthy state,
+	// e.g. "False", "True", or "Unknown".
+	// +required
+	ConditionStatus v1.ConditionStatus `json:"conditionStatus,omitempty"`
+	//nolint:kubeapilinter
+	// TolerationDuration is the duration to wait before attempting to terminate
+	// nodes that match this repair policy. Overrides the CloudProvider's
+	// TolerationDuration for this specific condition.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
+	// +kubebuilder:validation:Type="string"
+	// +required
+	TolerationDuration metav1.Duration `json:"tolerationDuration"`
+}
 
 // DisruptionReason defines valid reasons for disruption budgets.
 // +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
