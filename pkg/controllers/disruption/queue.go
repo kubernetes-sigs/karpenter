@@ -238,11 +238,13 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			return
 		}
 		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()))...)
-		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+		labels := map[string]string{
 			metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.Reason())),
 			metrics.NodePoolLabel:     cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-		})
+		}
+		metrics.NodeClaimsDisruptedTotal.Inc(labels)
+		metrics.PodsDisruptedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.

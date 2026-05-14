@@ -171,11 +171,19 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	}
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).Info("deleting unhealthy node")
-	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+	labels := map[string]string{
 		metrics.ReasonLabel:       metrics.UnhealthyReason,
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
-	})
+	}
+	metrics.NodeClaimsDisruptedTotal.Inc(labels)
+	// Pods on the node have not yet started draining at this point — list captures
+	// the pre-disruption state. Errors don't fail the reconcile; the metric reports 0.
+	podCount, err := nodeutils.CountReschedulablePodsOnNode(ctx, c.kubeClient, node.Name)
+	if err != nil {
+		log.FromContext(ctx).V(1).Info("counting reschedulable pods for disruption metric", "error", err.Error())
+	}
+	metrics.PodsDisruptedTotal.Add(float64(podCount), labels)
 	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
 		Condition:                 pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
