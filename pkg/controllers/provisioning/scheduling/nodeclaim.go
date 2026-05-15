@@ -98,7 +98,7 @@ func NewNodeClaim(
 	template.Spec.Resources.Requests = daemonResources
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
-		hostPortUsage:        hostPortUsage,
+		hostPortUsage:        hostPortUsage.DeepCopy(), // Deep copy so each NodeClaim can independently track port usage
 		topology:             topology,
 		daemonResources:      daemonResources,
 		hostname:             hostname,
