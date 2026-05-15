@@ -779,7 +779,8 @@ func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
 	}
 
 	zoneReq := podData.StrictRequirements.Get(corev1.LabelTopologyZone)
-	volZoneReq, hasVol := podData.VolumeRequirements[corev1.LabelTopologyZone]
+	hasVol := podData.VolumeRequirements.Has(corev1.LabelTopologyZone)
+	volZoneReq := podData.VolumeRequirements.Get(corev1.LabelTopologyZone)
 
 	var zonalValues []string
 	if zoneReq.Operator() == corev1.NodeSelectorOpIn {
