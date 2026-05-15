@@ -64,13 +64,9 @@ Benchmark experiments and simulations show meaningful decreases in disruption ra
 
 The benefit of this feature varies by consolidation policy. For `ConsolidateWhenEmpty` NodePools, the value is direct: concentrating pod deletions on a single node is the only way to create the fully-empty condition that triggers consolidation. Without this controller, scale-down events rarely produce empty nodes. For `ConsolidateWhenUnderutilized` NodePools, the value is indirect but meaningful: concentrating deletions reduces the number of pods Karpenter must evict when it consolidates, lowering the total disruption cost of each consolidation move even though the consolidation would eventually happen regardless.
 
-## Proposal
+### Proposal: How it works
 
-We introduce a new feature-gated controller (`pod.deletioncost`) that automatically manages the `controller.kubernetes.io/pod-deletion-cost` annotation on pods running on Karpenter-managed nodes. The controller ranks nodes using Karpenter's consolidation candidate ranking, assigns deletion cost values to pods so that Kubernetes' ReplicaSet scale-down logic preferentially removes pods from the best consolidation targets first, and partitions nodes Karpenter cannot act on separately to protect them from early eviction.
-
-### How it works
-
-All new code lives in `pkg/controllers/pod/deletioncost/`. A singleton reconciler runs every 60 seconds. The 60-second interval balances annotation freshness against API server write load. fast enough to react to scale events within one HPA evaluation period, slow enough to avoid amplifying watch events during steady state. On each tick it:
+We introduce a new feature-gated controller (`pod.deletioncost`) that automatically manages the `controller.kubernetes.io/pod-deletion-cost` annotation on pods running on Karpenter-managed nodes. All new code lives in `pkg/controllers/pod/deletioncost/`. A singleton reconciler runs every 60 seconds. The 60-second interval balances annotation freshness against API server write load. fast enough to react to scale events within one HPA evaluation period, slow enough to avoid amplifying watch events during steady state. On each tick it:
 
 1. Checks the `PodDeletionCostManagement` feature gate
 2. Collects all Karpenter-managed nodes from `state.Cluster`
