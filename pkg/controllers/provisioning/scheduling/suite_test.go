@@ -4320,6 +4320,74 @@ var _ = Context("Scheduling", func() {
 						TopologySpreadConstraints: tsc,
 					}),
 				}, map[string]int{"test-zone-3": 1}),
+				Entry("when TSC is unsatisfiable", []*corev1.Pod{
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+					}),
+				}, []*corev1.Pod{
+					test.UnschedulablePod(test.PodOptions{
+						Phase: corev1.PodPending,
+						TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
+							TopologyKey:       corev1.LabelTopologyZone,
+							WhenUnsatisfiable: corev1.DoNotSchedule,
+							LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+							MaxSkew:           1,
+							MinDomains:        lo.ToPtr(int32(4)),
+						}},
+					}),
+				}, map[string]int{"none": 1}),
+				Entry("when pod affinity is unsatisfiable", []*corev1.Pod{}, []*corev1.Pod{
+					test.UnschedulablePod(test.PodOptions{
+						Phase: corev1.PodPending,
+						PodRequirements: []corev1.PodAffinityTerm{{
+							TopologyKey:   corev1.LabelTopologyZone,
+							LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"nonexistent": "label"}},
+						}},
+					}),
+				}, map[string]int{"none": 1}),
+				Entry("when pod anti-affinity is unsatisfiable", []*corev1.Pod{
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+					}),
+					test.UnschedulablePod(test.PodOptions{
+						ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+					}),
+				}, []*corev1.Pod{
+					test.UnschedulablePod(test.PodOptions{
+						Phase: corev1.PodPending,
+						PodAntiRequirements: []corev1.PodAffinityTerm{{
+							TopologyKey:   corev1.LabelTopologyZone,
+							LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+						}},
+					}),
+				}, map[string]int{"none": 1}),
 			)
 		})
 	})

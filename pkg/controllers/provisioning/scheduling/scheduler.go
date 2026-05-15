@@ -773,7 +773,10 @@ func (s *Scheduler) sortExistingNodes() {
 //nolint:gocyclo
 func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
 	podData := s.cachedPodData[pod.UID]
-	tscZoneValidDomains := s.topology.GetTopologyZoneConstraints(pod, podData.Requirements)
+	tscZoneValidDomains, satisfiable := s.topology.GetTopologyZoneConstraints(pod, podData.Requirements)
+	if !satisfiable {
+		return "none"
+	}
 
 	zoneReq := podData.StrictRequirements.Get(corev1.LabelTopologyZone)
 	volZoneReq, hasVol := podData.VolumeRequirements[corev1.LabelTopologyZone]

@@ -130,9 +130,11 @@ func (t *TopologyGroup) Get(pod *corev1.Pod, podDomains, nodeDomains *scheduling
 	case TopologyTypeSpread:
 		return t.nextDomainTopologySpread(pod, podDomains, nodeDomains)
 	case TopologyTypePodAffinity:
-		return t.nextDomainAffinity(pod, podDomains, nodeDomains), nil
+		req := t.nextDomainAffinity(pod, podDomains, nodeDomains)
+		return req, sets.New[string](req.Values()...)
 	case TopologyTypePodAntiAffinity:
-		return t.nextDomainAntiAffinity(podDomains, nodeDomains), nil
+		req := t.nextDomainAntiAffinity(podDomains, nodeDomains)
+		return req, sets.New[string](req.Values()...)
 	default:
 		panic(fmt.Sprintf("Unrecognized topology group type: %s", t.Type))
 	}
@@ -245,7 +247,7 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, no
 		if count <= t.maxSkew {
 			return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpIn, hostName), sets.New[string](hostName)
 		}
-		return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist), nil
+		return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist), validDomains
 	}
 
 	// If we are explicitly selecting on specific node domains ("In" requirement),
@@ -289,7 +291,7 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, no
 	}
 	if minDomain == "" {
 		// avoids an error message about 'zone in [""]', preferring 'zone in []'
-		return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist), nil
+		return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist), validDomains
 	}
 	return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpIn, minDomain), validDomains
 }
