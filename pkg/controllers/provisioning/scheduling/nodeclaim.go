@@ -97,9 +97,14 @@ func NewNodeClaim(
 	template.Requirements.Add(scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = corev1.ResourceList{}
+	// Deep copy so each NodeClaim can independently track port usage
+	hostPortUsageForNodeClaim := make(map[string]*scheduling.HostPortUsage, len(hostPortUsage))
+	for k, v := range hostPortUsage {
+		hostPortUsageForNodeClaim[k] = v.DeepCopy()
+	}
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
-		hostPortUsage:        hostPortUsage,
+		hostPortUsage:        hostPortUsageForNodeClaim,
 		topology:             topology,
 		daemonResources:      daemonResources,
 		hostname:             hostname,
@@ -262,7 +267,7 @@ func (n *NodeClaim) addDaemonRequests() {
 	for _, it := range n.InstanceTypeOptions {
 		if dr, ok := n.daemonResources[it.Name]; ok {
 			if len(minDaemonOverhead) == 0 {
-				minDaemonOverhead = dr.DeepCopy()
+				minDaemonOverhead = dr
 			} else {
 				minDaemonOverhead = resources.MinResources(minDaemonOverhead, dr)
 			}
@@ -350,7 +355,7 @@ type InstanceTypeFilterError struct {
 // Updates the min/max daemon overhead bounds for error reporting.
 func (e *InstanceTypeFilterError) trackDaemonOverhead(dr corev1.ResourceList) {
 	if len(e.maxDaemonRequests) == 0 {
-		e.minDaemonRequests = dr.DeepCopy()
+		e.minDaemonRequests = dr
 		e.maxDaemonRequests = dr.DeepCopy()
 		return
 	}
@@ -444,13 +449,15 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		podRequests:  podRequests,
 	}
 	remaining := cloudprovider.InstanceTypes{}
+	// exposed host ports on the pod
+	hostPorts := scheduling.GetHostPorts(pod)
 
 	for _, it := range instanceTypes {
-		hostPortUsageForInstanceType := lo.ValueOr(hostPortUsage, it.Name, &scheduling.HostPortUsage{})
-		// exposed host ports on the pod
-		hostPorts := scheduling.GetHostPorts(pod)
-		if err := hostPortUsageForInstanceType.Conflicts(pod, hostPorts); err != nil {
-			continue
+		hostPortUsageForInstanceType, ok := hostPortUsage[it.Name]
+		if ok {
+			if err := hostPortUsageForInstanceType.Conflicts(pod, hostPorts); err != nil {
+				continue
+			}
 		}
 
 		var totalRequestsForInstanceType corev1.ResourceList

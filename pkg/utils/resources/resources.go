@@ -117,7 +117,8 @@ func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
 	}
 }
 
-// MaxResources returns the maximum quantities for a given list of resources
+// MaxResources returns the maximum quantities for a given list of resources.
+// Quantity structs in the list returned are only safe to mutate if Quantity.d.Dec == nil
 func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 	resourceList := v1.ResourceList{}
 	for _, resource := range resources {
@@ -131,7 +132,8 @@ func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 }
 
 // MinResources returns the minimum quantities for resources present in all lists (intersection of resources)
-// Ex: MinResources({cpu: 1}, {cpu: 2, gpu: 1}) = {cpu: 1}
+// Ex: MinResources({cpu: 1}, {cpu: 2, gpu: 1}) = {cpu: 1}.
+// Quantity structs in the list returned are only safe to mutate if Quantity.d.Dec == nil
 func MinResources(resources ...v1.ResourceList) v1.ResourceList {
 	if len(resources) == 0 {
 		return v1.ResourceList{}
@@ -141,7 +143,7 @@ func MinResources(resources ...v1.ResourceList) v1.ResourceList {
 		for resourceName, quantity := range resourceList {
 			if rlQuantity, exists := rl[resourceName]; exists {
 				if rlQuantity.Cmp(quantity) < 0 {
-					resourceList[resourceName] = rlQuantity.DeepCopy()
+					resourceList[resourceName] = rlQuantity
 				}
 			} else {
 				delete(resourceList, resourceName)
