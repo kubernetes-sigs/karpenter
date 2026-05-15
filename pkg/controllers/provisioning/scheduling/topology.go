@@ -234,7 +234,7 @@ func (t *Topology) AddRequirements(p *corev1.Pod, taints []corev1.Taint, podRequ
 		if nodeRequirements.Has(topology.Key) {
 			nodeDomains = nodeRequirements.Get(topology.Key)
 		}
-		domains := topology.Get(p, podDomains, nodeDomains)
+		domains, _ := topology.Get(p, podDomains, nodeDomains)
 		if domains.Len() == 0 {
 			return nil, topologyError{
 				topology:    topology,
@@ -245,6 +245,39 @@ func (t *Topology) AddRequirements(p *corev1.Pod, taints []corev1.Taint, podRequ
 		requirements.Add(domains)
 	}
 	return requirements, nil
+}
+
+// GetTopologyZoneConstraints returns the set of valid zones from all topology constraints
+// that use the zone topology key for the given pod, along with whether the constraints are satisfiable.
+func (t *Topology) GetTopologyZoneConstraints(p *corev1.Pod, podRequirements scheduling.Requirements) (sets.Set[string], bool) {
+	var result sets.Set[string]
+
+	for _, topology := range t.topologyGroups {
+		if !topology.IsOwnedBy(p.UID) || topology.Key != corev1.LabelTopologyZone {
+			continue
+		}
+
+		podDomains := scheduling.NewRequirement(topology.Key, corev1.NodeSelectorOpExists)
+		if podRequirements.Has(topology.Key) {
+			podDomains = podRequirements.Get(topology.Key)
+		}
+		nodeDomains := scheduling.NewRequirement(topology.Key, corev1.NodeSelectorOpExists)
+		_, validDomains := topology.Get(p, podDomains, nodeDomains)
+
+		if validDomains.Len() == 0 {
+			return nil, false
+		}
+		if result == nil {
+			result = validDomains
+		} else {
+			for zone := range result {
+				if !validDomains.Has(zone) {
+					delete(result, zone)
+				}
+			}
+		}
+	}
+	return result, true
 }
 
 // Register is used to register a domain as available across topologies for the given topology key.

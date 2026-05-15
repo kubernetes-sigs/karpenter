@@ -32,6 +32,7 @@ import (
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -388,10 +389,17 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	podErrors := map[*corev1.Pod]error{}
 	// Reset the metric for the controller, so we don't keep old ids around
 	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
+	PendingPodsByEffectiveZone.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
+	podCountByZone := make(map[string]int)
 	for _, p := range pods {
 		s.updateCachedPodData(p)
+		if p.Status.Phase == corev1.PodPending {
+			zone := s.computeEffectiveZoneFromPod(p)
+			podCountByZone[zone]++
+		}
 	}
+
 	q := NewQueue(pods, s.cachedPodData)
 
 	startTime := s.clock.Now()
@@ -426,6 +434,14 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
+	}
+
+	controllerName := injection.GetControllerName(ctx)
+	for zone, count := range podCountByZone {
+		PendingPodsByEffectiveZone.Set(float64(count), map[string]string{
+			ControllerLabel: controllerName,
+			"zone":          zone,
+		})
 	}
 
 	return Results{
@@ -748,6 +764,55 @@ func (s *Scheduler) sortExistingNodes() {
 		}
 		return s.existingNodes[i].Name() < s.existingNodes[j].Name()
 	})
+}
+
+// computeEffectiveZoneFromPod calculates the effective zone constraint by intersecting
+// pod-level zone signals, PVC volume zones, and TSC valid domains. This can be the
+// specific zone name if exactly one zone, "flexible" if multiple zones, "none" if no intersection.
+//
+//nolint:gocyclo
+func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
+	podData := s.cachedPodData[pod.UID]
+	tscZoneValidDomains, satisfiable := s.topology.GetTopologyZoneConstraints(pod, podData.Requirements)
+	if !satisfiable {
+		return "none"
+	}
+
+	zoneReq := podData.StrictRequirements.Get(corev1.LabelTopologyZone)
+	hasVol := podData.VolumeRequirements.Has(corev1.LabelTopologyZone)
+	volZoneReq := podData.VolumeRequirements.Get(corev1.LabelTopologyZone)
+
+	var zonalValues []string
+	if zoneReq.Operator() == corev1.NodeSelectorOpIn {
+		zonalValues = zoneReq.Values()
+	} else if hasVol && volZoneReq.Operator() == corev1.NodeSelectorOpIn {
+		zonalValues = volZoneReq.Values()
+	} else if len(tscZoneValidDomains) > 0 {
+		zonalValues = sets.List(tscZoneValidDomains)
+	} else {
+		return "flexible"
+	}
+
+	var matchCount int
+	var matchedZone string
+	for _, zone := range zonalValues {
+		if !zoneReq.Has(zone) {
+			continue
+		}
+		if hasVol && !volZoneReq.Has(zone) {
+			continue
+		}
+		if len(tscZoneValidDomains) > 0 && !tscZoneValidDomains.Has(zone) {
+			continue
+		}
+		matchCount++
+		if matchCount == 1 {
+			matchedZone = zone
+		} else {
+			return "flexible"
+		}
+	}
+	return lo.Ternary(matchCount == 1, matchedZone, "none")
 }
 
 // parallelizeUntil is an implementation of workqueue.ParallelizeUntil that modifies the
