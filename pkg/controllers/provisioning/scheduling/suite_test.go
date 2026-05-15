@@ -2474,6 +2474,17 @@ var _ = Context("Scheduling", func() {
 			// Expect that the scheduled node is equal to node3 since it's initialized
 			Expect(scheduledNode.Name).To(Equal(node.Name))
 		})
+		It("should schedule pods with the same host port to different nodes", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := []*corev1.Pod{
+				test.UnschedulablePod(test.PodOptions{HostPorts: []int32{8080}}),
+				test.UnschedulablePod(test.PodOptions{HostPorts: []int32{8080}}),
+			}
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			node1 := ExpectScheduled(ctx, env.Client, pods[0])
+			node2 := ExpectScheduled(ctx, env.Client, pods[1])
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+		})
 	})
 
 	Describe("Existing Nodes", func() {
