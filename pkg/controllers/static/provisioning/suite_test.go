@@ -27,7 +27,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	"k8s.io/client-go/tools/record"
-	clock "k8s.io/utils/clock/testing"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -64,7 +63,6 @@ func (f *failingClient) Create(ctx context.Context, obj client.Object, opts ...c
 
 var (
 	ctx                      context.Context
-	fakeClock                *clock.FakeClock
 	cluster                  *state.Cluster
 	nodeController           *informer.NodeController
 	daemonsetController      *informer.DaemonSetController
@@ -86,13 +84,12 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
-	fakeClock = clock.NewFakeClock(time.Now())
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock)
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
-	controller = static.NewController(env.Client, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, fakeClock)
+	controller = static.NewController(env.Client, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, env.Clock)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 })
 
@@ -102,10 +99,10 @@ var _ = BeforeEach(func() {
 	cluster.Reset()
 
 	// ensure any waiters on our clock are allowed to proceed before resetting our clock time
-	for fakeClock.HasWaiters() {
-		fakeClock.Step(1 * time.Minute)
+	for env.Clock.HasWaiters() {
+		env.Clock.Step(1 * time.Minute)
 	}
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 })
 
 var _ = AfterSuite(func() {
@@ -126,7 +123,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// Create controller with failing client
-			failingController := static.NewController(&failingClient{Client: env.Client}, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, fakeClock)
+			failingController := static.NewController(&failingClient{Client: env.Client}, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, env.Clock)
 
 			result, err := failingController.Reconcile(ctx, nodePool)
 			Expect(err).To(HaveOccurred())
@@ -234,7 +231,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, nodeClaim2, node1, node2)
 
 			// Update cluster state to track the nodes
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
 			Expect(cluster.Nodes()).To(HaveLen(2))
 			ExpectStateNodePoolCount(cluster, nodePool.Name, 2, 0, 0)
 
@@ -288,7 +285,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
 
 			// 	// Update cluster state to track the nodes
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			Expect(cluster.Nodes()).To(HaveLen(1))
 			ExpectStateNodePoolCount(cluster, nodePool.Name, 1, 0, 0)
 
@@ -339,7 +336,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim3, node3)
 
 			// 	// Update cluster state to track the nodes
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{node3, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2, nodeClaim3})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimStateController, []*corev1.Node{node3, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2, nodeClaim3})
 
 			// Reconcile multiple times
 			for i := 0; i < 10; i++ {
@@ -377,7 +374,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
 
 			// 	// Update cluster state to track the nodes
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			Expect(cluster.Nodes()).To(HaveLen(1))
 			ExpectStateNodePoolCount(cluster, nodePool.Name, 1, 0, 0)
 
@@ -492,7 +489,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			nodePool.Spec.Template.Spec.Requirements = inputRequirements
 			ExpectApplied(ctx, env.Client, nodePool)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{}, []*v1.NodeClaim{})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimStateController, []*corev1.Node{}, []*v1.NodeClaim{})
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))

@@ -26,7 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clock "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -42,7 +41,6 @@ import (
 var ctx context.Context
 var nodeClaimConsistencyController *consistency.Controller
 var env *test.Environment
-var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
 var recorder *test.EventRecorder
 
@@ -53,7 +51,6 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(
 		test.WithCRDs(apis.CRDs...),
 		test.WithCRDs(v1alpha1.CRDs...),
@@ -62,7 +59,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cp = &fake.CloudProvider{}
 	recorder = test.NewEventRecorder()
-	nodeClaimConsistencyController = consistency.NewController(fakeClock, env.Client, cp, recorder)
+	nodeClaimConsistencyController = consistency.NewController(env.Clock, env.Client, cp, recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -75,7 +72,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 	ExpectCleanedUp(ctx, env.Client)
 })
 
@@ -129,7 +126,7 @@ var _ = Describe("NodeClaimController", func() {
 				nodeClaim, node := test.NodeClaimAndNode(nodeClaimOpts...)
 				nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeConsistentStateFound)
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-				ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+				ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 				ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				if isNodeClaimManaged {
@@ -174,7 +171,7 @@ var _ = Describe("NodeClaimController", func() {
 				corev1.ResourcePods:   resource.MustParse("10"),
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)

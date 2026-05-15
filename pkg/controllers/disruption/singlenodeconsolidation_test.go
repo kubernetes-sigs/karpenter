@@ -90,13 +90,13 @@ var _ = Describe("SingleNodeConsolidation", func() {
 		}
 
 		// Create a single node consolidation controller
-		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		c := disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
 		consolidation = disruption.NewSingleNodeConsolidation(c)
 	})
 
 	AfterEach(func() {
 		disruption.SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
-		fakeClock.SetTime(time.Now())
+		env.Clock.SetTime(time.Now())
 		ExpectCleanedUp(ctx, env.Client)
 	})
 
@@ -257,7 +257,7 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 			ExpectApplied(ctx, env.Client, nodeClaim)
 
@@ -280,7 +280,7 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 			ctx,
 			env.Client,
 			recorder,
-			fakeClock,
+			env.Clock,
 			stateNode,
 			limits,
 			nodePoolMap,
