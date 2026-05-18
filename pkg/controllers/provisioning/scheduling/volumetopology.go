@@ -102,19 +102,6 @@ func mergeVolumeRequirementAlternatives(alternatives, volAlts []scheduling.Requi
 	return nil, fmt.Errorf("incompatible volume topology requirements: all %d combinations are incompatible, topology keys %v", attemptedCombinations, volumeRequirementKeys(alternatives, volAlts))
 }
 
-func volumeRequirementKeys(alternatives ...[]scheduling.Requirements) []string {
-	keys := sets.New[string]()
-	for _, requirementAlternatives := range alternatives {
-		for _, requirements := range requirementAlternatives {
-			if requirements == nil {
-				continue
-			}
-			keys.Insert(requirements.Keys().UnsortedList()...)
-		}
-	}
-	return sets.List(keys)
-}
-
 func mergeCompatibleVolumeRequirementAlternatives(alternatives, volAlts []scheduling.Requirements) []scheduling.Requirements {
 	var mergedAlternatives []scheduling.Requirements
 	for _, existing := range alternatives {
@@ -142,6 +129,19 @@ func mergeVolumeRequirements(existing, volReq scheduling.Requirements) schedulin
 	}
 	merged.Add(volReq.Values()...)
 	return merged
+}
+
+func volumeRequirementKeys(alternatives ...[]scheduling.Requirements) []string {
+	keys := sets.New[string]()
+	for _, requirementAlternatives := range alternatives {
+		for _, requirements := range requirementAlternatives {
+			if requirements == nil {
+				continue
+			}
+			keys.Insert(requirements.Keys().UnsortedList()...)
+		}
+	}
+	return sets.List(keys)
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]scheduling.Requirements, error) {
