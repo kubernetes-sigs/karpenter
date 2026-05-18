@@ -30,7 +30,10 @@ import (
 
 type PersistentVolumeOptions struct {
 	metav1.ObjectMeta
-	Zones              []string
+	// Zones builds a single topology term with multiple zone values unless NodeSelectorTerms is set.
+	Zones []string
+	// NodeSelectorTerms, when set, are used verbatim instead of deriving a single term from Zones.
+	NodeSelectorTerms  []v1.NodeSelectorTerm
 	StorageClassName   string
 	Driver             string
 	UseAWSInTreeDriver bool
@@ -76,10 +79,18 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 		}
 	}
 	var nodeAffinity *v1.VolumeNodeAffinity
-	if len(options.Zones) != 0 {
-		nodeAffinity = &v1.VolumeNodeAffinity{Required: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: []v1.NodeSelectorRequirement{
-			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: options.Zones},
-		}}}}}
+	if len(options.NodeSelectorTerms) != 0 {
+		nodeAffinity = &v1.VolumeNodeAffinity{
+			Required: &v1.NodeSelector{
+				NodeSelectorTerms: options.NodeSelectorTerms,
+			},
+		}
+	} else if len(options.Zones) != 0 {
+		nodeAffinity = &v1.VolumeNodeAffinity{
+			Required: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: options.Zones},
+			}}}},
+		}
 	}
 	return &v1.PersistentVolume{
 		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
@@ -129,7 +140,10 @@ func PersistentVolumeClaim(overrides ...PersistentVolumeClaimOptions) *v1.Persis
 
 type StorageClassOptions struct {
 	metav1.ObjectMeta
-	Zones             []string
+	// Zones builds a single allowed topology term with multiple zone values unless AllowedTopologies is set.
+	Zones []string
+	// AllowedTopologies, when set, are used verbatim instead of deriving a single term from Zones.
+	AllowedTopologies []v1.TopologySelectorTerm
 	Provisioner       *string
 	VolumeBindingMode *storagev1.VolumeBindingMode
 }
@@ -143,7 +157,9 @@ func StorageClass(overrides ...StorageClassOptions) *storagev1.StorageClass {
 	}
 
 	var allowedTopologies []v1.TopologySelectorTerm
-	if options.Zones != nil {
+	if len(options.AllowedTopologies) != 0 {
+		allowedTopologies = options.AllowedTopologies
+	} else if options.Zones != nil {
 		allowedTopologies = []v1.TopologySelectorTerm{{MatchLabelExpressions: []v1.TopologySelectorLabelRequirement{{Key: v1.LabelTopologyZone, Values: options.Zones}}}}
 	}
 	if options.Provisioner == nil {

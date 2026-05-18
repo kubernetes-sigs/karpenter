@@ -41,8 +41,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 				},
 			}
 
-			result, err := store.apply("default", instanceType)
-			Expect(err).ToNot(HaveOccurred(), "unexpected error applying overlay")
+			result := store.apply("default", instanceType)
 
 			// Verify Requirements sharing - map comparison by checking first key address
 			if expectSharedReqs {
@@ -218,8 +217,7 @@ var _ = Describe("Store Apply Correctness", func() {
 				},
 			}
 
-			result, err := store.apply("default", instanceType)
-			Expect(err).ToNot(HaveOccurred())
+			result := store.apply("default", instanceType)
 
 			// Verify first offering was modified
 			Expect(result.Offerings[0].Price).To(BeNumerically("==", 0.106), "expected first offering price to be 0.106") // 0.096 + 0.01
@@ -260,8 +258,7 @@ var _ = Describe("Store Apply Correctness", func() {
 				},
 			}
 
-			result, err := store.apply("default", instanceType)
-			Expect(err).ToNot(HaveOccurred())
+			result := store.apply("default", instanceType)
 
 			// Verify hugepages was added
 			hugepages, ok := result.Capacity["hugepages-2Mi"]
@@ -319,12 +316,10 @@ var _ = Describe("Store Apply Isolation Between NodePools", func() {
 		}
 
 		// Apply to NodePool A
-		resultA, err := store.apply("nodepool-a", instanceType)
-		Expect(err).ToNot(HaveOccurred(), "unexpected error for nodepool-a")
+		resultA := store.apply("nodepool-a", instanceType)
 
 		// Apply to NodePool B
-		resultB, err := store.apply("nodepool-b", instanceType)
-		Expect(err).ToNot(HaveOccurred(), "unexpected error for nodepool-b")
+		resultB := store.apply("nodepool-b", instanceType)
 
 		// Verify NodePool A has +10% (0.096 * 1.10 = 0.1056)
 		expectedPriceA := 0.1056
@@ -348,10 +343,14 @@ var _ = Describe("Store Apply Unevaluated NodePool", func() {
 			Name: "m5.large",
 		})
 
+		publicStore := NewInstanceTypeStore()
 		store := newInternalInstanceTypeStore()
+
 		// Don't add "unevaluated" to evaluatedNodePools
 
-		_, err := store.apply("unevaluated", instanceType)
+		publicStore.UpdateStore(store)
+
+		_, err := publicStore.Apply("unevaluated", instanceType)
 		Expect(err).To(HaveOccurred(), "expected error for unevaluated node pool")
 		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue(), "expected UnevaluatedNodePoolError")
 	})
