@@ -612,6 +612,31 @@ var _ = Describe("DeviceAllocation Controller", func() {
 					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
 				))
 			})
+			It("becomes non-releasable when a claim's reservations are cleared", func() {
+				claim := withReservedFor(
+					resourceClaim("claim-a", deviceResult("device-0")),
+					podRef("pod-a", "uid-a"),
+				)
+				ExpectApplied(ctx, env.Client, claim)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+				seq, err := controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices := collectDevices(seq)
+				Expect(devices[deviceID("device-0")].Releasable).To(BeTrue())
+
+				claim.Status.ReservedFor = nil
+				ExpectApplied(ctx, env.Client, claim)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+				seq, err = controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices = collectDevices(seq)
+				Expect(devices).To(HaveKeyWithValue(
+					deviceID("device-0"),
+					deviceallocation.Metadata{Releasable: false},
+				))
+			})
 		})
 	})
 })

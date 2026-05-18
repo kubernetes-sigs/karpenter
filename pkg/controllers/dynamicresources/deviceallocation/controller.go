@@ -68,7 +68,8 @@ type Metadata struct {
 	// releasable.
 	Releasable bool
 	// PodUIDs is the aggregate set of pod UIDs from the ReservedFor entries of all ResourceClaims that reference the
-	// device. Non-pod consumer UIDs are excluded.
+	// device. Non-pod consumer UIDs are excluded. Duplicates are possible and consumers should not assume uniqueness.
+	// This is intentionally a slice rather than a set for performance reasons, as membership is expected to be small.
 	PodUIDs []types.UID
 }
 
