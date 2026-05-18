@@ -302,6 +302,9 @@ func (p *Provisioner) NewScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
+	if options.FromContext(ctx).FeatureGates.NodeClaimOptimization {
+		opts = append(opts, scheduler.EnableNodeClaimOptimization)
+	}
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
 	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
 }

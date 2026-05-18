@@ -89,6 +89,7 @@ type options struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+	optimizeNodeClaim       bool
 }
 
 type Options = option.Function[options]
@@ -178,6 +179,7 @@ func NewScheduler(
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
 		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
+		OptimizationEnabled:     option.Resolve(opts...).optimizeNodeClaim,
 	}
 	s.calculateExistingNodeClaims(ctx, stateNodes, daemonSetPods)
 	return s
@@ -212,6 +214,21 @@ type Scheduler struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+	OptimizationEnabled     bool
+	OptimizationPasses      int
+	// OptimizationSnapshot holds the pre/post NodeClaim state and total
+	// cost for this Solve call. Pre is captured on the first optimization
+	// pass (before any revert mutates the claim set); Post is captured at
+	// Solve exit. Both halves are zero-valued when optimization did not
+	// run (either because it was disabled or Solve exited before the
+	// queue drained).
+	//
+	// The Pre/PostCost scalars are the load-bearing values for the
+	// per-run cost invariant: PostCost <= PreCost + costEpsilon — every
+	// split the optimizer took must pay off against its own estimate.
+	// The Pre/Post NodeClaim slices support drill-down diffs by stable
+	// hostname; see NodeClaimSnapshot.
+	OptimizationSnapshot OptimizationSnapshot
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -378,6 +395,7 @@ func (r Results) TruncateInstanceTypes(ctx context.Context, maxInstanceTypes int
 	return r
 }
 
+//nolint:gocyclo // Solve is the scheduler loop; its branches are the distinct phases (topology update, pod pop, trySchedule error handling, optimization pass, finalize). Splitting them hurts readability.
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -402,6 +420,9 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		// Try the next pod
 		pod, ok := q.Pop()
 		if !ok {
+			if s.OptimizationEnabled && s.tryOptimize(q) {
+				continue
+			}
 			break
 		}
 		// We relax the pod all the way the first time we see it
@@ -426,6 +447,9 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
+	}
+	if s.OptimizationEnabled {
+		s.finalizeOptimization(ctx)
 	}
 
 	return Results{
@@ -621,7 +645,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 					"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
 			}
 		}
-		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
+		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode, s.OptimizationEnabled)
 		r, its, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if err != nil {
 			errs[i] = err

@@ -145,6 +145,26 @@ func (t *TopologyGroup) Record(domains ...string) {
 	}
 }
 
+// Unrecord decrements the count for each given domain and re-inserts the
+// domain into emptyDomains if the count reaches zero. Mirror of Record.
+//
+// Guards against going below zero: a decrement against an unknown domain or
+// an already-zero count is a no-op, preserving the invariant that domain
+// counts are non-negative. An out-of-balance call is a caller bug and
+// should not silently corrupt TopologyGroup state.
+func (t *TopologyGroup) Unrecord(domains ...string) {
+	for _, domain := range domains {
+		count, ok := t.domains[domain]
+		if !ok || count <= 0 {
+			continue
+		}
+		t.domains[domain] = count - 1
+		if t.domains[domain] == 0 {
+			t.emptyDomains.Insert(domain)
+		}
+	}
+}
+
 // Counts returns true if the pod would count for the topology, given that it schedule to a node with the provided
 // requirements
 func (t *TopologyGroup) Counts(pod *corev1.Pod, taints []corev1.Taint, requirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
