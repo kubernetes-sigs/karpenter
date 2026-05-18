@@ -1,0 +1,175 @@
+/*
+Copyright The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package dynamicresources
+
+import (
+	"unique"
+
+	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
+
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+)
+
+// ID types used throughout the allocator. These use unique.Handle for efficient comparison.
+type (
+	DriverID       = unique.Handle[string]
+	PoolID         = unique.Handle[string]
+	InstanceTypeID = unique.Handle[string]
+	NodeClaimID    = unique.Handle[string]
+	NodePoolID     = unique.Handle[string]
+)
+
+// DeviceID is an alias for cloudprovider.DeviceID.
+type DeviceID = cloudprovider.DeviceID
+
+// ResourceSlice is the allocator's abstraction over both in-cluster (API server) ResourceSlices
+// and cloud-provider-supplied ResourceSliceTemplates. This interface avoids copying all in-cluster
+// slices into a common struct on every scheduling loop.
+type ResourceSlice interface {
+	// Driver returns the DRA driver name for this slice.
+	Driver() unique.Handle[string]
+	// Pool returns the resource pool this slice belongs to.
+	Pool() cloudprovider.ResourcePool
+	// Devices returns the devices in this slice.
+	Devices() []cloudprovider.Device
+	// Potential returns true if this slice represents potential (not yet published) devices
+	// from a cloud provider template. Returns false for in-cluster slices published to the
+	// API server.
+	//
+	// The allocator uses this distinction for:
+	//   - Tracking allocations: potential devices are tracked per-NodeClaim and per-InstanceType;
+	//     published devices are tracked globally.
+	//   - Requirement narrowing: published (non-potential) non-node-local devices may carry
+	//     topology requirements that constrain the NodeClaim. Potential devices are always
+	//     node-local and do not constrain topology.
+	Potential() bool
+	// NodeSelector returns the node selector if the slice uses label-based node affinity, or nil.
+	NodeSelector() *corev1.NodeSelector
+	// AllNodes returns true if the slice's devices are accessible from all nodes.
+	AllNodes() bool
+	// Generation returns the pool generation this slice belongs to. Newer generations
+	// supersede older ones. Template slices return 0.
+	Generation() int64
+	// ResourceSliceCount returns the total number of slices expected in this pool.
+	// Used to determine pool completeness. Template slices return 1.
+	ResourceSliceCount() int64
+}
+
+// apiServerSlice adapts a resourcev1.ResourceSlice from the API server to the ResourceSlice interface.
+type apiServerSlice struct {
+	slice *resourcev1.ResourceSlice
+	// devices is lazily populated on first access to avoid repeated conversion.
+	devices []cloudprovider.Device
+}
+
+// NewAPIServerSlice wraps an API server ResourceSlice to implement the ResourceSlice interface.
+func NewAPIServerSlice(slice *resourcev1.ResourceSlice) ResourceSlice {
+	return &apiServerSlice{slice: slice}
+}
+
+func (s *apiServerSlice) Driver() unique.Handle[string] {
+	return unique.Make(s.slice.Spec.Driver)
+}
+
+func (s *apiServerSlice) Pool() cloudprovider.ResourcePool {
+	return cloudprovider.ResourcePool{
+		Name: unique.Make(s.slice.Spec.Pool.Name),
+	}
+}
+
+func (s *apiServerSlice) Devices() []cloudprovider.Device {
+	if s.devices == nil {
+		s.devices = make([]cloudprovider.Device, len(s.slice.Spec.Devices))
+		for i, d := range s.slice.Spec.Devices {
+			attrs := make(map[resourcev1.QualifiedName]resourcev1.DeviceAttribute, len(d.Attributes))
+			for k, v := range d.Attributes {
+				attrs[k] = v
+			}
+			s.devices[i] = cloudprovider.Device{
+				Name:       unique.Make(d.Name),
+				Attributes: attrs,
+			}
+		}
+	}
+	return s.devices
+}
+
+func (s *apiServerSlice) Potential() bool {
+	return false
+}
+
+func (s *apiServerSlice) NodeSelector() *corev1.NodeSelector {
+	return s.slice.Spec.NodeSelector
+}
+
+func (s *apiServerSlice) AllNodes() bool {
+	if s.slice.Spec.AllNodes == nil {
+		return false
+	}
+	return *s.slice.Spec.AllNodes
+}
+
+func (s *apiServerSlice) Generation() int64 {
+	return s.slice.Spec.Pool.Generation
+}
+
+func (s *apiServerSlice) ResourceSliceCount() int64 {
+	return s.slice.Spec.Pool.ResourceSliceCount
+}
+
+// templateSlice adapts a cloudprovider.ResourceSliceTemplate to the ResourceSlice interface.
+type templateSlice struct {
+	template *cloudprovider.ResourceSliceTemplate
+}
+
+// NewTemplateSlice wraps a cloud provider ResourceSliceTemplate to implement the ResourceSlice interface.
+func NewTemplateSlice(t *cloudprovider.ResourceSliceTemplate) ResourceSlice {
+	return &templateSlice{template: t}
+}
+
+func (s *templateSlice) Driver() unique.Handle[string] {
+	return s.template.Driver
+}
+
+func (s *templateSlice) Pool() cloudprovider.ResourcePool {
+	return s.template.Pool
+}
+
+func (s *templateSlice) Devices() []cloudprovider.Device {
+	return s.template.Devices
+}
+
+func (s *templateSlice) Potential() bool {
+	return true
+}
+
+func (s *templateSlice) NodeSelector() *corev1.NodeSelector {
+	return nil
+}
+
+func (s *templateSlice) AllNodes() bool {
+	return false
+}
+
+func (s *templateSlice) Generation() int64 {
+	return 0
+}
+
+func (s *templateSlice) ResourceSliceCount() int64 {
+	return 1
+}
