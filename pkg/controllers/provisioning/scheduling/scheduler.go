@@ -401,7 +401,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	for _, p := range pods {
-		if err, ok := s.initialPodError(p); ok {
+		if err, ok := s.initialPodErrors[p.UID]; ok {
 			podErrors[p] = err
 			continue
 		}
@@ -449,11 +449,6 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		ExistingNodes: s.existingNodes,
 		PodErrors:     podErrors,
 	}, ctx.Err()
-}
-
-func (s *Scheduler) initialPodError(p *corev1.Pod) (error, bool) {
-	err, ok := s.initialPodErrors[p.UID]
-	return err, ok
 }
 
 func (s *Scheduler) trySchedule(ctx context.Context, p *corev1.Pod) error {

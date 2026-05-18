@@ -302,8 +302,9 @@ func (p *Provisioner) NewScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
+	// Seed initial pod errors so volume-topology failures are reported as scheduling decisions.
 	opts = append(opts, scheduler.InitialPodErrors(podErrors))
+	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
 	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
 }
 
@@ -544,7 +545,7 @@ func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []
 				return nil, nil, nil, err
 			}
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
-			podErrors[pod.UID] = fmt.Errorf("getting volume topology requirements, %w", err)
+			podErrors[pod.UID] = err
 			continue
 		}
 		if len(reqs) > 0 {
