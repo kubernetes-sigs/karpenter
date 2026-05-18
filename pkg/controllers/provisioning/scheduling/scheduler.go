@@ -779,13 +779,12 @@ func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
 	}
 
 	zoneReq := podData.StrictRequirements.Get(corev1.LabelTopologyZone)
-	hasVol := podData.VolumeRequirements.Has(corev1.LabelTopologyZone)
-	volZoneReq := podData.VolumeRequirements.Get(corev1.LabelTopologyZone)
+	volZoneReq := volumeZoneReq(podData.VolumeRequirements)
 
 	var zonalValues []string
 	if zoneReq.Operator() == corev1.NodeSelectorOpIn {
 		zonalValues = zoneReq.Values()
-	} else if hasVol && volZoneReq.Operator() == corev1.NodeSelectorOpIn {
+	} else if volZoneReq != nil {
 		zonalValues = volZoneReq.Values()
 	} else if len(tscZoneValidDomains) > 0 {
 		zonalValues = sets.List(tscZoneValidDomains)
@@ -799,7 +798,7 @@ func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
 		if !zoneReq.Has(zone) {
 			continue
 		}
-		if hasVol && !volZoneReq.Has(zone) {
+		if volZoneReq != nil && !volZoneReq.Has(zone) {
 			continue
 		}
 		if len(tscZoneValidDomains) > 0 && !tscZoneValidDomains.Has(zone) {
@@ -813,6 +812,33 @@ func (s *Scheduler) computeEffectiveZoneFromPod(pod *corev1.Pod) string {
 		}
 	}
 	return lo.Ternary(matchCount == 1, matchedZone, "none")
+}
+
+// volumeZoneReq returns a single Requirement representing the union of zone constraints
+// across all volume alternatives. Returns nil if volumes don't constrain zones.
+func volumeZoneReq(volumeReqs []scheduling.Requirements) *scheduling.Requirement {
+	if len(volumeReqs) == 0 {
+		return nil
+	}
+	var merged *scheduling.Requirement
+	for _, vol := range volumeReqs {
+		if vol == nil {
+			return nil
+		}
+		req := vol.Get(corev1.LabelTopologyZone)
+		if req.Operator() != corev1.NodeSelectorOpIn {
+			return nil
+		}
+		if len(volumeReqs) == 1 {
+			return req
+		}
+		if merged == nil {
+			merged = scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, req.Values()...)
+		} else {
+			merged.Insert(req.Values()...)
+		}
+	}
+	return merged
 }
 
 // parallelizeUntil is an implementation of workqueue.ParallelizeUntil that modifies the
