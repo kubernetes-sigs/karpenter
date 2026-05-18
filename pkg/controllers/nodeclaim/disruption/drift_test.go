@@ -17,6 +17,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"slices"
 	"time"
 
 	"github.com/imdario/mergo"
@@ -553,12 +554,7 @@ var _ = Describe("Drift", func() {
 			func(expectDrifted bool, includedCapacityTypes ...string) {
 				it.Offerings = lo.Filter(it.Offerings, func(o *cloudprovider.Offering, _ int) bool {
 					ct := o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
-					for _, ict := range includedCapacityTypes {
-						if ct == ict {
-							return true
-						}
-					}
-					return false
+					return slices.Contains(includedCapacityTypes, ct)
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 				fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp

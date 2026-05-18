@@ -163,7 +163,7 @@ func StorageClass(overrides ...StorageClassOptions) *storagev1.StorageClass {
 		allowedTopologies = []v1.TopologySelectorTerm{{MatchLabelExpressions: []v1.TopologySelectorLabelRequirement{{Key: v1.LabelTopologyZone, Values: options.Zones}}}}
 	}
 	if options.Provisioner == nil {
-		options.Provisioner = lo.ToPtr("test-provisioner")
+		options.Provisioner = new("test-provisioner")
 	}
 
 	return &storagev1.StorageClass{
@@ -193,7 +193,7 @@ func VolumeAttachment(overrides ...VolumeAttachmentOptions) *storagev1.VolumeAtt
 			NodeName: options.NodeName,
 			Attacher: "fake-csi",
 			Source: storagev1.VolumeAttachmentSource{
-				PersistentVolumeName: lo.ToPtr(options.VolumeName),
+				PersistentVolumeName: new(options.VolumeName),
 			},
 		},
 	}

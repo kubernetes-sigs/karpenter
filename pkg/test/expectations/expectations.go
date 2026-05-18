@@ -172,7 +172,7 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
-		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}); !errors.IsNotFound(err) {
+		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}); !errors.IsNotFound(err) {
 			Expect(err).To(BeNil())
 		}
 		ExpectNotFound(ctx, c, object)
@@ -265,7 +265,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 				defer wg.Done()
 				defer GinkgoRecover()
 				Expect(c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
-					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}})).ToNot(HaveOccurred())
+					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: new(int64(0))}})).ToNot(HaveOccurred())
 			}(object, namespace.Name)
 		}
 	}

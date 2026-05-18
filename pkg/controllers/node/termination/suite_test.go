@@ -213,7 +213,7 @@ var _ = Describe("Termination", func() {
 			// Create a fully blocking PDB to prevent the node from being deleted before we can observe its labels
 			pdb := test.PodDisruptionBudget(test.PDBOptions{
 				Labels:         labels,
-				MaxUnavailable: lo.ToPtr(intstr.FromInt(0)),
+				MaxUnavailable: new(intstr.FromInt(0)),
 			})
 
 			ExpectApplied(ctx, env.Client, node, nodeClaim, pod, pdb)
@@ -427,8 +427,8 @@ var _ = Describe("Termination", func() {
 				Kind:               "DaemonSet",
 				Name:               daemonEvict.Name,
 				UID:                daemonEvict.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}}})
 			podNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -437,16 +437,16 @@ var _ = Describe("Termination", func() {
 				Kind:               "DaemonSet",
 				Name:               daemonNodeCritical.Name,
 				UID:                daemonNodeCritical.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}}})
 			podDaemonClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         "apps/v1",
 				Kind:               "DaemonSet",
 				Name:               daemonClusterCritical.Name,
 				UID:                daemonClusterCritical.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
 			}}}})
 
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical)
@@ -764,7 +764,7 @@ var _ = Describe("Termination", func() {
 					},
 					OwnerReferences: defaultOwnerRefs,
 				},
-				TerminationGracePeriodSeconds: lo.ToPtr(int64(300)),
+				TerminationGracePeriodSeconds: new(int64(300)),
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
 
@@ -790,7 +790,7 @@ var _ = Describe("Termination", func() {
 					},
 					OwnerReferences: defaultOwnerRefs,
 				},
-				TerminationGracePeriodSeconds: lo.ToPtr(int64(60)),
+				TerminationGracePeriodSeconds: new(int64(60)),
 			})
 			fakeClock.SetTime(time.Now())
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
@@ -826,7 +826,7 @@ var _ = Describe("Termination", func() {
 					},
 					OwnerReferences: defaultOwnerRefs,
 				},
-				TerminationGracePeriodSeconds: lo.ToPtr(int64(6000)),
+				TerminationGracePeriodSeconds: new(int64(6000)),
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
 			ExpectDeletionTimestampSet(ctx, env.Client, pod)
