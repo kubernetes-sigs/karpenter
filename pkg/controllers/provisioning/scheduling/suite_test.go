@@ -3125,6 +3125,8 @@ var _ = Context("Scheduling", func() {
 			Expect(results.PodErrors).To(HaveLen(1))
 			Expect(lo.Map(lo.Keys(results.PodErrors), func(p *corev1.Pod, _ int) string { return p.Name })).To(ConsistOf(invalidPod.Name))
 			Expect(lo.Values(results.PodErrors)[0].Error()).To(ContainSubstring("incompatible volume topology requirements"))
+			Expect(lo.Values(results.PodErrors)[0].Error()).To(ContainSubstring("all 4 combinations are incompatible"))
+			Expect(lo.Values(results.PodErrors)[0].Error()).To(ContainSubstring(fmt.Sprintf("topology keys [%s]", rackTopologyKey)))
 			Expect(results.NewNodeClaims).To(HaveLen(1))
 			Expect(lo.Map(results.NewNodeClaims[0].Pods, func(p *corev1.Pod, _ int) string { return p.Name })).To(ConsistOf(validPod.Name))
 			Expect(cluster.PodSchedulingDecisionTime(client.ObjectKeyFromObject(invalidPod)).IsZero()).To(BeFalse())

@@ -98,7 +98,21 @@ func mergeVolumeRequirementAlternatives(alternatives, volAlts []scheduling.Requi
 		return mergedAlternatives, nil
 	}
 
-	return nil, fmt.Errorf("incompatible volume topology requirements: all combinations are incompatible")
+	attemptedCombinations := len(alternatives) * len(volAlts)
+	return nil, fmt.Errorf("incompatible volume topology requirements: all %d combinations are incompatible, topology keys %v", attemptedCombinations, volumeRequirementKeys(alternatives, volAlts))
+}
+
+func volumeRequirementKeys(alternatives ...[]scheduling.Requirements) []string {
+	keys := sets.New[string]()
+	for _, requirementAlternatives := range alternatives {
+		for _, requirements := range requirementAlternatives {
+			if requirements == nil {
+				continue
+			}
+			keys.Insert(requirements.Keys().UnsortedList()...)
+		}
+	}
+	return sets.List(keys)
 }
 
 func mergeCompatibleVolumeRequirementAlternatives(alternatives, volAlts []scheduling.Requirements) []scheduling.Requirements {
