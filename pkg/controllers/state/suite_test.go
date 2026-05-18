@@ -1828,6 +1828,18 @@ var _ = Describe("Taints", func() {
 			stateNode := ExpectStateNodeExists(cluster, node)
 			Expect(stateNode.Taints()).To(HaveLen(0))
 		})
+		It("should not consider NodeReadinessController taints on a managed node that isn't initialized", func() {
+			node.Spec.Taints = []corev1.Taint{
+				{Key: "readiness.k8s.io/some-rule", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "readiness.k8s.io/another-rule", Effect: corev1.TaintEffectNoExecute},
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
 		It("should consider ephemeral taints on a managed node after the node is initialized", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node)
 			ExpectMakeNodesInitialized(ctx, env.Client, node)
