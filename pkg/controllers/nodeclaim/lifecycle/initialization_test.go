@@ -669,6 +669,9 @@ var _ = Describe("Initialization", func() {
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		// Launch reassigns the providerID; sync the node to the post-launch value.
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		node.Spec.ProviderID = nodeClaim.Status.ProviderID
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
