@@ -33,6 +33,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/capacitybuffer"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
@@ -163,6 +164,10 @@ func NewControllers(
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
 		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
+	}
+
+	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
+		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p))
 	}
 
 	return controllers
