@@ -655,4 +655,65 @@ var _ = Describe("Initialization", func() {
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
+	It("should not consider the Node to be initialized while a readiness.k8s.io/ taint is present, and initialize once it is removed", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{
+			ProviderID: nodeClaim.Status.ProviderID,
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
+			},
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
+			},
+			Taints: []corev1.Taint{
+				{
+					Key:    "readiness.k8s.io/some-rule",
+					Effect: corev1.TaintEffectNoSchedule,
+				},
+				v1.UnregisteredNoExecuteTaint,
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+
+		// Shouldn't consider the node initialized while the NRC taint is present
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
+
+		node = ExpectExists(ctx, env.Client, node)
+		node.Spec.Taints = []corev1.Taint{}
+		ExpectApplied(ctx, env.Client, node)
+
+		// nodeClaim should now be initialized once the NRC taint is removed
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
+	})
 })
