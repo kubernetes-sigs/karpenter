@@ -25,6 +25,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime/pprof"
+	"sort"
 	"testing"
 	"text/tabwriter"
 	"time"
@@ -33,9 +34,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -64,16 +67,30 @@ var r = rand.New(rand.NewSource(42))
 // To run the benchmarks use:
 // `go test -tags=test_performance -run=XXX -bench=.`
 //
-// to get something statistically significant for comparison we need to run them several times and then
-// compare the results between the old performance and the new performance.
-// ```sh
+// For statistically significant before/after comparisons (recommended: sequential runs, multi-CPU):
 //
-//	go test -tags=test_performance -run=XXX -bench=. -count=10 | tee /tmp/old
-//	# make your changes to the code
-//	go test -tags=test_performance -run=XXX -bench=. -count=10 | tee /tmp/new
-//	benchstat /tmp/old /tmp/new
+//	go test -tags=test_performance -run='^$' -bench=. -count=10 -benchtime=5s -cpu=1,2,4 -benchmem | tee /tmp/old
+//	# apply your fix
+//	go test -tags=test_performance -run='^$' -bench=. -count=10 -benchtime=5s -cpu=1,2,4 -benchmem | tee /tmp/new
+//	go run golang.org/x/perf/cmd/benchstat@latest /tmp/old /tmp/new
 //
-// ```
+// Performance hotspot benchmarks (run a specific one for focused comparison):
+//
+//	# sort.Slice per pod on inflight NodeClaims (scheduler.go)
+//	go test -tags=test_performance -run=XXX -bench=BenchmarkSortSliceNewNodeClaims -count=10 ./pkg/controllers/provisioning/scheduling/
+//	go test -tags=test_performance -run=XXX -bench='BenchmarkScheduling(500|2000)$|BenchmarkSchedulingHighInflight' ./pkg/controllers/provisioning/scheduling/
+//
+//	# kubeClient.Get per node in countDomains (topology.go)
+//	go test -tags=test_performance -run=XXX -bench=BenchmarkSchedulingTopologySpreadWith -count=10 ./pkg/controllers/provisioning/scheduling/
+//
+//	# hashstructure.Hash reflection in TopologyGroup.Hash (topologygroup.go)
+//	go test -tags=test_performance -run=XXX -bench=BenchmarkTopologyGroupHash -count=10 ./pkg/controllers/provisioning/scheduling/
+//
+// For CPU and heap flame graphs (captures all scenarios):
+//
+//	go test -tags=test_performance -run=TestSchedulingProfile ./pkg/controllers/provisioning/scheduling/
+//	go tool pprof -http=:8080 schedule.cpuprofile    # CPU flame graph
+//	go tool pprof -http=:8080 schedule.heapprofile   # allocation flame graph
 func BenchmarkScheduling1(b *testing.B) {
 	benchmarkScheduler(b, makeDiversePods(1))
 }
@@ -156,6 +173,73 @@ func TestSchedulingProfile(t *testing.T) {
 		totalNodes += int(nodeCount)
 	}
 	fmt.Fprintf(tw, "\nscheduled %d against %d nodes in total in %s %f pods/sec\n", totalPods, totalNodes, totalTime, float64(totalPods)/totalTime.Seconds())
+
+	// Topology Spread with pre-seeded state: exercises the countDomains kubeClient.Get path
+	fmt.Fprintf(tw, "============== Topology Spread w/ Existing Nodes ==============\n")
+	for _, existingCount := range []int{500, 2000} {
+		podCount := 500
+		newPods := makeTopologySpreadSingleKeyPods(podCount)
+		preseededClient := buildPreseededClient(existingCount)
+		nodePool2 := test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Limits: v1.Limits{
+					corev1.ResourceCPU:    resource.MustParse("10000000"),
+					corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+				},
+			},
+		})
+		cp2 := fake.NewCloudProvider()
+		its2 := fake.InstanceTypes(400)
+		cp2.InstanceTypes = its2
+		start := time.Now()
+		res := testing.Benchmark(func(b *testing.B) {
+			clk := &clock.RealClock{}
+			clusterState := state.NewCluster(clk, preseededClient, cp2)
+			for i := 0; i < b.N; i++ {
+				topo, err := scheduling.NewTopology(ctx, preseededClient, clusterState, nil,
+					[]*v1.NodePool{nodePool2},
+					map[string][]*cloudprovider.InstanceType{nodePool2.Name: its2},
+					newPods)
+				if err != nil {
+					b.Fatalf("topology: %s", err)
+				}
+				sched := scheduling.NewScheduler(ctx, preseededClient, []*v1.NodePool{nodePool2}, clusterState, nil, topo,
+					map[string][]*cloudprovider.InstanceType{nodePool2.Name: its2}, nil,
+					events.NewRecorder(&record.FakeRecorder{}), clk, nil)
+				results, err := sched.Solve(ctx, newPods)
+				if err != nil {
+					b.Fatalf("solve: %s", err)
+				}
+				if len(results.PodErrors) > 0 {
+					b.Fatalf("unscheduled pods: %d", len(results.PodErrors))
+				}
+			}
+		})
+		totalTime += time.Since(start) / time.Duration(res.N)
+		nodeCount := res.Extra["nodes"]
+		totalPods += podCount
+		totalNodes += int(nodeCount)
+		fmt.Fprintf(tw, "%d existing nodes\t%d pods\t%d nodes\t%s per scheduling\t%s per pod\n",
+			existingCount, podCount, int(nodeCount),
+			time.Duration(res.NsPerOp()), time.Duration(res.NsPerOp()/int64(podCount)))
+	}
+
+	// High Inflight: exercises the sort.Slice / heap path on growing inflight NodeClaims
+	fmt.Fprintf(tw, "============== High Inflight ==============\n")
+	for _, podCount := range []int{500, 2000} {
+		start := time.Now()
+		res := testing.Benchmark(func(b *testing.B) {
+			benchmarkScheduler(b, makeHighInflightPods(podCount))
+		})
+		totalTime += time.Since(start) / time.Duration(res.N)
+		nodeCount := res.Extra["nodes"]
+		totalPods += podCount
+		totalNodes += int(nodeCount)
+		fmt.Fprintf(tw, "%d Pods\t%d pods\t%d nodes\t%s per scheduling\t%s per pod\n",
+			podCount, podCount, int(nodeCount),
+			time.Duration(res.NsPerOp()), time.Duration(res.NsPerOp()/int64(podCount)))
+	}
+
 	tw.Flush()
 }
 
@@ -451,4 +535,297 @@ func randomMemory() resource.Quantity {
 func randomCPU() resource.Quantity {
 	cpu := []int{100, 250, 500, 1000, 1500}
 	return resource.MustParse(fmt.Sprintf("%dm", cpu[r.Intn(len(cpu))]))
+}
+
+// makeTopologySpreadSingleKeyPods creates count pods that all share a single
+// TopologySpreadConstraint (zone key, selector app=benchmark-tsc).
+// All pods hash to the same TopologyGroup, so countDomains is called exactly
+// once per Solve — but that call issues one kubeClient.Get per pre-seeded node.
+func makeTopologySpreadSingleKeyPods(count int) []*corev1.Pod {
+	const tscAppLabel = "benchmark-tsc"
+	var pods []*corev1.Pod
+	for i := 0; i < count; i++ {
+		pods = append(pods, test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+				Labels:    map[string]string{"app": tscAppLabel},
+				UID:       uuid.NewUUID(),
+			},
+			TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+				{
+					MaxSkew:           1,
+					TopologyKey:       corev1.LabelTopologyZone,
+					WhenUnsatisfiable: corev1.DoNotSchedule,
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": tscAppLabel},
+					},
+				},
+			},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    randomCPU(),
+					corev1.ResourceMemory: randomMemory(),
+				},
+			},
+		}))
+	}
+	return pods
+}
+
+// makeHighInflightPods creates count pods with hostname anti-affinity to each other.
+// Every pod must land on a distinct node, growing s.newNodeClaims to count.
+// This is the worst case for the sort.Slice call in scheduler.add() — it runs
+// on lists of length 1, 2, 3, ..., count, once per pod scheduled.
+func makeHighInflightPods(count int) []*corev1.Pod {
+	labels := map[string]string{"app": "high-inflight-bench"}
+	var pods []*corev1.Pod
+	for i := 0; i < count; i++ {
+		pods = append(pods, test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
+				UID:    uuid.NewUUID(),
+			},
+			PodAntiRequirements: []corev1.PodAffinityTerm{
+				{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+					TopologyKey:   corev1.LabelHostname,
+				},
+			},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("100m"),
+					corev1.ResourceMemory: resource.MustParse("128Mi"),
+				},
+			},
+		}))
+	}
+	return pods
+}
+
+// benchmarkSortSlice measures the cost of one sort.Slice call on a slice of n ints,
+// mirroring the sort.Slice(s.newNodeClaims, ...) call in scheduler.add() at inflight
+// NodeClaim count n. Called once per pod scheduled, so total cost per batch = n*b.N*ns/op.
+func benchmarkSortSlice(b *testing.B, n int) {
+	b.Helper()
+	podCounts := make([]int, n)
+	for i := range podCounts {
+		podCounts[i] = r.Intn(50)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sort.Slice(podCounts, func(a, b int) bool { return podCounts[a] < podCounts[b] })
+	}
+}
+
+// BenchmarkSortSliceNewNodeClaims10/50/100/500 measure the sort.Slice cost at increasing
+// inflight NodeClaim counts. Compare against a container/heap replacement.
+func BenchmarkSortSliceNewNodeClaims10(b *testing.B)  { benchmarkSortSlice(b, 10) }
+func BenchmarkSortSliceNewNodeClaims50(b *testing.B)  { benchmarkSortSlice(b, 50) }
+func BenchmarkSortSliceNewNodeClaims100(b *testing.B) { benchmarkSortSlice(b, 100) }
+func BenchmarkSortSliceNewNodeClaims500(b *testing.B) { benchmarkSortSlice(b, 500) }
+
+// uniqueTSCPodCount is the number of distinct topology groups created per
+// BenchmarkTopologyGroupHash iteration. Divide ns/op by this to get per-Hash() cost.
+const uniqueTSCPodCount = 100
+
+// BenchmarkTopologyGroupHash measures the per-call cost of TopologyGroup.Hash(),
+// which uses a direct fnv.New64a() encoder (was reflection-based hashstructure).
+// It creates uniqueTSCPodCount pods each with a distinct TSC label selector so
+// uniqueTSCPodCount distinct Hash() calls are made inside NewTopology.
+// countDomains returns immediately (empty fake client).
+// Divide ns/op by uniqueTSCPodCount to get per-Hash() cost.
+func BenchmarkTopologyGroupHash(b *testing.B) {
+	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
+	pods := makeUniqueTSCPods(uniqueTSCPodCount)
+
+	nodePool := test.NodePool(v1.NodePool{
+		Spec: v1.NodePoolSpec{
+			Limits: v1.Limits{
+				corev1.ResourceCPU:    resource.MustParse("10000000"),
+				corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+			},
+		},
+	})
+	cp := fake.NewCloudProvider()
+	instanceTypes := fake.InstanceTypes(400)
+	cp.InstanceTypes = instanceTypes
+
+	// Build client and cluster once outside the timer — only NewTopology is measured.
+	client := fakecr.NewFakeClient()
+	clk := &clock.RealClock{}
+	clusterState := state.NewCluster(clk, client, cp)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := scheduling.NewTopology(ctx, client, clusterState, nil,
+			[]*v1.NodePool{nodePool},
+			map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes},
+			pods)
+		if err != nil {
+			b.Fatalf("creating topology: %s", err)
+		}
+	}
+	b.ReportMetric(float64(uniqueTSCPodCount), "topology-groups/op")
+}
+
+// makeUniqueTSCPods creates count pods each with a distinct TSC label selector,
+// forcing count distinct TopologyGroup hashes inside NewTopology.
+func makeUniqueTSCPods(count int) []*corev1.Pod {
+	var pods []*corev1.Pod
+	for i := 0; i < count; i++ {
+		appLabel := fmt.Sprintf("tsc-app-%d", i)
+		pods = append(pods, test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+				Labels:    map[string]string{"app": appLabel},
+				UID:       uuid.NewUUID(),
+			},
+			TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+				{
+					MaxSkew:           1,
+					TopologyKey:       corev1.LabelTopologyZone,
+					WhenUnsatisfiable: corev1.DoNotSchedule,
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": appLabel},
+					},
+				},
+			},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("100m"),
+					corev1.ResourceMemory: resource.MustParse("128Mi"),
+				},
+			},
+		}))
+	}
+	return pods
+}
+
+// BenchmarkSchedulingHighInflight500 and ...2000 measure scheduling throughput when
+// every pod must land on a distinct node (hostname anti-affinity), maximizing
+// s.newNodeClaims size and the sort.Slice cost in scheduler.add().
+// Compare pods/sec against BenchmarkScheduling500 / BenchmarkScheduling2000 to quantify
+// the throughput regression from inflight NodeClaim accumulation.
+func BenchmarkSchedulingHighInflight500(b *testing.B) {
+	benchmarkScheduler(b, makeHighInflightPods(500))
+}
+
+func BenchmarkSchedulingHighInflight2000(b *testing.B) {
+	benchmarkScheduler(b, makeHighInflightPods(2000))
+}
+
+// buildPreseededClient creates a fake client seeded with existingNodeCount (Node, Pod) pairs
+// spread across 3 zones. Pods have label app=benchmark-tsc and Spec.NodeName set so
+// countDomains exercises the kubeClient.Get path. Build once outside the benchmark timer.
+func buildPreseededClient(existingNodeCount int) client.Client {
+	zones := []string{"test-zone-1", "test-zone-2", "test-zone-3"}
+	objs := make([]runtime.Object, 0, existingNodeCount*2)
+	for i := 0; i < existingNodeCount; i++ {
+		nodeName := fmt.Sprintf("bench-node-%d", i)
+		zone := zones[i%len(zones)]
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Labels: map[string]string{
+					corev1.LabelTopologyZone: zone,
+					corev1.LabelHostname:     nodeName,
+				},
+			},
+		})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+				Labels:    map[string]string{"app": "benchmark-tsc"},
+				UID:       uuid.NewUUID(),
+			},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("100m"),
+					corev1.ResourceMemory: resource.MustParse("128Mi"),
+				},
+			},
+		})
+		pod.Spec.NodeName = nodeName
+		objs = append(objs, node, pod)
+	}
+	return fakecr.NewFakeClient(objs...)
+}
+
+// benchmarkSchedulerWithPreseededState benchmarks scheduling newPods against a cluster
+// with existingNodeCount pre-seeded (Node, Pod) pairs. A fresh topology+scheduler is
+// created per iteration so countDomains runs every time. The fake client is built once
+// outside the timer.
+func benchmarkSchedulerWithPreseededState(b *testing.B, existingNodeCount int, newPods []*corev1.Pod) {
+	b.Helper()
+	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
+
+	nodePool := test.NodePool(v1.NodePool{
+		Spec: v1.NodePoolSpec{
+			Limits: v1.Limits{
+				corev1.ResourceCPU:    resource.MustParse("10000000"),
+				corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+			},
+		},
+	})
+	cp := fake.NewCloudProvider()
+	instanceTypes := fake.InstanceTypes(400)
+	cp.InstanceTypes = instanceTypes
+
+	preseededClient := buildPreseededClient(existingNodeCount)
+
+	clk := &clock.RealClock{}
+	b.ResetTimer()
+	nodesInRound1 := 0
+	start := time.Now()
+	for i := 0; i < b.N; i++ {
+		clusterState := state.NewCluster(clk, preseededClient, cp)
+		topology, err := scheduling.NewTopology(ctx, preseededClient, clusterState, nil,
+			[]*v1.NodePool{nodePool},
+			map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes},
+			newPods)
+		if err != nil {
+			b.Fatalf("creating topology: %s", err)
+		}
+		sched := scheduling.NewScheduler(
+			ctx,
+			preseededClient,
+			[]*v1.NodePool{nodePool},
+			clusterState,
+			nil,
+			topology,
+			map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes},
+			nil,
+			events.NewRecorder(&record.FakeRecorder{}),
+			clk,
+			nil,
+		)
+		results, err := sched.Solve(ctx, newPods)
+		if err != nil {
+			b.Fatalf("scheduler.Solve: %s", err)
+		}
+		if len(results.PodErrors) > 0 {
+			b.Fatalf("expected all pods to schedule, got %d errors", len(results.PodErrors))
+		}
+		if i == 0 {
+			nodesInRound1 = len(results.NewNodeClaims)
+		}
+	}
+	duration := time.Since(start)
+	podsPerSec := float64(len(newPods)) / (duration.Seconds() / float64(b.N))
+	b.ReportMetric(podsPerSec, "pods/sec")
+	b.ReportMetric(float64(len(newPods)), "pods")
+	b.ReportMetric(float64(nodesInRound1), "nodes")
+	b.ReportMetric(float64(existingNodeCount), "existing-nodes")
+}
+
+// BenchmarkSchedulingTopologySpreadWith500ExistingNodes and ...2000ExistingNodes prove
+// the O(N) countDomains kubeClient.Get cost. The growing ns/op from 500→2000 nodes
+// confirms the finding. After the fix (stateNodes map lookup), performance should be flat.
+func BenchmarkSchedulingTopologySpreadWith500ExistingNodes(b *testing.B) {
+	benchmarkSchedulerWithPreseededState(b, 500, makeTopologySpreadSingleKeyPods(500))
+}
+
+func BenchmarkSchedulingTopologySpreadWith2000ExistingNodes(b *testing.B) {
+	benchmarkSchedulerWithPreseededState(b, 2000, makeTopologySpreadSingleKeyPods(500))
 }

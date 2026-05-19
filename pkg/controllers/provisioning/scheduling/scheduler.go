@@ -18,6 +18,7 @@ package scheduling
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -193,7 +194,7 @@ type PodData struct {
 
 type Scheduler struct {
 	uuid                    types.UID // Unique UUID attached to this scheduling loop
-	newNodeClaims           []*NodeClaim
+	newNodeClaims           nodeClaimHeap
 	existingNodes           []*ExistingNode
 	nodeClaimTemplates      []*NodeClaimTemplate
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
@@ -212,6 +213,26 @@ type Scheduler struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+}
+
+// nodeClaimHeap implements heap.Interface for []*NodeClaim ordered by ascending Pods count.
+type nodeClaimHeap []*NodeClaim
+
+func (h nodeClaimHeap) Len() int           { return len(h) }
+func (h nodeClaimHeap) Less(i, j int) bool { return len(h[i].Pods) < len(h[j].Pods) }
+func (h nodeClaimHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *nodeClaimHeap) Push(x any) {
+	*h = append(*h, x.(*NodeClaim))
+}
+
+func (h *nodeClaimHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	old[n-1] = nil // avoid memory leak
+	*h = old[:n-1]
+	return x
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -429,7 +450,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	}
 
 	return Results{
-		NewNodeClaims: s.newNodeClaims,
+		NewNodeClaims: []*NodeClaim(s.newNodeClaims),
 		ExistingNodes: s.existingNodes,
 		PodErrors:     podErrors,
 	}, ctx.Err()
@@ -500,8 +521,6 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	if err := s.addToExistingNode(ctx, pod); err == nil {
 		return nil
 	}
-	// Consider using https://pkg.go.dev/container/heap
-	sort.Slice(s.newNodeClaims, func(a, b int) bool { return len(s.newNodeClaims[a].Pods) < len(s.newNodeClaims[b].Pods) })
 
 	// Pick existing node that we are about to create
 	if err := s.addToInflightNode(ctx, pod); err == nil {
@@ -583,6 +602,7 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	})
 	if inflightNodeClaim != nil {
 		inflightNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve)
+		heap.Fix(&s.newNodeClaims, idx)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
@@ -676,7 +696,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	if newNodeClaim != nil {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
 		newNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve)
-		s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
+		heap.Push(&s.newNodeClaims, newNodeClaim)
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil
 	}

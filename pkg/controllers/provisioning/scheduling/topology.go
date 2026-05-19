@@ -361,6 +361,14 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		}
 	}
 
+	// Build a node lookup from in-memory state to avoid per-node API calls in the pod loop.
+	stateNodeByName := make(map[string]*corev1.Node, len(t.stateNodes))
+	for _, sn := range t.stateNodes {
+		if sn.Node != nil {
+			stateNodeByName[sn.Node.Name] = sn.Node
+		}
+	}
+
 	// sort our pods by the node they are scheduled to
 	sort.Slice(pods, func(i, j int) bool {
 		return pods[i].Spec.NodeName < pods[j].Spec.NodeName
@@ -383,17 +391,21 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 			node = previousNode
 			nodeRequirements = previousNodeRequirements
 		} else {
-			node = &corev1.Node{}
-			if err := t.kubeClient.Get(ctx, types.NamespacedName{Name: p.Spec.NodeName}, node); err != nil {
-				// Pods that cannot be evicted can be leaked in the API Server after
-				// a Node is removed. Since pod bindings are immutable, these pods
-				// cannot be recovered, and will be deleted by the pod lifecycle
-				// garbage collector. These pods are not running, and should not
-				// impact future topology calculations.
-				if errors.IsNotFound(err) {
-					continue
+			if cached, ok := stateNodeByName[p.Spec.NodeName]; ok {
+				node = cached
+			} else {
+				node = &corev1.Node{}
+				if err := t.kubeClient.Get(ctx, types.NamespacedName{Name: p.Spec.NodeName}, node); err != nil {
+					// Pods that cannot be evicted can be leaked in the API Server after
+					// a Node is removed. Since pod bindings are immutable, these pods
+					// cannot be recovered, and will be deleted by the pod lifecycle
+					// garbage collector. These pods are not running, and should not
+					// impact future topology calculations.
+					if errors.IsNotFound(err) {
+						continue
+					}
+					return serrors.Wrap(fmt.Errorf("getting node, %w", err), "Node", klog.KRef("", p.Spec.NodeName))
 				}
-				return serrors.Wrap(fmt.Errorf("getting node, %w", err), "Node", klog.KRef("", p.Spec.NodeName))
 			}
 			nodeRequirements = scheduling.NewLabelRequirements(node.Labels)
 
