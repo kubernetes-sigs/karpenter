@@ -100,10 +100,10 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "nvidia-t4-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-										"memory":             {StringValue: lo.ToPtr("16Gi")},
-										"compute_capability": {StringValue: lo.ToPtr("7.5")},
-										"cuda_cores":         {StringValue: lo.ToPtr("2560")},
+										"type":               {StringValue: new("nvidia-tesla-t4")},
+										"memory":             {StringValue: new("16Gi")},
+										"compute_capability": {StringValue: new("7.5")},
+										"cuda_cores":         {StringValue: new("2560")},
 									},
 								},
 							}}},
@@ -125,11 +125,11 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "nvidia-v100-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":               {StringValue: lo.ToPtr("nvidia-tesla-v100")},
-										"memory":             {StringValue: lo.ToPtr("32Gi")},
-										"compute_capability": {StringValue: lo.ToPtr("7.0")},
-										"cuda_cores":         {StringValue: lo.ToPtr("5120")},
-										"nvlink":             {StringValue: lo.ToPtr("true")},
+										"type":               {StringValue: new("nvidia-tesla-v100")},
+										"memory":             {StringValue: new("32Gi")},
+										"compute_capability": {StringValue: new("7.0")},
+										"cuda_cores":         {StringValue: new("5120")},
+										"nvlink":             {StringValue: new("true")},
 									},
 								},
 							}}},
@@ -155,7 +155,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "gpu-workload",
@@ -264,7 +264,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "gpu-workload-update",
@@ -342,17 +342,17 @@ var _ = Describe("DRA KWOK Driver", func() {
 							{
 								Name: "nvidia-t4-0",
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-									"memory":             {StringValue: lo.ToPtr("16Gi")},
-									"compute_capability": {StringValue: lo.ToPtr("7.5")},
+									"type":               {StringValue: new("nvidia-tesla-t4")},
+									"memory":             {StringValue: new("16Gi")},
+									"compute_capability": {StringValue: new("7.5")},
 								},
 							},
 							{
 								Name: "nvidia-t4-1",
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"type":               {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-									"memory":             {StringValue: lo.ToPtr("16Gi")},
-									"compute_capability": {StringValue: lo.ToPtr("7.5")},
+									"type":               {StringValue: new("nvidia-tesla-t4")},
+									"memory":             {StringValue: new("16Gi")},
+									"compute_capability": {StringValue: new("7.5")},
 								},
 							},
 						}}},
@@ -410,10 +410,10 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "xilinx-u250-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":       {StringValue: lo.ToPtr("xilinx-alveo-u250")},
-										"memory":     {StringValue: lo.ToPtr("32Gi")},
-										"dsp_slices": {StringValue: lo.ToPtr("6144")},
-										"interface":  {StringValue: lo.ToPtr("pcie-gen3")},
+										"type":       {StringValue: new("xilinx-alveo-u250")},
+										"memory":     {StringValue: new("32Gi")},
+										"dsp_slices": {StringValue: new("6144")},
+										"interface":  {StringValue: new("pcie-gen3")},
 									},
 								},
 							}}},
@@ -435,10 +435,10 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "xilinx-u250-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":       {StringValue: lo.ToPtr("xilinx-alveo-u250")},
-										"memory":     {StringValue: lo.ToPtr("64Gi")},
-										"dsp_slices": {StringValue: lo.ToPtr("12288")},
-										"interface":  {StringValue: lo.ToPtr("pcie-gen3")},
+										"type":       {StringValue: new("xilinx-alveo-u250")},
+										"memory":     {StringValue: new("64Gi")},
+										"dsp_slices": {StringValue: new("12288")},
+										"interface":  {StringValue: new("pcie-gen3")},
 									},
 								},
 							}}},
@@ -456,7 +456,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "fpga-workload",
@@ -549,17 +549,17 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "nvidia-t4-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":         {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-										"memory":       {StringValue: lo.ToPtr("16Gi")},
-										"device_class": {StringValue: lo.ToPtr("gpu")},
+										"type":         {StringValue: new("nvidia-tesla-t4")},
+										"memory":       {StringValue: new("16Gi")},
+										"device_class": {StringValue: new("gpu")},
 									},
 								},
 								{
 									Name: "nvidia-t4-1",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":         {StringValue: lo.ToPtr("nvidia-tesla-t4")},
-										"memory":       {StringValue: lo.ToPtr("16Gi")},
-										"device_class": {StringValue: lo.ToPtr("gpu")},
+										"type":         {StringValue: new("nvidia-tesla-t4")},
+										"memory":       {StringValue: new("16Gi")},
+										"device_class": {StringValue: new("gpu")},
 									},
 								},
 							}}},
@@ -581,9 +581,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "xilinx-u250-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":         {StringValue: lo.ToPtr("xilinx-alveo-u250")},
-										"memory":       {StringValue: lo.ToPtr("32Gi")},
-										"device_class": {StringValue: lo.ToPtr("fpga")},
+										"type":         {StringValue: new("xilinx-alveo-u250")},
+										"memory":       {StringValue: new("32Gi")},
+										"device_class": {StringValue: new("fpga")},
 									},
 								},
 							}}},
@@ -601,7 +601,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "multi-device-workload",
@@ -754,7 +754,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "invalid-config-workload",
@@ -834,8 +834,8 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "nvidia-test-gpu",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":   {StringValue: lo.ToPtr("nvidia-test-gpu")},
-										"memory": {StringValue: lo.ToPtr("8Gi")},
+										"type":   {StringValue: new("nvidia-test-gpu")},
+										"memory": {StringValue: new("8Gi")},
 									},
 								},
 							}}},
@@ -856,7 +856,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "dra-ignored",
@@ -872,7 +872,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 							ResourceClaims: []corev1.PodResourceClaim{
 								{
 									Name:                      "gpu-claim",
-									ResourceClaimTemplateName: lo.ToPtr("gpu-claim-template"),
+									ResourceClaimTemplateName: new("gpu-claim-template"),
 								},
 							},
 							Containers: []corev1.Container{
@@ -936,7 +936,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "regular-kwok",
@@ -1045,7 +1045,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "test-device-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type": {StringValue: lo.ToPtr("test-gpu")},
+										"type": {StringValue: new("test-gpu")},
 									},
 								},
 							}}},
@@ -1091,8 +1091,8 @@ var _ = Describe("DRA KWOK Driver", func() {
 						Message:            "DRAConfig is valid and ready",
 					},
 				}
-				latest.Status.NodeCount = ptr.To(int32(2))
-				latest.Status.ResourceSliceCount = ptr.To(int32(2))
+				latest.Status.NodeCount = new(int32(2))
+				latest.Status.ResourceSliceCount = new(int32(2))
 
 				// Update status subresource (may conflict if driver updates concurrently)
 				return env.Client.Status().Update(env.Context, latest)
@@ -1159,8 +1159,8 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "h100-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type":   {StringValue: lo.ToPtr("nvidia-h100")},
-										"memory": {StringValue: lo.ToPtr("80Gi")},
+										"type":   {StringValue: new("nvidia-h100")},
+										"memory": {StringValue: new("80Gi")},
 									},
 								},
 							}}},
@@ -1194,7 +1194,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "arria-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type": {StringValue: lo.ToPtr("intel-arria10")},
+										"type": {StringValue: new("intel-arria10")},
 									},
 								},
 							}}},
@@ -1212,7 +1212,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "multi-driver-test",
@@ -1297,7 +1297,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "h100-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type": {StringValue: lo.ToPtr("nvidia-h100")},
+										"type": {StringValue: new("nvidia-h100")},
 									},
 								},
 							}}},
@@ -1330,7 +1330,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 								{
 									Name: "a100-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										"type": {StringValue: lo.ToPtr("nvidia-a100")},
+										"type": {StringValue: new("nvidia-a100")},
 									},
 								},
 							}}},
@@ -1348,7 +1348,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 					Namespace: "default",
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: lo.ToPtr(int32(1)),
+					Replicas: new(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "duplicate-driver-test",

@@ -138,7 +138,7 @@ var _ = Describe("GarbageCollection", func() {
 	})
 	It("should delete many NodeClaims when the Nodes are there in a NotReady state and the instances are gone", func() {
 		var nodeClaims []*v1.NodeClaim
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			nodeClaims = append(nodeClaims, test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

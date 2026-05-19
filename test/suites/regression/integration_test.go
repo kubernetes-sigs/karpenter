@@ -173,7 +173,7 @@ var _ = Describe("Integration", func() {
 						Requests: corev1.ResourceList{
 							corev1.ResourceCPU: func() resource.Quantity {
 								dsOverhead := env.GetDaemonSetOverhead(nodePool)
-								base := lo.ToPtr(resource.MustParse("1800m"))
+								base := new(resource.MustParse("1800m"))
 								base.Sub(*dsOverhead.Cpu())
 								return *base
 							}(),
@@ -290,7 +290,7 @@ var _ = Describe("Integration", func() {
 					Key:       corev1.LabelInstanceTypeStable,
 					Operator:  corev1.NodeSelectorOpIn,
 					Values:    []string{"insance-type-1", "insance-type-2"},
-					MinValues: lo.ToPtr(-1)},
+					MinValues: new(-1)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
@@ -299,7 +299,7 @@ var _ = Describe("Integration", func() {
 					Key:       corev1.LabelInstanceTypeStable,
 					Operator:  corev1.NodeSelectorOpIn,
 					Values:    []string{"insance-type-1", "insance-type-2"},
-					MinValues: lo.ToPtr(0)},
+					MinValues: new(0)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
@@ -308,7 +308,7 @@ var _ = Describe("Integration", func() {
 					Key:       corev1.LabelInstanceTypeStable,
 					Operator:  corev1.NodeSelectorOpIn,
 					Values:    []string{"insance-type-1", "insance-type-2"},
-					MinValues: lo.ToPtr(51)},
+					MinValues: new(51)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})
@@ -317,7 +317,7 @@ var _ = Describe("Integration", func() {
 					Key:       corev1.LabelInstanceTypeStable,
 					Operator:  corev1.NodeSelectorOpIn,
 					Values:    []string{"insance-type-1", "insance-type-2"},
-					MinValues: lo.ToPtr(3)},
+					MinValues: new(3)},
 				)
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
 			})

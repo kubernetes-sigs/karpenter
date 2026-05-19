@@ -242,7 +242,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		})
 		sc = test.StorageClass(test.StorageClassOptions{
 			ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-			Provisioner: lo.ToPtr(csiProvider),
+			Provisioner: new(csiProvider),
 			Zones:       []string{"test-zone-1"},
 		})
 		csiNode = &storagev1.CSINode{
@@ -255,7 +255,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 						Name:   csiProvider,
 						NodeID: "fake-node-id",
 						Allocatable: &storagev1.VolumeNodeResources{
-							Count: lo.ToPtr(int32(10)),
+							Count: new(int32(10)),
 						},
 					},
 				},
@@ -264,9 +264,9 @@ var _ = Describe("Volume Usage/Limits", func() {
 	})
 	It("should hydrate the volume usage on a Node update", func() {
 		ExpectApplied(ctx, env.Client, sc, node, csiNode)
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: lo.ToPtr(sc.Name),
+				StorageClassName: new(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -285,9 +285,9 @@ var _ = Describe("Volume Usage/Limits", func() {
 	})
 	It("should maintain the volume usage state when receiving NodeClaim updates", func() {
 		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: lo.ToPtr(sc.Name),
+				StorageClassName: new(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -316,9 +316,9 @@ var _ = Describe("Volume Usage/Limits", func() {
 	It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
 		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
 		var pvcs []*corev1.PersistentVolumeClaim
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: lo.ToPtr(sc.Name),
+				StorageClassName: new(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -357,7 +357,7 @@ var _ = Describe("HostPort Usage", func() {
 	It("should hydrate the HostPort usage on a Node update", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			pod := test.Pod(test.PodOptions{
 				HostPorts: []int32{int32(i)},
 			})
@@ -380,7 +380,7 @@ var _ = Describe("HostPort Usage", func() {
 	It("should maintain the host port usage state when receiving NodeClaim updates", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			pod := test.Pod(test.PodOptions{
 				HostPorts: []int32{int32(i)},
 			})
@@ -417,7 +417,7 @@ var _ = Describe("HostPort Usage", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		var pods []*corev1.Pod
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			pod := test.Pod(test.PodOptions{
 				HostPorts: []int32{int32(i)},
 			})
@@ -776,7 +776,7 @@ var _ = Describe("Node Resource Level", func() {
 	// nolint:gosec
 	It("should maintain a correct count of resource usage as pods are deleted/added", func() {
 		var pods []*corev1.Pod
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			pods = append(pods, test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: map[corev1.ResourceName]resource.Quantity{
@@ -812,7 +812,7 @@ var _ = Describe("Node Resource Level", func() {
 
 			// extra reconciles shouldn't cause it to be multiply counted
 			nReconciles := rand.Intn(3) + 1 // 1 to 3 reconciles
-			for i := 0; i < nReconciles; i++ {
+			for range nReconciles {
 				ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 			}
 			sum += pod.Spec.Containers[0].Resources.Requests.Cpu().AsApproximateFloat64()
@@ -826,7 +826,7 @@ var _ = Describe("Node Resource Level", func() {
 			ExpectDeleted(ctx, env.Client, pod)
 			nReconciles := rand.Intn(3) + 1
 			// or multiply removed
-			for i := 0; i < nReconciles; i++ {
+			for range nReconciles {
 				ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 			}
 			sum -= pod.Spec.Containers[0].Resources.Requests.Cpu().AsApproximateFloat64()
@@ -871,8 +871,8 @@ var _ = Describe("Node Resource Level", func() {
 			Kind:               "DaemonSet",
 			Name:               ds.Name,
 			UID:                ds.UID,
-			Controller:         lo.ToPtr(true),
-			BlockOwnerDeletion: lo.ToPtr(true),
+			Controller:         new(true),
+			BlockOwnerDeletion: new(true),
 		})
 
 		node := test.Node(test.NodeOptions{
@@ -1593,8 +1593,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -1621,8 +1621,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -1642,8 +1642,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -1670,8 +1670,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -1764,7 +1764,7 @@ var _ = Describe("Data Races", func() {
 		}()
 
 		// Call UpdateNode on 100 nodes (enough to trigger a DATA RACE)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			node := test.Node(test.NodeOptions{
 				ProviderID: test.RandomProviderID(),
 			})
@@ -1787,7 +1787,7 @@ var _ = Describe("Data Races", func() {
 		}()
 
 		// Call UpdateNodeClaim on 100 NodeClaims (enough to trigger a DATA RACE)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
@@ -2885,7 +2885,7 @@ var _ = Describe("NodePoolState Tracking", func() {
 			numOperations := 50
 
 			// Concurrent mark/unmark operations
-			for i := 0; i < numOperations; i++ {
+			for i := range numOperations {
 				wg.Add(1)
 				go func(iteration int) {
 					defer wg.Done()

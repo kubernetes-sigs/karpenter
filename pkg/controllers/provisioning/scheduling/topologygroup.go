@@ -216,7 +216,7 @@ func hashSelector(selector *metav1.LabelSelector) uint64 {
 		}
 		selectorHash = lo.Must(hashstructure.Hash(selector.MatchLabels, hashstructure.FormatV2, nil))
 	}
-	return lo.Must(hashstructure.Hash([]interface{}{expressionHashes, selectorHash}, hashstructure.FormatV2, nil))
+	return lo.Must(hashstructure.Hash([]any{expressionHashes, selectorHash}, hashstructure.FormatV2, nil))
 }
 
 // nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.

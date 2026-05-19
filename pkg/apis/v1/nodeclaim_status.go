@@ -57,9 +57,11 @@ type NodeClaimStatus struct {
 	// Allocatable is the estimated allocatable capacity of the node
 	// +optional
 	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
-	//nolint:kubeapilinter
 	// Conditions contains signals for health and readiness
 	// +optional
+	// +listType=map
+	// +listMapKey=type
+	//nolint:kubeapilinter
 	Conditions []status.Condition `json:"conditions,omitempty"`
 	//nolint:kubeapilinter
 	// LastPodEventTime is updated with the last time a pod was scheduled

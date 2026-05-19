@@ -199,7 +199,7 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 //	3vcpu, 6Gi mem, 30 pods
 func InstanceTypes(total int) []*cloudprovider.InstanceType {
 	instanceTypes := []*cloudprovider.InstanceType{}
-	for i := 0; i < total; i++ {
+	for i := range total {
 		instanceTypes = append(instanceTypes, NewInstanceType(InstanceTypeOptions{
 			Name: fmt.Sprintf("fake-it-%d", i),
 			Resources: map[corev1.ResourceName]resource.Quantity{
