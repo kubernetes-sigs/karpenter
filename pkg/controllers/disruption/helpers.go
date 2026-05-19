@@ -232,31 +232,26 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
 	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
 	for _, node := range cluster.DeepCopyNodes() {
-		// We only consider nodes that we own and are initialized towards the total.
-		// If a node is launched/registered, but not initialized, pods aren't scheduled
-		// to the node, and these are treated as unhealthy until they're cleaned up.
-		// This prevents odd roundup cases with percentages where replacement nodes that
-		// aren't initialized could be counted towards the total, resulting in more disruptions
-		// to active nodes than desired, where Karpenter should wait for these nodes to be
-		// healthy before continuing.
-		if !node.Managed() || !node.Initialized() {
+		if !node.Managed() {
 			continue
 		}
 
-		// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
-		// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
-		// on the underlying cloud provider machine.
-		if node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+		nodePool, ok := node.Labels()[v1.NodePoolLabelKey]
+		if !ok {
+			log.FromContext(ctx).V(1).Info("skipping node missing nodepool label", "node", node.Name())
 			continue
 		}
-
-		nodePool := node.Labels()[v1.NodePoolLabelKey]
 		numNodes[nodePool]++
 
 		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
-		// 1. Has a NotReady conditiion
-		// 2. Is marked as disrupting
-		if cond := nodeutils.GetCondition(node.Node, corev1.NodeReady); cond.Status != corev1.ConditionTrue || node.MarkedForDeletion() {
+		// 1. Is not yet initialized (launched/registered but not ready for scheduling)
+		// 2. Has the InstanceTerminating condition (drained and cloud provider delete succeeded)
+		// 3. Has a NotReady condition
+		// 4. Is marked as disrupting
+		if !node.Initialized() ||
+			node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() ||
+			nodeutils.GetCondition(node.Node, corev1.NodeReady).Status != corev1.ConditionTrue ||
+			node.MarkedForDeletion() {
 			disrupting[nodePool]++
 		}
 	}
