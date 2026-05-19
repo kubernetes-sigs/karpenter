@@ -158,6 +158,14 @@ spec:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
                       type: string
+                    driftInterval:
+                      description: |-
+                        DriftInterval controls how frequently Karpenter checks this NodePool's
+                        nodes for configuration drift. When omitted the controller falls back
+                        to its global default (currently 5 minutes). A shorter interval
+                        increases API server and cloud-provider API load; a longer interval
+                        reduces churn for batch workloads.
+                      type: string
                   required:
                     - consolidateAfter
                   type: object
