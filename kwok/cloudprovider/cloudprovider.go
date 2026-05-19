@@ -21,6 +21,7 @@ import (
 	_ "embed"
 	stderrors "errors"
 	"fmt"
+	"maps"
 	"math/rand"
 	"strings"
 	"time"
@@ -237,9 +238,7 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1.NodeClaim, offering *cloudprovider.Offering) map[string]string {
 	ret := make(map[string]string, len(labels))
 	// start with labels on the nodeclaim
-	for k, v := range labels {
-		ret[k] = v
-	}
+	maps.Copy(ret, labels)
 
 	// add the derived nodeclaim requirement labels
 	for _, r := range nodeClaim.Spec.Requirements {
@@ -274,9 +273,7 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 
 func addKwokAnnotation(annotations map[string]string) map[string]string {
 	ret := make(map[string]string, len(annotations)+1)
-	for k, v := range annotations {
-		ret[k] = v
-	}
+	maps.Copy(ret, annotations)
 	ret[v1alpha1.KwokLabelKey] = v1alpha1.KwokLabelValue
 	return ret
 }

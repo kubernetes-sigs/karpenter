@@ -377,7 +377,7 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 	// handles MaxUnavailable with PDBs. Take the case with 5% disruptions, but
 	// 10 nodes. Karpenter will opt to allow 1 node to be disrupted, rather than
 	// blocking all disruptions for this nodepool.
-	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(GetIntStrFromValue(in.Nodes)), numNodes, true)
+	res, err := intstr.GetScaledValueFromIntOrPercent(new(GetIntStrFromValue(in.Nodes)), numNodes, true)
 	if err != nil {
 		// Should never happen since this is validated when the nodepool is applied
 		// If this value is incorrectly formatted, fail closed, since we don't know what

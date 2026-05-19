@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -290,8 +289,8 @@ var _ = Describe("ResourceSliceController", func() {
 										{
 											Name: "nvidia-gpu-0",
 											Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-												"type":   {StringValue: lo.ToPtr("nvidia-tesla-v100")},
-												"memory": {StringValue: lo.ToPtr("32Gi")},
+												"type":   {StringValue: new("nvidia-tesla-v100")},
+												"memory": {StringValue: new("32Gi")},
 											},
 										},
 									},
@@ -473,7 +472,7 @@ var _ = Describe("ResourceSliceController", func() {
 				resourcev1.Device{
 					Name: "nvidia-gpu-1",
 					Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"type": {StringValue: lo.ToPtr("nvidia-tesla-v100")},
+						"type": {StringValue: new("nvidia-tesla-v100")},
 					},
 				},
 			)

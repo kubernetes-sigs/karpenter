@@ -203,7 +203,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
 
-		for i := 0; i < numNodes; i++ {
+		for i := range numNodes {
 			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 		}
 		// inform cluster state about nodes and nodeclaims
@@ -271,7 +271,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
 
-		for i := 0; i < numNodes; i++ {
+		for i := range numNodes {
 			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 		}
 
@@ -392,7 +392,7 @@ var _ = Describe("Simulate Scheduling", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "local-path",
 			},
-			Provisioner: lo.ToPtr("kubernetes.io/no-provisioner"),
+			Provisioner: new("kubernetes.io/no-provisioner"),
 		})
 		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{UseLocal: true})
 		persistentVolume.Spec.NodeAffinity = &corev1.VolumeNodeAffinity{
@@ -420,8 +420,8 @@ var _ = Describe("Simulate Scheduling", func() {
 						Kind:               "StatefulSet",
 						Name:               ss.Name,
 						UID:                ss.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -501,8 +501,8 @@ var _ = Describe("Simulate Scheduling", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				}}})
 
@@ -890,13 +890,13 @@ var _ = Describe("Pod Eviction Cost", func() {
 	})
 	It("should have a higher disruptionCost for a pod with a higher priority", func() {
 		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
-			Spec: corev1.PodSpec{Priority: lo.ToPtr(int32(1))},
+			Spec: corev1.PodSpec{Priority: new(int32(1))},
 		})
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a lower priority", func() {
 		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
-			Spec: corev1.PodSpec{Priority: lo.ToPtr(int32(-1))},
+			Spec: corev1.PodSpec{Priority: new(int32(-1))},
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
@@ -972,7 +972,7 @@ var _ = Describe("Candidate Filtering", func() {
 						Kind:       "Node",
 						Name:       node.Name,
 						UID:        node.UID,
-						Controller: lo.ToPtr(true),
+						Controller: new(true),
 					},
 				},
 			},
@@ -1011,7 +1011,7 @@ var _ = Describe("Candidate Filtering", func() {
 						Kind:       "DaemonSet",
 						Name:       daemonSet.Name,
 						UID:        daemonSet.UID,
-						Controller: lo.ToPtr(true),
+						Controller: new(true),
 					},
 				},
 			},
@@ -1415,7 +1415,7 @@ var _ = Describe("Candidate Filtering", func() {
 						Kind:       "DaemonSet",
 						Name:       daemonSet.Name,
 						UID:        daemonSet.UID,
-						Controller: lo.ToPtr(true),
+						Controller: new(true),
 					},
 				},
 			},
@@ -1461,7 +1461,7 @@ var _ = Describe("Candidate Filtering", func() {
 						Kind:       "Node",
 						Name:       node.Name,
 						UID:        node.UID,
-						Controller: lo.ToPtr(true),
+						Controller: new(true),
 					},
 				},
 			},
@@ -2038,8 +2038,8 @@ var _ = Describe("Metrics", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -2098,8 +2098,8 @@ var _ = Describe("Metrics", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -2159,8 +2159,8 @@ var _ = Describe("Metrics", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
