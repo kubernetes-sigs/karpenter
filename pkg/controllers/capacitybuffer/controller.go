@@ -106,7 +106,7 @@ func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1alpha1.Capa
 	}
 
 	if resolveErr != nil {
-		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
+		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil //nolint:nilerr // resolution failures are transient; requeue without surfacing as controller error
 	}
 	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 }
@@ -183,7 +183,6 @@ func (c *Controller) resolveScalableRef(ctx context.Context, cb *autoscalingv1al
 
 	return podSpec, nil
 }
-
 
 // calculateReplicas gathers all applicable constraints (fixed, percentage, limits)
 // and returns the minimum. This ensures we never exceed any single constraint.
@@ -287,4 +286,3 @@ func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object
 	}
 	return requests
 }
-

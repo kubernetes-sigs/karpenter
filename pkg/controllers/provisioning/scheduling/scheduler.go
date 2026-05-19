@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -258,10 +259,13 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {
-		if len(existing.Pods) > 0 {
+		realPods := lo.Filter(existing.Pods, func(p *corev1.Pod, _ int) bool {
+			return !isVirtualBufferPod(p)
+		})
+		if len(realPods) > 0 {
 			cluster.NominateNodeForPod(ctx, existing.ProviderID())
 		}
-		for _, p := range existing.Pods {
+		for _, p := range realPods {
 			recorder.Publish(NominatePodEvent(p, existing.Node, existing.NodeClaim))
 		}
 	}
@@ -285,6 +289,10 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 		return
 	}
 	log.FromContext(ctx).WithValues("nodes", inflightCount, "pods", existingCount).Info("computed unready node(s) will fit pod(s)")
+}
+
+func isVirtualBufferPod(p *corev1.Pod) bool {
+	return p.Annotations[autoscalingv1alpha1.FakePodAnnotationKey] == autoscalingv1alpha1.FakePodAnnotationValue
 }
 
 func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {

@@ -93,7 +93,7 @@ type ScalableRef struct {
 type CapacityBufferSpec struct {
 	// provisioningStrategy defines how the buffer is utilized.
 	// "buffer.x-k8s.io/active-capacity" is the default strategy, where the buffer actively scales up the cluster by creating placeholder pods.
-	// +kubebuilder:default="buffer.x-k8s.io/active-capacity"
+	// +default="buffer.x-k8s.io/active-capacity"
 	// +optional
 	ProvisioningStrategy *string `json:"provisioningStrategy,omitempty" protobuf:"bytes,1,opt,name=provisioningStrategy"`
 

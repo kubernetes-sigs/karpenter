@@ -146,6 +146,7 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 		if err := p.updateBufferProvisioningStatus(ctx, results); err != nil {
 			log.FromContext(ctx).Error(err, "updating CapacityBuffer provisioning status")
 		}
+		p.cluster.UpdateBufferPodCounts(bufferPodCountsFromResults(results))
 	}
 	if len(results.NewNodeClaims) == 0 {
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil

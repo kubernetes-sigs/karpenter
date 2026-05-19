@@ -510,6 +510,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 	})
 })
 
+//nolint:unparam
 func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
 	for i := range conditions {
 		if conditions[i].Type == condType {

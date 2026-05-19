@@ -85,6 +85,8 @@ type Cluster struct {
 	unsyncedStartTime   time.Time
 	lastUnsyncedLogTime time.Time
 	antiAffinityPods    sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
+
+	bufferPodCounts sync.Map // provider id (string) -> int: number of virtual buffer pods placed on this node
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
@@ -278,6 +280,42 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	if n, ok := c.nodes[providerID]; ok {
 		n.Nominate(ctx, c.clock) // extends nomination window if already nominated
 	}
+}
+
+// UpdateBufferPodCounts replaces the entire buffer pod count mapping with the
+// new counts. Called by the provisioner after each scheduling pass to reflect
+// which nodes are hosting virtual buffer pods. Nodes not in the map are cleared.
+func (c *Cluster) UpdateBufferPodCounts(counts map[string]int) {
+	// Clear all existing entries, then store new ones. sync.Map doesn't have a
+	// bulk-replace, so we range-delete first.
+	c.bufferPodCounts.Range(func(key, _ any) bool {
+		c.bufferPodCounts.Delete(key)
+		return true
+	})
+	for providerID, count := range counts {
+		if count > 0 {
+			c.bufferPodCounts.Store(providerID, count)
+		}
+	}
+}
+
+// HasBufferPods returns true if the node with the given providerID has at least
+// one virtual buffer pod placed on it during the last provisioning pass.
+func (c *Cluster) HasBufferPods(providerID string) bool {
+	v, ok := c.bufferPodCounts.Load(providerID)
+	if !ok {
+		return false
+	}
+	return v.(int) > 0
+}
+
+// BufferPodCount returns the number of virtual buffer pods on the node.
+func (c *Cluster) BufferPodCount(providerID string) int {
+	v, ok := c.bufferPodCounts.Load(providerID)
+	if !ok {
+		return 0
+	}
+	return v.(int)
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete

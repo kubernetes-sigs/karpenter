@@ -26,6 +26,7 @@ import (
 
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
 func readyBuffer(name string, replicas int32) *autoscalingv1alpha1.CapacityBuffer {
@@ -60,37 +61,45 @@ func TestBuildVirtualPods(t *testing.T) {
 		t.Fatalf("expected 3 pods, got %d", len(pods))
 	}
 	for i, p := range pods {
-		if p.Name != "capacity-buffer-web-"+itoa(i+1) {
-			t.Errorf("pod[%d] name = %q, want capacity-buffer-web-%d", i, p.Name, i+1)
-		}
-		if p.Namespace != "default" {
-			t.Errorf("pod[%d] namespace = %q, want default", i, p.Namespace)
-		}
-		if string(p.UID) != "uid-web-"+itoa(i+1) {
-			t.Errorf("pod[%d] UID = %q, want uid-web-%d", i, p.UID, i+1)
-		}
-		if p.Annotations[autoscalingv1alpha1.FakePodAnnotationKey] != "true" {
-			t.Errorf("pod[%d] missing fake-pod annotation", i)
-		}
-		if p.Labels[autoscalingv1alpha1.BufferNameLabel] != "web" {
-			t.Errorf("pod[%d] missing buffer-name label", i)
-		}
-		if p.Spec.Priority == nil || *p.Spec.Priority != autoscalingv1alpha1.VirtualPodPriority {
-			t.Errorf("pod[%d] priority = %v, want %d", i, p.Spec.Priority, autoscalingv1alpha1.VirtualPodPriority)
-		}
-		if p.Spec.NodeName != "" {
-			t.Errorf("pod[%d] nodeName should be empty, got %q", i, p.Spec.NodeName)
-		}
-		var found bool
-		for _, c := range p.Status.Conditions {
-			if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("pod[%d] missing PodScheduled=False/Unschedulable condition", i)
+		assertVirtualPodMetadata(t, p, i, "web")
+	}
+}
+
+func assertVirtualPodMetadata(t *testing.T, p *corev1.Pod, idx int, bufferName string) {
+	t.Helper()
+	i := idx + 1
+	if p.Name != "capacity-buffer-"+bufferName+"-"+itoa(i) {
+		t.Errorf("pod[%d] name = %q, want capacity-buffer-%s-%d", idx, p.Name, bufferName, i)
+	}
+	if p.Namespace != "default" {
+		t.Errorf("pod[%d] namespace = %q, want default", idx, p.Namespace)
+	}
+	if string(p.UID) != "uid-"+bufferName+"-"+itoa(i) {
+		t.Errorf("pod[%d] UID = %q, want uid-%s-%d", idx, p.UID, bufferName, i)
+	}
+	if p.Annotations[autoscalingv1alpha1.FakePodAnnotationKey] != "true" {
+		t.Errorf("pod[%d] missing fake-pod annotation", idx)
+	}
+	if p.Labels[autoscalingv1alpha1.BufferNameLabel] != bufferName {
+		t.Errorf("pod[%d] missing buffer-name label", idx)
+	}
+	if p.Spec.Priority == nil || *p.Spec.Priority != autoscalingv1alpha1.VirtualPodPriority {
+		t.Errorf("pod[%d] priority = %v, want %d", idx, p.Spec.Priority, autoscalingv1alpha1.VirtualPodPriority)
+	}
+	if p.Spec.NodeName != "" {
+		t.Errorf("pod[%d] nodeName should be empty, got %q", idx, p.Spec.NodeName)
+	}
+	assertHasUnschedulableCondition(t, p, idx)
+}
+
+func assertHasUnschedulableCondition(t *testing.T, p *corev1.Pod, idx int) {
+	t.Helper()
+	for _, c := range p.Status.Conditions {
+		if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
+			return
 		}
 	}
+	t.Errorf("pod[%d] missing PodScheduled=False/Unschedulable condition", idx)
 }
 
 func TestBuildVirtualPodsDeterministicUID(t *testing.T) {
@@ -232,33 +241,25 @@ func TestComputeProvisioningCondition(t *testing.T) {
 
 	t.Run("fits existing capacity", func(t *testing.T) {
 		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 3, desiredReplicas: 3})
-		if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "FitsExistingCapacity" {
-			t.Errorf("got %+v, want Provisioning=True/FitsExistingCapacity", cond)
-		}
+		assertCondition(t, cond, metav1.ConditionTrue, "FitsExistingCapacity")
 	})
 
 	t.Run("requires new capacity", func(t *testing.T) {
 		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 1, requiresNewClaim: 2, desiredReplicas: 3})
-		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "RequiresNewCapacity" {
-			t.Errorf("got %+v, want Provisioning=False/RequiresNewCapacity", cond)
-		}
+		assertCondition(t, cond, metav1.ConditionFalse, "RequiresNewCapacity")
 	})
 
 	t.Run("not ready for provisioning", func(t *testing.T) {
 		notReady := readyBuffer("web", 3)
 		notReady.Status.Conditions[0].Status = metav1.ConditionFalse
 		cond := computeProvisioningCondition(notReady, nil)
-		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "NotReadyForProvisioning" {
-			t.Errorf("got %+v, want Provisioning=False/NotReadyForProvisioning", cond)
-		}
+		assertCondition(t, cond, metav1.ConditionFalse, "NotReadyForProvisioning")
 	})
 
 	t.Run("buffer empty", func(t *testing.T) {
 		empty := readyBuffer("web", 0)
 		cond := computeProvisioningCondition(empty, nil)
-		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "BufferEmpty" {
-			t.Errorf("got %+v, want Provisioning=False/BufferEmpty", cond)
-		}
+		assertCondition(t, cond, metav1.ConditionFalse, "BufferEmpty")
 	})
 
 	t.Run("ready but no results", func(t *testing.T) {
@@ -267,6 +268,83 @@ func TestComputeProvisioningCondition(t *testing.T) {
 			t.Errorf("got %+v, want nil (leave condition unchanged)", cond)
 		}
 	})
+}
+
+func assertCondition(t *testing.T, cond *metav1.Condition, wantStatus metav1.ConditionStatus, wantReason string) {
+	t.Helper()
+	if cond == nil {
+		t.Fatalf("condition is nil, want status=%s reason=%s", wantStatus, wantReason)
+	}
+	if cond.Status != wantStatus || cond.Reason != wantReason {
+		t.Errorf("got status=%s reason=%s, want status=%s reason=%s", cond.Status, cond.Reason, wantStatus, wantReason)
+	}
+}
+
+func TestBufferPodCountsFromResults(t *testing.T) {
+	cbA := readyBuffer("a", 3)
+	cbB := readyBuffer("b", 2)
+	spec := corev1.PodSpec{}
+
+	aPods := buildVirtualPods(cbA, spec)
+	bPods := buildVirtualPods(cbB, spec)
+	realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real-pod", Namespace: "default"}}
+
+	nodeA := makeExistingNode("provider-a")
+	nodeA.Pods = []*corev1.Pod{aPods[0], aPods[1], realPod}
+
+	nodeB := makeExistingNode("provider-b")
+	nodeB.Pods = []*corev1.Pod{bPods[0], bPods[1]}
+
+	results := scheduler.Results{
+		ExistingNodes: []*scheduler.ExistingNode{nodeA, nodeB},
+		NewNodeClaims: []*scheduler.NodeClaim{{Pods: []*corev1.Pod{aPods[2]}}},
+		PodErrors:     map[*corev1.Pod]error{},
+	}
+
+	counts := bufferPodCountsFromResults(results)
+
+	// provider-a has 2 virtual pods (real pods excluded)
+	if counts["provider-a"] != 2 {
+		t.Errorf("provider-a count = %d, want 2", counts["provider-a"])
+	}
+	// provider-b has 2 virtual pods
+	if counts["provider-b"] != 2 {
+		t.Errorf("provider-b count = %d, want 2", counts["provider-b"])
+	}
+	// Pods on new NodeClaims are not counted (those nodes don't exist yet)
+	if _, ok := counts["new-node"]; ok {
+		t.Errorf("new node claims should not be in counts")
+	}
+}
+
+func TestBufferPodCountsFromResultsEmpty(t *testing.T) {
+	results := scheduler.Results{}
+	counts := bufferPodCountsFromResults(results)
+	if len(counts) != 0 {
+		t.Errorf("expected empty map, got %v", counts)
+	}
+}
+
+func TestBufferPodCountsFromResultsNoVirtualPods(t *testing.T) {
+	realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
+	nodeA := makeExistingNode("provider-a")
+	nodeA.Pods = []*corev1.Pod{realPod}
+
+	results := scheduler.Results{
+		ExistingNodes: []*scheduler.ExistingNode{nodeA},
+	}
+	counts := bufferPodCountsFromResults(results)
+	if len(counts) != 0 {
+		t.Errorf("expected empty map when no virtual pods, got %v", counts)
+	}
+}
+
+func makeExistingNode(providerID string) *scheduler.ExistingNode {
+	sn := state.NewNode()
+	sn.Node = &corev1.Node{
+		Spec: corev1.NodeSpec{ProviderID: providerID},
+	}
+	return &scheduler.ExistingNode{StateNode: sn}
 }
 
 // itoa is a tiny local integer-to-string used to avoid importing strconv.

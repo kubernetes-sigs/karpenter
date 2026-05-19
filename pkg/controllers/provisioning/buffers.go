@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
-		scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 )
 
 // appendVirtualPods lists all CapacityBuffers that are ReadyForProvisioning,
@@ -193,14 +193,14 @@ func bufferNameOf(pod *corev1.Pod) string {
 	return pod.Labels[autoscalingv1alpha1.BufferNameLabel]
 }
 
-// bufferProvisioningStatus summarises, per buffer, which virtual pods scheduled
+// bufferProvisioningStatus summarizes, per buffer, which virtual pods scheduled
 // to existing capacity vs. required new NodeClaims vs. failed outright.
 type bufferProvisioningStatus struct {
-	namespace          string
-	existing           int
-	requiresNewClaim   int
-	failed             int
-	desiredReplicas    int
+	namespace        string
+	existing         int
+	requiresNewClaim int
+	failed           int
+	desiredReplicas  int
 }
 
 // updateBufferProvisioningStatus patches the Provisioning condition on every
@@ -308,46 +308,62 @@ func computeProvisioningCondition(cb *autoscalingv1alpha1.CapacityBuffer, s *buf
 	return nil
 }
 
+// bufferPodCountsFromResults builds a providerID→count mapping of how many
+// virtual buffer pods were placed on each existing node during this scheduling
+// pass. Used to update cluster state so disruption knows which nodes host
+// buffer capacity and should not be treated as empty.
+func bufferPodCountsFromResults(results scheduler.Results) map[string]int {
+	counts := map[string]int{}
+	for _, existing := range results.ExistingNodes {
+		for _, pod := range existing.Pods {
+			if !IsVirtualPod(pod) {
+				continue
+			}
+			counts[existing.ProviderID()]++
+		}
+	}
+	return counts
+}
+
 // classifyBufferPods walks Schedule()'s Results and buckets virtual pods by
 // owning buffer. Real (non-virtual) pods are ignored.
 func classifyBufferPods(results scheduler.Results, buffers map[string]*autoscalingv1alpha1.CapacityBuffer) map[string]*bufferProvisioningStatus {
 	out := map[string]*bufferProvisioningStatus{}
-	ensure := func(name, namespace string) *bufferProvisioningStatus {
-		s, ok := out[name]
-		if !ok {
-			s = &bufferProvisioningStatus{namespace: namespace}
-			if cb, found := buffers[name]; found && cb.Status.Replicas != nil {
-				s.desiredReplicas = int(*cb.Status.Replicas)
-			}
-			out[name] = s
-		}
-		return s
-	}
 
 	for _, existing := range results.ExistingNodes {
-		for _, pod := range existing.Pods {
-			name := bufferNameOf(pod)
-			if name == "" {
-				continue
-			}
-			ensure(name, pod.Namespace).existing++
-		}
+		countVirtualPods(existing.Pods, buffers, out, func(s *bufferProvisioningStatus) { s.existing++ })
 	}
 	for _, nc := range results.NewNodeClaims {
-		for _, pod := range nc.Pods {
-			name := bufferNameOf(pod)
-			if name == "" {
-				continue
-			}
-			ensure(name, pod.Namespace).requiresNewClaim++
-		}
+		countVirtualPods(nc.Pods, buffers, out, func(s *bufferProvisioningStatus) { s.requiresNewClaim++ })
 	}
 	for pod := range results.PodErrors {
 		name := bufferNameOf(pod)
 		if name == "" {
 			continue
 		}
-		ensure(name, pod.Namespace).failed++
+		ensureStatus(name, pod.Namespace, buffers, out).failed++
 	}
 	return out
+}
+
+func countVirtualPods(pods []*corev1.Pod, buffers map[string]*autoscalingv1alpha1.CapacityBuffer, out map[string]*bufferProvisioningStatus, inc func(*bufferProvisioningStatus)) {
+	for _, pod := range pods {
+		name := bufferNameOf(pod)
+		if name == "" {
+			continue
+		}
+		inc(ensureStatus(name, pod.Namespace, buffers, out))
+	}
+}
+
+func ensureStatus(name, namespace string, buffers map[string]*autoscalingv1alpha1.CapacityBuffer, out map[string]*bufferProvisioningStatus) *bufferProvisioningStatus {
+	s, ok := out[name]
+	if !ok {
+		s = &bufferProvisioningStatus{namespace: namespace}
+		if cb, found := buffers[name]; found && cb.Status.Replicas != nil {
+			s.desiredReplicas = int(*cb.Status.Replicas)
+		}
+		out[name] = s
+	}
+	return s
 }
