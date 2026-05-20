@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
@@ -152,6 +153,10 @@ func (c *cacheSyncingStatusWriter) Patch(ctx context.Context, obj client.Object,
 		return objectSynced(ctx, c.client, obj)
 	}, pollingOptions...)
 	return nil
+}
+
+func (c *cacheSyncingStatusWriter) Apply(_ context.Context, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+	panic("apply on cacheSyncingStatusWriter isn't supported")
 }
 
 func objectSynced(ctx context.Context, c client.Client, obj client.Object) error {
