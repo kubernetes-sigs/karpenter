@@ -85,9 +85,13 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	for i := range nodePoolList.Items {
 		its, err := c.cloudProvider.GetInstanceTypes(ctx, &nodePoolList.Items[i])
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("listing instance types, %w", err)
+			// We skip the nodepool if we are not able to list the instance types for it
+			// This will mean that we will not be able to evaluate the nodepool for node overlays
+			// and scheduled nodeclaims for this nodepool will continue to be skipped by the provisioner
+			continue
 		}
 		nodePoolToInstanceTypes[nodePoolList.Items[i].Name] = its
+		temporaryStore.evaluatedNodePools.Insert(nodePoolList.Items[i].Name)
 	}
 
 	overlayList.OrderByWeight()
@@ -101,9 +105,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			overlaysWithConflict = append(overlaysWithConflict, overlayList.Items[i].Name)
 		}
 	}
-	temporaryStore.evaluatedNodePools.Insert(lo.Map(nodePoolList.Items, func(np v1.NodePool, _ int) string {
-		return np.Name
-	})...)
 
 	err, requeue := c.updateOverlayStatuses(ctx, overlayList.Items, overlaysWithConflict, overlayWithRuntimeValidationFailure)
 	if requeue {
