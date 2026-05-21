@@ -156,7 +156,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				sortedCandidates[2].NodePool.Name,
 			}
 			Expect(nodePoolsInFirstGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				Expect(sortedCandidates[i].DisruptionCost).To(Equal(1.0))
 			}
 

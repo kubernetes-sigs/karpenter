@@ -21,7 +21,6 @@ import (
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/samber/lo"
 
 	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
@@ -279,7 +278,7 @@ var _ = Describe("Liveness", func() {
 						Kind:               object.GVK(nodePool).Kind,
 						Name:               nodePool.Name,
 						UID:                nodePool.UID,
-						BlockOwnerDeletion: lo.ToPtr(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -295,7 +294,7 @@ var _ = Describe("Liveness", func() {
 						Kind:               object.GVK(nodePool).Kind,
 						Name:               nodePool.Name,
 						UID:                nodePool.UID,
-						BlockOwnerDeletion: lo.ToPtr(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -328,7 +327,7 @@ var _ = Describe("Liveness", func() {
 						Kind:               object.GVK(nodePool).Kind,
 						Name:               nodePool.Name,
 						UID:                nodePool.UID,
-						BlockOwnerDeletion: lo.ToPtr(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -344,7 +343,7 @@ var _ = Describe("Liveness", func() {
 						Kind:               object.GVK(nodePool).Kind,
 						Name:               nodePool.Name,
 						UID:                nodePool.UID,
-						BlockOwnerDeletion: lo.ToPtr(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -384,7 +383,7 @@ var _ = Describe("Liveness", func() {
 						Kind:               object.GVK(nodePool).Kind,
 						Name:               nodePool.Name,
 						UID:                nodePool.UID,
-						BlockOwnerDeletion: lo.ToPtr(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},

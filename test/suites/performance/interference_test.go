@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
@@ -71,7 +70,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			By("Net scaling out interference test")
 
 			// Scale down one deployment 50% and Scale up the 2nd to 500
-			smallDeployment.Spec.Replicas = lo.ToPtr(int32(250))
+			smallDeployment.Spec.Replicas = new(int32(250))
 			largeDeployment := test.Deployment(largeOpts)
 			env.ExpectUpdated(smallDeployment)
 			env.ExpectCreated(largeDeployment)
@@ -105,8 +104,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// Scale small_deployment from 250 to 400 (+150 pods)
 			// Scale large_deployment from 500 to 200 (-300 pods)
 			// Net result: 600 total pods (down from 750, net change of -150 pods)
-			smallDeployment.Spec.Replicas = lo.ToPtr(int32(400))
-			largeDeployment.Spec.Replicas = lo.ToPtr(int32(200))
+			smallDeployment.Spec.Replicas = new(int32(400))
+			largeDeployment.Spec.Replicas = new(int32(200))
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring consolidation activity during mixed scaling operations")

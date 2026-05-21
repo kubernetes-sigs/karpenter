@@ -655,4 +655,41 @@ var _ = Describe("Initialization", func() {
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
+	It("should not consider the Node to be initialized while a readiness.k8s.io/ taint is present, and initialize once it is removed", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+			},
+		})
+		// NRC independently applies its taint after the node joins.
+		node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
+			Key:    "readiness.k8s.io/some-rule",
+			Effect: corev1.TaintEffectNoSchedule,
+		})
+
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		// Launch reassigns the providerID; sync the node to the post-launch value.
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		node.Spec.ProviderID = nodeClaim.Status.ProviderID
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+
+		// Shouldn't consider the node initialized while the NRC taint is present
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
+
+		node = ExpectExists(ctx, env.Client, node)
+		node.Spec.Taints = []corev1.Taint{}
+		ExpectApplied(ctx, env.Client, node)
+
+		// nodeClaim should now be initialized once the NRC taint is removed
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
+	})
 })

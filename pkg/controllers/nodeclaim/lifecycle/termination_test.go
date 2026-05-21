@@ -308,7 +308,7 @@ var _ = Describe("Termination", func() {
 	It("should not delete nodes without provider ids if the NodeClaim hasn't been launched yet", func() {
 		// Generate 10 nodes, none of which have a provider id
 		var nodes []*corev1.Node
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			nodes = append(nodes, test.Node())
 		}
 		ExpectApplied(ctx, env.Client, lo.Map(nodes, func(n *corev1.Node, _ int) client.Object { return n })...)
