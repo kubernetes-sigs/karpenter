@@ -32,10 +32,14 @@ type PoolKey struct {
 	Pool   PoolID
 }
 
-// DeviceWithID pairs a device with its globally unique identifier.
+// DeviceWithID pairs a device with its globally unique identifier and any topology
+// requirements inherited from the slice that contains it. TopologyRequirements is
+// non-nil when the device's slice uses a NodeSelector (non-node-local device); nil
+// for AllNodes slices and template (potential) devices.
 type DeviceWithID struct {
 	cloudprovider.Device
-	ID DeviceID
+	ID                   DeviceID
+	TopologyRequirements *scheduling.Requirements
 }
 
 // Pool represents a group of in-cluster ResourceSlices that share a driver and pool name.
@@ -123,14 +127,16 @@ func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
 			continue
 		}
 		p.Slices = append(p.Slices, s)
+		topoReqs := sliceTopologyRequirements(s)
 		for _, d := range s.Devices() {
 			p.Devices = append(p.Devices, DeviceWithID{
 				Device: d,
-				ID: DeviceID{
+				ID: DeviceID{DeviceID: cloudprovider.DeviceID{
 					Driver: pool.Key.Driver,
 					Pool:   pool.Key.Pool,
 					Device: d.Name,
-				},
+				}},
+				TopologyRequirements: topoReqs,
 			})
 		}
 	}
@@ -154,6 +160,24 @@ func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requireme
 		return nodeSelectorsMatch(ns, requirements)
 	}
 	return false
+}
+
+// sliceTopologyRequirements returns the topology requirements implied by a slice's NodeSelector,
+// or nil if the slice uses AllNodes (no topology constraint).
+func sliceTopologyRequirements(s ResourceSlice) *scheduling.Requirements {
+	if s.AllNodes() {
+		return nil
+	}
+	ns := s.NodeSelector()
+	if ns == nil {
+		return nil
+	}
+	reqs := scheduling.NewRequirements()
+	for _, term := range ns.NodeSelectorTerms {
+		termReqs := scheduling.NewNodeSelectorRequirements(term.MatchExpressions...)
+		reqs.Add(termReqs.Values()...)
+	}
+	return &reqs
 }
 
 // nodeSelectorsMatch checks if any term in the NodeSelector is compatible with the requirements.
@@ -233,6 +257,7 @@ func (b *poolBuilder) build(key PoolKey) *Pool {
 			continue
 		}
 		pool.Slices = append(pool.Slices, e.slice)
+		topoReqs := sliceTopologyRequirements(e.slice)
 		for _, d := range e.slice.Devices() {
 			if seen.Has(d.Name) {
 				pool.Invalid = true
@@ -240,11 +265,12 @@ func (b *poolBuilder) build(key PoolKey) *Pool {
 			seen.Insert(d.Name)
 			pool.Devices = append(pool.Devices, DeviceWithID{
 				Device: d,
-				ID: DeviceID{
+				ID: DeviceID{DeviceID: cloudprovider.DeviceID{
 					Driver: key.Driver,
 					Pool:   key.Pool,
 					Device: d.Name,
-				},
+				}},
+				TopologyRequirements: topoReqs,
 			})
 		}
 	}

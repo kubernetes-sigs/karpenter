@@ -37,7 +37,7 @@ import (
 // Example: A ResourceClaim requires a GPU and NIC that share a PCI root. The PCI root ID is
 // only known after node launch, but the cloud provider declares that specific GPU-NIC pairs
 // on a given instance type will share this attribute.
-type AttributeBindings map[resourcev1.QualifiedName]map[string]map[InstanceTypeID]map[DeviceID]sets.Set[DeviceID]
+type AttributeBindings map[resourcev1.QualifiedName]map[string]map[InstanceTypeID]map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID]
 
 // HasBindings returns true if the given device has any attribute binding entries for the specified
 // attribute, nodePool, and instanceType. This is used to check whether a device participates in
@@ -55,7 +55,7 @@ func (ab AttributeBindings) HasBindings(nodePool string, instanceType InstanceTy
 	if !ok {
 		return false
 	}
-	_, ok = itBindings[device]
+	_, ok = itBindings[device.DeviceID]
 	return ok
 }
 
@@ -76,21 +76,21 @@ func (ab AttributeBindings) Bound(nodePool string, instanceType InstanceTypeID, 
 	if !ok {
 		return false
 	}
-	deviceBindings, ok := itBindings[deviceA]
+	deviceBindings, ok := itBindings[deviceA.DeviceID]
 	if !ok {
 		return false
 	}
-	if deviceA == deviceB {
+	if deviceA.DeviceID == deviceB.DeviceID {
 		return deviceBindings.Len() > 0
 	}
-	return deviceBindings.Has(deviceB)
+	return deviceBindings.Has(deviceB.DeviceID)
 }
 
 // BuildAttributeBindings constructs the attribute binding graph from cloud provider instance type
 // metadata. It creates symmetric pairs for each declared binding and computes the transitive
 // closure per (attribute, nodePool, instanceType) triple.
 func BuildAttributeBindings(instanceTypesByNodePool map[string][]*cloudprovider.InstanceType) AttributeBindings {
-	bindings := make(map[resourcev1.QualifiedName]map[string]map[InstanceTypeID]map[DeviceID]sets.Set[DeviceID])
+	bindings := make(map[resourcev1.QualifiedName]map[string]map[InstanceTypeID]map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID])
 	for nodePool, instanceTypes := range instanceTypesByNodePool {
 		for _, instanceType := range instanceTypes {
 			for _, itBinding := range instanceType.DynamicResources.AttributeBindings {
@@ -99,23 +99,23 @@ func BuildAttributeBindings(instanceTypesByNodePool map[string][]*cloudprovider.
 				}
 				bindingsForAttribute, ok := bindings[itBinding.Attribute]
 				if !ok {
-					bindingsForAttribute = make(map[string]map[InstanceTypeID]map[DeviceID]sets.Set[DeviceID])
+					bindingsForAttribute = make(map[string]map[InstanceTypeID]map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID])
 					bindings[itBinding.Attribute] = bindingsForAttribute
 				}
 				bindingsForNodePool, ok := bindingsForAttribute[nodePool]
 				if !ok {
-					bindingsForNodePool = make(map[InstanceTypeID]map[DeviceID]sets.Set[DeviceID])
+					bindingsForNodePool = make(map[InstanceTypeID]map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID])
 					bindingsForAttribute[nodePool] = bindingsForNodePool
 				}
 				bindingsForInstanceType, ok := bindingsForNodePool[unique.Make(instanceType.Name)]
 				if !ok {
-					bindingsForInstanceType = make(map[DeviceID]sets.Set[DeviceID])
+					bindingsForInstanceType = make(map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID])
 					bindingsForNodePool[unique.Make(instanceType.Name)] = bindingsForInstanceType
 				}
 				for i := range itBinding.Devices {
 					bindingsForDevice, ok := bindingsForInstanceType[itBinding.Devices[i]]
 					if !ok {
-						bindingsForDevice = sets.New[DeviceID]()
+						bindingsForDevice = sets.New[cloudprovider.DeviceID]()
 						bindingsForInstanceType[itBinding.Devices[i]] = bindingsForDevice
 					}
 					for j := range itBinding.Devices {
@@ -136,10 +136,10 @@ func BuildAttributeBindings(instanceTypesByNodePool map[string][]*cloudprovider.
 	for _, nodePoolBindings := range bindings {
 		for _, instanceTypeBindings := range nodePoolBindings {
 			for _, deviceBindings := range instanceTypeBindings {
-				closures := make(map[DeviceID]sets.Set[DeviceID], len(deviceBindings))
+				closures := make(map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID], len(deviceBindings))
 				for device := range deviceBindings {
-					visited := sets.New[DeviceID]()
-					queue := []DeviceID{device}
+					visited := sets.New[cloudprovider.DeviceID]()
+					queue := []cloudprovider.DeviceID{device}
 					for len(queue) > 0 {
 						curr := queue[0]
 						queue = queue[1:]

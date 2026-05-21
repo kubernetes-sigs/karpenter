@@ -27,12 +27,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 )
 
-func deviceID(driver, pool, device string) cloudprovider.DeviceID {
-	return cloudprovider.DeviceID{
+func deviceID(driver, pool, device string) dynamicresources.DeviceID {
+	return dynamicresources.DeviceID{DeviceID: cloudprovider.DeviceID{
 		Driver: unique.Make(driver),
 		Pool:   unique.Make(pool),
 		Device: unique.Make(device),
-	}
+	}}
 }
 
 func itType(name string, bindings ...*cloudprovider.AttributeBinding) *cloudprovider.InstanceType {
@@ -44,10 +44,14 @@ func itType(name string, bindings ...*cloudprovider.AttributeBinding) *cloudprov
 	}
 }
 
-func attrBinding(attribute resourcev1.QualifiedName, devices ...cloudprovider.DeviceID) *cloudprovider.AttributeBinding {
+func attrBinding(attribute resourcev1.QualifiedName, devices ...dynamicresources.DeviceID) *cloudprovider.AttributeBinding {
+	cpDevices := make([]cloudprovider.DeviceID, len(devices))
+	for i, d := range devices {
+		cpDevices[i] = d.DeviceID
+	}
 	return &cloudprovider.AttributeBinding{
 		Attribute: attribute,
-		Devices:   devices,
+		Devices:   cpDevices,
 	}
 }
 
@@ -142,7 +146,7 @@ var _ = Describe("AttributeBindings", func() {
 				)},
 			})
 			it := unique.Make("gpu-xl")
-			for _, pair := range [][2]cloudprovider.DeviceID{
+			for _, pair := range [][2]dynamicresources.DeviceID{
 				{devA, devB}, {devA, devC}, {devA, devD},
 				{devB, devA}, {devB, devC}, {devB, devD},
 				{devC, devA}, {devC, devB}, {devC, devD},

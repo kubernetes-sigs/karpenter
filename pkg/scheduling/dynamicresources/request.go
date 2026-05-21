@@ -19,6 +19,7 @@ package dynamicresources
 import (
 	"context"
 	"fmt"
+	"unique"
 
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -61,6 +62,7 @@ type RequestData struct {
 
 // ClaimData holds the parsed constraints and requests for a single ResourceClaim.
 type ClaimData struct {
+	ID          ResourceClaimID
 	Requests    []RequestData
 	Constraints []Constraint
 }
@@ -77,7 +79,9 @@ func ValidateClaimRequest(
 	celCache *dracel.Cache,
 	bindingFallback *AttributeBindingFallback,
 ) (*ClaimData, error) {
-	data := &ClaimData{}
+	data := &ClaimData{
+		ID: unique.Make(claim.Name),
+	}
 
 	// Build constraints.
 	for _, c := range claim.Spec.Devices.Constraints {

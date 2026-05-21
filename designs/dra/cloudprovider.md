@@ -54,8 +54,7 @@ type ResourceSlice interface {
     //
     // The allocator uses this distinction for:
     //   - Tracking allocations: potential devices are tracked per-NodeClaim and
-    //     per-InstanceType (inFlightAllocatedDevices); published devices are tracked
-    //     globally (allocatedDevices).
+    //     per-InstanceType; published devices are tracked globally via AllocationTracker.
     //   - Requirement narrowing: published (non-potential) non-node-local devices
     //     may carry topology requirements that constrain the NodeClaim. Potential
     //     devices are always node-local and do not constrain topology.
@@ -65,10 +64,16 @@ type ResourceSlice interface {
     NodeSelector() *corev1.NodeSelector
     // AllNodes returns true if the slice's devices are accessible from all nodes.
     AllNodes() bool
+    // Generation returns the pool generation this slice belongs to. Newer generations
+    // supersede older ones during pool gathering. Template slices return 0.
+    Generation() int64
+    // ResourceSliceCount returns the total number of slices expected in this pool at
+    // the current generation. Used to determine pool completeness. Template slices return 1.
+    ResourceSliceCount() int64
 }
 ```
 
-This allows the allocator to work with both sources through a common interface without copying. The `cloudprovider.ResourceSliceTemplate` implements this interface with `Potential() → true`, `NodeSelector() → nil`, `AllNodes() → false`. An adapter for `resourcev1.ResourceSlice` implements it with `Potential() → false` and derives the remaining methods from the API object's fields.
+This allows the allocator to work with both sources through a common interface without copying. The `cloudprovider.ResourceSliceTemplate` implements this interface with `Potential() → true`, `NodeSelector() → nil`, `AllNodes() → false`, `Generation() → 0`, `ResourceSliceCount() → 1`. An adapter for `resourcev1.ResourceSlice` implements it with `Potential() → false` and derives the remaining methods from the API object's fields.
 
 ### AttributeBinding
 
