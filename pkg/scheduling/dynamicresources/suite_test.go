@@ -17,13 +17,38 @@ limitations under the License.
 package dynamicresources_test
 
 import (
+	"context"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
+)
+
+var (
+	ctx context.Context
+	env *test.Environment
 )
 
 func TestDynamicResources(t *testing.T) {
+	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "DynamicResources")
 }
+
+var _ = BeforeSuite(func() {
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
+})
+
+var _ = AfterSuite(func() {
+	Expect(env.Stop()).To(Succeed())
+})
+
+var _ = AfterEach(func() {
+	ExpectCleanedUp(ctx, env.Client)
+})
