@@ -63,7 +63,7 @@ var _ = Describe("NodeOverlay", func() {
 			nos := lo.Times(10, func(_ int) *v1alpha1.NodeOverlay {
 				return test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						Weight: lo.ToPtr[int32](int32(rand.IntN(100) + 1)), //nolint:gosec
+						Weight: new(int32(rand.IntN(100) + 1)), //nolint:gosec
 						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      "test",

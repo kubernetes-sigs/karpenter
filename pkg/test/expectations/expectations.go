@@ -173,7 +173,7 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
-		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}); !errors.IsNotFound(err) {
+		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}); !errors.IsNotFound(err) {
 			Expect(err).To(BeNil())
 		}
 		ExpectNotFound(ctx, c, object)
@@ -267,7 +267,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 				defer wg.Done()
 				defer GinkgoRecover()
 				err := c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
-					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}})
+					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: new(int64(0))}})
 				// Fail open for CRDs that don't exist on this k8s version (e.g. ResourceClaim on < 1.34)
 				if err != nil && !meta.IsNoMatchError(err) {
 					Expect(err).ToNot(HaveOccurred())
