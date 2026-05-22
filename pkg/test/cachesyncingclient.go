@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/avast/retry-go"
 	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
@@ -36,24 +36,26 @@ type CacheSyncingClient struct {
 	client.Client
 }
 
+const (
+	pollInterval = 10 * time.Millisecond
+	pollTimeout  = 1 * time.Second
+)
+
+// pollForCacheSync blocks until condition returns done or pollTimeout elapses.
 // If we timeout on polling, the assumption is that the cache updated to a newer version
-// and we missed the current WRITE operation that we just performed
-var pollingOptions = []retry.Option{
-	retry.Attempts(100), // This whole poll should take ~1s
-	retry.Delay(time.Millisecond * 10),
-	retry.DelayType(retry.FixedDelay),
+// and we missed the current WRITE operation that we just performed.
+func pollForCacheSync(ctx context.Context, condition wait.ConditionWithContextFunc) {
+	_ = wait.PollUntilContextTimeout(ctx, pollInterval, pollTimeout, true, condition)
 }
 
 func (c *CacheSyncingClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
 	if err := c.Client.Create(ctx, obj, opts...); err != nil {
 		return err
 	}
-	_ = retry.Do(func() error {
-		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
-			return fmt.Errorf("getting object, %w", err)
-		}
-		return nil
-	}, pollingOptions...)
+	pollForCacheSync(ctx, func(ctx context.Context) (bool, error) {
+		err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil, ctx.Err()
+	})
 	return nil
 }
 
@@ -61,15 +63,10 @@ func (c *CacheSyncingClient) Delete(ctx context.Context, obj client.Object, opts
 	if err := c.Client.Delete(ctx, obj, opts...); err != nil {
 		return err
 	}
-	_ = retry.Do(func() error {
-		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
-			if errors.IsNotFound(err) {
-				return nil
-			}
-			return fmt.Errorf("getting object, %w", err)
-		}
-		return fmt.Errorf("object still exists")
-	}, pollingOptions...)
+	pollForCacheSync(ctx, func(ctx context.Context) (bool, error) {
+		err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return apierrors.IsNotFound(err), ctx.Err()
+	})
 	return nil
 }
 
@@ -77,9 +74,10 @@ func (c *CacheSyncingClient) Update(ctx context.Context, obj client.Object, opts
 	if err := c.Client.Update(ctx, obj, opts...); err != nil {
 		return err
 	}
-	_ = retry.Do(func() error {
-		return objectSynced(ctx, c.Client, obj)
-	}, pollingOptions...)
+	pollForCacheSync(ctx, func(ctx context.Context) (bool, error) {
+		err := objectSynced(ctx, c.Client, obj)
+		return err == nil, ctx.Err()
+	})
 	return nil
 }
 
@@ -87,9 +85,10 @@ func (c *CacheSyncingClient) Patch(ctx context.Context, obj client.Object, patch
 	if err := c.Client.Patch(ctx, obj, patch, opts...); err != nil {
 		return err
 	}
-	_ = retry.Do(func() error {
-		return objectSynced(ctx, c.Client, obj)
-	}, pollingOptions...)
+	pollForCacheSync(ctx, func(ctx context.Context) (bool, error) {
+		err := objectSynced(ctx, c.Client, obj)
+		return err == nil, ctx.Err()
+	})
 	return nil
 }
 
@@ -104,19 +103,14 @@ func (c *CacheSyncingClient) DeleteAllOf(ctx context.Context, obj client.Object,
 	metaList := &metav1.PartialObjectMetadataList{}
 	metaList.SetGroupVersionKind(lo.Must(apiutil.GVKForObject(obj, c.Scheme())))
 
-	_ = retry.Do(func() error {
+	pollForCacheSync(ctx, func(ctx context.Context) (bool, error) {
 		listOptions := []client.ListOption{client.Limit(1)}
 		if options.Namespace != "" {
 			listOptions = append(listOptions, client.InNamespace(options.Namespace))
 		}
-		if err := c.List(ctx, metaList, listOptions...); err != nil {
-			return fmt.Errorf("listing objects, %w", err)
-		}
-		if len(metaList.Items) != 0 {
-			return fmt.Errorf("objects still exist")
-		}
-		return nil
-	}, pollingOptions...)
+		err := c.List(ctx, metaList, listOptions...)
+		return err == nil && len(metaList.Items) == 0, ctx.Err()
+	})
 	return nil
 }
 
@@ -138,9 +132,10 @@ func (c *cacheSyncingStatusWriter) Update(ctx context.Context, obj client.Object
 	if err := c.client.Status().Update(ctx, obj, opts...); err != nil {
 		return err
 	}
-	_ = retry.Do(func() error {
-		return objectSynced(ctx, c.client, obj)
-	}, pollingOptions...)
+	pollForCacheSync(ctx, func(ctx context.Context) (bool, error) {
+		err := objectSynced(ctx, c.client, obj)
+		return err == nil, ctx.Err()
+	})
 	return nil
 }
 
@@ -148,9 +143,10 @@ func (c *cacheSyncingStatusWriter) Patch(ctx context.Context, obj client.Object,
 	if err := c.client.Status().Patch(ctx, obj, patch, opts...); err != nil {
 		return err
 	}
-	_ = retry.Do(func() error {
-		return objectSynced(ctx, c.client, obj)
-	}, pollingOptions...)
+	pollForCacheSync(ctx, func(ctx context.Context) (bool, error) {
+		err := objectSynced(ctx, c.client, obj)
+		return err == nil, ctx.Err()
+	})
 	return nil
 }
 
