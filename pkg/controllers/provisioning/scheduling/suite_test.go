@@ -2425,6 +2425,15 @@ var _ = Context("Scheduling", func() {
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
 				node1 := ExpectScheduled(ctx, env.Client, initialPod)
 
+				// Verify simulation-only requirements don't leak into the created NodeClaim
+				Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+				createdNodeClaim := cloudProvider.CreateCalls[0]
+				reqs := pscheduling.NewNodeSelectorRequirementsWithMinValues(createdNodeClaim.Spec.Requirements...)
+				Expect(reqs).ToNot(HaveKey(v1.NodeRegisteredLabelKey))
+				Expect(reqs).ToNot(HaveKey(v1.NodeInitializedLabelKey))
+				Expect(createdNodeClaim.Labels).ToNot(HaveKey(v1.NodeRegisteredLabelKey))
+				Expect(createdNodeClaim.Labels).ToNot(HaveKey(v1.NodeInitializedLabelKey))
+
 				// create our daemonset pod and manually bind it to the node
 				ds1Pod := test.UnschedulablePod(test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{
