@@ -87,12 +87,9 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim)
 
 // KnownEphemeralTaintsRemoved validates whether all the ephemeral taints are removed
 func KnownEphemeralTaintsRemoved(node *corev1.Node) (*corev1.Taint, bool) {
-	for _, knownTaint := range scheduling.KnownEphemeralTaints {
-		// if the node still has a known ephemeral taint applied, it's not ready
-		for i := range node.Spec.Taints {
-			if knownTaint.MatchTaint(&node.Spec.Taints[i]) {
-				return &node.Spec.Taints[i], false
-			}
+	for i := range node.Spec.Taints {
+		if scheduling.IsKnownEphemeralTaint(&node.Spec.Taints[i]) {
+			return &node.Spec.Taints[i], false
 		}
 	}
 	return nil, true

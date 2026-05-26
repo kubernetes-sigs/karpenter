@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -61,23 +62,37 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 
 	// File output
 	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
-		reportFile := filepath.Join(outputDir, fmt.Sprintf("%s_performance_report.json", filePrefix))
-		if reportJSON, err := json.MarshalIndent(report, "", "  "); err == nil {
-			if err := os.WriteFile(reportFile, reportJSON, 0600); err == nil {
-				GinkgoWriter.Printf("Report written to: %s\n", reportFile)
-			}
+		writeReportFiles(report, filePrefix, outputDir)
+	}
+}
+
+// writeReportFiles persists the report JSON and any profile data under
+// outputDir. The caller-supplied filePrefix is sanitized to prevent path
+// traversal via the OUTPUT_DIR environment variable or the prefix itself.
+func writeReportFiles(report *PerformanceReport, filePrefix, outputDir string) {
+	safeDir := filepath.Clean(outputDir)
+	safePrefix := filepath.Base(filepath.Clean(filePrefix))
+	writeUnder := func(name string, data []byte) (string, error) {
+		path := filepath.Join(safeDir, name)
+		// Defense in depth: ensure the resolved path stays under safeDir.
+		if rel, err := filepath.Rel(safeDir, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("refusing to write outside %q", safeDir)
 		}
-		if len(report.MemoryProfileData) > 0 {
-			profileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", filePrefix))
-			if err := os.WriteFile(profileFile, report.MemoryProfileData, 0600); err == nil {
-				GinkgoWriter.Printf("Memory profile saved to: %s\n", profileFile)
-			}
+		return path, os.WriteFile(path, data, 0600)
+	}
+	if reportJSON, err := json.MarshalIndent(report, "", "  "); err == nil {
+		if path, err := writeUnder(fmt.Sprintf("%s_performance_report.json", safePrefix), reportJSON); err == nil {
+			GinkgoWriter.Printf("Report written to: %s\n", path)
 		}
-		if len(report.CPUProfileData) > 0 {
-			cpuProfileFile := filepath.Join(outputDir, fmt.Sprintf("karpenter_cpu_profile_%s.pb.gz", filePrefix))
-			if err := os.WriteFile(cpuProfileFile, report.CPUProfileData, 0600); err == nil {
-				GinkgoWriter.Printf("CPU profile saved to: %s\n", cpuProfileFile)
-			}
+	}
+	if len(report.MemoryProfileData) > 0 {
+		if path, err := writeUnder(fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", safePrefix), report.MemoryProfileData); err == nil {
+			GinkgoWriter.Printf("Memory profile saved to: %s\n", path)
+		}
+	}
+	if len(report.CPUProfileData) > 0 {
+		if path, err := writeUnder(fmt.Sprintf("karpenter_cpu_profile_%s.pb.gz", safePrefix), report.CPUProfileData); err == nil {
+			GinkgoWriter.Printf("CPU profile saved to: %s\n", path)
 		}
 	}
 }

@@ -319,7 +319,7 @@ var _ = Describe("Topology", func() {
 			}
 			createPods := func(count int) []*corev1.Pod {
 				var pods []*corev1.Pod
-				for i := 0; i < count; i++ {
+				for range count {
 					pods = append(pods, test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 						ResourceRequirements: rr, TopologySpreadConstraints: topology}))
 				}
@@ -2299,7 +2299,7 @@ var _ = Describe("Topology", func() {
 			// pod affinity/anti-affinity are bidirectional, so run this a few times to ensure we handle it regardless
 			// of pod scheduling order
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				affPod1 := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 				// affPod2 will avoid affPod1
 				affPod2 := test.UnschedulablePod(test.PodOptions{PodAntiRequirements: []corev1.PodAffinityTerm{{
@@ -2791,7 +2791,7 @@ var _ = Describe("Topology", func() {
 			webLabels := map[string]string{"type": "web", "spread": "spread"}
 			cacheLabels := map[string]string{"type": "cache", "spread": "spread"}
 			uiLabels := map[string]string{"type": "ui", "spread": "spread"}
-			for i := 0; i < 50; i++ {
+			for range 50 {
 				ExpectApplied(ctx, env.Client, nodePool.DeepCopy())
 				// we have to schedule DB -> Web -> Cache -> UI in that order or else there are pod affinity violations
 				pods := []*corev1.Pod{

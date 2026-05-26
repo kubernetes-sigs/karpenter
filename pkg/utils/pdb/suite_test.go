@@ -79,7 +79,7 @@ var _ = Describe("CanEvictPods", func() {
 		}
 		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
 			Labels:                     podLabels,
-			MinAvailable:               lo.ToPtr(intstr.FromString("100%")),
+			MinAvailable:               new(intstr.FromString("100%")),
 			UnhealthyPodEvictionPolicy: lo.ToPtr(policyv1.AlwaysAllow),
 		})
 		pod := test.Pod(test.PodOptions{
@@ -99,7 +99,7 @@ var _ = Describe("CanEvictPods", func() {
 	It("can't evict unhealthy pods when UnhealthyPodEvictionPolicy is not set", func() {
 		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
 			Labels:       podLabels,
-			MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+			MinAvailable: new(intstr.FromString("100%")),
 		})
 		pod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -160,26 +160,26 @@ var _ = Describe("CanEvictPods", func() {
 		},
 		Entry("100% min available", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:       podLabels,
-			MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+			MinAvailable: new(intstr.FromString("100%")),
 		})),
 		Entry("0% max unavailable", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:         podLabels,
-			MaxUnavailable: lo.ToPtr(intstr.FromString("0%")),
+			MaxUnavailable: new(intstr.FromString("0%")),
 		})),
 		Entry("0 max unavailable", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:         podLabels,
-			MaxUnavailable: lo.ToPtr(intstr.FromInt(0)),
+			MaxUnavailable: new(intstr.FromInt(0)),
 		})),
 		Entry("multiple PDBs on the same pod",
 			test.PodDisruptionBudget(test.PDBOptions{
 				ObjectMeta:   metav1.ObjectMeta{Name: "pdb-1"},
 				Labels:       podLabels,
-				MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+				MinAvailable: new(intstr.FromString("100%")),
 			}),
 			test.PodDisruptionBudget(test.PDBOptions{
 				ObjectMeta:   metav1.ObjectMeta{Name: "pdb-2"},
 				Labels:       podLabels,
-				MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+				MinAvailable: new(intstr.FromString("100%")),
 			}),
 		),
 	)
@@ -206,26 +206,26 @@ var _ = Describe("CanEvictPods", func() {
 		},
 		Entry("100% min available", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:       podLabels,
-			MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+			MinAvailable: new(intstr.FromString("100%")),
 		})),
 		Entry("0% max unavailable", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:         podLabels,
-			MaxUnavailable: lo.ToPtr(intstr.FromString("0%")),
+			MaxUnavailable: new(intstr.FromString("0%")),
 		})),
 		Entry("0 max unavailable", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:         podLabels,
-			MaxUnavailable: lo.ToPtr(intstr.FromInt(0)),
+			MaxUnavailable: new(intstr.FromInt(0)),
 		})),
 		Entry("multiple PDBs on the same pod",
 			test.PodDisruptionBudget(test.PDBOptions{
 				ObjectMeta:   metav1.ObjectMeta{Name: "pdb-1"},
 				Labels:       podLabels,
-				MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+				MinAvailable: new(intstr.FromString("100%")),
 			}),
 			test.PodDisruptionBudget(test.PDBOptions{
 				ObjectMeta:   metav1.ObjectMeta{Name: "pdb-2"},
 				Labels:       podLabels,
-				MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+				MinAvailable: new(intstr.FromString("100%")),
 			}),
 		),
 	)
@@ -238,7 +238,7 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 		}
 		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
 			Labels:                     podLabels,
-			MinAvailable:               lo.ToPtr(intstr.FromString("100%")),
+			MinAvailable:               new(intstr.FromString("100%")),
 			UnhealthyPodEvictionPolicy: lo.ToPtr(policyv1.AlwaysAllow),
 		})
 		pod := test.Pod(test.PodOptions{
@@ -256,7 +256,7 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 	It("does not consider unhealthy pod as currently reschedulable when UnhealthyPodEvictionPolicy is not set", func() {
 		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
 			Labels:       podLabels,
-			MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+			MinAvailable: new(intstr.FromString("100%")),
 		})
 		pod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -302,26 +302,26 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 		},
 		Entry("100% min available", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:       podLabels,
-			MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+			MinAvailable: new(intstr.FromString("100%")),
 		})),
 		Entry("0% max unavailable", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:         podLabels,
-			MaxUnavailable: lo.ToPtr(intstr.FromString("0%")),
+			MaxUnavailable: new(intstr.FromString("0%")),
 		})),
 		Entry("0 max unavailable", test.PodDisruptionBudget(test.PDBOptions{
 			Labels:         podLabels,
-			MaxUnavailable: lo.ToPtr(intstr.FromInt(0)),
+			MaxUnavailable: new(intstr.FromInt(0)),
 		})),
 		Entry("multiple PDBs on the same pod",
 			test.PodDisruptionBudget(test.PDBOptions{
 				ObjectMeta:   metav1.ObjectMeta{Name: "pdb-1"},
 				Labels:       podLabels,
-				MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+				MinAvailable: new(intstr.FromString("100%")),
 			}),
 			test.PodDisruptionBudget(test.PDBOptions{
 				ObjectMeta:   metav1.ObjectMeta{Name: "pdb-2"},
 				Labels:       podLabels,
-				MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+				MinAvailable: new(intstr.FromString("100%")),
 			}),
 		),
 	)

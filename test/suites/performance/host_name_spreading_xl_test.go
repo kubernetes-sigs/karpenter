@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
@@ -73,8 +72,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			initialNodes := scaleOutReport.TotalNodes
 
 			// Scale down both deployments
-			smallDeployment.Spec.Replicas = lo.ToPtr(int32(700))
-			largeDeployment.Spec.Replicas = lo.ToPtr(int32(700))
+			smallDeployment.Spec.Replicas = new(int32(700))
+			largeDeployment.Spec.Replicas = new(int32(700))
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring XL consolidation performance")

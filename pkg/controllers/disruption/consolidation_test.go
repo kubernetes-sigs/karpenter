@@ -98,7 +98,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		spotNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: new(true)}}))
 	})
 	Context("Events", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmptyOrUnderutilized", func() {
@@ -244,8 +244,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
@@ -302,8 +302,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
@@ -366,7 +366,7 @@ var _ = Describe("Consolidation", func() {
 		It("should only allow 3 empty nodes to be disrupted", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -389,7 +389,7 @@ var _ = Describe("Consolidation", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -412,7 +412,7 @@ var _ = Describe("Consolidation", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -434,7 +434,7 @@ var _ = Describe("Consolidation", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// make a pod for each nodes, where they each all fit into one node.
@@ -454,11 +454,11 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, pods[i])
 				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
 			}
@@ -477,7 +477,7 @@ var _ = Describe("Consolidation", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// make a pod for each node, where only two pods can fit each node.
@@ -497,11 +497,11 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, pods[i])
 				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
 			}
@@ -509,7 +509,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			// Reconcile 5 times, enqueuing 3 commands total.
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				ExpectSingletonReconciled(ctx, disruptionController)
 			}
 			// Execute all commands in the queue, only deleting 3 nodes
@@ -534,7 +534,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -599,7 +599,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -663,7 +663,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -715,7 +715,7 @@ var _ = Describe("Consolidation", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -749,7 +749,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -803,7 +803,7 @@ var _ = Describe("Consolidation", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -837,7 +837,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -890,7 +890,7 @@ var _ = Describe("Consolidation", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -924,7 +924,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -992,8 +992,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 				ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
@@ -1079,8 +1079,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
@@ -1106,7 +1106,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(ok).To(BeTrue())
 		})
 		It("cannot replace spot with spot if the spotToSpotConsolidation is disabled", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(false)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: new(false)}}))
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -1120,8 +1120,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
@@ -1195,8 +1195,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
@@ -1248,7 +1248,7 @@ var _ = Describe("Consolidation", func() {
 			})
 			// These 15 cheapest instance types should eventually be considered for consolidation.
 			var expectedInstanceTypesNames []string
-			for i := 0; i < 15; i++ {
+			for i := range 15 {
 				expectedInstanceTypesNames = append(expectedInstanceTypesNames, expectedInstanceTypesForConsolidation[i].Name)
 			}
 
@@ -1279,8 +1279,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
@@ -1319,7 +1319,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(spotInstancesConsideredForConsolidation)).To(Equal(15))
 
 			// Make sure we considered the first 15 cheapest instance types.
-			for i := 0; i < 15; i++ {
+			for i := range 15 {
 				Expect(spotInstancesConsideredForConsolidation).To(ContainElement(expectedInstanceTypesNames[i]))
 			}
 
@@ -1332,7 +1332,7 @@ var _ = Describe("Consolidation", func() {
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpExists,
 
-					MinValues: lo.ToPtr(16),
+					MinValues: new(16),
 				},
 			}
 			// Fetch 18 spot instances
@@ -1366,7 +1366,7 @@ var _ = Describe("Consolidation", func() {
 			})
 			// These 15 cheapest instance types should eventually be considered for consolidation.
 			var expectedInstanceTypesNames []string
-			for i := 0; i < 16; i++ {
+			for i := range 16 {
 				expectedInstanceTypesNames = append(expectedInstanceTypesNames, expectedInstanceTypesForConsolidation[i].Name)
 			}
 
@@ -1397,8 +1397,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
@@ -1438,7 +1438,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(spotInstancesConsideredForConsolidation)).To(Equal(16))
 
 			// Make sure we considered the first 16 cheapest instance types.
-			for i := 0; i < 16; i++ {
+			for i := range 16 {
 				Expect(spotInstancesConsideredForConsolidation).To(ContainElement(expectedInstanceTypesNames[i]))
 			}
 
@@ -1452,7 +1452,7 @@ var _ = Describe("Consolidation", func() {
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpExists,
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 				{
 					Key:      v1.CapacityTypeLabelKey,
@@ -1549,7 +1549,7 @@ var _ = Describe("Consolidation", func() {
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpExists,
 
-					MinValues: lo.ToPtr(10),
+					MinValues: new(10),
 				},
 			}
 			// Fetch 18 spot instances
@@ -1583,7 +1583,7 @@ var _ = Describe("Consolidation", func() {
 			})
 			// These 15 cheapest instance types should eventually be considered for consolidation.
 			var expectedInstanceTypesNames []string
-			for i := 0; i < 15; i++ {
+			for i := range 15 {
 				expectedInstanceTypesNames = append(expectedInstanceTypesNames, expectedInstanceTypesForConsolidation[i].Name)
 			}
 
@@ -1614,8 +1614,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
@@ -1655,7 +1655,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(spotInstancesConsideredForConsolidation)).To(Equal(15))
 
 			// Make sure we considered the first 15 cheapest instance types.
-			for i := 0; i < 15; i++ {
+			for i := range 15 {
 				Expect(spotInstancesConsideredForConsolidation).To(ContainElement(expectedInstanceTypesNames[i]))
 			}
 
@@ -1670,7 +1670,7 @@ var _ = Describe("Consolidation", func() {
 						Key:      corev1.LabelInstanceTypeStable,
 						Operator: corev1.NodeSelectorOpExists,
 
-						MinValues: lo.ToPtr(16),
+						MinValues: new(16),
 					},
 				}
 				// Fetch 18 spot instances
@@ -1731,8 +1731,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 				ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
@@ -1772,8 +1772,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 
@@ -1832,8 +1832,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 				pdb := test.PodDisruptionBudget(test.PDBOptions{
@@ -1889,8 +1889,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 
@@ -1972,8 +1972,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 
@@ -2036,8 +2036,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						},
 					},
@@ -2126,8 +2126,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						},
 					},
@@ -2247,8 +2247,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
@@ -2336,8 +2336,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -2416,8 +2416,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
@@ -2491,8 +2491,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			nodeClassNodePool := test.NodePool()
@@ -2541,8 +2541,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -2584,8 +2584,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -2641,8 +2641,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			nodeClaims[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
@@ -2683,8 +2683,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
@@ -2726,8 +2726,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
@@ -2773,8 +2773,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -2820,8 +2820,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			// Set a 2m duration-based do-not-disrupt annotation on pod[2]
@@ -2863,8 +2863,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			// All pods have a 2m duration-based do-not-disrupt annotation
@@ -2912,8 +2912,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			// Set an invalid format annotation - should not block consolidation
@@ -2953,8 +2953,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -2999,8 +2999,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
@@ -3068,8 +3068,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -3145,8 +3145,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -3192,8 +3192,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -3244,8 +3244,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -3302,8 +3302,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -3396,8 +3396,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -3461,8 +3461,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -3504,8 +3504,8 @@ var _ = Describe("Consolidation", func() {
 									Kind:               "ReplicaSet",
 									Name:               rs.Name,
 									UID:                rs.UID,
-									Controller:         lo.ToPtr(true),
-									BlockOwnerDeletion: lo.ToPtr(true),
+									Controller:         new(true),
+									BlockOwnerDeletion: new(true),
 								},
 							},
 						},
@@ -3786,8 +3786,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -3846,8 +3846,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -3894,8 +3894,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 
@@ -3972,8 +3972,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 
@@ -4044,8 +4044,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 
@@ -4122,8 +4122,8 @@ var _ = Describe("Consolidation", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 
@@ -4157,7 +4157,7 @@ var _ = Describe("Consolidation", func() {
 						ExpectExists(ctx, env.Client, nodeClaims[2])
 
 						var extraPods []*corev1.Pod
-						for i := 0; i < 2; i++ {
+						for range 2 {
 							extraPods = append(extraPods, test.Pod(test.PodOptions{
 								ResourceRequirements: corev1.ResourceRequirements{
 									Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
@@ -4247,8 +4247,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -4355,8 +4355,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -4423,8 +4423,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -4479,8 +4479,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -4525,8 +4525,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -4538,7 +4538,7 @@ var _ = Describe("Consolidation", func() {
 			}
 
 			var pods []*corev1.Pod
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				pod := test.UnschedulablePod(podOpts)
 				pods = append(pods, pod)
 			}
@@ -4569,7 +4569,7 @@ var _ = Describe("Consolidation", func() {
 			time.Sleep(time.Second * 11)
 
 			// Re-create the pods to re-bind them
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				ExpectDeleted(ctx, env.Client, pods[i])
 				pod := test.UnschedulablePod(podOpts)
 				ExpectApplied(ctx, env.Client, pod)
@@ -4619,7 +4619,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 			reservedNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true)}}))
 		})
 		It("can consolidate from one reserved offering to another", func() {
 			leastExpensiveReservationID := fmt.Sprintf("r-%s", leastExpensiveInstance.Name)
@@ -4653,8 +4653,8 @@ var _ = Describe("Consolidation", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			}})
@@ -4713,8 +4713,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				}})
@@ -4876,7 +4876,7 @@ var _ = Describe("Consolidation", func() {
 			// Create a nodepool with instance type minValues requirement
 			nodePoolWithMinValues = test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
-					Weight: lo.ToPtr(int32(100)),
+					Weight: new(int32(100)),
 					Template: v1.NodeClaimTemplate{
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
@@ -4886,7 +4886,7 @@ var _ = Describe("Consolidation", func() {
 									Values: lo.Map(cloudProvider.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) string {
 										return it.Name
 									}),
-									MinValues: lo.ToPtr(3),
+									MinValues: new(3),
 								},
 							},
 						},
@@ -4955,7 +4955,7 @@ var _ = Describe("Consolidation", func() {
 		It("should not consolidate static NodePool nodes", func() {
 			staticNp := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
-					Replicas:   lo.ToPtr(int64(2)), // Static nodepool with 2 desired replica
+					Replicas:   new(int64(2)), // Static nodepool with 2 desired replica
 					Disruption: v1.Disruption{},
 				},
 			})

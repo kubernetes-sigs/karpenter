@@ -319,9 +319,7 @@ func (in *StateNode) Taints() []corev1.Taint {
 		// different reason (e.g. the node is cordoned) we will assume that pods can schedule against the
 		// node in the future incorrectly.
 		return lo.Reject(taints, func(taint corev1.Taint, _ int) bool {
-			if _, found := lo.Find(scheduling.KnownEphemeralTaints, func(t corev1.Taint) bool {
-				return t.MatchTaint(&taint)
-			}); found {
+			if scheduling.IsKnownEphemeralTaint(&taint) {
 				return true
 			}
 			if _, found := lo.Find(in.NodeClaim.Spec.StartupTaints, func(t corev1.Taint) bool {
@@ -475,10 +473,7 @@ func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 }
 
 func nominationWindow(ctx context.Context) time.Duration {
-	nominationPeriod := 2 * options.FromContext(ctx).BatchMaxDuration
-	if nominationPeriod < 10*time.Second {
-		nominationPeriod = 10 * time.Second
-	}
+	nominationPeriod := max(2*options.FromContext(ctx).BatchMaxDuration, 10*time.Second)
 	return nominationPeriod
 }
 
