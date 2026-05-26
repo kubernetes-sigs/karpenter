@@ -79,11 +79,23 @@ func (kp *KarpenterProfiler) Stop() ([]byte, []byte) {
 
 func (kp *KarpenterProfiler) run(ctx context.Context) {
 	defer close(kp.done)
+
+	localPort := rand.IntnRange(10000, 49151)
+	pfCtx, pfCancel := context.WithCancel(ctx)
+	defer pfCancel()
+
+	if err := kp.establishPortForward(pfCtx, localPort); err != nil {
+		kp.lastError = fmt.Sprintf("initial port-forward: %v", err)
+		GinkgoWriter.Printf("KarpenterProfiler: failed to establish initial port-forward: %v\n", err)
+		return
+	}
+	GinkgoWriter.Printf("KarpenterProfiler: port-forward established on port %d\n", localPort)
+
 	heapTicker := time.NewTicker(30 * time.Second)
 	defer heapTicker.Stop()
 
 	// Capture an initial heap profile immediately
-	kp.captureHeap(ctx)
+	kp.captureHeap(localPort)
 
 	for {
 		select {
@@ -91,34 +103,30 @@ func (kp *KarpenterProfiler) run(ctx context.Context) {
 			return
 		case <-heapTicker.C:
 			kp.pollCount++
-			kp.captureHeap(ctx)
-			// Capture CPU profile less frequently to avoid blocking the loop.
-			// Every 2nd heap tick (~60s) we also grab a CPU profile.
+			kp.captureHeap(localPort)
 			if kp.pollCount%2 == 0 {
-				kp.captureCPU(ctx)
+				kp.captureCPU(localPort)
 			}
 		}
 	}
 }
 
-func (kp *KarpenterProfiler) captureHeap(ctx context.Context) {
-	pod, err := kp.env.FindActiveKarpenterPod(ctx)
+func (kp *KarpenterProfiler) establishPortForward(ctx context.Context, localPort int) error {
+	findCtx, findCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer findCancel()
+
+	pod, err := kp.env.FindActiveKarpenterPod(findCtx)
 	if err != nil || pod == nil {
-		kp.lastError = fmt.Sprintf("finding karpenter pod: %v", err)
-		GinkgoWriter.Printf("KarpenterProfiler: [heap] failed to find pod: %v\n", err)
-		return
+		return fmt.Errorf("finding karpenter pod: %w", err)
 	}
 
-	localPort := rand.IntnRange(10000, 49151)
-	portCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	if err := kp.env.PortForwardPod(portCtx, pod, 8080, localPort); err != nil {
-		kp.lastError = fmt.Sprintf("port-forward heap: %v", err)
-		GinkgoWriter.Printf("KarpenterProfiler: [heap] port-forward failed to pod %s on port %d: %v\n", pod.Name, localPort, err)
-		return
+	if err := kp.env.PortForwardPod(ctx, pod, 8080, localPort); err != nil {
+		return fmt.Errorf("port-forward to %s: %w", pod.Name, err)
 	}
+	return nil
+}
 
+func (kp *KarpenterProfiler) captureHeap(localPort int) {
 	if memMB, memData := kp.fetchHeapProfile(localPort); memMB > kp.peakMemoryMB {
 		GinkgoWriter.Printf("KarpenterProfiler: [heap] new peak memory: %.2f MB (previous: %.2f MB)\n", memMB, kp.peakMemoryMB)
 		kp.peakMemoryMB = memMB
@@ -126,32 +134,17 @@ func (kp *KarpenterProfiler) captureHeap(ctx context.Context) {
 	}
 }
 
-func (kp *KarpenterProfiler) captureCPU(ctx context.Context) {
-	pod, err := kp.env.FindActiveKarpenterPod(ctx)
-	if err != nil || pod == nil {
-		kp.lastError = fmt.Sprintf("finding karpenter pod: %v", err)
-		GinkgoWriter.Printf("KarpenterProfiler: [cpu] failed to find pod: %v\n", err)
-		return
-	}
-
-	localPort := rand.IntnRange(10000, 49151)
-	portCtx, cancel := context.WithTimeout(ctx, time.Duration(CPUProfileSeconds+10)*time.Second)
-	defer cancel()
-
-	if err := kp.env.PortForwardPod(portCtx, pod, 8080, localPort); err != nil {
-		kp.lastError = fmt.Sprintf("port-forward cpu: %v", err)
-		GinkgoWriter.Printf("KarpenterProfiler: [cpu] port-forward failed to pod %s on port %d: %v\n", pod.Name, localPort, err)
-		return
-	}
-
+func (kp *KarpenterProfiler) captureCPU(localPort int) {
 	if cpuNanos, cpuData := kp.fetchCPUProfile(localPort); cpuNanos > kp.peakCPUNanos {
 		GinkgoWriter.Printf("KarpenterProfiler: [cpu] new peak CPU: %.2f ms (previous: %.2f ms)\n", float64(cpuNanos)/1e6, float64(kp.peakCPUNanos)/1e6)
 		kp.peakCPUNanos = cpuNanos
 		kp.peakCPUProfile = cpuData
 	}
 }
+var profilerClient = &http.Client{Timeout: 30 * time.Second}
+
 func (kp *KarpenterProfiler) fetchHeapProfile(port int) (float64, []byte) {
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/heap", port)) //nolint:gosec
+	resp, err := profilerClient.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/heap", port)) //nolint:gosec
 	if err != nil {
 		kp.lastError = fmt.Sprintf("pprof heap error: %v", err)
 		return 0, nil
@@ -172,7 +165,9 @@ func (kp *KarpenterProfiler) fetchHeapProfile(port int) (float64, []byte) {
 }
 
 func (kp *KarpenterProfiler) fetchCPUProfile(port int) (int64, []byte) {
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/profile?seconds=%d", port, CPUProfileSeconds)) //nolint:gosec
+	// CPU profile blocks for CPUProfileSeconds, so use a longer timeout
+	cpuClient := &http.Client{Timeout: time.Duration(CPUProfileSeconds+15) * time.Second}
+	resp, err := cpuClient.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/profile?seconds=%d", port, CPUProfileSeconds)) //nolint:gosec
 	if err != nil {
 		kp.lastError = fmt.Sprintf("pprof cpu error: %v", err)
 		return 0, nil

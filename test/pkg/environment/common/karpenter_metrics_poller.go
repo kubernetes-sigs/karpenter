@@ -251,8 +251,10 @@ func (mp *KarpenterMetricsPoller) establishPortForward(ctx context.Context, loca
 
 // scrapeMetrics fetches /metrics from the given local port and extracts
 // process_resident_memory_bytes and process_cpu_seconds_total.
+var scrapeClient = &http.Client{Timeout: 5 * time.Second}
+
 func (mp *KarpenterMetricsPoller) scrapeMetrics(port int) (memBytes float64, cpuSeconds float64, err error) {
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", port)) //nolint:gosec
+	resp, err := scrapeClient.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", port)) //nolint:gosec
 	if err != nil {
 		return 0, 0, fmt.Errorf("GET /metrics: %w", err)
 	}
