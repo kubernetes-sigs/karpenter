@@ -236,7 +236,7 @@ func BenchmarkStoreApplyAllScenario(b *testing.B) {
 		}
 	}
 
-	store := NewInstanceTypeStore()
+	publicStore := NewInstanceTypeStore()
 	internalStore := newInternalInstanceTypeStore()
 
 	// Setup overlays for 5 node pools
@@ -264,13 +264,13 @@ func BenchmarkStoreApplyAllScenario(b *testing.B) {
 		}
 	}
 
-	store.UpdateStore(internalStore)
+	publicStore.UpdateStore(internalStore)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, np := range nodePools {
-			_, _ = store.ApplyAll(np, instanceTypes)
+			_, _ = publicStore.ApplyAll(np, instanceTypes)
 		}
 	}
 }
