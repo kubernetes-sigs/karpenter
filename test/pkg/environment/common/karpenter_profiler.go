@@ -141,6 +141,7 @@ func (kp *KarpenterProfiler) captureCPU(localPort int) {
 		kp.peakCPUProfile = cpuData
 	}
 }
+
 var profilerClient = &http.Client{Timeout: 30 * time.Second}
 
 func (kp *KarpenterProfiler) fetchHeapProfile(port int) (float64, []byte) {
