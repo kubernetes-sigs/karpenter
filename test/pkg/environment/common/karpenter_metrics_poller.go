@@ -17,27 +17,26 @@ limitations under the License.
 package common
 
 import (
+	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
-	"net/url"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // ResourceSample represents a single point-in-time measurement of container resource usage
 type ResourceSample struct {
 	Timestamp time.Time
-	MemoryMB  float64 // container working set memory in MB
-	CPUCores  float64 // container CPU usage rate in cores
+	MemoryMB  float64 // process resident memory in MB
+	CPUCores  float64 // CPU usage rate in cores (computed from delta)
 }
 
 // ResourceStats holds aggregated statistics computed from a time series of samples
@@ -51,24 +50,15 @@ type ResourceStats struct {
 	SampleCount int     // number of samples collected
 }
 
-// prometheusQueryResponse represents the JSON response from Prometheus instant query API
-type prometheusQueryResponse struct {
-	Status string `json:"status"`
-	Data   struct {
-		ResultType string `json:"resultType"`
-		Result     []struct {
-			Value []json.RawMessage `json:"value"` // [timestamp, "value"]
-		} `json:"result"`
-	} `json:"data"`
-}
-
-// KarpenterMetricsPoller polls Prometheus for real container-level CPU and memory
-// usage of the active Karpenter pod via cAdvisor metrics. It collects a time series
-// of samples that can be aggregated into P95, average, and max statistics.
+// KarpenterMetricsPoller polls the Karpenter pod's /metrics endpoint directly
+// for process-level CPU and memory usage. It uses a single long-lived port-forward
+// and computes CPU rate from the delta of process_cpu_seconds_total between samples.
 //
-// This uses the Prometheus instance already deployed in the cluster (via
-// kube-prometheus-stack) which scrapes cAdvisor metrics from the kubelet.
-// No metrics-server installation is required.
+// This approach is more reliable than querying Prometheus because:
+// - No dependency on Prometheus being installed or having scraped data
+// - No scrape lag or rate() window issues
+// - Single port-forward reused across all samples (no per-sample connection churn)
+// - Metrics are authoritative (reported by the Go runtime itself)
 type KarpenterMetricsPoller struct {
 	env     *Environment
 	mu      sync.Mutex
@@ -78,8 +68,8 @@ type KarpenterMetricsPoller struct {
 	errors  int
 }
 
-// StartKarpenterMetricsPoller begins polling Prometheus for the Karpenter pod's
-// container resource usage every 5 seconds.
+// StartKarpenterMetricsPoller begins polling the Karpenter pod's /metrics endpoint
+// for process resource usage every 5 seconds.
 func StartKarpenterMetricsPoller(env *Environment) *KarpenterMetricsPoller {
 	ctx, cancel := context.WithCancel(env.Context)
 	mp := &KarpenterMetricsPoller{
@@ -99,168 +89,233 @@ func (mp *KarpenterMetricsPoller) Stop() ResourceStats {
 	defer mp.mu.Unlock()
 	stats := computeStats(mp.samples)
 	if len(mp.samples) == 0 {
-		GinkgoWriter.Printf("KarpenterMetricsPoller: WARNING - stopped with 0 samples (%d errors). Karpenter resource metrics will be empty. Ensure Prometheus is installed and scraping cAdvisor metrics.\n", mp.errors)
+		GinkgoWriter.Printf("KarpenterMetricsPoller: WARNING - stopped with 0 samples (%d errors). Ensure the Karpenter pod is running and exposing /metrics on port 8080.\n", mp.errors)
 	} else {
-		GinkgoWriter.Printf("KarpenterMetricsPoller: Stopped with %d samples (%d errors), P95 memory=%.2f MB, P95 CPU=%.4f cores\n",
-			len(mp.samples), mp.errors, stats.P95MemoryMB, stats.P95CPUCores)
+		GinkgoWriter.Printf("KarpenterMetricsPoller: === RESULTS ===\n")
+		GinkgoWriter.Printf("KarpenterMetricsPoller:   Samples: %d (errors: %d)\n", len(mp.samples), mp.errors)
+		GinkgoWriter.Printf("KarpenterMetricsPoller:   Memory - P95: %.2f MB, Avg: %.2f MB, Max: %.2f MB\n",
+			stats.P95MemoryMB, stats.AvgMemoryMB, stats.MaxMemoryMB)
+		GinkgoWriter.Printf("KarpenterMetricsPoller:   CPU    - P95: %.4f cores, Avg: %.4f cores, Max: %.4f cores\n",
+			stats.P95CPUCores, stats.AvgCPUCores, stats.MaxCPUCores)
 	}
 	return stats
 }
 
 func (mp *KarpenterMetricsPoller) run(ctx context.Context) {
 	defer close(mp.done)
+
+	localPort := rand.IntnRange(10000, 49151)
+	portForwardCtx, portForwardCancel := context.WithCancel(ctx)
+	defer portForwardCancel()
+
+	GinkgoWriter.Printf("KarpenterMetricsPoller: starting, establishing port-forward on local port %d\n", localPort)
+
+	// Establish a single long-lived port-forward to the Karpenter pod
+	if err := mp.establishPortForward(portForwardCtx, localPort); err != nil {
+		mp.recordError(fmt.Errorf("initial port-forward failed: %w", err))
+		return
+	}
+	GinkgoWriter.Printf("KarpenterMetricsPoller: port-forward established successfully on port %d\n", localPort)
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
+	var prevCPUSeconds float64
+	var prevTime time.Time
+	firstSample := true
+	sampleNum := 0
+
 	for {
-		mp.poll(ctx)
+		now := time.Now()
+		memBytes, cpuSeconds, err := mp.scrapeMetrics(localPort)
+		if err != nil {
+			mp.recordError(err)
+			// Try to re-establish port-forward on failure
+			GinkgoWriter.Printf("KarpenterMetricsPoller: scrape failed, attempting port-forward reconnect\n")
+			portForwardCancel()
+			localPort = rand.IntnRange(10000, 49151)
+			portForwardCtx, portForwardCancel = context.WithCancel(ctx)
+			if pfErr := mp.establishPortForward(portForwardCtx, localPort); pfErr != nil {
+				mp.recordError(fmt.Errorf("port-forward re-establish failed: %w", pfErr))
+				GinkgoWriter.Printf("KarpenterMetricsPoller: reconnect failed, giving up: %v\n", pfErr)
+				portForwardCancel()
+				return
+			}
+			GinkgoWriter.Printf("KarpenterMetricsPoller: reconnected successfully on port %d\n", localPort)
+		} else if firstSample {
+			// First sample: we can record memory but not CPU rate (need two points)
+			prevCPUSeconds = cpuSeconds
+			prevTime = now
+			firstSample = false
+			sampleNum++
+			mp.mu.Lock()
+			mp.samples = append(mp.samples, ResourceSample{
+				Timestamp: now,
+				MemoryMB:  memBytes / (1024 * 1024),
+				CPUCores:  0,
+			})
+			mp.mu.Unlock()
+			GinkgoWriter.Printf("KarpenterMetricsPoller: [sample %d] first sample - memory=%.2f MB, process_cpu_seconds_total=%.4f (CPU rate available after next sample)\n",
+				sampleNum, memBytes/(1024*1024), cpuSeconds)
+		} else {
+			elapsed := now.Sub(prevTime).Seconds()
+			cpuRate := 0.0
+			if elapsed > 0 {
+				cpuRate = (cpuSeconds - prevCPUSeconds) / elapsed
+			}
+			// Clamp negative rates (can happen if counter resets, e.g. pod restart)
+			if cpuRate < 0 {
+				cpuRate = 0
+			}
+			prevCPUSeconds = cpuSeconds
+			prevTime = now
+			sampleNum++
+
+			mp.mu.Lock()
+			mp.samples = append(mp.samples, ResourceSample{
+				Timestamp: now,
+				MemoryMB:  memBytes / (1024 * 1024),
+				CPUCores:  cpuRate,
+			})
+			mp.mu.Unlock()
+
+			// Log every 5th sample to avoid flooding, but always log first few
+			if sampleNum <= 5 || sampleNum%5 == 0 {
+				GinkgoWriter.Printf("KarpenterMetricsPoller: [sample %d] memory=%.2f MB, cpu=%.4f cores (elapsed=%.1fs, cpu_delta=%.4fs)\n",
+					sampleNum, memBytes/(1024*1024), cpuRate, elapsed, cpuSeconds-prevCPUSeconds+cpuRate*elapsed)
+			}
+		}
+
 		select {
 		case <-ctx.Done():
+			GinkgoWriter.Printf("KarpenterMetricsPoller: context canceled, collected %d samples total\n", sampleNum)
+			portForwardCancel()
 			return
 		case <-ticker.C:
 		}
 	}
 }
-func (mp *KarpenterMetricsPoller) poll(ctx context.Context) {
-	defer GinkgoRecover()
 
-	sample, err := mp.collectSample(ctx)
+func (mp *KarpenterMetricsPoller) establishPortForward(ctx context.Context, localPort int) error {
+	findCtx, findCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer findCancel()
+
+	pod, err := mp.env.FindActiveKarpenterPod(findCtx)
+	if err != nil || pod == nil {
+		return fmt.Errorf("finding karpenter pod: %w", err)
+	}
+	GinkgoWriter.Printf("KarpenterMetricsPoller: found karpenter pod %s/%s, establishing port-forward %d->8080\n",
+		pod.Namespace, pod.Name, localPort)
+
+	// Pass the long-lived ctx so the port-forward stays alive until ctx is canceled.
+	// PortForwardPod blocks until the connection is ready or fails.
+	if err := mp.env.PortForwardPod(ctx, pod, 8080, localPort); err != nil {
+		return fmt.Errorf("port-forward to karpenter pod %s: %w", pod.Name, err)
+	}
+
+	// Verify connectivity with a quick scrape
+	memBytes, cpuSeconds, err := mp.scrapeMetrics(localPort)
 	if err != nil {
-		mp.recordError(err)
-		return
+		return fmt.Errorf("connectivity check failed after port-forward: %w", err)
 	}
-
-	mp.mu.Lock()
-	mp.samples = append(mp.samples, sample)
-	if len(mp.samples) == 1 {
-		GinkgoWriter.Printf("KarpenterMetricsPoller: first sample collected - memory=%.2f MB, cpu=%.4f cores\n", sample.MemoryMB, sample.CPUCores)
-	}
-	mp.mu.Unlock()
+	GinkgoWriter.Printf("KarpenterMetricsPoller: connectivity verified - process_resident_memory_bytes=%.0f, process_cpu_seconds_total=%.4f\n",
+		memBytes, cpuSeconds)
+	return nil
 }
 
-func (mp *KarpenterMetricsPoller) collectSample(ctx context.Context) (ResourceSample, error) {
-	pod, err := mp.env.FindActiveKarpenterPod(ctx)
-	if err != nil || pod == nil {
-		return ResourceSample{}, fmt.Errorf("finding karpenter pod: %w", err)
+// scrapeMetrics fetches /metrics from the given local port and extracts
+// process_resident_memory_bytes and process_cpu_seconds_total.
+func (mp *KarpenterMetricsPoller) scrapeMetrics(port int) (memBytes float64, cpuSeconds float64, err error) {
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", port)) //nolint:gosec
+	if err != nil {
+		return 0, 0, fmt.Errorf("GET /metrics: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, 0, fmt.Errorf("GET /metrics returned status %d", resp.StatusCode)
 	}
 
-	promPod := mp.findPrometheusPod(ctx)
-	if promPod == nil {
-		return ResourceSample{}, fmt.Errorf("could not find Prometheus pod in monitoring namespace")
+	var foundMem, foundCPU bool
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "process_resident_memory_bytes ") {
+			if v, e := strconv.ParseFloat(strings.TrimPrefix(line, "process_resident_memory_bytes "), 64); e == nil {
+				memBytes = v
+				foundMem = true
+			}
+		} else if strings.HasPrefix(line, "process_cpu_seconds_total ") {
+			if v, e := strconv.ParseFloat(strings.TrimPrefix(line, "process_cpu_seconds_total "), 64); e == nil {
+				cpuSeconds = v
+				foundCPU = true
+			}
+		}
+		if foundMem && foundCPU {
+			break
+		}
 	}
 
-	localPort := rand.IntnRange(10000, 49151)
-	portCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	if err := mp.env.PortForwardPod(portCtx, promPod, 9090, localPort); err != nil {
-		return ResourceSample{}, fmt.Errorf("port-forward to Prometheus: %w", err)
+	if !foundMem || !foundCPU {
+		return 0, 0, fmt.Errorf("metrics not found in response (mem=%v, cpu=%v)", foundMem, foundCPU)
 	}
-
-	memBytes := mp.queryPrometheusValue(localPort,
-		fmt.Sprintf(`sum(container_memory_working_set_bytes{namespace="kube-system",pod="%s",container!=""})`, pod.Name))
-	cpuCores := mp.queryPrometheusValue(localPort,
-		fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{namespace="kube-system",pod="%s",container!=""}[30s]))`, pod.Name))
-
-	if memBytes == 0 && cpuCores == 0 {
-		return ResourceSample{}, fmt.Errorf("got zero values from Prometheus for pod %s", pod.Name)
-	}
-
-	return ResourceSample{
-		Timestamp: time.Now(),
-		MemoryMB:  memBytes / (1024 * 1024),
-		CPUCores:  cpuCores,
-	}, nil
+	return memBytes, cpuSeconds, nil
 }
 
 func (mp *KarpenterMetricsPoller) recordError(err error) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 	mp.errors++
-	if mp.errors <= 3 {
-		GinkgoWriter.Printf("KarpenterMetricsPoller: %v\n", err)
+	if mp.errors <= 5 {
+		GinkgoWriter.Printf("KarpenterMetricsPoller: error %d: %v\n", mp.errors, err)
 	}
-}
-
-func (mp *KarpenterMetricsPoller) findPrometheusPod(ctx context.Context) *corev1.Pod {
-	podList := &corev1.PodList{}
-	if err := mp.env.Client.List(ctx, podList,
-		client.InNamespace("monitoring"),
-		client.MatchingLabels{"app.kubernetes.io/name": "prometheus"},
-	); err != nil || len(podList.Items) == 0 {
-		return nil
-	}
-	for i := range podList.Items {
-		if podList.Items[i].Status.Phase == corev1.PodRunning {
-			return &podList.Items[i]
-		}
-	}
-	return nil
-}
-func (mp *KarpenterMetricsPoller) queryPrometheusValue(port int, query string) float64 {
-	u := fmt.Sprintf("http://127.0.0.1:%d/api/v1/query?query=%s", port, url.QueryEscape(query))
-	resp, err := http.Get(u) //nolint:gosec // URL is constructed from trusted local port-forward, not user input
-	if err != nil {
-		return 0
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0
-	}
-
-	var result prometheusQueryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0
-	}
-
-	if result.Status != "success" || len(result.Data.Result) == 0 {
-		return 0
-	}
-
-	// The value is the second element: [timestamp, "value_string"]
-	if len(result.Data.Result[0].Value) < 2 {
-		return 0
-	}
-
-	var valueStr string
-	if err := json.Unmarshal(result.Data.Result[0].Value[1], &valueStr); err != nil {
-		return 0
-	}
-
-	return parseFloat(valueStr)
 }
 
 // computeStats calculates P95, average, and max from a slice of resource samples.
+// The first sample's CPU value (always 0) is excluded from CPU statistics.
 func computeStats(samples []ResourceSample) ResourceStats {
 	if len(samples) == 0 {
 		return ResourceStats{}
 	}
 
 	memValues := make([]float64, len(samples))
-	cpuValues := make([]float64, len(samples))
-	var memSum, cpuSum float64
-	var memMax, cpuMax float64
+	var memSum, memMax float64
 
 	for i, s := range samples {
 		memValues[i] = s.MemoryMB
-		cpuValues[i] = s.CPUCores
 		memSum += s.MemoryMB
-		cpuSum += s.CPUCores
 		memMax = math.Max(memMax, s.MemoryMB)
-		cpuMax = math.Max(cpuMax, s.CPUCores)
+	}
+
+	// For CPU, skip the first sample (which has CPUCores=0 since we need two points for a rate)
+	var cpuValues []float64
+	var cpuSum, cpuMax float64
+	for _, s := range samples {
+		if s.CPUCores > 0 || len(cpuValues) > 0 {
+			cpuValues = append(cpuValues, s.CPUCores)
+			cpuSum += s.CPUCores
+			cpuMax = math.Max(cpuMax, s.CPUCores)
+		}
 	}
 
 	n := float64(len(samples))
-	return ResourceStats{
+	stats := ResourceStats{
 		P95MemoryMB: percentile(memValues, 0.95),
 		AvgMemoryMB: memSum / n,
 		MaxMemoryMB: memMax,
-		P95CPUCores: percentile(cpuValues, 0.95),
-		AvgCPUCores: cpuSum / n,
-		MaxCPUCores: cpuMax,
 		SampleCount: len(samples),
 	}
+
+	if len(cpuValues) > 0 {
+		stats.P95CPUCores = percentile(cpuValues, 0.95)
+		stats.AvgCPUCores = cpuSum / float64(len(cpuValues))
+		stats.MaxCPUCores = cpuMax
+	}
+
+	return stats
 }
 
 // percentile returns the p-th percentile of a slice of float64 values using
@@ -281,10 +336,4 @@ func percentile(values []float64, p float64) float64 {
 	}
 	frac := rank - float64(lower)
 	return values[lower]*(1-frac) + values[upper]*frac
-}
-
-func parseFloat(s string) float64 {
-	var v float64
-	_, _ = fmt.Sscanf(s, "%f", &v)
-	return v
 }
