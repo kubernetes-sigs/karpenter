@@ -101,98 +101,124 @@ func (mp *KarpenterMetricsPoller) Stop() ResourceStats {
 	return stats
 }
 
+// pollerState holds mutable state for the polling loop
+type pollerState struct {
+	localPort      int
+	pfCtx          context.Context
+	pfCancel       context.CancelFunc
+	prevCPUSeconds float64
+	prevTime       time.Time
+	firstSample    bool
+	sampleNum      int
+}
+
 func (mp *KarpenterMetricsPoller) run(ctx context.Context) {
 	defer close(mp.done)
 
-	localPort := rand.IntnRange(10000, 49151)
-	portForwardCtx, portForwardCancel := context.WithCancel(ctx)
-	defer portForwardCancel()
+	state := &pollerState{
+		localPort:   rand.IntnRange(10000, 49151),
+		firstSample: true,
+	}
+	state.pfCtx, state.pfCancel = context.WithCancel(ctx)
+	defer state.pfCancel()
 
-	GinkgoWriter.Printf("KarpenterMetricsPoller: starting, establishing port-forward on local port %d\n", localPort)
+	GinkgoWriter.Printf("KarpenterMetricsPoller: starting, establishing port-forward on local port %d\n", state.localPort)
 
-	// Establish a single long-lived port-forward to the Karpenter pod
-	if err := mp.establishPortForward(portForwardCtx, localPort); err != nil {
+	if err := mp.establishPortForward(state.pfCtx, state.localPort); err != nil {
 		mp.recordError(fmt.Errorf("initial port-forward failed: %w", err))
 		return
 	}
-	GinkgoWriter.Printf("KarpenterMetricsPoller: port-forward established successfully on port %d\n", localPort)
+	GinkgoWriter.Printf("KarpenterMetricsPoller: port-forward established successfully on port %d\n", state.localPort)
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	var prevCPUSeconds float64
-	var prevTime time.Time
-	firstSample := true
-	sampleNum := 0
-
 	for {
-		now := time.Now()
-		memBytes, cpuSeconds, err := mp.scrapeMetrics(localPort)
-		if err != nil {
-			mp.recordError(err)
-			// Try to re-establish port-forward on failure
-			GinkgoWriter.Printf("KarpenterMetricsPoller: scrape failed, attempting port-forward reconnect\n")
-			portForwardCancel()
-			localPort = rand.IntnRange(10000, 49151)
-			portForwardCtx, portForwardCancel = context.WithCancel(ctx)
-			if pfErr := mp.establishPortForward(portForwardCtx, localPort); pfErr != nil {
-				mp.recordError(fmt.Errorf("port-forward re-establish failed: %w", pfErr))
-				GinkgoWriter.Printf("KarpenterMetricsPoller: reconnect failed, giving up: %v\n", pfErr)
-				portForwardCancel()
-				return
-			}
-			GinkgoWriter.Printf("KarpenterMetricsPoller: reconnected successfully on port %d\n", localPort)
-		} else if firstSample {
-			// First sample: we can record memory but not CPU rate (need two points)
-			prevCPUSeconds = cpuSeconds
-			prevTime = now
-			firstSample = false
-			sampleNum++
-			mp.mu.Lock()
-			mp.samples = append(mp.samples, ResourceSample{
-				Timestamp: now,
-				MemoryMB:  memBytes / (1024 * 1024),
-				CPUCores:  0,
-			})
-			mp.mu.Unlock()
-			GinkgoWriter.Printf("KarpenterMetricsPoller: [sample %d] first sample - memory=%.2f MB, process_cpu_seconds_total=%.4f (CPU rate available after next sample)\n",
-				sampleNum, memBytes/(1024*1024), cpuSeconds)
-		} else {
-			elapsed := now.Sub(prevTime).Seconds()
-			cpuRate := 0.0
-			if elapsed > 0 {
-				cpuRate = (cpuSeconds - prevCPUSeconds) / elapsed
-			}
-			// Clamp negative rates (can happen if counter resets, e.g. pod restart)
-			if cpuRate < 0 {
-				cpuRate = 0
-			}
-			prevCPUSeconds = cpuSeconds
-			prevTime = now
-			sampleNum++
-
-			mp.mu.Lock()
-			mp.samples = append(mp.samples, ResourceSample{
-				Timestamp: now,
-				MemoryMB:  memBytes / (1024 * 1024),
-				CPUCores:  cpuRate,
-			})
-			mp.mu.Unlock()
-
-			// Log every 5th sample to avoid flooding, but always log first few
-			if sampleNum <= 5 || sampleNum%5 == 0 {
-				GinkgoWriter.Printf("KarpenterMetricsPoller: [sample %d] memory=%.2f MB, cpu=%.4f cores (elapsed=%.1fs, cpu_delta=%.4fs)\n",
-					sampleNum, memBytes/(1024*1024), cpuRate, elapsed, cpuSeconds-prevCPUSeconds+cpuRate*elapsed)
-			}
+		if !mp.pollOnce(ctx, state) {
+			return
 		}
-
 		select {
 		case <-ctx.Done():
-			GinkgoWriter.Printf("KarpenterMetricsPoller: context canceled, collected %d samples total\n", sampleNum)
-			portForwardCancel()
+			GinkgoWriter.Printf("KarpenterMetricsPoller: context canceled, collected %d samples total\n", state.sampleNum)
+			state.pfCancel()
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+// pollOnce performs a single scrape and records the sample. Returns false if the poller should stop.
+func (mp *KarpenterMetricsPoller) pollOnce(ctx context.Context, state *pollerState) bool {
+	now := time.Now()
+	memBytes, cpuSeconds, err := mp.scrapeMetrics(state.localPort)
+	if err != nil {
+		return mp.handleScrapeError(ctx, state, err)
+	}
+
+	if state.firstSample {
+		mp.recordFirstSample(state, now, memBytes, cpuSeconds)
+	} else {
+		mp.recordSample(state, now, memBytes, cpuSeconds)
+	}
+	return true
+}
+
+func (mp *KarpenterMetricsPoller) handleScrapeError(ctx context.Context, state *pollerState, err error) bool {
+	mp.recordError(err)
+	GinkgoWriter.Printf("KarpenterMetricsPoller: scrape failed, attempting port-forward reconnect\n")
+	state.pfCancel()
+	state.localPort = rand.IntnRange(10000, 49151)
+	state.pfCtx, state.pfCancel = context.WithCancel(ctx)
+	if pfErr := mp.establishPortForward(state.pfCtx, state.localPort); pfErr != nil {
+		mp.recordError(fmt.Errorf("port-forward re-establish failed: %w", pfErr))
+		GinkgoWriter.Printf("KarpenterMetricsPoller: reconnect failed, giving up: %v\n", pfErr)
+		state.pfCancel()
+		return false
+	}
+	GinkgoWriter.Printf("KarpenterMetricsPoller: reconnected successfully on port %d\n", state.localPort)
+	return true
+}
+
+func (mp *KarpenterMetricsPoller) recordFirstSample(state *pollerState, now time.Time, memBytes, cpuSeconds float64) {
+	state.prevCPUSeconds = cpuSeconds
+	state.prevTime = now
+	state.firstSample = false
+	state.sampleNum++
+	mp.mu.Lock()
+	mp.samples = append(mp.samples, ResourceSample{
+		Timestamp: now,
+		MemoryMB:  memBytes / (1024 * 1024),
+		CPUCores:  0,
+	})
+	mp.mu.Unlock()
+	GinkgoWriter.Printf("KarpenterMetricsPoller: [sample %d] first sample - memory=%.2f MB, process_cpu_seconds_total=%.4f (CPU rate available after next sample)\n",
+		state.sampleNum, memBytes/(1024*1024), cpuSeconds)
+}
+
+func (mp *KarpenterMetricsPoller) recordSample(state *pollerState, now time.Time, memBytes, cpuSeconds float64) {
+	elapsed := now.Sub(state.prevTime).Seconds()
+	cpuRate := 0.0
+	if elapsed > 0 {
+		cpuRate = (cpuSeconds - state.prevCPUSeconds) / elapsed
+	}
+	if cpuRate < 0 {
+		cpuRate = 0
+	}
+	state.prevCPUSeconds = cpuSeconds
+	state.prevTime = now
+	state.sampleNum++
+
+	mp.mu.Lock()
+	mp.samples = append(mp.samples, ResourceSample{
+		Timestamp: now,
+		MemoryMB:  memBytes / (1024 * 1024),
+		CPUCores:  cpuRate,
+	})
+	mp.mu.Unlock()
+
+	if state.sampleNum <= 5 || state.sampleNum%5 == 0 {
+		GinkgoWriter.Printf("KarpenterMetricsPoller: [sample %d] memory=%.2f MB, cpu=%.4f cores (elapsed=%.1fs)\n",
+			state.sampleNum, memBytes/(1024*1024), cpuRate, elapsed)
 	}
 }
 
@@ -243,16 +269,12 @@ func (mp *KarpenterMetricsPoller) scrapeMetrics(port int) (memBytes float64, cpu
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.HasPrefix(line, "process_resident_memory_bytes ") {
-			if v, e := strconv.ParseFloat(strings.TrimPrefix(line, "process_resident_memory_bytes "), 64); e == nil {
-				memBytes = v
-				foundMem = true
-			}
-		} else if strings.HasPrefix(line, "process_cpu_seconds_total ") {
-			if v, e := strconv.ParseFloat(strings.TrimPrefix(line, "process_cpu_seconds_total "), 64); e == nil {
-				cpuSeconds = v
-				foundCPU = true
-			}
+		if v, ok := parseMetricLine(line, "process_resident_memory_bytes "); ok {
+			memBytes = v
+			foundMem = true
+		} else if v, ok := parseMetricLine(line, "process_cpu_seconds_total "); ok {
+			cpuSeconds = v
+			foundCPU = true
 		}
 		if foundMem && foundCPU {
 			break
@@ -263,6 +285,18 @@ func (mp *KarpenterMetricsPoller) scrapeMetrics(port int) (memBytes float64, cpu
 		return 0, 0, fmt.Errorf("metrics not found in response (mem=%v, cpu=%v)", foundMem, foundCPU)
 	}
 	return memBytes, cpuSeconds, nil
+}
+
+// parseMetricLine checks if a line starts with the given prefix and returns the parsed float value.
+func parseMetricLine(line, prefix string) (float64, bool) {
+	if !strings.HasPrefix(line, prefix) {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(strings.TrimPrefix(line, prefix), 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 func (mp *KarpenterMetricsPoller) recordError(err error) {
