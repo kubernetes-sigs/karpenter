@@ -192,5 +192,41 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectNotFound(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
 		})
+		It("should clamp gracePeriodSeconds to >= 1 when nodeTerminationTime is in the past", func() {
+			// Use a finalizer so envtest does not immediately garbage-collect the pod after the
+			// delete call. Without a finalizer, the pod disappears before we can read back the
+			// DeletionTimestamp that the API server stamped on it, making it impossible to
+			// verify that the clamp produced a graceful delete (not a force-delete).
+			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
+			pod.Finalizers = []string{"karpenter.sh/test-finalizer"}
+			ExpectApplied(ctx, env.Client, pod)
+			DeferCleanup(func() {
+				// Remove the finalizer so AfterEach's ExpectCleanedUp can delete the pod.
+				ExpectFinalizersRemoved(ctx, env.Client, pod)
+			})
+
+			// Set the termination time 1 hour in the past: remaining = -3600s.
+			// Without the clamp the grace period would be <=0, sending gracePeriodSeconds=0
+			// to the API (force-delete). The clamp must produce >= 1.
+			pastTerminationTime := fakeClock.Now().Add(-1 * time.Hour)
+			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &pastTerminationTime)).To(Succeed())
+
+			// Verify the delete was graceful (not a force-delete): the Disrupted event must have
+			// been published and contain "1 seconds of grace-period" in the message, proving the
+			// clamp produced gracePeriodSeconds=1 (not 0).
+			// Note: DeletionGracePeriodSeconds on the re-fetched pod may be 0 because the API
+			// server recomputes it as floor(DeletionTimestamp-now()); with a 1s grace period it
+			// decays to 0 during the round-trip. The event message is captured at delete time.
+			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
+			evts := recorder.Events()
+			Expect(evts).To(HaveLen(1))
+			Expect(evts[0].Message).To(ContainSubstring("granted 1 seconds of grace-period"))
+
+			// Also verify the pod is terminating (DeletionTimestamp set), not force-deleted
+			// (force-delete would bypass the graceful termination and remove the object immediately
+			// even with a finalizer in older Kubernetes; a set DeletionTimestamp confirms graceful).
+			pod = ExpectExists(ctx, env.Client, pod)
+			Expect(pod.DeletionTimestamp).ToNot(BeNil())
+		})
 	})
 })
