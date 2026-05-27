@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"sort"
@@ -288,7 +289,12 @@ func (mp *KarpenterMetricsPoller) scrapeMetrics(port int) (memBytes float64, cpu
 	if err != nil {
 		return 0, 0, fmt.Errorf("GET /metrics: %w", err)
 	}
-	defer resp.Body.Close()
+	// Drain the full response body before closing to avoid sending a TCP RST
+	// through the port-forward tunnel (which causes noisy "connection reset by peer" logs).
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, 0, fmt.Errorf("GET /metrics returned status %d", resp.StatusCode)
