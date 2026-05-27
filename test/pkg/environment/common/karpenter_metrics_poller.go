@@ -19,6 +19,7 @@ package common
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -163,9 +164,30 @@ func (mp *KarpenterMetricsPoller) pollOnce(ctx context.Context, state *pollerSta
 	return true
 }
 
+// metricsNotFoundError indicates the HTTP request succeeded but the response
+// didn't contain the expected metrics (pod is temporarily overloaded/busy).
+// This should NOT trigger a port-forward reconnect — just skip the sample.
+type metricsNotFoundError struct {
+	foundMem bool
+	foundCPU bool
+}
+
+func (e *metricsNotFoundError) Error() string {
+	return fmt.Sprintf("metrics not found in response (mem=%v, cpu=%v)", e.foundMem, e.foundCPU)
+}
+
 func (mp *KarpenterMetricsPoller) handleScrapeError(ctx context.Context, state *pollerState, err error) bool {
 	mp.recordError(err)
-	GinkgoWriter.Printf("KarpenterMetricsPoller: scrape failed, attempting port-forward reconnect\n")
+
+	// If the response came back but was missing metrics, the pod is just busy.
+	// Skip this sample and try again next tick — don't tear down the port-forward.
+	var notFound *metricsNotFoundError
+	if errors.As(err, &notFound) {
+		return true
+	}
+
+	// Actual connection failure — try to reconnect
+	GinkgoWriter.Printf("KarpenterMetricsPoller: scrape failed (%v), attempting port-forward reconnect\n", err)
 	state.pfCancel()
 	state.localPort = rand.IntnRange(10000, 49151)
 	state.pfCtx, state.pfCancel = context.WithCancel(ctx)
@@ -239,13 +261,21 @@ func (mp *KarpenterMetricsPoller) establishPortForward(ctx context.Context, loca
 		return fmt.Errorf("port-forward to karpenter pod %s: %w", pod.Name, err)
 	}
 
-	// Verify connectivity with a quick scrape
-	memBytes, cpuSeconds, err := mp.scrapeMetrics(localPort)
-	if err != nil {
+	// Verify connectivity — retry a few times since the pod may be temporarily busy
+	for attempt := range 3 {
+		memBytes, cpuSeconds, err := mp.scrapeMetrics(localPort)
+		if err == nil {
+			GinkgoWriter.Printf("KarpenterMetricsPoller: connectivity verified - process_resident_memory_bytes=%.0f, process_cpu_seconds_total=%.4f\n",
+				memBytes, cpuSeconds)
+			return nil
+		}
+		var notFound *metricsNotFoundError
+		if errors.As(err, &notFound) && attempt < 2 {
+			time.Sleep(2 * time.Second)
+			continue
+		}
 		return fmt.Errorf("connectivity check failed after port-forward: %w", err)
 	}
-	GinkgoWriter.Printf("KarpenterMetricsPoller: connectivity verified - process_resident_memory_bytes=%.0f, process_cpu_seconds_total=%.4f\n",
-		memBytes, cpuSeconds)
 	return nil
 }
 
@@ -284,7 +314,7 @@ func (mp *KarpenterMetricsPoller) scrapeMetrics(port int) (memBytes float64, cpu
 	}
 
 	if !foundMem || !foundCPU {
-		return 0, 0, fmt.Errorf("metrics not found in response (mem=%v, cpu=%v)", foundMem, foundCPU)
+		return 0, 0, &metricsNotFoundError{foundMem: foundMem, foundCPU: foundCPU}
 	}
 	return memBytes, cpuSeconds, nil
 }
