@@ -37,30 +37,24 @@ import (
 // ResourceSample represents a single point-in-time measurement of container resource usage
 type ResourceSample struct {
 	Timestamp time.Time
-	MemoryMB  float64 // process resident memory in MB
-	CPUCores  float64 // CPU usage rate in cores (computed from delta)
+	MemoryMB  float64
+	CPUCores  float64
 }
 
 // ResourceStats holds aggregated statistics computed from a time series of samples
 type ResourceStats struct {
-	P95MemoryMB float64 // 95th percentile memory usage in MB
-	AvgMemoryMB float64 // average memory usage in MB
-	MaxMemoryMB float64 // peak memory usage in MB
-	P95CPUCores float64 // 95th percentile CPU usage in cores
-	AvgCPUCores float64 // average CPU usage in cores
-	MaxCPUCores float64 // peak CPU usage in cores
-	SampleCount int     // number of samples collected
+	P95MemoryMB float64
+	AvgMemoryMB float64
+	MaxMemoryMB float64
+	P95CPUCores float64
+	AvgCPUCores float64
+	MaxCPUCores float64
+	SampleCount int
 }
 
 // KarpenterMetricsPoller polls the Karpenter pod's /metrics endpoint directly
 // for process-level CPU and memory usage. It uses a single long-lived port-forward
 // and computes CPU rate from the delta of process_cpu_seconds_total between samples.
-//
-// This approach is more reliable than querying Prometheus because:
-// - No dependency on Prometheus being installed or having scraped data
-// - No scrape lag or rate() window issues
-// - Single port-forward reused across all samples (no per-sample connection churn)
-// - Metrics are authoritative (reported by the Go runtime itself)
 type KarpenterMetricsPoller struct {
 	env     *Environment
 	mu      sync.Mutex
@@ -167,7 +161,6 @@ func (mp *KarpenterMetricsPoller) pollOnce(ctx context.Context, state *pollerSta
 
 // metricsNotFoundError indicates the HTTP request succeeded but the response
 // didn't contain the expected metrics (pod is temporarily overloaded/busy).
-// This should NOT trigger a port-forward reconnect — just skip the sample.
 type metricsNotFoundError struct {
 	foundMem bool
 	foundCPU bool
