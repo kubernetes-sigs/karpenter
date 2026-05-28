@@ -61,8 +61,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 660+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 660 MB during scale-out")
+			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 635+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 635 MB during scale-out")
 			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.00+CPUOverheadCores()),
 				"Karpenter controller avg CPU should be less than 1.00 cores during scale-out")
 
@@ -90,10 +90,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
-			Expect(interferenceReport.KarpenterP95MemoryMB).To(BeNumerically("<", 1140+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 1140 MB during interference")
-			Expect(interferenceReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.40+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.40 cores during interference")
+			Expect(interferenceReport.KarpenterP95MemoryMB).To(BeNumerically("<", 1090+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 1090 MB during interference")
+			Expect(interferenceReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.35+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.35 cores during interference")
 
 			// ========== PHASE 3: Interference Scale In TEST ==========
 			By("Executing interference consolidation test (small_deployment scales out to 400, large_deployment scales in to 200)")
@@ -124,8 +124,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should remain greater than 38% after consolidation")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should remain greater than 40% after consolidation")
-			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 960+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 960 MB during consolidation")
+			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 920+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 920 MB during consolidation")
 			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.90+CPUOverheadCores()),
 				"Karpenter controller avg CPU should be less than 0.90 cores during consolidation")
 

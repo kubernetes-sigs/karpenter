@@ -62,10 +62,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 55%")
-			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 700+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 700 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.25+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.25 cores during scale-out")
+			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 670+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 670 MB during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.20+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.20 cores during scale-out")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Scaling down deployments to trigger consolidation")
@@ -90,10 +90,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 660+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 660 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.05+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.05 cores during consolidation")
+			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 635+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 635 MB during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.00+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.00 cores during consolidation")
 
 		})
 	})

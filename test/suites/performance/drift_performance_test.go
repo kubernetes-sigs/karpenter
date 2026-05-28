@@ -60,8 +60,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// Performance assertions for initial deployment
 			Expect(initialReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
 				"Initial deployment should complete within 5 minutes")
-			Expect(initialReport.KarpenterP95MemoryMB).To(BeNumerically("<", 450+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 450 MB during scale-out")
+			Expect(initialReport.KarpenterP95MemoryMB).To(BeNumerically("<", 430+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 430 MB during scale-out")
 			Expect(initialReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.85+CPUOverheadCores()),
 				"Karpenter controller avg CPU should be less than 0.85 cores during scale-out")
 
@@ -91,10 +91,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// Drift performance assertions
 			Expect(driftReport.TotalTime).To(BeNumerically("<", 50*time.Minute),
 				"Drift should complete within 50 minutes")
-			Expect(driftReport.KarpenterP95MemoryMB).To(BeNumerically("<", 550+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 550 MB during drift")
-			Expect(driftReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.15+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.15 cores during drift")
+			Expect(driftReport.KarpenterP95MemoryMB).To(BeNumerically("<", 530+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 530 MB during drift")
+			Expect(driftReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.10+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.10 cores during drift")
 
 			// ========== PHASE 3: POST-DRIFT VALIDATION ==========
 			By("Validating post-drift cluster state")
