@@ -72,7 +72,7 @@ func getDeterministicDeploymentConfigs() []DeploymentConfig {
 	} // Total: 700 pods
 
 	configs := make([]DeploymentConfig, 30)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		configs[i] = DeploymentConfig{
 			Name:                      fmt.Sprintf("wide-deployment-%d", i+1),
 			CPU:                       cpuValues[i],

@@ -77,7 +77,10 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	// if the sync hasn't happened yet and the race protecting startup taint isn't present then log it as missing and proceed
 	// if the sync has happened then the startup taint has been removed if it was present
 	if _, ok := node.Labels[v1.NodeRegisteredLabelKey]; !ok && !hasStartupTaint {
-		log.FromContext(ctx).WithValues("taint", v1.UnregisteredTaintKey).Error(fmt.Errorf("missing taint prevents registration-related race conditions on Karpenter-managed nodes"), "node claim registration error")
+		log.FromContext(ctx).Error(
+			fmt.Errorf("missing taint prevents registration-related race conditions on Karpenter-managed nodes"),
+			"node claim registration error",
+			"taint", v1.UnregisteredTaintKey)
 		r.recorder.Publish(UnregisteredTaintMissingEvent(nodeClaim))
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KObj(node)))
@@ -88,6 +91,8 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	// If any hook is not ready, registration is deferred and the unregistered taint remains.
 	hooksResult, hookErrors := r.checkRegistrationHooks(ctx, nodeClaim)
 	if lo.IsEmpty(hooksResult) && hookErrors == nil {
+		// Re-sync the node after hooks complete since hooks may have mutated the nodeClaim.
+		r.syncNode(nodeClaim, node)
 		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 			return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
 		})

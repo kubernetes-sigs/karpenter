@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.20.1
   name: nodeoverlays.karpenter.sh
 spec:
   group: karpenter.sh
@@ -80,7 +80,7 @@ spec:
                   type: string
                 requirements:
                   description: |-
-                    Requirements constrain when this NodeOverlay is applied during scheduling simulations.
+                    requirements constrain when this NodeOverlay is applied during scheduling simulations.
                     These requirements can match:
                     - Well-known labels (e.g., node.kubernetes.io/instance-type, karpenter.sh/nodepool)
                     - Custom labels from NodePool's spec.template.labels
@@ -131,6 +131,7 @@ spec:
                     type: object
                   maxItems: 100
                   type: array
+                  x-kubernetes-list-type: atomic
                   x-kubernetes-validations:
                     - message: requirements with operator 'NotIn' must have a value defined
                       rule: 'self.all(x, x.operator == ''NotIn'' ? x.values.size() != 0 : true)'
@@ -213,6 +214,9 @@ spec:
                       - type
                     type: object
                   type: array
+                  x-kubernetes-list-map-keys:
+                    - type
+                  x-kubernetes-list-type: map
               type: object
           required:
             - spec

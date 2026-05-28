@@ -105,12 +105,20 @@ type Operator struct {
 
 type Options struct {
 	LeaderElectionLabels map[string]string
+	LeaderElectionConfig *rest.Config // Optional separate config for leader election
 }
 
 // Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
 func WithLeaderElectionLabels(labels map[string]string) option.Function[Options] {
 	return func(opts *Options) {
 		opts.LeaderElectionLabels = labels
+	}
+}
+
+// Adds LeaderElectionConfig to the underlying manager's LeaderElectionOptions allowing for custom client config
+func WithLeaderElectionConfig(config *rest.Config) option.Function[Options] {
+	return func(opts *Options) {
+		opts.LeaderElectionConfig = config
 	}
 }
 
@@ -145,6 +153,11 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	// limiting on the regular config would also cause client-side rate limiting on the leader election client,
 	// often leading to leader loss during large scale-ups or periods of high churn
 	leaderConfig := rest.CopyConfig(config)
+
+	if opts.LeaderElectionConfig != nil {
+		leaderConfig = opts.LeaderElectionConfig
+	}
+
 	config.QPS = float32(options.FromContext(ctx).KubeClientQPS)
 	config.Burst = options.FromContext(ctx).KubeClientBurst
 	config.UserAgent = fmt.Sprintf("%s/%s", AppName, Version)
@@ -184,7 +197,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 			// EnableWarmup allows controllers to start their sources (watches/informers) before leader election
 			// is won. This pre-populates caches and improves leader failover time. Only effective when leader
 			// election is enabled, so we only set it when both conditions are true.
-			EnableWarmup: lo.ToPtr(!options.FromContext(ctx).DisableLeaderElection && !options.FromContext(ctx).DisableControllerWarmup),
+			EnableWarmup: new(!options.FromContext(ctx).DisableLeaderElection && !options.FromContext(ctx).DisableControllerWarmup),
 		},
 	}
 	if options.FromContext(ctx).EnableProfiling {
@@ -232,7 +245,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)),
+		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once events.Recorder is updated
 		Clock:               clock.RealClock{},
 		InstanceTypeStore:   instanceTypeStore,
 	}
@@ -247,11 +260,9 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...controlle
 
 func (o *Operator) Start(ctx context.Context) {
 	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		lo.Must0(o.Manager.Start(ctx))
-	}()
+	})
 	wg.Wait()
 }
 

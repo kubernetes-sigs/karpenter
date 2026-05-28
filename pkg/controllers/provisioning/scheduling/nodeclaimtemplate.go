@@ -140,7 +140,7 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 					Kind:               object.GVK(&v1.NodePool{}).Kind,
 					Name:               i.NodePoolName,
 					UID:                i.NodePoolUUID,
-					BlockOwnerDeletion: lo.ToPtr(true),
+					BlockOwnerDeletion: new(true),
 				},
 			},
 		},

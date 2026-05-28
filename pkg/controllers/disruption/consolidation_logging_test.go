@@ -291,6 +291,44 @@ func mockCandidate(name string) *Candidate {
 	}
 }
 
+func TestLogValues_PodCount(t *testing.T) {
+	// Create candidates with different numbers of reschedulable pods
+	c1 := mockCandidate("node-1")
+	c1.NodeClaim = &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: "nc-1"}}
+	c1.reschedulablePods = []*corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-1"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-2"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-3"}},
+	}
+
+	c2 := mockCandidate("node-2")
+	c2.NodeClaim = &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: "nc-2"}}
+	c2.reschedulablePods = []*corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-4"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-5"}},
+	}
+
+	cmd := Command{
+		Candidates:   []*Candidate{c1, c2},
+		Replacements: []*Replacement{},
+	}
+
+	logValues := cmd.LogValues()
+	// LogValues returns key-value pairs: find the "pod-count" key and check its value
+	var podCount int
+	for i := 0; i < len(logValues)-1; i += 2 {
+		if logValues[i] == "pod-count" {
+			podCount = logValues[i+1].(int)
+			break
+		}
+	}
+
+	// pod-count should be 3 + 2 = 5, not just 2 (the last candidate's count)
+	if podCount != 5 {
+		t.Errorf("LogValues() pod-count = %d, want 5 (sum of all candidates' pods)", podCount)
+	}
+}
+
 func TestConsolidationCandidateEvent(t *testing.T) {
 	recorder := test.NewEventRecorder()
 

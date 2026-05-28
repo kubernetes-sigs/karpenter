@@ -100,7 +100,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		if cmd.Decision() == NoOpDecision {
 			continue
 		}
-		if _, err = s.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
+		if _, err = s.validator.Validate(ctx, cmd, commandValidationDelay); err != nil {
 			if IsValidationError(err) {
 				reason := getValidationFailureReason(err)
 				cmd.EmitRejectedEvents(s.recorder, reason)

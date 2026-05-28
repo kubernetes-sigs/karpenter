@@ -24,11 +24,13 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [Cluster API](https://github.com/kubernetes-sigs/karpenter-provider-cluster-api)
 - [Exoscale](https://github.com/exoscale/karpenter-provider-exoscale/)
 - [GCP](https://github.com/cloudpilot-ai/karpenter-provider-gcp)
+- [Huawei Cloud](https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei)
 - [IBM Cloud](https://github.com/kubernetes-sigs/karpenter-provider-ibm-cloud)
 - [Proxmox](https://github.com/sergelogvinov/karpenter-provider-proxmox)
 - Oracle Cloud Infrastructure (OCI) 
     - [Officially supported and maintained by Oracle](https://github.com/oracle/karpenter-provider-oci)
     - [Maintained by Zoom](https://github.com/zoom/karpenter-oci)
+- [Akamai/Linode](https://github.com/linode/karpenter-provider-linode) (Alpha)
 
 ## Community, discussion, contribution, and support
 

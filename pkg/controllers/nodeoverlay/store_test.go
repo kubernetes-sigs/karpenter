@@ -19,7 +19,6 @@ package nodeoverlay
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -41,8 +40,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 				},
 			}
 
-			result, err := store.apply("default", instanceType)
-			Expect(err).ToNot(HaveOccurred(), "unexpected error applying overlay")
+			result := store.apply("default", instanceType)
 
 			// Verify Requirements sharing - map comparison by checking first key address
 			if expectSharedReqs {
@@ -115,7 +113,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 				})
 				// Use actual requirements string from the generated instance type
 				return map[string]*priceUpdate{
-					it.Offerings[0].Requirements.String(): {OverlayUpdate: lo.ToPtr("+0.01"), lowestWeight: lo.ToPtr(int32(10))},
+					it.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
 				}
 			}(),
 			&capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
@@ -162,7 +160,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 					Name: "m5.large",
 				})
 				return map[string]*priceUpdate{
-					it.Offerings[0].Requirements.String(): {OverlayUpdate: lo.ToPtr("+0.01"), lowestWeight: lo.ToPtr(int32(10))},
+					it.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
 				}
 			}(),
 			&capacityUpdate{
@@ -211,15 +209,14 @@ var _ = Describe("Store Apply Correctness", func() {
 					instanceType.Name: &instanceTypeUpdate{
 						Price: map[string]*priceUpdate{
 							// Only overlay the first offering
-							instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: lo.ToPtr("+0.01"), lowestWeight: lo.ToPtr(int32(10))},
+							instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
 						},
 						Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
 					},
 				},
 			}
 
-			result, err := store.apply("default", instanceType)
-			Expect(err).ToNot(HaveOccurred())
+			result := store.apply("default", instanceType)
 
 			// Verify first offering was modified
 			Expect(result.Offerings[0].Price).To(BeNumerically("==", 0.106), "expected first offering price to be 0.106") // 0.096 + 0.01
@@ -260,8 +257,7 @@ var _ = Describe("Store Apply Correctness", func() {
 				},
 			}
 
-			result, err := store.apply("default", instanceType)
-			Expect(err).ToNot(HaveOccurred())
+			result := store.apply("default", instanceType)
 
 			// Verify hugepages was added
 			hugepages, ok := result.Capacity["hugepages-2Mi"]
@@ -303,7 +299,7 @@ var _ = Describe("Store Apply Isolation Between NodePools", func() {
 			"nodepool-a": {
 				instanceType.Name: &instanceTypeUpdate{
 					Price: map[string]*priceUpdate{
-						instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: lo.ToPtr("+10%"), lowestWeight: lo.ToPtr(int32(10))},
+						instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("+10%"), lowestWeight: new(int32(10))},
 					},
 					Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
 				},
@@ -311,7 +307,7 @@ var _ = Describe("Store Apply Isolation Between NodePools", func() {
 			"nodepool-b": {
 				instanceType.Name: &instanceTypeUpdate{
 					Price: map[string]*priceUpdate{
-						instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: lo.ToPtr("-5%"), lowestWeight: lo.ToPtr(int32(10))},
+						instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("-5%"), lowestWeight: new(int32(10))},
 					},
 					Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
 				},
@@ -319,12 +315,10 @@ var _ = Describe("Store Apply Isolation Between NodePools", func() {
 		}
 
 		// Apply to NodePool A
-		resultA, err := store.apply("nodepool-a", instanceType)
-		Expect(err).ToNot(HaveOccurred(), "unexpected error for nodepool-a")
+		resultA := store.apply("nodepool-a", instanceType)
 
 		// Apply to NodePool B
-		resultB, err := store.apply("nodepool-b", instanceType)
-		Expect(err).ToNot(HaveOccurred(), "unexpected error for nodepool-b")
+		resultB := store.apply("nodepool-b", instanceType)
 
 		// Verify NodePool A has +10% (0.096 * 1.10 = 0.1056)
 		expectedPriceA := 0.1056
@@ -348,10 +342,14 @@ var _ = Describe("Store Apply Unevaluated NodePool", func() {
 			Name: "m5.large",
 		})
 
+		publicStore := NewInstanceTypeStore()
 		store := newInternalInstanceTypeStore()
+
 		// Don't add "unevaluated" to evaluatedNodePools
 
-		_, err := store.apply("unevaluated", instanceType)
+		publicStore.UpdateStore(store)
+
+		_, err := publicStore.Apply("unevaluated", instanceType)
 		Expect(err).To(HaveOccurred(), "expected error for unevaluated node pool")
 		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue(), "expected UnevaluatedNodePoolError")
 	})
@@ -412,7 +410,7 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 		// Apply overlays to m5.large: add hugepages and adjust spot pricing
 		overlay := v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
-				Weight: lo.ToPtr(int32(100)),
+				Weight: new(int32(100)),
 				Capacity: corev1.ResourceList{
 					"hugepages-2Mi": resource.MustParse("100Mi"),
 				},
