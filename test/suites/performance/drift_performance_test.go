@@ -62,8 +62,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Initial deployment should complete within 5 minutes")
 			Expect(initialReport.KarpenterP95MemoryMB).To(BeNumerically("<", 430+MemoryOverheadMB()),
 				"Karpenter controller P95 memory should be less than 430 MB during scale-out")
-			Expect(initialReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.85+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 0.85 cores during scale-out")
+			Expect(initialReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.75+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 0.75 cores during scale-out")
 
 			// Allow system to stabilize before triggering drift
 			By("Allowing system to stabilize before triggering drift")
@@ -93,8 +93,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Drift should complete within 50 minutes")
 			Expect(driftReport.KarpenterP95MemoryMB).To(BeNumerically("<", 530+MemoryOverheadMB()),
 				"Karpenter controller P95 memory should be less than 530 MB during drift")
-			Expect(driftReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.10+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.10 cores during drift")
+			Expect(driftReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.00+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.00 cores during drift")
 
 			// ========== PHASE 3: POST-DRIFT VALIDATION ==========
 			By("Validating post-drift cluster state")

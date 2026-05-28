@@ -55,8 +55,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 65%")
 			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 285+MemoryOverheadMB()),
 				"Karpenter controller P95 memory should be less than 285 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.55+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 0.55 cores during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.50+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 0.50 cores during scale-out")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Executing consolidation performance test (scaling down to 700 pods)")

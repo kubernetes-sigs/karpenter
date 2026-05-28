@@ -64,8 +64,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 40%")
 			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 1400+MemoryOverheadMB()),
 				"Karpenter controller P95 memory should be less than 1400 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.60+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.60 cores during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.50+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.50 cores during scale-out")
 
 			// ========== PHASE 2: XL CONSOLIDATION TEST ==========
 			By("Scaling down XL deployments to trigger consolidation")
@@ -94,8 +94,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 40%")
 			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 1310+MemoryOverheadMB()),
 				"Karpenter controller P95 memory should be less than 1310 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.75+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.75 cores during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.60+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.60 cores during consolidation")
 
 		})
 	})

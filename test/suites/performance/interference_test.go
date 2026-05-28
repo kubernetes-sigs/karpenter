@@ -63,8 +63,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 40%")
 			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 635+MemoryOverheadMB()),
 				"Karpenter controller P95 memory should be less than 635 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.00+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.00 cores during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.95+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 0.95 cores during scale-out")
 
 			// ========== PHASE 2: Interference Scale Out TEST ==========
 			By("Net scaling out interference test")
@@ -92,8 +92,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 40%")
 			Expect(interferenceReport.KarpenterP95MemoryMB).To(BeNumerically("<", 1090+MemoryOverheadMB()),
 				"Karpenter controller P95 memory should be less than 1090 MB during interference")
-			Expect(interferenceReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.35+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.35 cores during interference")
+			Expect(interferenceReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.25+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.25 cores during interference")
 
 			// ========== PHASE 3: Interference Scale In TEST ==========
 			By("Executing interference consolidation test (small_deployment scales out to 400, large_deployment scales in to 200)")
@@ -126,8 +126,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should remain greater than 40% after consolidation")
 			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 920+MemoryOverheadMB()),
 				"Karpenter controller P95 memory should be less than 920 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.90+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 0.90 cores during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.80+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 0.80 cores during consolidation")
 
 		})
 	})
