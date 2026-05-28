@@ -19,22 +19,36 @@ package performance
 import (
 	"os"
 	"strconv"
+
+	. "github.com/onsi/ginkgo/v2"
 )
 
-// MemoryOverheadMB returns the additional memory overhead (in MB) to add to
-// Karpenter controller memory thresholds. This is read from the
-// KARPENTER_MEMORY_OVERHEAD_MB environment variable and defaults to 0.
-// This is useful for internal providers where daemonsets and other overhead
-// cause the karpenter pod to consistently use more memory.
+// MemoryOverheadMB returns the additional memory overhead (in MB) configured via
+// the KARPENTER_MEMORY_OVERHEAD_MB environment variable (defaults to 0).
+// This value represents expected baseline memory overhead from daemonsets and
+// other environment-specific components. It is reported in test output for
+// observability but is NOT used to gate test pass/fail.
 func MemoryOverheadMB() float64 {
 	return envFloat64("KARPENTER_MEMORY_OVERHEAD_MB", 0)
 }
 
-// CPUOverheadNanos returns the additional CPU overhead (in nanoseconds) to add
-// to Karpenter controller CPU thresholds. This is read from the
-// KARPENTER_CPU_OVERHEAD_NANOS environment variable and defaults to 0.
+// CPUOverheadNanos returns the additional CPU overhead (in nanoseconds) configured
+// via the KARPENTER_CPU_OVERHEAD_NANOS environment variable (defaults to 0).
+// This value represents expected baseline CPU overhead from environment-specific
+// components. It is reported in test output for observability but is NOT used to
+// gate test pass/fail.
 func CPUOverheadNanos() float64 {
 	return envFloat64("KARPENTER_CPU_OVERHEAD_NANOS", 0)
+}
+
+// ReportOverhead logs the configured overhead values to the test output.
+// Call this at the beginning of performance test suites to record the
+// environment-specific overhead configuration for later analysis.
+func ReportOverhead() {
+	memOverhead := MemoryOverheadMB()
+	cpuOverhead := CPUOverheadNanos()
+	GinkgoWriter.Printf("Configured memory overhead: %.2f MB\n", memOverhead)
+	GinkgoWriter.Printf("Configured CPU overhead: %.0f ns\n", cpuOverhead)
 }
 
 func envFloat64(key string, defaultVal float64) float64 {
