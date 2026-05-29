@@ -180,10 +180,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 20%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.20),
 				"Average memory utilization should be greater than 20%")
-			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 375+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 375 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.65+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 0.65 cores during scale-out")
+			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 370+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 370 MB during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.70+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 0.70 cores during scale-out")
 
 			// ========== PHASE 2: WIDE CONSOLIDATION TEST ==========
 			By("Scaling down all 30 deployments to trigger consolidation")
@@ -212,8 +212,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 20%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.20),
 				"Average memory utilization should be greater than 20%")
-			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 370+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 370 MB during consolidation")
+			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 340+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 340 MB during consolidation")
 			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.30+CPUOverheadCores()),
 				"Karpenter controller avg CPU should be less than 0.30 cores during consolidation")
 

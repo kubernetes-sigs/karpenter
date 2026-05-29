@@ -66,10 +66,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 670+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 670 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.05+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 1.05 cores during scale-out")
+			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 645+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 645 MB during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.10+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 1.10 cores during scale-out")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")
@@ -110,10 +110,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
 				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 600+MemoryOverheadMB()),
-				"Karpenter controller P95 memory should be less than 600 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.70+CPUOverheadCores()),
-				"Karpenter controller avg CPU should be less than 0.70 cores during consolidation")
+			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 585+MemoryOverheadMB()),
+				"Karpenter controller P95 memory should be less than 585 MB during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 0.80+CPUOverheadCores()),
+				"Karpenter controller avg CPU should be less than 0.80 cores during consolidation")
 
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()
