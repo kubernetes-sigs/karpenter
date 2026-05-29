@@ -192,6 +192,7 @@ func (mp *KarpenterMetricsPoller) handleScrapeError(ctx context.Context, state *
 		return false
 	}
 	GinkgoWriter.Printf("KarpenterMetricsPoller: reconnected successfully on port %d\n", state.localPort)
+	state.firstSample = true
 	return true
 }
 
