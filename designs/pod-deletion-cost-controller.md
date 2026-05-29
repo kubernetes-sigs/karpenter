@@ -70,7 +70,7 @@ We introduce a new feature-gated controller that automatically manages the `cont
 
 ### How it works
 
-The controller reconciles on a periodic interval, gated behind the `PodDeletionCostManagement` feature gate (the reconciler does not run when the gate is disabled). Where the data for this controller lives is an implementation detail, but the controller could reuse the existing `state.Cluster` data structures and functions to perform its ranking. On each reconcile it:
+The controller reconciles on a periodic interval, gated behind the `PodDeletionCostManagement` feature gate. On each reconcile it:
 
 1. Collects all Karpenter-managed nodes
 2. Runs change detection (compares `ConsolidationState` timestamp). If nothing changed, skips with zero API writes
