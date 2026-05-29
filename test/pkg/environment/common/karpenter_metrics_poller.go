@@ -217,9 +217,16 @@ func (mp *KarpenterMetricsPoller) recordSample(state *pollerState, now time.Time
 	if elapsed > 0 {
 		cpuRate = (cpuSeconds - state.prevCPUSeconds) / elapsed
 	}
+
+	// Negative rate means counter reset (pod restart). Reset baseline and skip this sample.
 	if cpuRate < 0 {
-		cpuRate = 0
+		GinkgoWriter.Printf("KarpenterMetricsPoller: CPU counter reset detected (delta=%.4f), resetting baseline\n",
+			cpuSeconds-state.prevCPUSeconds)
+		state.prevCPUSeconds = cpuSeconds
+		state.prevTime = now
+		return
 	}
+
 	state.prevCPUSeconds = cpuSeconds
 	state.prevTime = now
 	state.sampleNum++
@@ -355,11 +362,11 @@ func computeStats(samples []ResourceSample) ResourceStats {
 		memMax = math.Max(memMax, s.MemoryMB)
 	}
 
-	// For CPU, skip the first sample (which has CPUCores=0 since we need two points for a rate)
+	// Skip the first sample for CPU (always 0 since rate needs two points)
 	var cpuValues []float64
 	var cpuSum, cpuMax float64
-	for _, s := range samples {
-		if s.CPUCores > 0 || len(cpuValues) > 0 {
+	if len(samples) > 1 {
+		for _, s := range samples[1:] {
 			cpuValues = append(cpuValues, s.CPUCores)
 			cpuSum += s.CPUCores
 			cpuMax = math.Max(cpuMax, s.CPUCores)

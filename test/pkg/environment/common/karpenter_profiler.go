@@ -190,6 +190,7 @@ func (kp *KarpenterProfiler) fetchCPUProfile(port int) (int64, []byte) {
 
 // PortForwardPod creates a port-forward to a pod without using Ginkgo assertions.
 // Safe to call from background goroutines. The port-forward is torn down when ctx is canceled.
+// Callers must cancel ctx to clean up the port-forward goroutine, even if this function returns an error.
 func (env *Environment) PortForwardPod(ctx context.Context, pod *corev1.Pod, podPort, localPort int) error {
 	roundTripper, upgrader, err := spdy.RoundTripperFor(env.Config)
 	if err != nil {
