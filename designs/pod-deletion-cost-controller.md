@@ -75,7 +75,7 @@ The controller reconciles on a periodic interval, gated behind the `PodDeletionC
 1. For nodes that have changed since last reconcile.
 2. Partitions nodes into Draining, Drifted, Disruptable, and Not Disruptable
 3. Ranks Drifted and Disruptable nodes by the current Karpenter consolidation candidate ranking function. Draining nodes get a fixed minimum value. Not Disruptable nodes are excluded from ranking.
-4. For each NodePool, the number of nodes eligible for annotation is limited by that NodePool's disruption budget. Since drift and consolidation can have separate budgets per NodePool, the controller respects each independently: Drifted nodes are bounded by the drift disruption budget, Disruptable nodes are bounded by the consolidation disruption budget. Only nodes Karpenter could actually act on get annotated. Across all NodePools, a hard cap of 50 nodes per cycle prevents excessive labeling when budgets are permissive.
+4. Ranks Drifted and Disruptable nodes by the current Karpenter consolidation candidate ranking function. Draining nodes are marked as the best to disrupt. Not Disruptable nodes are excluded from ranking.
 5. For each eligible node's pods, writes the pod-deletion-cost annotation along with ownership and conflict-detection annotations (the three-annotation protocol described in Risks). Skips pods with customer-set deletion costs. Nodes that drop out of scope have their managed annotations cleaned up.
 
 The hard cap of 50 nodes is the alpha default; we will collect feedback and adjust for beta. Implementation may use sparse numbering to reduce the number of annotation updates needed when individual nodes are added or removed from the ranking.
