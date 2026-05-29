@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,12 +37,13 @@ type Consolidation struct {
 
 //nolint:gocyclo
 func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+	clockOpt := status.WithClock(c.clock)
 	hasConsolidatableCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable) != nil
 
 	// 1. If Consolidation isn't enabled, remove the consolidatable status condition
 	if nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
 		if hasConsolidatableCondition {
-			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
+			_ = nodeClaim.StatusConditions(clockOpt).Clear(v1.ConditionTypeConsolidatable)
 			log.FromContext(ctx).V(1).Info("removing consolidatable status condition", "reason", "consolidation is disabled")
 		}
 		return reconcile.Result{}, nil
@@ -50,7 +52,7 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 	// 2. If NodeClaim is not initialized, remove the consolidatable status condition
 	if !initialized.IsTrue() {
 		if hasConsolidatableCondition {
-			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
+			_ = nodeClaim.StatusConditions(clockOpt).Clear(v1.ConditionTypeConsolidatable)
 			log.FromContext(ctx).V(1).Info("removing consolidatable status condition", "reason", "nodeclaim isn't initialized")
 		}
 		return reconcile.Result{}, nil
@@ -62,7 +64,7 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 	// Consider a node consolidatable by looking at the lastPodEvent status field on the nodeclaim.
 	if c.clock.Since(timeToCheck) < lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration) {
 		if hasConsolidatableCondition {
-			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
+			_ = nodeClaim.StatusConditions(clockOpt).Clear(v1.ConditionTypeConsolidatable)
 			log.FromContext(ctx).V(1).Info("removing consolidatable status condition",
 				"reason", "consolidateAfter window not yet elapsed",
 				"lastPodEventTime", timeToCheck,
@@ -75,7 +77,7 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 	}
 
 	// 6. Otherwise, add the consolidatable status condition
-	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+	nodeClaim.StatusConditions(clockOpt).SetTrue(v1.ConditionTypeConsolidatable)
 	if !hasConsolidatableCondition {
 		log.FromContext(ctx).V(1).Info("marking consolidatable")
 	}

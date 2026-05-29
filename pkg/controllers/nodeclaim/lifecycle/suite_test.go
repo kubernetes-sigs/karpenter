@@ -29,7 +29,6 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
@@ -54,7 +53,6 @@ var (
 	ctx                 context.Context
 	nodeClaimController *nodeclaimlifecycle.Controller
 	env                 *test.Environment
-	fakeClock           *clock.FakeClock
 	cloudProvider       *fake.CloudProvider
 	recorder            *test.EventRecorder
 	npState             *nodepoolhealth.State
@@ -79,14 +77,13 @@ func removeNodeClaimImmutabilityValidation(crds ...*apiextensionsv1.CustomResour
 }
 
 var _ = BeforeSuite(func() {
-	fakeClock = clock.NewFakeClock(time.Now())
 	recorder = test.NewEventRecorder()
 	env = test.NewEnvironment(test.WithCRDs(removeNodeClaimImmutabilityValidation(apis.CRDs...)...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())
 
 	cloudProvider = fake.NewCloudProvider()
 	npState = nodepoolhealth.NewState()
-	nodeClaimController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider, recorder, npState, nil)
+	nodeClaimController = nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil)
 })
 
 var _ = AfterSuite(func() {
@@ -94,7 +91,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 	ExpectCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
 })
@@ -157,7 +154,7 @@ var _ = Describe("Finalizer", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			// add a finalizer so we can make assertions about all status conditions
@@ -210,7 +207,7 @@ var _ = Describe("Finalizer", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())

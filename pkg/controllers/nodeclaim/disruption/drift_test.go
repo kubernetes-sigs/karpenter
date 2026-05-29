@@ -86,7 +86,7 @@ var _ = Describe("Drift", func() {
 	It("should detect stale instance type drift if the instance type label doesn't exist", func() {
 		delete(nodeClaim.Labels, corev1.LabelInstanceTypeStable)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+		env.Clock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -95,7 +95,7 @@ var _ = Describe("Drift", func() {
 	It("should detect stale instance type drift if the instance type doesn't exist", func() {
 		cp.InstanceTypes = nil
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+		env.Clock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -107,7 +107,7 @@ var _ = Describe("Drift", func() {
 			return it
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+		env.Clock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -125,7 +125,7 @@ var _ = Describe("Drift", func() {
 			return it
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+		env.Clock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -557,7 +557,7 @@ var _ = Describe("Drift", func() {
 					return slices.Contains(includedCapacityTypes, ct)
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-				fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+				env.Clock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
 				ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
