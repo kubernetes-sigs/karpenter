@@ -72,8 +72,7 @@ We introduce a new feature-gated controller that automatically manages the `cont
 
 The controller reconciles on a periodic interval, gated behind the `PodDeletionCostManagement` feature gate. On each reconcile it:
 
-1. Collects all Karpenter-managed nodes
-2. Runs change detection (compares `ConsolidationState` timestamp). If nothing changed, skips with zero API writes
+1. For nodes that have changed since last reconcile.
 3. Partitions nodes into Draining, Drifted, Disruptable, and Not Disruptable
 4. Ranks Drifted and Disruptable nodes by the current Karpenter consolidation candidate ranking function. Draining nodes get a fixed minimum value. Not Disruptable nodes are excluded from ranking.
 5. For each NodePool, the number of nodes eligible for annotation is limited by that NodePool's disruption budget. Since drift and consolidation can have separate budgets per NodePool, the controller respects each independently: Drifted nodes are bounded by the drift disruption budget, Disruptable nodes are bounded by the consolidation disruption budget. Only nodes Karpenter could actually act on get annotated. Across all NodePools, a hard cap of 50 nodes per cycle prevents excessive labeling when budgets are permissive.
