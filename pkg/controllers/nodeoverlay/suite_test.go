@@ -35,8 +35,6 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	clock "k8s.io/utils/clock/testing"
-
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
@@ -57,7 +55,6 @@ var (
 	nodePool              *v1.NodePool
 	nodePoolTwo           *v1.NodePool
 	cluster               *state.Cluster
-	fakeClock             *clock.FakeClock
 	nodeOverlayController *Controller
 	store                 *InstanceTypeStore
 )
@@ -72,9 +69,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
 	store = NewInstanceTypeStore()
-	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeOverlayController = NewController(env.Client, cloudProvider, store, cluster)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
+	nodeOverlayController = NewController(env.Clock, env.Client, cloudProvider, store, cluster)
 })
 
 var _ = BeforeEach(func() {

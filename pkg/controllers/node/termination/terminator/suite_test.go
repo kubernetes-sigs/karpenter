@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	clock "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -50,7 +49,6 @@ var queue *terminator.Queue
 var pdb *policyv1.PodDisruptionBudget
 var pod *corev1.Pod
 var node *corev1.Node
-var fakeClock *clock.FakeClock
 var terminatorInstance *terminator.Terminator
 
 func TestAPIs(t *testing.T) {
@@ -60,7 +58,6 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(
 		test.WithCRDs(apis.CRDs...),
 		test.WithCRDs(v1alpha1.CRDs...),
@@ -69,7 +66,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewQueue(env.Client, recorder)
-	terminatorInstance = terminator.NewTerminator(fakeClock, env.Client, queue, recorder)
+	terminatorInstance = terminator.NewTerminator(env.Clock, env.Client, queue, recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -263,7 +260,7 @@ var _ = Describe("Eviction/Queue", func() {
 			// Set the termination time 1 hour in the past: remaining = -3600s.
 			// Without the clamp the grace period would be <=0, sending gracePeriodSeconds=0
 			// to the API (force-delete). The clamp must produce >= 1.
-			pastTerminationTime := fakeClock.Now().Add(-1 * time.Hour)
+			pastTerminationTime := env.Clock.Now().Add(-1 * time.Hour)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &pastTerminationTime)).To(Succeed())
 
 			// Verify the delete was graceful (not a force-delete): the Disrupted event must have
