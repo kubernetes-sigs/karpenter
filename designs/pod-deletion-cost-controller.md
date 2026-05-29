@@ -35,7 +35,7 @@ This logic extends naturally to nodes that Karpenter cannot consolidate and to n
 - **Draining:** Nodes that have the `karpenter.sh/disrupted` taint (disruption already committed) AND at least one pod blocked by a PDB with `DisruptionsAllowed=0`. These are the highest-value targets for RS scale-down assistance because the node is already committed to disruption and getting replica pods off unblocks the PDB faster. Draining nodes receive a fixed minimum int32 deletion cost. They are not sequentially ranked.
 - **Drifted:** Nodes with `ConditionTypeDrifted=True` and no do-not-disrupt pods. These nodes need replacement for compliance or security reasons. Draining them first via RS scale-down means scale-down events naturally assist drift progress. Nodes are ranked by consolidation priority.
 - **Disruptable:** Nodes that are not drifted and have no do-not-disrupt pods. Standard consolidation targets. Nodes are ranked by consolidation priority.
-- **Not Disruptable:** Nodes that Karpenter cannot or should not consolidate: those with do-not-disrupt pods, nodes marked do-not-disrupt, or nodes in NodePools with no consolidation budget (`consolidateAfter` is nil). Deleting pods from them has zero consolidation or drift value. Managed annotations are cleared so the RS controller applies its default behavior.
+- **Not Disruptable:** Nodes that Karpenter cannot or should not consolidate: those with do-not-disrupt pods, pods that aren't managed by replicaset controllers, nodes marked do-not-disrupt, or nodes in NodePools with no consolidation budget (`consolidateAfter` is nil). Deleting pods from them has zero consolidation or drift value. Managed annotations are cleared so the RS controller applies its default behavior.
 
 Only Drifted and Disruptable nodes receive sequential negative ranks such that newly created pods without managed annotations always have a higher default deletion cost (e.g. default is 1 in Karpenter or 0 in Replicaset controller). Draining nodes get a fixed minimum value. Not Disruptable nodes have annotations removed entirely. The ReplicaSet controller removes pods from draining nodes first (unblocking in-progress operations), then drifted nodes, then normal consolidation targets, and protected nodes last.
 
@@ -66,7 +66,7 @@ For ConsolidateWhenEmpty NodePools, concentrating pod deletions on specific node
 
 ## Proposal
 
-We introduce a new feature-gated controller that automatically manages the `controller.kubernetes.io/pod-deletion-cost` annotation on pods running on Karpenter-managed nodes. The controller ranks nodes using Karpenter's disruption cost heuristic, assigns deletion cost values to pods so that Kubernetes' ReplicaSet scale-down logic preferentially removes pods from the best consolidation targets first, and partitions nodes Karpenter cannot act on separately to protect them from early eviction.
+We introduce a new feature-gated controller that automatically manages the `controller.kubernetes.io/pod-deletion-cost` annotation on pods running on Karpenter-managed nodes that are replicaset owned. The controller ranks nodes using Karpenter's disruption cost heuristic, assigns deletion cost values to pods so that Kubernetes' ReplicaSet scale-down logic preferentially removes pods from the best consolidation targets first, and partitions nodes Karpenter cannot act on separately to protect them from early eviction.
 
 ### How it works
 
