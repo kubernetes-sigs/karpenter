@@ -74,7 +74,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	queue = terminator.NewQueue(env.Clock, env.Client, recorder)
 	terminationController = termination.NewController(env.Clock, env.Client, cloudProvider, terminator.NewTerminator(env.Clock, env.Client, queue, recorder), recorder)
 })
 
@@ -90,7 +90,7 @@ var _ = Describe("Termination", func() {
 	BeforeEach(func() {
 		env.Clock.SetTime(time.Now())
 		cloudProvider.Reset()
-		*queue = lo.FromPtr(terminator.NewQueue(env.Client, recorder))
+		*queue = lo.FromPtr(terminator.NewQueue(env.Clock, env.Client, recorder))
 
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
@@ -804,6 +804,7 @@ var _ = Describe("Termination", func() {
 			// The pod should be deleted 60 seconds before the node's TGP expires
 			env.Clock.Step(175 * time.Second)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 
@@ -835,6 +836,7 @@ var _ = Describe("Termination", func() {
 			// expect pod still exists
 			env.Clock.Step(90 * time.Second)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 			ExpectNodeExists(ctx, env.Client, node.Name)
 			pod = ExpectExists(ctx, env.Client, pod)
