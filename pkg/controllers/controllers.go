@@ -94,7 +94,7 @@ func NewControllers(
 ) []controller.Controller {
 	o := option.Resolve(opts...)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
-	evictionQueue := terminator.NewQueue(kubeClient, recorder)
+	evictionQueue := terminator.NewQueue(clock, kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
