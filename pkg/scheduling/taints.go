@@ -18,6 +18,7 @@ package scheduling
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
@@ -40,6 +41,34 @@ var KnownEphemeralTaints = []corev1.Taint{
 	{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 	{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 	v1.UnregisteredNoExecuteTaint,
+}
+
+// KnownEphemeralTaintKeyPrefixes are taint key prefixes that are expected to be ephemeral.
+// Used for taint families whose key has a controller-managed suffix (e.g. Node Readiness
+// Controller adds taints with keys like "readiness.k8s.io/<rule-name>"). See #2934.
+var KnownEphemeralTaintKeyPrefixes = []string{
+	// https://kubernetes.io/blog/2026/02/03/introducing-node-readiness-controller/
+	"readiness.k8s.io/",
+}
+
+// IsKnownEphemeralTaint reports whether the given taint is in KnownEphemeralTaints
+// (exact match on key/value/effect) or has a key matching any prefix in
+// KnownEphemeralTaintKeyPrefixes.
+func IsKnownEphemeralTaint(taint *corev1.Taint) bool {
+	if taint == nil {
+		return false
+	}
+	for i := range KnownEphemeralTaints {
+		if KnownEphemeralTaints[i].MatchTaint(taint) {
+			return true
+		}
+	}
+	for _, prefix := range KnownEphemeralTaintKeyPrefixes {
+		if strings.HasPrefix(taint.Key, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // Taints is a decorated alias type for []corev1.Taint

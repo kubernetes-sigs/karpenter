@@ -186,7 +186,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
 		for key, minValues := range unsatisfiableKeys {
-			nodeClaimRequirements.Get(key).MinValues = lo.ToPtr(minValues)
+			nodeClaimRequirements.Get(key).MinValues = new(minValues)
 		}
 	}
 	if err != nil {

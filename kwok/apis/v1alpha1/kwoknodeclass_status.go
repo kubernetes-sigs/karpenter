@@ -26,8 +26,8 @@ type KWOKNodeClassStatus struct {
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
-func (in *KWOKNodeClass) StatusConditions() status.ConditionSet {
-	return status.NewReadyConditions().For(in)
+func (in *KWOKNodeClass) StatusConditions(opts ...status.ForOption) status.ConditionSet {
+	return status.NewReadyConditions().For(in, opts...)
 }
 
 func (in *KWOKNodeClass) GetConditions() []status.Condition {
