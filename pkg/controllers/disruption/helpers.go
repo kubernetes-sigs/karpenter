@@ -281,7 +281,11 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	return disruptionBudgetMapping, nil
 }
 
-// filterPodsByCompatibleCandidates returns pods whose nodeSelector and tolerations match at least one candidate
+// filterPodsByCompatibleCandidates returns pods whose nodeSelector and tolerations match at least one candidate.
+// This is a necessary but not sufficient guard: the downstream scheduler simulation may still fail if the
+// replacement chosen for a candidate is itself incompatible with the pod (e.g. a replacement from a different
+// NodePool whose taints the pod doesn't tolerate). In that case consolidation is correctly blocked by the
+// simulator, not this filter.
 func filterPodsByCompatibleCandidates(pods []*corev1.Pod, candidates []*Candidate) []*corev1.Pod {
 	return lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
 		return lo.SomeBy(candidates, func(c *Candidate) bool {

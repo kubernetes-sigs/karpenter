@@ -3389,7 +3389,7 @@ var _ = Describe("Consolidation", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, nodepoolA, nodepoolB, nodeclaimB, nodeB, pendingPod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodeB}, []*v1.NodeClaim{nodeclaimB})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodeB}, []*v1.NodeClaim{nodeclaimB})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// pending pod from NodePool A must not block deletion of NodePool B's empty node
@@ -3483,7 +3483,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, drainingPod, nodeA)
 
 			// Initialize nodeA before marking it for deletion so the cluster state reflects it as deleting
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodeA, nodeB}, []*v1.NodeClaim{nodeclaimA, nodeclaimB})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodeA, nodeB}, []*v1.NodeClaim{nodeclaimA, nodeclaimB})
 
 			// Mark NodePool A's nodeclaim as deleting
 			Expect(env.Client.Delete(ctx, nodeclaimA)).To(Succeed())
