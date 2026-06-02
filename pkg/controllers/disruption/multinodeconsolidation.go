@@ -266,6 +266,12 @@ func (m *MultiNodeConsolidation) pairwiseSearchFallback(ctx context.Context, can
 		// needed: the walk uses the result to decide whether to accept or
 		// skip c. Without it, a bad first candidate would poison the
 		// entire accepted set with no way to eject it.
+		//
+		// TODO: computeConsolidation calls SimulateScheduling which
+		// recomputes DeepCopyNodes, GetPendingPods, and pdb.NewLimits on
+		// every invocation. These are invariants within a single reconcile.
+		// A future optimization could snapshot this state once and pass a
+		// prepared simulation context to each probe.
 		cmd, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
