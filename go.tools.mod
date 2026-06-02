@@ -3,7 +3,7 @@ module tools
 // Tool dependencies isolated from main module to avoid conflicts.
 // Usage: go tool -modfile=go.tools.mod <toolname>
 
-go 1.26.3
+go 1.26.4
 
 tool (
 	github.com/B1NARY-GR0UP/nwa

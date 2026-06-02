@@ -26,6 +26,7 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -62,10 +63,9 @@ const (
 
 	multiplePodDisruptionBudgetsError = "This pod has more than one PodDisruptionBudget, which the eviction subresource does not support."
 
-	// rolloutRestartAnnotation matches the annotation `kubectl rollout restart` writes onto
-	// the workload's pod template; setting it triggers the Deployment controller to surge a
-	// fresh pod and delete the old one.
-	rolloutRestartAnnotation = "kubectl.kubernetes.io/restartedAt"
+	// RolloutRestartAnnotation matches the annotation `kubectl rollout restart` writes onto the workload's pod template;
+	// setting it triggers the Deployment controller to surge a fresh pod and delete the old one.
+	RolloutRestartAnnotation = "kubectl.kubernetes.io/restartedAt"
 )
 
 type NodeDrainError struct {
@@ -245,14 +245,23 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 // and we re-check Status.
 func (q *Queue) tryRolloutRestart(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	if !options.FromContext(ctx).FeatureGates.RolloutRestartDrainStrategy {
+		fmt.Printf("DEBUG tryRolloutRestart: feature gate OFF for pod %s/%s\n", pod.Namespace, pod.Name)
 		return false, nil
 	}
 	target, err := podutils.SingletonRolloutTargetForPod(ctx, q.kubeClient, pod)
 	if err != nil {
+		fmt.Printf("DEBUG tryRolloutRestart: err for pod %s/%s: %v\n", pod.Namespace, pod.Name, err)
 		return false, err
 	}
 	if target == nil {
+		fmt.Printf("DEBUG tryRolloutRestart: target=nil for pod %s/%s (owners=%+v)\n", pod.Namespace, pod.Name, pod.OwnerReferences)
 		return false, nil
+	}
+	if dep, ok := target.Object.(*appsv1.Deployment); ok {
+		fmt.Printf("DEBUG tryRolloutRestart: Deployment %s Gen=%d ObsGen=%d UpdRepl=%d Repl=%d AvlRepl=%d SpecRepl=%d rolloutInProgress=%v\n",
+			dep.Name, dep.Generation, dep.Status.ObservedGeneration, dep.Status.UpdatedReplicas, dep.Status.Replicas, dep.Status.AvailableReplicas, *dep.Spec.Replicas, target.RolloutInProgress)
+	} else {
+		fmt.Printf("DEBUG tryRolloutRestart: target found kind=%s name=%s rolloutInProgress=%v\n", target.Kind, target.Object.GetName(), target.RolloutInProgress)
 	}
 	if target.RolloutInProgress {
 		q.recorder.Publish(terminatorevents.RolloutRestartInProgress(pod, target.Kind, target.Object.GetName()))
@@ -277,7 +286,7 @@ func (q *Queue) tryRolloutRestart(ctx context.Context, pod *corev1.Pod) (bool, e
 func (q *Queue) rolloutRestart(ctx context.Context, target *podutils.SingletonRolloutTarget) error {
 	patch := []byte(fmt.Sprintf(
 		`{"spec":{"template":{"metadata":{"annotations":{%q:%q}}}}}`,
-		rolloutRestartAnnotation, time.Now().UTC().Format(time.RFC3339),
+		RolloutRestartAnnotation, time.Now().UTC().Format(time.RFC3339),
 	))
 	if err := q.kubeClient.Patch(ctx, target.Object, client.RawPatch(types.StrategicMergePatchType, patch)); err != nil {
 		return fmt.Errorf("rollout-restarting %s %s/%s: %w", target.Kind, target.Object.GetNamespace(), target.Object.GetName(), err)
