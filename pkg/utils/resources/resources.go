@@ -109,10 +109,12 @@ func SubtractFrom(dest v1.ResourceList, src v1.ResourceList) {
 }
 
 // Ceiling computes the effective resource requirements for a given Pod,
-// using the same logic as the scheduler.
+// using the same logic as the scheduler. When InPlacePodVerticalScaling is enabled,
+// this returns max(spec.requests, status.allocatedResources) to reflect what the
+// kubelet actually holds during active resize transitions.
 func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
 	return v1.ResourceRequirements{
-		Requests: resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{}),
+		Requests: resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{UseStatusResources: true}),
 		Limits:   resourcehelper.PodLimits(pod, resourcehelper.PodResourcesOptions{}),
 	}
 }
