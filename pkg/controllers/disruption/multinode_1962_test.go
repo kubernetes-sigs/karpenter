@@ -147,17 +147,17 @@ var _ = Describe("MultiNode Consolidation Non-Prefix Subset (#1962)", func() {
 		ExpectManualBinding(ctx, env.Client, podBad, nodes[1])
 		ExpectManualBinding(ctx, env.Client, podGood2, nodes[2])
 
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client,
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock,
 			nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		c := disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
 		multiConsolidation := disruption.NewMultiNodeConsolidation(c,
 			disruption.WithValidator(NewTestMultiConsolidationValidator(nodePool)))
 
-		budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiConsolidation.Reason())
+		budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, multiConsolidation.Reason())
 		Expect(err).To(Succeed())
 
-		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider,
+		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider,
 			multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 		Expect(err).To(Succeed())
 		Expect(candidates).To(HaveLen(3))
