@@ -138,7 +138,14 @@ func MinResources(resources ...v1.ResourceList) v1.ResourceList {
 	if len(resources) == 0 {
 		return v1.ResourceList{}
 	}
-	resourceList := resources[0].DeepCopy()
+
+	// Start with a copy of the first list's keys, but just copy the Quantity values
+	// Safe since we never mutate them
+	resourceList := make(v1.ResourceList, len(resources[0]))
+	for k, v := range resources[0] {
+		resourceList[k] = v
+	}
+
 	for _, rl := range resources[1:] {
 		for resourceName, quantity := range resourceList {
 			if rlQuantity, exists := rl[resourceName]; exists {

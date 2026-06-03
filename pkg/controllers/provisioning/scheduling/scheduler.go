@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,7 +146,7 @@ func NewScheduler(
 	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
 		var err error
 		nct := NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, &corev1.Pod{}, corev1.ResourceList{}, map[string]corev1.ResourceList{}, map[string]*scheduling.HostPortUsage{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
+		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, &corev1.Pod{}, corev1.ResourceList{}, []InstanceTypeGroup{{InstanceTypes: instanceTypes[np.Name], HostPortUsage: scheduling.NewHostPortUsage()}}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if len(nct.InstanceTypeOptions) == 0 {
 			if instanceTypeFilterErr, ok := lo.ErrorsAs[InstanceTypeFilterError](err); ok && instanceTypeFilterErr.minValuesIncompatibleErr != nil {
 				recorder.Publish(NoCompatibleInstanceTypes(np, true))
@@ -158,19 +159,17 @@ func NewScheduler(
 		}
 		return nct, true
 	})
-	compatibleDaemonPods := getCompatibleDaemonPods(ctx, templates, daemonSetPods)
 	s := &Scheduler{
-		uuid:                uuid.NewUUID(),
-		kubeClient:          kubeClient,
-		nodeClaimTemplates:  templates,
-		topology:            topology,
-		cluster:             cluster,
-		daemonOverhead:      getDaemonOverhead(compatibleDaemonPods),
-		daemonHostPortUsage: getDaemonHostPortUsage(compatibleDaemonPods),
-		cachedPodData:       map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
-		volumeReqsByPod:     volumeReqsByPod,          // Volume requirements per pod
-		recorder:            recorder,
-		preferences:         &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
+		uuid:               uuid.NewUUID(),
+		kubeClient:         kubeClient,
+		nodeClaimTemplates: templates,
+		topology:           topology,
+		cluster:            cluster,
+		instanceTypeGroups: buildInstanceTypeGroups(ctx, templates, daemonSetPods),
+		cachedPodData:      map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
+		volumeReqsByPod:    volumeReqsByPod,          // Volume requirements per pod
+		recorder:           recorder,
+		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
@@ -199,8 +198,7 @@ type Scheduler struct {
 	existingNodes           []*ExistingNode
 	nodeClaimTemplates      []*NodeClaimTemplate
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
-	daemonOverhead          map[*NodeClaimTemplate]map[string]corev1.ResourceList
-	daemonHostPortUsage     map[*NodeClaimTemplate]map[string]*scheduling.HostPortUsage
+	instanceTypeGroups      map[*NodeClaimTemplate][]InstanceTypeGroup
 	cachedPodData           map[types.UID]*PodData                  // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
 	volumeReqsByPod         map[types.UID][]scheduling.Requirements // Volume topology requirement alternatives per pod
 	preferences             *Preferences
@@ -638,7 +636,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 					"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
 			}
 		}
-		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
+		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.instanceTypeGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
 		r, its, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if err != nil {
 			errs[i] = err
@@ -870,44 +868,76 @@ func parallelizeUntil(workers, pieces int, doWorkPiece func(int) bool) {
 	wg.Wait()
 }
 
-// getCompatibleDaemonPods returns compatible daemon pods for each NodeClaimTemplate and instance type.
-func getCompatibleDaemonPods(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]map[string][]*corev1.Pod {
-	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, map[string][]*corev1.Pod) {
-		return nct, lo.SliceToMap(nct.InstanceTypeOptions, func(it *cloudprovider.InstanceType) (string, []*corev1.Pod) {
+type InstanceTypeGroup struct {
+	InstanceTypes  []*cloudprovider.InstanceType
+	DaemonPods     []*corev1.Pod
+	DaemonOverhead corev1.ResourceList
+	HostPortUsage  *scheduling.HostPortUsage
+}
+
+// buildInstanceTypeGroups groups instance types by their compatible daemon pods and computes the following for NodeClaimTemplate and group
+// - Overhead required for daemons to schedule for any node provisioned by the NodeClaimTemplate
+// - Requested host ports for DaemonSet pods
+func buildInstanceTypeGroups(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate][]InstanceTypeGroup {
+	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, []InstanceTypeGroup) {
+		groups := map[string]*InstanceTypeGroup{}
+		for _, it := range nct.InstanceTypeOptions {
 			compatible := lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool {
 				if pod.HasDRARequirements(p) && karpopts.FromContext(ctx).IgnoreDRARequests {
 					return false
 				}
 				return isDaemonPodCompatible(nct, it, p)
 			})
-			return it.Name, compatible
-		})
+			key := podSetKey(compatible)
+			if g, ok := groups[key]; ok {
+				g.InstanceTypes = append(g.InstanceTypes, it)
+			} else {
+				groups[key] = &InstanceTypeGroup{
+					InstanceTypes: []*cloudprovider.InstanceType{it},
+					DaemonPods:    compatible,
+				}
+			}
+		}
+		result := lo.Map(lo.Values(groups), func(g *InstanceTypeGroup, _ int) InstanceTypeGroup { return *g })
+		computeDaemonOverhead(result)
+		computeDaemonHostPortUsage(result)
+		return nct, result
 	})
 }
 
-// getDaemonOverhead determines the overhead for each NodeClaimTemplate required for daemons to schedule for any node provisioned by the NodeClaimTemplate
-func getDaemonOverhead(compatibleDaemonPods map[*NodeClaimTemplate]map[string][]*corev1.Pod) map[*NodeClaimTemplate]map[string]corev1.ResourceList {
-	return lo.MapValues(compatibleDaemonPods, func(itPods map[string][]*corev1.Pod, _ *NodeClaimTemplate) map[string]corev1.ResourceList {
-		return lo.MapValues(itPods, func(pods []*corev1.Pod, _ string) corev1.ResourceList {
-			if len(pods) == 0 {
-				return corev1.ResourceList{}
-			}
-			return resources.RequestsForPods(pods...)
-		})
-	})
+// podSetKey creates a deterministic key from a list of pods for grouping.
+func podSetKey(pods []*corev1.Pod) string {
+	if len(pods) == 0 {
+		return ""
+	}
+	uids := make([]string, len(pods))
+	for i, p := range pods {
+		uids[i] = string(p.UID)
+	}
+	sort.Strings(uids)
+	return strings.Join(uids, ",")
 }
 
-// getDaemonHostPortUsage determines requested host ports for DaemonSet pods, given a NodeClaimTemplate
-func getDaemonHostPortUsage(compatibleDaemonPods map[*NodeClaimTemplate]map[string][]*corev1.Pod) map[*NodeClaimTemplate]map[string]*scheduling.HostPortUsage {
-	return lo.MapValues(compatibleDaemonPods, func(itPods map[string][]*corev1.Pod, _ *NodeClaimTemplate) map[string]*scheduling.HostPortUsage {
-		return lo.MapValues(itPods, func(pods []*corev1.Pod, _ string) *scheduling.HostPortUsage {
-			hostPortUsage := scheduling.NewHostPortUsage()
-			for _, p := range pods {
-				hostPortUsage.Add(p, scheduling.GetHostPorts(p))
-			}
-			return hostPortUsage
-		})
-	})
+// computeDaemonOverhead computes and sets the DaemonOverhead field on each group.
+func computeDaemonOverhead(groups []InstanceTypeGroup) {
+	for i := range groups {
+		if len(groups[i].DaemonPods) > 0 {
+			groups[i].DaemonOverhead = resources.RequestsForPods(groups[i].DaemonPods...)
+		} else {
+			groups[i].DaemonOverhead = corev1.ResourceList{}
+		}
+	}
+}
+
+// computeDaemonHostPortUsage computes and sets the HostPortUsage field on each group.
+func computeDaemonHostPortUsage(groups []InstanceTypeGroup) {
+	for i := range groups {
+		hostPortUsage := scheduling.NewHostPortUsage()
+		for _, p := range groups[i].DaemonPods {
+			hostPortUsage.Add(p, scheduling.GetHostPorts(p))
+		}
+		groups[i].HostPortUsage = hostPortUsage
+	}
 }
 
 // isDaemonPodCompatible determines if the daemon pod is compatible with the NodeClaimTemplate for daemon scheduling

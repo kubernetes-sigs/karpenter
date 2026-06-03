@@ -43,8 +43,7 @@ type NodeClaim struct {
 	Pods               []*corev1.Pod
 	reservationManager *ReservationManager
 	topology           *Topology
-	hostPortUsage      map[string]*scheduling.HostPortUsage
-	daemonResources    map[string]corev1.ResourceList
+	instanceTypeGroups []InstanceTypeGroup
 	hostname           string
 
 	// We store the reserved offerings rather than appending reservation ID labels for two reasons:
@@ -83,8 +82,7 @@ var nodeID int64
 func NewNodeClaim(
 	nodeClaimTemplate *NodeClaimTemplate,
 	topology *Topology,
-	daemonResources map[string]corev1.ResourceList,
-	hostPortUsage map[string]*scheduling.HostPortUsage,
+	instanceTypeGroups []InstanceTypeGroup,
 	instanceTypes []*cloudprovider.InstanceType,
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
@@ -96,16 +94,21 @@ func NewNodeClaim(
 	template.Requirements.Add(scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = corev1.ResourceList{}
-	// Deep copy so each NodeClaim can independently track port usage
-	hostPortUsageForNodeClaim := make(map[string]*scheduling.HostPortUsage, len(hostPortUsage))
-	for k, v := range hostPortUsage {
-		hostPortUsageForNodeClaim[k] = v.DeepCopy()
+	// Deep copy host port usage so each NodeClaim can independently track port usage
+	groupsForNodeClaim := make([]InstanceTypeGroup, len(instanceTypeGroups))
+	for i, g := range instanceTypeGroups {
+		groupsForNodeClaim[i] = InstanceTypeGroup{
+			InstanceTypes:  g.InstanceTypes,
+			DaemonPods:     g.DaemonPods,
+			DaemonOverhead: g.DaemonOverhead,
+			HostPortUsage:  g.HostPortUsage.DeepCopy(),
+		}
 	}
+
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
-		hostPortUsage:        hostPortUsageForNodeClaim,
 		topology:             topology,
-		daemonResources:      daemonResources,
+		instanceTypeGroups:   groupsForNodeClaim,
 		hostname:             hostname,
 		reservedOfferings:    cloudprovider.Offerings{},
 		reservationManager:   reservationManager,
@@ -121,9 +124,9 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
 		return nil, nil, nil, err
 	}
-  
+
 	baseRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
-  
+
 	// Check NodeClaim Affinity Requirements
 	if err := baseRequirements.Compatible(podData.Requirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
 		return nil, nil, nil, fmt.Errorf("incompatible requirements, %w", err)
@@ -182,7 +185,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 
-	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, pod, podData.Requests, n.daemonResources, n.hostPortUsage, requests, relaxMinValues)
+	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, pod, podData.Requests, n.instanceTypeGroups, requests, relaxMinValues)
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
 		for key, minValues := range unsatisfiableKeys {
@@ -214,8 +217,8 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 	n.topology.Register(corev1.LabelHostname, n.hostname)
 	n.topology.Record(pod, n.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	hostPorts := scheduling.GetHostPorts(pod)
-	for _, it := range instanceTypes {
-		n.hostPortUsage[it.Name].Add(pod, hostPorts)
+	for _, group := range n.instanceTypeGroups {
+		group.HostPortUsage.Add(pod, hostPorts)
 	}
 	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
 	n.releaseReservedOfferings(n.reservedOfferings, offeringsToReserve)
@@ -292,14 +295,24 @@ func (n *NodeClaim) offeringsToReserve(
 
 // Add min daemon resource requests (min across instance types)
 func (n *NodeClaim) addDaemonRequests() {
+	remaining := sets.New(n.InstanceTypeOptions...)
 	var minDaemonOverhead corev1.ResourceList
-	for _, it := range n.InstanceTypeOptions {
-		if dr, ok := n.daemonResources[it.Name]; ok {
-			if len(minDaemonOverhead) == 0 {
-				minDaemonOverhead = dr
-			} else {
-				minDaemonOverhead = resources.MinResources(minDaemonOverhead, dr)
+	for _, g := range n.instanceTypeGroups {
+		// Only consider groups that have at least one instance type still remaining
+		hasRemaining := false
+		for _, it := range g.InstanceTypes {
+			if remaining.Has(it) {
+				hasRemaining = true
+				break
 			}
+		}
+		if !hasRemaining {
+			continue
+		}
+		if len(minDaemonOverhead) == 0 {
+			minDaemonOverhead = g.DaemonOverhead
+		} else {
+			minDaemonOverhead = resources.MinResources(minDaemonOverhead, g.DaemonOverhead)
 		}
 	}
 	if len(minDaemonOverhead) > 0 {
@@ -385,7 +398,7 @@ type InstanceTypeFilterError struct {
 func (e *InstanceTypeFilterError) trackDaemonOverhead(dr corev1.ResourceList) {
 	if len(e.maxDaemonRequests) == 0 {
 		e.minDaemonRequests = dr
-		e.maxDaemonRequests = dr.DeepCopy()
+		e.maxDaemonRequests = dr
 		return
 	}
 	e.minDaemonRequests = resources.MinResources(e.minDaemonRequests, dr)
@@ -461,7 +474,7 @@ func (e InstanceTypeFilterError) Error() string {
 }
 
 //nolint:gocyclo
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, pod *corev1.Pod, podRequests corev1.ResourceList, daemonRequests map[string]corev1.ResourceList, hostPortUsage map[string]*scheduling.HostPortUsage, totalRequests corev1.ResourceList, relaxMinValues bool) (cloudprovider.InstanceTypes, map[string]int, error) {
+func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, pod *corev1.Pod, podRequests corev1.ResourceList, instanceTypeGroups []InstanceTypeGroup, totalRequests corev1.ResourceList, relaxMinValues bool) (cloudprovider.InstanceTypes, map[string]int, error) {
 	unsatisfiableKeys := map[string]int{}
 	// We hold the results of our scheduling simulation inside of this InstanceTypeFilterError struct
 	// to reduce the CPU load of having to generate the error string for a failed scheduling simulation
@@ -480,54 +493,55 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 	remaining := cloudprovider.InstanceTypes{}
 	// exposed host ports on the pod
 	hostPorts := scheduling.GetHostPorts(pod)
+	eligibleInstanceTypes := sets.New(instanceTypes...)
 
-	for _, it := range instanceTypes {
-		hostPortUsageForInstanceType, ok := hostPortUsage[it.Name]
-		if ok {
-			if err := hostPortUsageForInstanceType.Conflicts(pod, hostPorts); err != nil {
-				continue
-			}
+	for _, group := range instanceTypeGroups {
+		if portUsageErr := group.HostPortUsage.Conflicts(pod, hostPorts); portUsageErr != nil {
+			continue
 		}
-
 		var totalRequestsForInstanceType corev1.ResourceList
-		daemonRequestsForInstanceType := daemonRequests[it.Name]
-		if len(daemonRequestsForInstanceType) != 0 {
-			err.trackDaemonOverhead(daemonRequestsForInstanceType)
+		if len(group.DaemonOverhead) != 0 {
+			err.trackDaemonOverhead(group.DaemonOverhead)
 			totalRequestsForInstanceType = resources.MergeInto(totalRequestsForInstanceType, totalRequests)
-			totalRequestsForInstanceType = resources.MergeInto(totalRequestsForInstanceType, daemonRequestsForInstanceType)
+			totalRequestsForInstanceType = resources.MergeInto(totalRequestsForInstanceType, group.DaemonOverhead)
 		} else {
 			totalRequestsForInstanceType = totalRequests
 		}
 
-		// the tradeoff to not short-circuiting on the filtering is that we can report much better error messages
-		// about why scheduling failed
-		itCompat := compatible(it, requirements)
-		itFits := fits(it, totalRequestsForInstanceType)
-
-		// By using this iterative approach vs. the Available() function it prevents allocations
-		// which have to be garbage collected and slow down Karpenter's scheduling algorithm
-		itHasOffering := false
-		for _, of := range it.Offerings {
-			if of.Available && requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-				itHasOffering = true
-				break
+		for _, it := range group.InstanceTypes {
+			if !eligibleInstanceTypes.Has(it) {
+				continue
 			}
-		}
+			// the tradeoff to not short-circuiting on the filtering is that we can report much better error messages
+			// about why scheduling failed
+			itCompat := compatible(it, requirements)
+			itFits := fits(it, totalRequestsForInstanceType)
 
-		// track if any single instance type met a single criteria
-		err.requirementsMet = err.requirementsMet || itCompat
-		err.fits = err.fits || itFits
-		err.hasOffering = err.hasOffering || itHasOffering
+			// By using this iterative approach vs. the Available() function it prevents allocations
+			// which have to be garbage collected and slow down Karpenter's scheduling algorithm
+			itHasOffering := false
+			for _, of := range it.Offerings {
+				if of.Available && requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+					itHasOffering = true
+					break
+				}
+			}
 
-		// track if any single instance type met the three pairs of criteria
-		err.requirementsAndFits = err.requirementsAndFits || (itCompat && itFits && !itHasOffering)
-		err.requirementsAndOffering = err.requirementsAndOffering || (itCompat && itHasOffering && !itFits)
-		err.fitsAndOffering = err.fitsAndOffering || (itFits && itHasOffering && !itCompat)
+			// track if any single instance type met a single criteria
+			err.requirementsMet = err.requirementsMet || itCompat
+			err.fits = err.fits || itFits
+			err.hasOffering = err.hasOffering || itHasOffering
 
-		// and if it met all criteria, we keep the instance type and continue filtering.  We now won't be reporting
-		// any errors.
-		if itCompat && itFits && itHasOffering {
-			remaining = append(remaining, it)
+			// track if any single instance type met the three pairs of criteria
+			err.requirementsAndFits = err.requirementsAndFits || (itCompat && itFits && !itHasOffering)
+			err.requirementsAndOffering = err.requirementsAndOffering || (itCompat && itHasOffering && !itFits)
+			err.fitsAndOffering = err.fitsAndOffering || (itFits && itHasOffering && !itCompat)
+
+			// and if it met all criteria, we keep the instance type and continue filtering.  We now won't be reporting
+			// any errors.
+			if itCompat && itFits && itHasOffering {
+				remaining = append(remaining, it)
+			}
 		}
 	}
 
