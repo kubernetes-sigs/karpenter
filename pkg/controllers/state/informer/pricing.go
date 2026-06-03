@@ -23,7 +23,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/samber/lo"
+	"github.com/mitchellh/hashstructure/v2"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -44,7 +44,7 @@ type PricingController struct {
 	client        client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clusterCost   *cost.ClusterCost
-	npOfMap       map[types.NamespacedName]map[cost.OfferingKey]float64
+	npHashMap     map[types.NamespacedName]uint64
 }
 
 func NewPricingController(client client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *PricingController {
@@ -52,6 +52,7 @@ func NewPricingController(client client.Client, cloudProvider cloudprovider.Clou
 		client:        client,
 		cloudProvider: cloudProvider,
 		clusterCost:   clusterCost,
+		npHashMap:     make(map[types.NamespacedName]uint64),
 	}
 }
 
@@ -62,26 +63,20 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		return reconciler.Result{}, err
 	}
 
-	newNpOfMap := make(map[types.NamespacedName]map[cost.OfferingKey]float64)
+	newNpHashMap := make(map[types.NamespacedName]uint64, len(npl.Items))
 	var errs error
 	for _, np := range npl.Items {
-		oldOfs, exists := c.npOfMap[client.ObjectKeyFromObject(&np)]
 		newIts, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
 		if err != nil {
 			errs = multierr.Append(errs, err)
 			continue
 		}
 
-		newNpOfMap[client.ObjectKeyFromObject(&np)] = make(map[cost.OfferingKey]float64)
+		key := client.ObjectKeyFromObject(&np)
+		h := hashOfferings(newIts)
+		newNpHashMap[key] = h
 
-		for _, it := range newIts {
-			for _, o := range it.Offerings {
-				offeringKey := cost.OfferingKey{InstanceName: it.Name, Zone: o.Zone(), CapacityType: o.CapacityType()}
-				newNpOfMap[client.ObjectKeyFromObject(&np)][offeringKey] = o.Price
-			}
-		}
-
-		if exists && equal(oldOfs, newNpOfMap[client.ObjectKeyFromObject(&np)]) {
+		if oldHash, exists := c.npHashMap[key]; exists && oldHash == h {
 			continue
 		}
 		c.clusterCost.UpdateOfferings(ctx, &np, newIts)
@@ -89,25 +84,31 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 	if errs != nil {
 		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", errs)
 	}
-	c.npOfMap = newNpOfMap
+	c.npHashMap = newNpHashMap
 
 	return reconciler.Result{RequeueAfter: 1 * time.Hour}, nil
 }
 
-func equal(oldOfs map[cost.OfferingKey]float64, newOfs map[cost.OfferingKey]float64) bool {
-	if len(lo.Values(oldOfs)) != len(newOfs) {
-		return false
+func hashOfferings(instanceTypes []*cloudprovider.InstanceType) uint64 {
+	type offeringSnapshot struct {
+		InstanceName string
+		Zone         string
+		CapacityType string
+		Price        float64
 	}
-	for newOf, newPrice := range newOfs {
-		oldPrice, exists := oldOfs[newOf]
-		if !exists {
-			return false
-		}
-		if oldPrice != newPrice {
-			return false
+	snapshots := make([]offeringSnapshot, 0, len(instanceTypes)*3)
+	for _, it := range instanceTypes {
+		for _, o := range it.Offerings {
+			snapshots = append(snapshots, offeringSnapshot{
+				InstanceName: it.Name,
+				Zone:         o.Zone(),
+				CapacityType: o.CapacityType(),
+				Price:        o.Price,
+			})
 		}
 	}
-	return true
+	h, _ := hashstructure.Hash(snapshots, hashstructure.FormatV2, nil)
+	return h
 }
 
 func (c *PricingController) Name() string {
