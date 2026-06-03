@@ -44,7 +44,7 @@ type PricingController struct {
 	client        client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clusterCost   *cost.ClusterCost
-	npHashMap     map[types.NamespacedName]uint64
+	npOfMap       map[types.NamespacedName]uint64
 }
 
 func NewPricingController(client client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *PricingController {
@@ -52,7 +52,7 @@ func NewPricingController(client client.Client, cloudProvider cloudprovider.Clou
 		client:        client,
 		cloudProvider: cloudProvider,
 		clusterCost:   clusterCost,
-		npHashMap:     make(map[types.NamespacedName]uint64),
+		npOfMap:       make(map[types.NamespacedName]uint64),
 	}
 }
 
@@ -63,7 +63,7 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		return reconciler.Result{}, err
 	}
 
-	newNpHashMap := make(map[types.NamespacedName]uint64, len(npl.Items))
+	newNpOfMap := make(map[types.NamespacedName]uint64, len(npl.Items))
 	var errs error
 	for _, np := range npl.Items {
 		newIts, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
@@ -73,10 +73,10 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		}
 
 		key := client.ObjectKeyFromObject(&np)
-		h := hashOfferings(newIts)
-		newNpHashMap[key] = h
+		hash := hashOfferings(newIts)
+		newNpOfMap[key] = hash
 
-		if oldHash, exists := c.npHashMap[key]; exists && oldHash == h {
+		if oldHash, exists := c.npOfMap[key]; exists && oldHash == hash {
 			continue
 		}
 		c.clusterCost.UpdateOfferings(ctx, &np, newIts)
@@ -84,7 +84,7 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 	if errs != nil {
 		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", errs)
 	}
-	c.npHashMap = newNpHashMap
+	c.npOfMap = newNpOfMap
 
 	return reconciler.Result{RequeueAfter: 1 * time.Hour}, nil
 }
@@ -96,7 +96,7 @@ func hashOfferings(instanceTypes []*cloudprovider.InstanceType) uint64 {
 		CapacityType string
 		Price        float64
 	}
-	snapshots := make([]offeringSnapshot, 0, len(instanceTypes)*3)
+	var snapshots []offeringSnapshot
 	for _, it := range instanceTypes {
 		for _, o := range it.Offerings {
 			snapshots = append(snapshots, offeringSnapshot{
@@ -107,7 +107,7 @@ func hashOfferings(instanceTypes []*cloudprovider.InstanceType) uint64 {
 			})
 		}
 	}
-	h, _ := hashstructure.Hash(snapshots, hashstructure.FormatV2, nil)
+	h, _ := hashstructure.Hash(snapshots, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	return h
 }
 
