@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -59,7 +58,6 @@ import (
 
 var (
 	ctx                 context.Context
-	fakeClock           *clock.FakeClock
 	cluster             *state.Cluster
 	nodeController      *informer.NodeController
 	daemonsetController *informer.DaemonSetController
@@ -79,10 +77,9 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
@@ -96,10 +93,10 @@ var _ = BeforeEach(func() {
 	cloudProvider.Reset()
 
 	// ensure any waiters on our clock are allowed to proceed before resetting our clock time
-	for fakeClock.HasWaiters() {
-		fakeClock.Step(1 * time.Minute)
+	for env.Clock.HasWaiters() {
+		env.Clock.Step(1 * time.Minute)
 	}
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 	state.PodSchedulingDecisionSeconds.Reset()
 	pscheduling.DefaultTerminationGracePeriod = nil
 })
@@ -127,7 +124,7 @@ var _ = Describe("Provisioning", func() {
 
 			// Step the clock forward to exceed the batch idle duration
 			// This should cause the batcher to complete and allow provisioning
-			fakeClock.Step(11 * time.Second)
+			env.Clock.Step(11 * time.Second)
 
 			// Use the standard provisioning expectation which handles the reconciliation
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -145,32 +142,32 @@ var _ = Describe("Provisioning", func() {
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
-			Expect(fakeClock.HasWaiters()).To(BeFalse())
+			Expect(env.Clock.HasWaiters()).To(BeFalse())
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 
 				// Have a waiter on the first trigger and trigger the batcher
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod.UID)
 
 				time.Sleep(time.Second) // give the process time to make it to the next batching section
 
 				// Fall-through to the second batching section
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 
 				// Step the clock by 3 seconds which is within the batch idle duration of 5s and then add the same pod again.
-				fakeClock.Step(3 * time.Second)
-				// We expect to have waiters on the fakeClock since this is still within the batch idle duration of 5s.
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				env.Clock.Step(3 * time.Second)
+				// We expect to have waiters on the env.Clock since this is still within the batch idle duration of 5s.
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod.UID)
 
 				time.Sleep(time.Second) // give the process time to iterate on the batching section
 
 				// Step the clock again by 3s to just cross the batch idle duration. We should be able to get out of the
 				// provisioning loop because the same pod will not cause the idle duration to reset.
-				fakeClock.Step(3 * time.Second)
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeFalse())
+				env.Clock.Step(3 * time.Second)
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeFalse())
 			}()
 			ExpectSingletonReconciled(ctx, prov)
 			wg.Wait()
@@ -188,36 +185,36 @@ var _ = Describe("Provisioning", func() {
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
-			Expect(fakeClock.HasWaiters()).To(BeFalse())
+			Expect(env.Clock.HasWaiters()).To(BeFalse())
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 
 				// Have a waiter on the first trigger and trigger the batcher
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod.UID)
 
 				time.Sleep(time.Second) // give the process time to make it to the next batching section
 
 				// Fall-through to the second batching section
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 
 				// Step the clock by 3 seconds which is within the batch idle duration of 5s and then add a new pod
-				fakeClock.Step(3 * time.Second)
-				// We expect to have waiters on the fakeClock since this is still within the batch idle duration of 5s.
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				env.Clock.Step(3 * time.Second)
+				// We expect to have waiters on the env.Clock since this is still within the batch idle duration of 5s.
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod2.UID)
 
 				time.Sleep(time.Second) // give the process time to iterate on the batching section
 
 				// Step the clock by 3s as we expect provisioning to not happen until another 5s because the
 				// batch idle duration was reset due to a new pod being added.
-				fakeClock.Step(3 * time.Second)
-				Consistently(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
+				env.Clock.Step(3 * time.Second)
+				Consistently(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
 				// Stepping the clock again by 3s. We should be able to get out of the
 				// provisioning loop at this point (since we have exceeded the idle duration)
-				fakeClock.Step(3 * time.Second)
-				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeFalse())
+				env.Clock.Step(3 * time.Second)
+				Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeFalse())
 			}()
 			ExpectSingletonReconciled(ctx, prov)
 			wg.Wait()
@@ -508,7 +505,7 @@ var _ = Describe("Provisioning", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		// Schedule 3 pods to the node that currently exists
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			pod := test.UnschedulablePod()
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
@@ -1031,8 +1028,8 @@ var _ = Describe("Provisioning", func() {
 								Kind:               "DaemonSet",
 								Name:               daemonset.Name,
 								UID:                daemonset.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						},
 					},
@@ -1254,8 +1251,8 @@ var _ = Describe("Provisioning", func() {
 								Kind:               "DaemonSet",
 								Name:               daemonset.Name,
 								UID:                daemonset.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						},
 					},
@@ -1769,7 +1766,7 @@ var _ = Describe("Provisioning", func() {
 					Kind:               "NodePool",
 					Name:               nodePool.Name,
 					UID:                nodePool.UID,
-					BlockOwnerDeletion: lo.ToPtr(true),
+					BlockOwnerDeletion: new(true),
 				},
 			))
 			ExpectScheduled(ctx, env.Client, pod)
@@ -2072,7 +2069,7 @@ var _ = Describe("Provisioning", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "local-path",
 					},
-					Provisioner: lo.ToPtr("kubernetes.io/no-provisioner"),
+					Provisioner: new("kubernetes.io/no-provisioner"),
 				})
 				// Create a PersistentVolume that is using a random node name for its affinity
 				persistentVolume := test.PersistentVolume(volumeOptions)
@@ -2113,7 +2110,7 @@ var _ = Describe("Provisioning", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "local-path",
 					},
-					Provisioner: lo.ToPtr("kubernetes.io/no-provisioner"),
+					Provisioner: new("kubernetes.io/no-provisioner"),
 				})
 				pod := test.UnschedulablePod(test.PodOptions{
 					EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
@@ -2680,8 +2677,8 @@ var _ = Describe("Provisioning", func() {
 			It("should schedule to the nodepool with the highest priority always", func() {
 				nodePools := []client.Object{
 					test.NodePool(),
-					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: lo.ToPtr(int32(20))}}),
-					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: lo.ToPtr(int32(100))}}),
+					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: new(int32(20))}}),
+					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: new(int32(100))}}),
 				}
 				ExpectApplied(ctx, env.Client, nodePools...)
 				pods := []*corev1.Pod{
@@ -2697,8 +2694,8 @@ var _ = Describe("Provisioning", func() {
 				targetedNodePool := test.NodePool()
 				nodePools := []client.Object{
 					targetedNodePool,
-					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: lo.ToPtr(int32(20))}}),
-					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: lo.ToPtr(int32(100))}}),
+					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: new(int32(20))}}),
+					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: new(int32(100))}}),
 				}
 				ExpectApplied(ctx, env.Client, nodePools...)
 				pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.NodePoolLabelKey: targetedNodePool.Name}})
@@ -2713,7 +2710,7 @@ var _ = Describe("Provisioning", func() {
 		It("should not create NodeClaims for StaticNodePool", func() {
 			ExpectApplied(ctx, env.Client, test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
-					Replicas: lo.ToPtr(int64(2)),
+					Replicas: new(int64(2)),
 				}},
 			))
 			pod := test.UnschedulablePod()
@@ -2726,7 +2723,7 @@ var _ = Describe("Provisioning", func() {
 			targetedNodePool := test.NodePool()
 			staticNodePool := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
-					Replicas: lo.ToPtr(int64(1)),
+					Replicas: new(int64(1)),
 				}})
 			ExpectApplied(ctx, env.Client, targetedNodePool, staticNodePool)
 
@@ -2750,7 +2747,7 @@ var _ = Describe("Provisioning", func() {
 				// Create a nodepool with instance type minValues requirement
 				defaultNodePool = test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
-						Weight: lo.ToPtr(int32(100)),
+						Weight: new(int32(100)),
 						Template: v1.NodeClaimTemplate{
 							Spec: v1.NodeClaimTemplateSpec{
 								Requirements: []v1.NodeSelectorRequirementWithMinValues{
@@ -2759,7 +2756,7 @@ var _ = Describe("Provisioning", func() {
 										Operator: corev1.NodeSelectorOpIn,
 										Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
 
-										MinValues: lo.ToPtr(3),
+										MinValues: new(3),
 									},
 								},
 							},
@@ -2896,7 +2893,7 @@ var _ = Describe("Provisioning", func() {
 							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"instance-type-1", "instance-type-2"},
 
-							MinValues: lo.ToPtr(2),
+							MinValues: new(2),
 						}))
 				})
 
@@ -2943,7 +2940,7 @@ var _ = Describe("Provisioning", func() {
 
 					nodePoolWithNoMinValues := test.NodePool(v1.NodePool{
 						Spec: v1.NodePoolSpec{
-							Weight: lo.ToPtr(int32(10)),
+							Weight: new(int32(10)),
 							Template: v1.NodeClaimTemplate{
 								Spec: v1.NodeClaimTemplateSpec{
 									Requirements: []v1.NodeSelectorRequirementWithMinValues{
@@ -2979,7 +2976,7 @@ var _ = Describe("Provisioning", func() {
 							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"instance-type-1", "instance-type-2"},
 
-							MinValues: lo.ToPtr(2),
+							MinValues: new(2),
 						}))
 				})
 
@@ -3026,7 +3023,7 @@ var _ = Describe("Provisioning", func() {
 
 					lowerWeightNodePool := test.NodePool(v1.NodePool{
 						Spec: v1.NodePoolSpec{
-							Weight: lo.ToPtr(int32(10)),
+							Weight: new(int32(10)),
 							Template: v1.NodeClaimTemplate{
 								Spec: v1.NodeClaimTemplateSpec{
 									Requirements: []v1.NodeSelectorRequirementWithMinValues{
@@ -3035,7 +3032,7 @@ var _ = Describe("Provisioning", func() {
 											Operator: corev1.NodeSelectorOpIn,
 											Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
 
-											MinValues: lo.ToPtr(3),
+											MinValues: new(3),
 										},
 									},
 								},
@@ -3071,7 +3068,7 @@ var _ = Describe("Provisioning", func() {
 							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"instance-type-1", "instance-type-2"},
 
-							MinValues: lo.ToPtr(2),
+							MinValues: new(2),
 						}))
 				})
 			})
@@ -3092,7 +3089,7 @@ var _ = Describe("Provisioning", func() {
 										Operator: corev1.NodeSelectorOpIn,
 										Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
 
-										MinValues: lo.ToPtr(3),
+										MinValues: new(3),
 									},
 								},
 							},
@@ -3204,7 +3201,7 @@ var _ = Describe("Provisioning", func() {
 							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
 
-							MinValues: lo.ToPtr(2),
+							MinValues: new(2),
 						}))
 				})
 			})
@@ -3217,7 +3214,7 @@ var _ = Describe("Provisioning", func() {
 				// Create a nodepool with instance type minValues requirement
 				defaultNodePool = test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
-						Weight: lo.ToPtr(int32(100)),
+						Weight: new(int32(100)),
 						Template: v1.NodeClaimTemplate{
 							Spec: v1.NodeClaimTemplateSpec{
 								Requirements: []v1.NodeSelectorRequirementWithMinValues{
@@ -3226,14 +3223,14 @@ var _ = Describe("Provisioning", func() {
 										Operator: corev1.NodeSelectorOpIn,
 										Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
 
-										MinValues: lo.ToPtr(3),
+										MinValues: new(3),
 									},
 									{
 										Key:      corev1.LabelTopologyZone,
 										Operator: corev1.NodeSelectorOpIn,
 										Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
 
-										MinValues: lo.ToPtr(3),
+										MinValues: new(3),
 									},
 								},
 							},
@@ -3294,14 +3291,14 @@ var _ = Describe("Provisioning", func() {
 							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"instance-type-1"},
 
-							MinValues: lo.ToPtr(1),
+							MinValues: new(1),
 						},
 						v1.NodeSelectorRequirementWithMinValues{
 							Key:      corev1.LabelTopologyZone,
 							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
 
-							MinValues: lo.ToPtr(2),
+							MinValues: new(2),
 						}))
 
 					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{

@@ -47,17 +47,19 @@ type NodePoolStatus struct {
 	// the actual NodeClass Generation, NodeRegistrationHealthy status condition on the NodePool will be reset
 	// +optional
 	NodeClassObservedGeneration int64 `json:"nodeClassObservedGeneration,omitempty"`
-	//nolint:kubeapilinter
 	// Conditions contains signals for health and readiness
 	// +optional
+	// +listType=map
+	// +listMapKey=type
+	//nolint:kubeapilinter
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
-func (in *NodePool) StatusConditions() status.ConditionSet {
+func (in *NodePool) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	return status.NewReadyConditions(
 		ConditionTypeValidationSucceeded,
 		ConditionTypeNodeClassReady,
-	).For(in)
+	).For(in, opts...)
 }
 
 func (in *NodePool) GetConditions() []status.Condition {

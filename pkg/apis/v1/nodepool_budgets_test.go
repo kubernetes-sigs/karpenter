@@ -42,18 +42,18 @@ var _ = Describe("Budgets", func() {
 		budgets = []Budget{
 			{
 				Nodes:    "10",
-				Schedule: lo.ToPtr("* * * * *"),
-				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+				Schedule: new("* * * * *"),
+				Duration: new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
 				Nodes:    "100",
-				Schedule: lo.ToPtr("* * * * *"),
-				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+				Schedule: new("* * * * *"),
+				Duration: new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
 				Nodes:    "100%",
-				Schedule: lo.ToPtr("* * * * *"),
-				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+				Schedule: new("* * * * *"),
+				Duration: new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
 				Reasons: []DisruptionReason{
@@ -61,16 +61,16 @@ var _ = Describe("Budgets", func() {
 					DisruptionReasonUnderutilized,
 				},
 				Nodes:    "15",
-				Schedule: lo.ToPtr("* * * * *"),
-				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+				Schedule: new("* * * * *"),
+				Duration: new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
 				Reasons: []DisruptionReason{
 					DisruptionReasonDrifted,
 				},
 				Nodes:    "5",
-				Schedule: lo.ToPtr("* * * * *"),
-				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+				Schedule: new("* * * * *"),
+				Duration: new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
 				Reasons: []DisruptionReason{
@@ -79,8 +79,8 @@ var _ = Describe("Budgets", func() {
 					DisruptionReasonEmpty,
 				},
 				Nodes:    "0",
-				Schedule: lo.ToPtr("@weekly"),
-				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+				Schedule: new("@weekly"),
+				Duration: new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 		}
 		nodePool = &NodePool{
@@ -100,8 +100,8 @@ var _ = Describe("Budgets", func() {
 
 	Context("GetAllowedDisruptionsByReason", func() {
 		It("should return 0 for all reasons if a budget is active for all reasons", func() {
-			budgets[5].Schedule = lo.ToPtr("* * * * *")
-			budgets[5].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+			budgets[5].Schedule = new("* * * * *")
+			budgets[5].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
 
 			for _, reason := range allKnownDisruptionReasons {
 				allowedDisruption, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, reason)
@@ -112,8 +112,8 @@ var _ = Describe("Budgets", func() {
 
 		It("should return MaxInt32 for all reasons when there are no active budgets", func() {
 			for i := range budgets {
-				budgets[i].Schedule = lo.ToPtr("@yearly")
-				budgets[i].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+				budgets[i].Schedule = new("@yearly")
+				budgets[i].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
 			}
 
 			// All budgets should have unbounded disruptions when inactive
@@ -125,8 +125,8 @@ var _ = Describe("Budgets", func() {
 		})
 
 		It("should ignore reason-defined budgets when inactive", func() {
-			budgets[3].Schedule = lo.ToPtr("@yearly")
-			budgets[4].Schedule = lo.ToPtr("@yearly")
+			budgets[3].Schedule = new("@yearly")
+			budgets[4].Schedule = new("@yearly")
 
 			for _, reason := range allKnownDisruptionReasons {
 				allowedDisruption, err := nodePool.GetAllowedDisruptionsByReason(fakeClock, 100, reason)
@@ -152,9 +152,9 @@ var _ = Describe("Budgets", func() {
 			nodePool.Spec.Disruption.Budgets = append(nodePool.Spec.Disruption.Budgets,
 				[]Budget{
 					{
-						Schedule: lo.ToPtr("* * * * *"),
+						Schedule: new("* * * * *"),
 						Nodes:    "4",
-						Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+						Duration: new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 						Reasons: []DisruptionReason{
 							DisruptionReasonEmpty,
 						},
@@ -177,7 +177,7 @@ var _ = Describe("Budgets", func() {
 
 	Context("AllowedDisruptions", func() {
 		It("should return zero values if a schedule is invalid", func() {
-			budgets[0].Schedule = lo.ToPtr("@wrongly")
+			budgets[0].Schedule = new("@wrongly")
 			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
 			Expect(err).ToNot(Succeed())
 			Expect(val).To(BeNumerically("==", 0))
@@ -189,8 +189,8 @@ var _ = Describe("Budgets", func() {
 			Expect(val).To(BeNumerically("==", 0))
 		})
 		It("should return MaxInt32 when a budget is inactive", func() {
-			budgets[0].Schedule = lo.ToPtr("@yearly")
-			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+			budgets[0].Schedule = new("@yearly")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
 			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
 			Expect(err).To(Succeed())
 			Expect(val).To(BeNumerically("==", math.MaxInt32))
@@ -211,8 +211,8 @@ var _ = Describe("Budgets", func() {
 		It("should always consider a schedule and time in UTC", func() {
 			// Set the time to start of June 2000 in a time zone 1 hour ahead of UTC
 			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 0, 0, 0, 0, 0, time.FixedZone("fake-zone", 3600)))
-			budgets[0].Schedule = lo.ToPtr("@daily")
-			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("30m"))})
+			budgets[0].Schedule = new("@daily")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("30m"))})
 			// IsActive should use UTC, not the location of the clock that's inputted.
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
@@ -231,7 +231,7 @@ var _ = Describe("Budgets", func() {
 			Expect(active).To(BeTrue())
 		})
 		It("should return that a schedule is inactive", func() {
-			budgets[0].Schedule = lo.ToPtr("@yearly")
+			budgets[0].Schedule = new("@yearly")
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
 			Expect(active).To(BeFalse())
@@ -239,8 +239,8 @@ var _ = Describe("Budgets", func() {
 		It("should return that a schedule is active when the schedule hit is in the middle of the duration", func() {
 			// Set the date to the start of the year 1000, the best year ever
 			fakeClock = clock.NewFakeClock(time.Date(1000, time.January, 1, 12, 0, 0, 0, time.UTC))
-			budgets[0].Schedule = lo.ToPtr("@yearly")
-			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("24h"))})
+			budgets[0].Schedule = new("@yearly")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("24h"))})
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
 			Expect(active).To(BeTrue())
@@ -248,8 +248,8 @@ var _ = Describe("Budgets", func() {
 		It("should return that a schedule is active when the duration is longer than the recurrence", func() {
 			// Set the date to the first monday in 2024, the best year ever
 			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
-			budgets[0].Schedule = lo.ToPtr("@daily")
-			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("48h"))})
+			budgets[0].Schedule = new("@daily")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("48h"))})
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
 			Expect(active).To(BeTrue())
@@ -257,8 +257,8 @@ var _ = Describe("Budgets", func() {
 		It("should return that a schedule is inactive when the schedule hit is after the duration", func() {
 			// Set the date to the first monday in 2024, the best year ever
 			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
-			budgets[0].Schedule = lo.ToPtr("30 6 * * SUN")
-			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
+			budgets[0].Schedule = new("30 6 * * SUN")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
 			Expect(active).ToNot(BeTrue())
@@ -266,8 +266,8 @@ var _ = Describe("Budgets", func() {
 		It("should return an error indicating why the cron fails to parse", func() {
 			// Set the date to the first monday in 2024, the best year ever
 			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
-			budgets[0].Schedule = lo.ToPtr("0 0 * * tue-mon")
-			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
+			budgets[0].Schedule = new("0 0 * * tue-mon")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
 			_, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(MatchError(ContainSubstring("beginning of range (2) beyond end of range (1)")))
 		})

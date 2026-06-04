@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clock "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -41,7 +40,6 @@ import (
 var ctx context.Context
 var podEventsController *podevents.Controller
 var env *test.Environment
-var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
@@ -51,7 +49,6 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(
 		test.WithCRDs(apis.CRDs...),
 		test.WithCRDs(v1alpha1.CRDs...),
@@ -59,7 +56,7 @@ var _ = BeforeSuite(func() {
 	)
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
-	podEventsController = podevents.NewController(fakeClock, env.Client, cp)
+	podEventsController = podevents.NewController(env.Clock, env.Client, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -68,7 +65,7 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	ctx = options.ToContext(ctx, test.Options())
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 })
 
 var _ = AfterEach(func() {
@@ -100,7 +97,7 @@ var _ = Describe("PodEvents", func() {
 	})
 	It("should set the nodeclaim lastPodEvent", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		timeToCheck := fakeClock.Now().Truncate(time.Second)
+		timeToCheck := env.Clock.Now().Truncate(time.Second)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -118,9 +115,9 @@ var _ = Describe("PodEvents", func() {
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 	})
 	It("should set the nodeclaim lastPodEvent when it's been set before", func() {
-		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
+		nodeClaim.Status.LastPodEventTime.Time = env.Clock.Now().Add(-5 * time.Minute)
 		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
-		timeToCheck := fakeClock.Now().Truncate(time.Second)
+		timeToCheck := env.Clock.Now().Truncate(time.Second)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -128,7 +125,7 @@ var _ = Describe("PodEvents", func() {
 	})
 	It("should only set the nodeclaim lastPodEvent once within the dedupe timeframe", func() {
 		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
-		timeToCheck := fakeClock.Now().Truncate(time.Second)
+		timeToCheck := env.Clock.Now().Truncate(time.Second)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		// Expect that the lastPodEventTime is set
@@ -136,14 +133,14 @@ var _ = Describe("PodEvents", func() {
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
 
 		// step through half of the dedupe timeout, and re-reconcile, expecting the status to not change
-		fakeClock.Step(5 * time.Second)
+		env.Clock.Step(5 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
 
 		// step through rest of the dedupe timeout, and re-reconcile, expecting the status to change
-		fakeClock.Step(5 * time.Second)
+		env.Clock.Step(5 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
