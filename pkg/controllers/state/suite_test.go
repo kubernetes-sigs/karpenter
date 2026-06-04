@@ -89,7 +89,7 @@ var _ = BeforeSuite(func() {
 	podController = informer.NewPodController(env.Client, cluster)
 	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
-	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
+	nodeOverlayController = nodeoverlay.NewController(env.Clock, env.Client, cloudProvider, nodeOverlayStore, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 })
