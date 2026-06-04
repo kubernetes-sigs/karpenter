@@ -3126,7 +3126,7 @@ var _ = Context("Scheduling", func() {
 			}
 
 			cluster.AckPods(invalidPod, validPod)
-			fakeClock.Step(time.Minute)
+			env.Clock.Step(time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, scA, scB, pvcA, pvcB, invalidPod, validPod)
 			results, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
 			Expect(err).ToNot(HaveOccurred())
