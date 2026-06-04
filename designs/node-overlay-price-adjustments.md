@@ -28,13 +28,15 @@ This directly limits the utility of NodeOverlays as a cost-modeling tool and was
 
 ### Use Cases
 
-1. **Layered enterprise discounts**: A global EDP overlay applies a -15% base reduction, and a Graviton-specific overlay applies a further -5% on top. Both can be expressed in one expression with explicit ordering.
+1. **Layered enterprise discounts**: A global enterprise discount overlay applies a -15% base reduction, and a instance type/ family specific overlay applies a further -5% on top. Both can be expressed in one expression with explicit ordering.
 
 2. **Per-node licensing fees**: A security agent charges a flat $0.069/hr per node regardless of instance size. The fee is added after percentage discounts are applied.
 
-3. **Regional surcharges**: An overlay adds +3% for instances in a specific availability zone for compliance cost modeling. The expression makes the order of operations explicit.
+3. **Marketplace software licensing plus discounts**: A commercial workload requires a flat per-node license fee, while the underlying compute price receives an ISP, marketplace, or enterprise discount. For example, `self.price * 0.82 + 0.12` models an 18% compute discount plus a $0.12/hr software license fee per node.
 
-4. **Spot vs on-demand gap refinement**: An on-demand reservation discount narrows the price gap with spot. Modeled accurately, Karpenter can make more correct capacity-type decisions during provisioning.
+4. **Storage attachment cost plus enterprise discount**: A workload requires an EBS volume cost to be modeled per node in addition to the instance price, while the combined or compute-only cost receives an enterprise discount. Operators can choose the correct business rule explicitly, such as `(self.price + 0.08) * 0.9` when the discount applies to both compute and storage, or `self.price * 0.9 + 0.08` when the EBS cost is not discounted.
+
+6. **Spot vs on-demand gap refinement**: Enterprise discounts may apply to spot pricing while reservation savings apply to on-demand pricing, changing the effective gap between capacity types. Modeled accurately, Karpenter can make more correct capacity-type decisions during provisioning.
 
 ## Proposed Solution: `priceExpression` CEL Field
 
@@ -81,6 +83,31 @@ For a given instance type offering, let $M$ be the set of all matching NodeOverl
 2. **`priceExpression`**: If the highest-weight overlay in $M$ specifies `priceExpression`, it is evaluated with `self.price` set to the base price. The result becomes the new simulated price. Lower-weight overlays are not applied (same highest-weight-wins semantics as today).
 
 3. **Legacy `priceAdjustment`**: Overlays using the legacy field retain current override semantics—only the highest-weight match applies.
+
+### Why Not Merge Multiple Matching Overlays?
+
+An earlier design considered allowing multiple matching price overlays to merge, then resolving conflicts by weight and applying the resulting set of adjustments in order.
+
+**Advantages**
+
+- Users could define one global base discount overlay, then stack narrower overlays for instance-family-specific discounts instead of repeating the global discount in every instance-family expression.
+- Independently owned cost dimensions could remain in separate resources. For example, a platform team could own the enterprise discount while an application team owns a per-node licensing fee.
+- Shared adjustments could be updated once and automatically affect every more-specific overlay that composes with them.
+
+**Disadvantages**
+
+- The rest of NodeOverlay follows a simple highest-weight-wins model: when multiple overlays target the same field, the controller picks one winner and reports conflicts rather than composing partial state across resources. Price adjustment merging would be the only behavior with a different resolution model.
+- Merge resolution would require users and maintainers to reason about:
+
+  - which fields merge and which fields conflict,
+  - whether ordering comes from weight, declaration order, operation type, or another explicit field,
+  - how additive fees interact with percentage discounts,
+  - whether a higher-weight overlay replaces or composes with a lower-weight overlay, and
+  - how to explain status, events, and validation errors when the final price comes from several resources.
+
+**Decision**
+
+We moved away from multiple-overlay merge resolution because it makes NodeOverlay resolution significantly more complex while solving only this one feature's composition problem. Those semantics are especially hard for cost modeling because the order of operations is business-specific. A per-node licensing fee, an EBS cost, an ISP discount, and an enterprise discount can all be validly ordered in different ways depending on the contract. Encoding that behavior through multiple overlay merge rules would make the API look declarative while hiding the most important part of the calculation in controller-specific conflict resolution. A single CEL expression keeps the existing overlay selection semantics intact and makes the final arithmetic explicit in the resource that owns the price model.
 
 ### Mathematical Order of Operations
 
