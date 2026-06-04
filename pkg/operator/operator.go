@@ -186,6 +186,11 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
 			return ctx
 		},
+		Client: client.Options{
+			Cache: &client.CacheOptions{
+				Unstructured: true,
+			},
+		},
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
 				&coordinationv1.Lease{}: {
