@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -534,7 +535,7 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 }
 
 // ClearNodeClaimsCondition will remove the conditionType from the NodeClaim status of the provided statenodes
-func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, conditionType string, nodes ...*StateNode) error {
+func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, clk clock.Clock, conditionType string, nodes ...*StateNode) error {
 	errs := make([]error, len(nodes))
 	workqueue.ParallelizeUntil(ctx, len(nodes), len(nodes), func(i int) {
 		if !nodes[i].Initialized() || nodes[i].NodeClaim == nil {
@@ -546,7 +547,7 @@ func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, con
 				return e
 			}
 			stored := nodeClaim.DeepCopy()
-			_ = nodeClaim.StatusConditions().Clear(conditionType)
+			_ = nodeClaim.StatusConditions(status.WithClock(clk)).Clear(conditionType)
 			if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 				return kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
 			}

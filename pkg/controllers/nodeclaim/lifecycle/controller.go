@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -83,9 +84,9 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 		nodePoolState: nodePoolState,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Hour, time.Minute), recorder: recorder},
-		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, npState: nodePoolState, registrationHooks: registrationHooks},
-		initialization: &Initialization{kubeClient: kubeClient},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Hour, time.Minute), recorder: recorder, clock: clk},
+		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, npState: nodePoolState, registrationHooks: registrationHooks, clock: clk},
+		initialization: &Initialization{kubeClient: kubeClient, clock: clk},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, npState: nodePoolState},
 	}
 }
@@ -225,7 +226,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			return reconcile.Result{}, deleteErr
 		}
 		stored := nodeClaim.DeepCopy()
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
+		nodeClaim.StatusConditions(status.WithClock(c.clock)).SetTrue(v1.ConditionTypeInstanceTerminating)
 		if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 			// can cause races due to the fact that it fully replaces the list on a change

@@ -43,7 +43,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/csi-translation-lib/plugins"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -69,7 +68,6 @@ import (
 var ctx context.Context
 var prov *provisioning.Provisioner
 var env *test.Environment
-var fakeClock *clock.FakeClock
 var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
@@ -96,13 +94,12 @@ var _ = BeforeSuite(func() {
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	// set these on the cloud provider, so we can manipulate them if needed
 	cloudProvider.InstanceTypes = instanceTypes
-	fakeClock = clock.NewFakeClock(time.Now())
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
 })
 
@@ -2054,7 +2051,7 @@ var _ = Context("Scheduling", func() {
 						return []string{o.(*corev1.Pod).Spec.NodeName}
 					},
 				).Build()
-				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock)
 				controller := informer.NewNodeController(kubeClient, cluster)
 				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
 				ExpectApplied(ctx, kubeClient, nodePool)
@@ -2463,8 +2460,8 @@ var _ = Context("Scheduling", func() {
 			}
 
 			// Make one of the nodes and nodeClaims initialized
-			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaims[elem])
-			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaims[elem])
+			ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[elem]))
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
@@ -2474,6 +2471,17 @@ var _ = Context("Scheduling", func() {
 
 			// Expect that the scheduled node is equal to node3 since it's initialized
 			Expect(scheduledNode.Name).To(Equal(node.Name))
+		})
+		It("should schedule pods with the same host port to different nodes", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := []*corev1.Pod{
+				test.UnschedulablePod(test.PodOptions{HostPorts: []int32{8080}}),
+				test.UnschedulablePod(test.PodOptions{HostPorts: []int32{8080}}),
+			}
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			node1 := ExpectScheduled(ctx, env.Client, pods[0])
+			node2 := ExpectScheduled(ctx, env.Client, pods[1])
+			Expect(node1.Name).ToNot(Equal(node2.Name))
 		})
 	})
 
@@ -2487,7 +2495,7 @@ var _ = Context("Scheduling", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
-			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
 			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
@@ -2513,7 +2521,7 @@ var _ = Context("Scheduling", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
-			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
 			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
@@ -2554,8 +2562,8 @@ var _ = Context("Scheduling", func() {
 
 			// Make one of the nodes and nodeClaims initialized
 			elem := rand.Intn(100) //nolint:gosec
-			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaims[elem])
-			ExpectMakeNodesInitialized(ctx, env.Client, nodes[elem])
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaims[elem])
+			ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, nodes[elem])
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[elem]))
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[elem]))
 
@@ -2577,8 +2585,8 @@ var _ = Context("Scheduling", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodeClaim, node)
-			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
+			ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
 
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
@@ -2627,8 +2635,8 @@ var _ = Context("Scheduling", func() {
 					}},
 				)
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, ds)
-				ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-				ExpectMakeNodesInitialized(ctx, env.Client, node)
+				ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
+				ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
 
 				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
@@ -4311,7 +4319,7 @@ var _ = Context("Scheduling", func() {
 			}
 
 			// step the clock so the metric isn't 0
-			fakeClock.Step(1 * time.Minute)
+			env.Clock.Step(1 * time.Minute)
 			_, err := prov.Schedule(ctx)
 			Expect(err).To(BeNil())
 
@@ -5378,7 +5386,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler1 := scheduling.NewScheduler(ctx1, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology1,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), env.Clock, nil)
 			results1, err := scheduler1.Solve(ctx1, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results1.NewNodeClaims).To(HaveLen(1))
@@ -5391,7 +5399,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler2 := scheduling.NewScheduler(ctx2, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology2,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), env.Clock, nil)
 			results2, err := scheduler2.Solve(ctx2, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results2.NewNodeClaims).To(HaveLen(1))
