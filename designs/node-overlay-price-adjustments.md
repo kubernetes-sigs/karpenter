@@ -2,7 +2,7 @@
 
 ## Summary
 
-This RFC proposes replacing the existing single `spec.priceAdjustment` field with a `spec.priceExpression` field that accepts a CEL (Common Expression Language) expression. The expression receives the instance type's base price as `self.price` and must evaluate to a non-negative numeric value, giving operators full control over order of operations while collapsing all adjustments into a single, readable formula.
+This RFC proposes adding a `spec.priceExpression` field that accepts a CEL (Common Expression Language) expression. The expression receives the instance type's base price as `self.price` and must evaluate to a non-negative numeric value, giving operators full control over order of operations in a single, readable formula.
 
 ## Motivation
 
@@ -28,7 +28,7 @@ This directly limits the utility of NodeOverlays as a cost-modeling tool and was
 
 ### Use Cases
 
-1. **Layered enterprise discounts**: A global enterprise discount overlay applies a -15% base reduction, and a instance type/ family specific overlay applies a further -5% on top. Both can be expressed in one expression with explicit ordering.
+1. **Layered enterprise discounts**: A global enterprise discount overlay applies a -15% base reduction, and an instance type or family specific overlay applies a further -5% on top. Both can be expressed in one expression with explicit ordering.
 
 2. **Per-node licensing fees**: A security agent charges a flat $0.069/hr per node regardless of instance size. The fee is added after percentage discounts are applied.
 
@@ -36,15 +36,15 @@ This directly limits the utility of NodeOverlays as a cost-modeling tool and was
 
 4. **Storage attachment cost plus enterprise discount**: A workload requires an EBS volume cost to be modeled per node in addition to the instance price, while the combined or compute-only cost receives an enterprise discount. Operators can choose the correct business rule explicitly, such as `(self.price + 0.08) * 0.9` when the discount applies to both compute and storage, or `self.price * 0.9 + 0.08` when the EBS cost is not discounted.
 
-6. **Spot vs on-demand gap refinement**: Enterprise discounts may apply to spot pricing while reservation savings apply to on-demand pricing, changing the effective gap between capacity types. Modeled accurately, Karpenter can make more correct capacity-type decisions during provisioning.
+5. **Spot vs on-demand gap refinement**: Enterprise discounts may apply to spot pricing while reservation savings apply to on-demand pricing, changing the effective gap between capacity types. Modeled accurately, Karpenter can make more correct capacity-type decisions during provisioning.
 
 ## Proposed Solution: `priceExpression` CEL Field
 
 ### Overview
 
-Replace `spec.priceAdjustment` with a `spec.priceExpression` field that accepts a CEL expression string. The expression exposes a single variable `self` with a `price` field (double) representing the instance type's base price for the current offering. The expression must evaluate to a non-negative numeric value, which becomes the new simulated price.
+Add a `spec.priceExpression` field that accepts a CEL expression string. The expression exposes a single variable `self` with a `price` field (double) representing the instance type's base price for the current offering. The expression must evaluate to a non-negative numeric value, which becomes the new simulated price.
 
-This approach was suggested by @jmdeal in [kubernetes-sigs/karpenter#3004](https://github.com/kubernetes-sigs/karpenter/pull/3004) as a cleaner alternative to maintaining a structured list of adjustments.
+This approach was suggested by @jmdeal in [kubernetes-sigs/karpenter#3004](https://github.com/kubernetes-sigs/karpenter/pull/3004) as a cleaner alternative to maintaining a structured list of price operations.
 
 ### API
 
@@ -64,7 +64,7 @@ spec:
 
 The three-factor example from the motivation section (−10% EDP, +$0.05 agent fee, +3% AZ surcharge) is expressed as a single formula. The operator controls order of operations directly via parenthesization.
 
-The existing `priceAdjustment` and `price` fields are retained for backward compatibility. Specifying `priceExpression` alongside either is a validation error.
+The existing `price` field is retained for explicit price overrides. Specifying `priceExpression` alongside `price` is a validation error.
 
 ### Expression Environment
 
@@ -81,8 +81,6 @@ For a given instance type offering, let $M$ be the set of all matching NodeOverl
 1. **Base price**: The cloud provider's price is the initial value. If any overlay in $M$ specifies `spec.price`, the highest-weight such overlay's value becomes the base.
 
 2. **`priceExpression`**: If the highest-weight overlay in $M$ specifies `priceExpression`, it is evaluated with `self.price` set to the base price. The result becomes the new simulated price. Lower-weight overlays are not applied (same highest-weight-wins semantics as today).
-
-3. **Legacy `priceAdjustment`**: Overlays using the legacy field retain current override semantics—only the highest-weight match applies.
 
 ### Why Not Merge Multiple Matching Overlays?
 
@@ -139,11 +137,11 @@ CEL expressions are compiled once when the NodeOverlay controller reconciles, no
 - **`priceExpression` syntax**: Validated at admission time via `RuntimeValidate`. Any CEL parse or type-check error surfaces as a validation error on the overlay resource before it is applied.
 - **Return type**: The expression must return a numeric type (`double`, `int`, or `uint`). Expressions returning booleans, strings, or other types are rejected at compile time.
 - **Negative price**: Expressions that evaluate to a negative value are rejected at evaluation time. The offering retains its previous price, and a warning event is emitted on the overlay.
-- **Mutual exclusion**: Specifying `priceExpression` alongside `price` or `priceAdjustment` on the same resource is a validation error.
+- **Mutual exclusion**: Specifying `priceExpression` alongside `price` on the same resource is a validation error.
 
 **Backward Compatibility**
 
-The existing `priceAdjustment` and `price` fields are unchanged. All existing NodeOverlay resources continue to behave exactly as today. Operators opt in to `priceExpression` explicitly.
+The existing `price` field is unchanged. Existing NodeOverlay resources that use `price` continue to behave exactly as today. Operators opt in to `priceExpression` explicitly.
 
 ### Pros and Cons
 
@@ -159,13 +157,3 @@ The existing `priceAdjustment` and `price` fields are unchanged. All existing No
 - Harder to introspect programmatically (e.g. "what discounts apply to this instance type?") than a structured list of named adjustments.
 - Cannot compose adjustments across independently owned overlays—teams that want separate overlays for separate cost dimensions still need to merge them into a single expression (or use the weight-based highest-wins model at coarser granularity).
 - Expressions that are syntactically valid but semantically wrong (e.g. `self.price * 0.0`) will produce correct-but-unexpected prices with no warning.
-
-### Migration from `priceAdjustment`
-
-Existing single-adjustment overlays migrate trivially:
-
-| Before | After |
-|--------|-------|
-| `priceAdjustment: "-10%"` | `priceExpression: "self.price * 0.9"` |
-| `priceAdjustment: "+0.05"` | `priceExpression: "self.price + 0.05"` |
-| `price: "0.75"` | `price: "0.75"` (unchanged) |
