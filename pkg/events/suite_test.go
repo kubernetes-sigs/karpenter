@@ -56,11 +56,11 @@ func (i *InternalRecorder) Event(_ runtime.Object, _, reason, _ string) {
 	i.calls[reason]++
 }
 
-func (i *InternalRecorder) Eventf(object runtime.Object, eventtype, reason, messageFmt string, _ ...interface{}) {
+func (i *InternalRecorder) Eventf(object runtime.Object, eventtype, reason, messageFmt string, _ ...any) {
 	i.Event(object, eventtype, reason, messageFmt)
 }
 
-func (i *InternalRecorder) AnnotatedEventf(object runtime.Object, _ map[string]string, eventtype, reason, messageFmt string, _ ...interface{}) {
+func (i *InternalRecorder) AnnotatedEventf(object runtime.Object, _ map[string]string, eventtype, reason, messageFmt string, _ ...any) {
 	i.Event(object, eventtype, reason, messageFmt)
 }
 
@@ -104,7 +104,7 @@ var _ = Describe("Event Creation", func() {
 var _ = Describe("Dedupe", func() {
 	It("should only create a single event when many events are created quickly", func() {
 		pod := PodWithUID()
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			eventRecorder.Publish(terminatorevents.EvictPod(pod, ""))
 		}
 		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(1))
@@ -115,7 +115,7 @@ var _ = Describe("Dedupe", func() {
 		evt.DedupeTimeout = time.Second * 2
 
 		// Generate a set of events within the dedupe timeout
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			eventRecorder.Publish(evt)
 		}
 		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(1))
@@ -126,7 +126,7 @@ var _ = Describe("Dedupe", func() {
 		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(2))
 	})
 	It("should allow events with different entities to be created", func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID(), ""))
 		}
 		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(100))
@@ -135,14 +135,14 @@ var _ = Describe("Dedupe", func() {
 
 var _ = Describe("Rate Limiting", func() {
 	It("should only create max-burst when many events are created quickly", func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()))
 		}
 		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()).Reason)).To(Or(Equal(10), Equal(11))) // 11 can slip through due to timing before rate limiter kicks in
 	})
 	It("should allow many events over time due to smoothed rate limiting", func() {
-		for i := 0; i < 3; i++ {
-			for j := 0; j < 5; j++ {
+		for range 3 {
+			for range 5 {
 				eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()))
 			}
 			time.Sleep(time.Second)

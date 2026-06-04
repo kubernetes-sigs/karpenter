@@ -39,6 +39,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -47,6 +48,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -172,7 +174,7 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
-		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}); !errors.IsNotFound(err) {
+		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}); !errors.IsNotFound(err) {
 			Expect(err).To(BeNil())
 		}
 		ExpectNotFound(ctx, c, object)
@@ -257,6 +259,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&testv1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
 		&v1alpha1.NodeOverlay{},
+		&resourcev1.ResourceClaim{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
@@ -264,8 +267,12 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 				GinkgoHelper()
 				defer wg.Done()
 				defer GinkgoRecover()
-				Expect(c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
-					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}})).ToNot(HaveOccurred())
+				err := c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
+					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: new(int64(0))}})
+				// Fail open for CRDs that don't exist on this k8s version (e.g. ResourceClaim on < 1.34)
+				if err != nil && !meta.IsNoMatchError(err) {
+					Expect(err).ToNot(HaveOccurred())
+				}
 			}(object, namespace.Name)
 		}
 	}
@@ -438,20 +445,20 @@ func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeC
 	}
 }
 
-func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeClaims ...*v1.NodeClaim) {
+func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, clk clock.Clock, nodeClaims ...*v1.NodeClaim) {
 	GinkgoHelper()
 	for i := range nodeClaims {
 		nodeClaims[i] = ExpectExists(ctx, c, nodeClaims[i])
-		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeLaunched)
-		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeRegistered)
-		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeInitialized)
+		nodeClaims[i].StatusConditions(status.WithClock(clk)).SetTrue(v1.ConditionTypeLaunched)
+		nodeClaims[i].StatusConditions(status.WithClock(clk)).SetTrue(v1.ConditionTypeRegistered)
+		nodeClaims[i].StatusConditions(status.WithClock(clk)).SetTrue(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }
 
-func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
+func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, clk clock.Clock, nodes ...*corev1.Node) {
 	GinkgoHelper()
-	ExpectMakeNodesReady(ctx, c, nodes...)
+	ExpectMakeNodesReady(ctx, c, clk, nodes...)
 
 	for i := range nodes {
 		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
@@ -461,7 +468,7 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 	}
 }
 
-func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
+func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, clk clock.Clock, nodes ...*corev1.Node) {
 	for i := range nodes {
 		nodes[i] = ExpectExists(ctx, c, nodes[i])
 		nodes[i].Status.Phase = corev1.NodeRunning
@@ -469,8 +476,8 @@ func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*cor
 			{
 				Type:               corev1.NodeReady,
 				Status:             corev1.ConditionFalse,
-				LastHeartbeatTime:  metav1.Now(),
-				LastTransitionTime: metav1.Now(),
+				LastHeartbeatTime:  metav1.NewTime(clk.Now()),
+				LastTransitionTime: metav1.NewTime(clk.Now()),
 				Reason:             "NotReady",
 			},
 		}
@@ -481,7 +488,7 @@ func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*cor
 	}
 }
 
-func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
+func ExpectMakeNodesReady(ctx context.Context, c client.Client, clk clock.Clock, nodes ...*corev1.Node) {
 	for i := range nodes {
 		nodes[i] = ExpectExists(ctx, c, nodes[i])
 		nodes[i].Status.Phase = corev1.NodeRunning
@@ -489,8 +496,8 @@ func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*corev1
 			{
 				Type:               corev1.NodeReady,
 				Status:             corev1.ConditionTrue,
-				LastHeartbeatTime:  metav1.Now(),
-				LastTransitionTime: metav1.Now(),
+				LastHeartbeatTime:  metav1.NewTime(clk.Now()),
+				LastTransitionTime: metav1.NewTime(clk.Now()),
 				Reason:             "KubeletReady",
 			},
 		}
@@ -705,11 +712,11 @@ func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1.Nod
 	return ret
 }
 
-func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController *informer.NodeController, nodeClaimStateController *informer.NodeClaimController, nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
+func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, clk clock.Clock, nodeStateController *informer.NodeController, nodeClaimStateController *informer.NodeClaimController, nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 	GinkgoHelper()
 
-	ExpectMakeNodesInitialized(ctx, c, nodes...)
-	ExpectMakeNodeClaimsInitialized(ctx, c, nodeClaims...)
+	ExpectMakeNodesInitialized(ctx, c, clk, nodes...)
+	ExpectMakeNodeClaimsInitialized(ctx, c, clk, nodeClaims...)
 
 	// Inform cluster state about node and nodeclaim readiness
 	for _, n := range nodes {

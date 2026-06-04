@@ -197,7 +197,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 			// EnableWarmup allows controllers to start their sources (watches/informers) before leader election
 			// is won. This pre-populates caches and improves leader failover time. Only effective when leader
 			// election is enabled, so we only set it when both conditions are true.
-			EnableWarmup: lo.ToPtr(!options.FromContext(ctx).DisableLeaderElection && !options.FromContext(ctx).DisableControllerWarmup),
+			EnableWarmup: new(!options.FromContext(ctx).DisableLeaderElection && !options.FromContext(ctx).DisableControllerWarmup),
 		},
 	}
 	if options.FromContext(ctx).EnableProfiling {
@@ -245,7 +245,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)),
+		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once events.Recorder is updated
 		Clock:               clock.RealClock{},
 		InstanceTypeStore:   instanceTypeStore,
 	}
@@ -260,11 +260,9 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...controlle
 
 func (o *Operator) Start(ctx context.Context) {
 	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		lo.Must0(o.Manager.Start(ctx))
-	}()
+	})
 	wg.Wait()
 }
 

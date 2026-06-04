@@ -64,7 +64,7 @@ var _ = Describe("NodeOverlay", func() {
 				return v1alpha1.NodeOverlay{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("overlay-%d", i)},
 					Spec: v1alpha1.NodeOverlaySpec{
-						Weight: lo.ToPtr[int32](int32(rand.IntN(100) + 1)), //nolint:gosec
+						Weight: new(int32(rand.IntN(100) + 1)), //nolint:gosec
 						Requirements: []v1alpha1.NodeSelectorRequirement{
 							{
 								Key:      "test",
