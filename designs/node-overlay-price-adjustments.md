@@ -66,11 +66,19 @@ The three-factor example from the motivation section (−10% EDP, +$0.05 agent f
 
 The existing `price` field is retained for explicit price overrides. Specifying `priceExpression` alongside `price` is a validation error.
 
+`priceExpression` can also set a price directly by using a bare numeric literal that ignores `self.price`:
+
+```yaml
+priceExpression: "0.50"   # equivalent to price: "0.50"
+```
+
+This makes `spec.price` largely redundant — `priceExpression` subsumes it. `spec.price` is retained because it is more self-documenting for the simple override case and is validated by a regex at admission time rather than by CEL type-checking.
+
 ### Expression Environment
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `self.price` | `double` | The offering's base price (cloud provider price, or the value set by a `spec.price` override on a higher-weight overlay) |
+| `self.price` | `double` | The cloud provider's offering price as a double. This is always the raw provider price; it is not affected by `spec.price` overrides on other overlays. |
 
 The CEL environment is deliberately minimal. No other variables are exposed. The expression must return a `double`, `int`, or `uint`. Returning a negative value is permitted; see [Negative Prices](#negative-prices) below.
 
@@ -78,9 +86,11 @@ The CEL environment is deliberately minimal. No other variables are exposed. The
 
 For a given instance type offering, let $M$ be the set of all matching NodeOverlays sorted by weight descending (alphabetical by name to break ties):
 
-1. **Base price**: The cloud provider's price is the initial value. If any overlay in $M$ specifies `spec.price`, the highest-weight such overlay's value becomes the base.
+1. **Base price**: The cloud provider's offering price is always the input to any price computation. `spec.price` from one overlay is never visible to `priceExpression` on another overlay — the two fields are independent and compete under highest-weight-wins.
 
-2. **`priceExpression`**: If the highest-weight overlay in $M$ specifies `priceExpression`, it is evaluated with `self.price` set to the base price. The result becomes the new simulated price. Lower-weight overlays are not applied (same highest-weight-wins semantics as today).
+2. **`priceExpression`**: If the highest-weight overlay in $M$ specifies `priceExpression`, it is evaluated with `self.price` set to the cloud provider's offering price. The result becomes the new simulated price. Lower-weight overlays are not applied (same highest-weight-wins semantics as today).
+
+3. **`spec.price`**: If the highest-weight overlay in $M$ specifies `spec.price` (and does not specify `priceExpression`), that value becomes the simulated price directly. Lower-weight overlays are not applied.
 
 ### Why Not Merge Multiple Matching Overlays?
 
