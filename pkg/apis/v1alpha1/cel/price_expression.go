@@ -90,7 +90,7 @@ func (p *PriceExpression) Evaluate(price float64) (float64, error) {
 		return 0, fmt.Errorf("price expression %q: %w", p.expr, err)
 	}
 	if result < 0 {
-		log.Log.Info("price expression evaluated to negative value; set PriceNonNegative=False to suppress", "expression", p.expr, "result", result)
+		log.Log.Info("price expression evaluated to negative value", "expression", p.expr, "result", result)
 	}
 	return result, nil
 }

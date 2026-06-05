@@ -167,7 +167,8 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 			if overlay.PriceExpression != nil {
 				newPrice, err := overlay.PriceExpression.Evaluate(offering.Price)
 				if err != nil {
-					// Evaluation errors are surfaced via RuntimeValidate at admission time; skip silently here.
+					// Evaluation errors are caught at reconcile time and surface as ValidationSucceeded=False;
+					// if one slips through here, skip the offering rather than panic.
 					result[i] = offering
 					continue
 				}
@@ -251,10 +252,10 @@ func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName str
 // NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
 // compiled must be non-nil when nodeOverlay.Spec.PriceExpression is set; it is compiled once by the
 // caller so that both storage and evaluation share the same program.
-func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings, compiled *cel.PriceExpression) error {
+func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings, compiled *cel.PriceExpression) {
 	hasPriceField := nodeOverlay.Spec.Price != nil || nodeOverlay.Spec.PriceAdjustment != nil
 	if !hasPriceField && compiled == nil {
-		return nil
+		return
 	}
 
 	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
@@ -279,7 +280,6 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 			lowestWeight:    nodeOverlay.Spec.Weight,
 		}
 	}
-	return nil
 }
 
 func (i *internalInstanceTypeStore) isOfferingUpdateConflicting(nodePoolName string, instanceTypeName string, of *cloudprovider.Offering, nodeOverlay v1alpha1.NodeOverlay) bool {

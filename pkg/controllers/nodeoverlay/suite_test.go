@@ -2977,7 +2977,7 @@ var _ = Describe("PriceExpression Evaluation Error", func() {
 		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
 		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("ExpressionEvaluationError"))
 	})
-	It("should set ValidationSucceeded=True for a bare numeric literal (no self.price reference)", func() {
+	It("should set ValidationSucceeded=True and apply price for a bare numeric literal", func() {
 		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
 				Requirements: []v1alpha1.NodeSelectorRequirement{
@@ -2996,5 +2996,63 @@ var _ = Describe("PriceExpression Evaluation Error", func() {
 
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
 		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 0.50))
+	})
+	It("should not contaminate the store when a high-weight overlay fails evaluation, allowing lower-weight valid price to apply", func() {
+		// high-weight overlay uses an invalid expression that compiles but fails evaluation
+		overlayHighWeight := test.NodeOverlay(v1alpha1.NodeOverlay{
+			ObjectMeta: metav1.ObjectMeta{Name: "high-weight-bad-expr"},
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("self.notprice * 0.9"),
+				Weight:          lo.ToPtr(int32(20)),
+			},
+		})
+		// lower-weight overlay has a valid price
+		overlayLowWeight := test.NodeOverlay(v1alpha1.NodeOverlay{
+			ObjectMeta: metav1.ObjectMeta{Name: "low-weight-valid-price"},
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				Price:  lo.ToPtr("1.50"),
+				Weight: lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlayHighWeight, overlayLowWeight)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		// high-weight overlay should have ValidationSucceeded=False with ExpressionEvaluationError
+		updatedHigh := ExpectExists(ctx, env.Client, overlayHighWeight)
+		Expect(updatedHigh.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+		Expect(updatedHigh.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("ExpressionEvaluationError"))
+
+		// lower-weight overlay should have ValidationSucceeded=True
+		updatedLow := ExpectExists(ctx, env.Client, overlayLowWeight)
+		Expect(updatedLow.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+		// the valid lower-weight price should be applied, not left at the original 1.020
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.50))
 	})
 })
