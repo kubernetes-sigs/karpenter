@@ -227,26 +227,39 @@ func (c *Controller) storeUpdatesForInstanceTypeOverride(ctx context.Context, st
 		return r.AsNodeSelectorRequirement()
 	})...)
 
-	hasPriceSpec := overlay.Spec.Price != nil || overlay.Spec.PriceAdjustment != nil || overlay.Spec.PriceExpression != nil
+	// Compile once here so that both storage and negative-price detection share the same program.
+	var compiled *cel.PriceExpression
+	if overlay.Spec.PriceExpression != nil {
+		var err error
+		compiled, err = cel.Compile(*overlay.Spec.PriceExpression)
+		if err != nil {
+			// Should have been caught by RuntimeValidate; log and skip the whole overlay.
+			log.FromContext(ctx).Error(err, "skipping overlay with invalid priceExpression", "overlay", overlay.Name)
+			return false, false
+		}
+	}
+
+	hasPriceSpec := overlay.Spec.Price != nil || overlay.Spec.PriceAdjustment != nil || compiled != nil
 	var priceStored, negativePrice bool
 	for _, it := range its {
 		offerings := getOverlaidOfferings(nodePool, it, overlayRequirements)
-		// if we are not able to find any offerings for an instance type
-		// This will mean that the overlay does not select on the instance all together
 		if len(offerings) == 0 {
 			continue
 		}
-
-		if err := store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings); err != nil {
-			// CEL compilation errors should have been caught by RuntimeValidate; log and skip.
+		if err := store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings, compiled); err != nil {
 			log.FromContext(ctx).Error(err, "skipping offering update", "overlay", overlay.Name, "instanceType", it.Name)
 			continue
 		}
 		if hasPriceSpec {
 			priceStored = true
 		}
-		if overlay.Spec.PriceExpression != nil && celProducesNegativePrice(*overlay.Spec.PriceExpression, offerings) {
-			negativePrice = true
+		if compiled != nil {
+			for _, of := range offerings {
+				if price, err := compiled.Evaluate(of.Price); err == nil && price < 0 {
+					negativePrice = true
+					break
+				}
+			}
 		}
 		store.updateInstanceTypeCapacity(nodePool.Name, it.Name, overlay)
 	}
@@ -275,7 +288,7 @@ func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, 
 }
 
 func (c *Controller) isPriceUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) bool {
-	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil {
+	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil && overlay.Spec.PriceExpression == nil {
 		return false
 	}
 
@@ -341,21 +354,6 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 		}
 	}
 	return multierr.Combine(errs...), false
-}
-
-// celProducesNegativePrice returns true if the given CEL expression evaluates to a negative price
-// for any of the provided offerings.
-func celProducesNegativePrice(expr string, offerings cloudprovider.Offerings) bool {
-	compiled, err := cel.Compile(expr)
-	if err != nil {
-		return false
-	}
-	for _, of := range offerings {
-		if price, err := compiled.Evaluate(of.Price); err == nil && price < 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // NodeOverlayEventHandler is a watcher on any object to trigger a overlay reconciliation to validate the Node Overlays

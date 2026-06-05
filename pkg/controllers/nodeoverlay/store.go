@@ -17,7 +17,6 @@ limitations under the License.
 package nodeoverlay
 
 import (
-	"fmt"
 	"sync/atomic"
 
 	"github.com/samber/lo"
@@ -250,21 +249,12 @@ func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName str
 
 // updateInstanceTypeOffering add a new Price overlay update to the associated instance type.
 // NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
-func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings) error {
+// compiled must be non-nil when nodeOverlay.Spec.PriceExpression is set; it is compiled once by the
+// caller so that both storage and evaluation share the same program.
+func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings, compiled *cel.PriceExpression) error {
 	hasPriceField := nodeOverlay.Spec.Price != nil || nodeOverlay.Spec.PriceAdjustment != nil
-	hasPriceExpr := nodeOverlay.Spec.PriceExpression != nil
-	if !hasPriceField && !hasPriceExpr {
+	if !hasPriceField && compiled == nil {
 		return nil
-	}
-
-	var compiled *cel.PriceExpression
-	if hasPriceExpr {
-		var err error
-		compiled, err = cel.Compile(*nodeOverlay.Spec.PriceExpression)
-		if err != nil {
-			// Should have been caught by RuntimeValidate; surface here as a safety net.
-			return fmt.Errorf("compiling priceExpression for overlay %q: %w", nodeOverlay.Name, err)
-		}
 	}
 
 	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
