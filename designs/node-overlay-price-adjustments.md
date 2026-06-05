@@ -2,7 +2,7 @@
 
 ## Summary
 
-This RFC proposes adding a `spec.priceExpression` field that accepts a CEL (Common Expression Language) expression. The expression receives the instance type's base price as `self.price` and evaluates to a numeric value, giving operators full control over order of operations in a single, readable formula. Negative results are permitted as an intentional scheduling incentive but surface as a `PriceNonNegative=False` warning condition on the overlay.
+This RFC proposes adding a `spec.priceExpression` field that accepts a CEL (Common Expression Language) expression. The expression receives the cloud provider's offering price as `self.price` and evaluates to a numeric value, giving operators full control over order of operations in a single, readable formula. Negative results are permitted as an intentional scheduling incentive but surface as a `PriceNonNegative=False` warning condition on the overlay.
 
 ## Motivation
 
@@ -28,7 +28,7 @@ This directly limits the utility of NodeOverlays as a cost-modeling tool and was
 
 ### Use Cases
 
-1. **Layered enterprise discounts**: A global enterprise discount overlay applies a -15% base reduction, and an instance type or family specific overlay applies a further -5% on top. Both can be expressed in one expression with explicit ordering.
+1. **Layered enterprise discounts**: A global -15% enterprise discount and a -5% instance-family-specific discount both need to apply to the same instance type. Rather than maintaining a separate overlay per instance type with a pre-computed combined rate, both factors can be encoded in a single expression: `self.price * 0.85 * 0.95`.
 
 2. **Per-node licensing fees**: A security agent charges a flat $0.069/hr per node regardless of instance size. The fee is added after percentage discounts are applied.
 
@@ -140,14 +140,14 @@ CEL expressions are compiled once when the NodeOverlay controller reconciles, no
 1. On reconcile, call `cel.Compile(overlay.Spec.PriceExpression)` for each overlay with a `priceExpression`.
 2. If compilation fails, mark the overlay not-Ready with a descriptive message (same path as existing runtime validation failures).
 3. Store the compiled `cel.Program` in the `priceUpdate` struct alongside the overlay update string.
-4. At scheduling time, evaluate `program.Eval(map["self"]["price"] = basePrice)` to produce the adjusted price.
+4. At reconcile time, evaluate the expression against each matched offering to detect negative prices and set the `PriceNonNegative` condition. At scheduling time, evaluate the stored program against the cloud provider's offering price to produce the adjusted price for scheduling decisions.
 
 **Validation**
 
 - **`priceExpression` syntax**: Validated at admission time via `RuntimeValidate`. Any CEL parse or type-check error surfaces as a validation error on the overlay resource before it is applied.
 - **Return type**: The expression must return a numeric type (`double`, `int`, or `uint`). Expressions returning booleans, strings, or other types are rejected at compile time.
 - **Negative price**: Expressions that evaluate to a negative value are **permitted**. Negative prices are intentionally allowed so operators can use them as a scheduling incentive (Karpenter's `OrderByPrice` sorts cheaper offerings first, so a negative price causes those offerings to be strongly preferred). When a CEL expression produces a negative result for any offering, a `log.Info` warning is emitted and the overlay's `PriceNonNegative` status condition is set to `False`. See [Status Conditions](#status-conditions).
-- **Mutual exclusion**: Specifying `priceExpression` alongside `price` on the same resource is a validation error.
+- **Mutual exclusion**: Specifying `priceExpression` alongside `price` or `priceAdjustment` on the same resource is a validation error enforced at admission time via CEL XValidation rules on the CRD.
 
 **Negative Prices** <a name="negative-prices"></a>
 
