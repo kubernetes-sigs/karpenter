@@ -91,6 +91,23 @@ func (i *NodeClaimTemplate) resolveCustomLabelsFromRequirements() map[string]str
 	return labels
 }
 
+func priceOverlayAdjustedPrice(instanceTypes cloudprovider.InstanceTypes, requirements scheduling.Requirements) (float64, bool) {
+	var adjustedPrice float64
+	var found bool
+	for _, it := range instanceTypes {
+		for _, offering := range it.Offerings.Available().Compatible(requirements) {
+			if !offering.IsPriceOverlaid() {
+				continue
+			}
+			if !found || offering.Price < adjustedPrice {
+				adjustedPrice = offering.Price
+				found = true
+			}
+		}
+	}
+	return adjustedPrice, found
+}
+
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	// Inject instanceType requirements for NodeClaims belonging to dynamic NodePool
 	// For static we let cloudprovider.Create()
@@ -111,9 +128,10 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 			i.Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityTypes...))
 		}
 
-		if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {
+		if adjustedPrice, foundPriceOverlay := priceOverlayAdjustedPrice(instanceTypes, i.Requirements); foundPriceOverlay {
 			i.Annotations = lo.Assign(i.Annotations, map[string]string{
-				v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
+				v1alpha1.PriceOverlayAppliedAnnotationKey:       "true",
+				v1alpha1.PriceOverlayAdjustedPriceAnnotationKey: fmt.Sprintf("%.10g", adjustedPrice),
 			})
 		}
 		if foundCapacityOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); foundCapacityOverlay {

@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -1523,6 +1524,43 @@ var _ = Describe("Instance Type Selection", func() {
 
 			// Ensures that NodeClaims are created with 2 instanceTypes
 			Expect(len(supportedInstanceTypes(cloudProvider.CreateCalls[0]))).To(BeNumerically(">=", 2))
+		})
+	})
+	Context("Price Overlay Annotations", func() {
+		It("should annotate the NodeClaim with the adjusted price when a price overlay is applied", func() {
+			offering := &cloudprovider.Offering{
+				Available: true,
+				Requirements: scheduler.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+					corev1.LabelTopologyZone: "test-zone-1",
+				}),
+				Price: 1.5,
+			}
+			offering.SetPriceOverlayApplied()
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name:      "price-overlay-instance",
+					Offerings: cloudprovider.Offerings{offering},
+				}),
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod()
+			bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+			nc := bindings.Get(pod).NodeClaim
+			Expect(nc).NotTo(BeNil())
+			Expect(nc.Annotations).To(HaveKeyWithValue(v1alpha1.PriceOverlayAppliedAnnotationKey, "true"))
+			Expect(nc.Annotations).To(HaveKeyWithValue(v1alpha1.PriceOverlayAdjustedPriceAnnotationKey, fmt.Sprintf("%.10g", 1.5)))
+		})
+It("should not annotate the NodeClaim when no price overlay is applied", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod()
+			bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+			nc := bindings.Get(pod).NodeClaim
+			Expect(nc).NotTo(BeNil())
+			Expect(nc.Annotations).NotTo(HaveKey(v1alpha1.PriceOverlayAppliedAnnotationKey))
+			Expect(nc.Annotations).NotTo(HaveKey(v1alpha1.PriceOverlayAdjustedPriceAnnotationKey))
 		})
 	})
 })
