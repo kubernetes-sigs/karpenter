@@ -19,7 +19,6 @@ package v1alpha1
 import "sigs.k8s.io/karpenter/pkg/apis"
 
 const (
-	PriceOverlayAppliedAnnotationKey       = apis.Group + "/price-overlay-applied"
-	PriceOverlayAdjustedPriceAnnotationKey = apis.Group + "/price-overlay-adjusted-price"
-	CapacityOverlayAppliedAnnotationKey    = apis.Group + "/capacity-overlay-applied"
+	PriceOverlayAppliedAnnotationKey    = apis.Group + "/price-overlay-applied"
+	CapacityOverlayAppliedAnnotationKey = apis.Group + "/capacity-overlay-applied"
 )
