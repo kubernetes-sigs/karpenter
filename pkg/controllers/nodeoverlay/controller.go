@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
-	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -349,35 +348,9 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 	errs := make([]error, 0, len(overlayList))
 	for i := range overlayList {
 		stored := overlayList[i].DeepCopy()
-<<<<<<< HEAD
-		overlayList[i].StatusConditions(status.WithClock(c.clock)).SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
-		if err, ok := overlayWithRuntimeValidationFailure[overlayList[i].Name]; ok {
-			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
-		} else if lo.Contains(overlaysWithConflict, overlayList[i].Name) {
-			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
-		} else if overlaysWithExpressionError[overlayList[i].Name] {
-			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "ExpressionEvaluationError", "price expression failed to evaluate for one or more matched offerings")
-		}
-
-		hasPriceSpec := overlayList[i].Spec.Price != nil || overlayList[i].Spec.PriceAdjustment != nil || overlayList[i].Spec.PriceExpression != nil
-		if !hasPriceSpec {
-			overlayList[i].StatusConditions().SetTrue(v1alpha1.ConditionTypePriceApplied)
-		} else if priceApplied, ok := overlaysWithPriceApplied[overlayList[i].Name]; ok && priceApplied {
-			overlayList[i].StatusConditions().SetTrue(v1alpha1.ConditionTypePriceApplied)
-		} else {
-			overlayList[i].StatusConditions().SetFalse(v1alpha1.ConditionTypePriceApplied, "NoMatchingInstanceTypes", "price configuration did not match any instance types")
-		}
-
-		if overlaysWithNegativePrice[overlayList[i].Name] {
-			overlayList[i].StatusConditions().SetFalse(v1alpha1.ConditionTypePriceNonNegative, "NegativePrice", "price expression produced a negative value for one or more offerings")
-		} else {
-			overlayList[i].StatusConditions().SetTrue(v1alpha1.ConditionTypePriceNonNegative)
-		}
-=======
 		setValidationCondition(&overlayList[i], overlayWithRuntimeValidationFailure, overlaysWithConflict, overlaysWithExpressionError)
 		setPriceAppliedCondition(&overlayList[i], overlaysWithPriceApplied)
 		setNonNegativeCondition(&overlayList[i], overlaysWithNegativePrice)
->>>>>>> a0d7262c (update + bug fixes)
 
 		if !equality.Semantic.DeepEqual(stored, overlayList[i]) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
