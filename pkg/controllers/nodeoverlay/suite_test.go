@@ -2952,3 +2952,49 @@ var _ = Describe("PriceNonNegative Condition", func() {
 		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceNonNegative)).To(BeTrue())
 	})
 })
+
+var _ = Describe("PriceExpression Evaluation Error", func() {
+	It("should set ValidationSucceeded=False when priceExpression compiles but fails to evaluate", func() {
+		// self.notprice compiles fine (map<string,dyn> allows any key at compile time)
+		// but fails at evaluation time because the key does not exist in the eval map.
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("self.notprice * 0.9"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("ExpressionEvaluationError"))
+	})
+	It("should set ValidationSucceeded=True for a bare numeric literal (no self.price reference)", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("0.50"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+	})
+})
