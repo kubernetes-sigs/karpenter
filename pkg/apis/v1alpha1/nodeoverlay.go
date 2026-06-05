@@ -82,8 +82,9 @@ type NodeOverlaySpec struct {
 	Price *string `json:"price,omitempty"`
 	//nolint:kubeapilinter
 	// PriceExpression specifies a CEL expression for computing the adjusted price.
-	// The expression has access to self.price (the original instance type price as a double)
-	// and must evaluate to a non-negative numeric value.
+	// The expression has access to self.price (the cloud provider's offering price as a double).
+	// It must evaluate to a numeric value (double, int, or uint). Negative results are permitted
+	// and act as a scheduling incentive, but will set PriceNonNegative=False on the overlay.
 	// Example: "(self.price * 0.9 + 0.05) * 1.03"
 	// Cannot be set together with price or priceAdjustment.
 	// +optional
