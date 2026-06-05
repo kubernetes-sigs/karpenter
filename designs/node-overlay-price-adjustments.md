@@ -2,7 +2,7 @@
 
 ## Summary
 
-This RFC proposes adding a `spec.priceExpression` field that accepts a CEL (Common Expression Language) expression. The expression receives the instance type's base price as `self.price` and must evaluate to a non-negative numeric value, giving operators full control over order of operations in a single, readable formula.
+This RFC proposes adding a `spec.priceExpression` field that accepts a CEL (Common Expression Language) expression. The expression receives the instance type's base price as `self.price` and evaluates to a numeric value, giving operators full control over order of operations in a single, readable formula. Negative results are permitted as an intentional scheduling incentive but surface as a `PriceNonNegative=False` warning condition on the overlay.
 
 ## Motivation
 
@@ -42,7 +42,7 @@ This directly limits the utility of NodeOverlays as a cost-modeling tool and was
 
 ### Overview
 
-Add a `spec.priceExpression` field that accepts a CEL expression string. The expression exposes a single variable `self` with a `price` field (double) representing the instance type's base price for the current offering. The expression must evaluate to a non-negative numeric value, which becomes the new simulated price.
+Add a `spec.priceExpression` field that accepts a CEL expression string. The expression exposes a single variable `self` with a `price` field (double) representing the instance type's base price for the current offering. The expression must evaluate to a numeric value, which becomes the new simulated price. Negative results are permitted; see [Negative Prices](#negative-prices).
 
 This approach was suggested by @jmdeal in [kubernetes-sigs/karpenter#3004](https://github.com/kubernetes-sigs/karpenter/pull/3004) as a cleaner alternative to maintaining a structured list of price operations.
 
@@ -72,7 +72,7 @@ The existing `price` field is retained for explicit price overrides. Specifying 
 |----------|------|-------------|
 | `self.price` | `double` | The offering's base price (cloud provider price, or the value set by a `spec.price` override on a higher-weight overlay) |
 
-The CEL environment is deliberately minimal. No other variables are exposed. The expression must return a `double`, `int`, or `uint`. Returning a negative value is a validation error at admission time and also guarded at evaluation time.
+The CEL environment is deliberately minimal. No other variables are exposed. The expression must return a `double`, `int`, or `uint`. Returning a negative value is permitted; see [Negative Prices](#negative-prices) below.
 
 ### Resolution Rules
 
@@ -136,8 +136,30 @@ CEL expressions are compiled once when the NodeOverlay controller reconciles, no
 
 - **`priceExpression` syntax**: Validated at admission time via `RuntimeValidate`. Any CEL parse or type-check error surfaces as a validation error on the overlay resource before it is applied.
 - **Return type**: The expression must return a numeric type (`double`, `int`, or `uint`). Expressions returning booleans, strings, or other types are rejected at compile time.
-- **Negative price**: Expressions that evaluate to a negative value are rejected at evaluation time. The offering retains its previous price, and a warning event is emitted on the overlay.
+- **Negative price**: Expressions that evaluate to a negative value are **permitted**. Negative prices are intentionally allowed so operators can use them as a scheduling incentive (Karpenter's `OrderByPrice` sorts cheaper offerings first, so a negative price causes those offerings to be strongly preferred). When a CEL expression produces a negative result for any offering, a `log.Info` warning is emitted and the overlay's `PriceNonNegative` status condition is set to `False`. See [Status Conditions](#status-conditions).
 - **Mutual exclusion**: Specifying `priceExpression` alongside `price` on the same resource is a validation error.
+
+**Negative Prices** <a name="negative-prices"></a>
+
+The existing `price` and `priceAdjustment` fields clamp their result to `0` via `AdjustedPrice()` in `cloudprovider/types.go`, so they cannot produce negative prices. Only `priceExpression` can produce a negative value.
+
+When the NodeOverlay controller evaluates a CEL expression at reconcile time and the result is negative:
+1. The price is applied as-is (not clamped). A negative price causes those offerings to sort ahead of all positive-priced offerings in `OrderByPrice`, acting as a hard scheduling preference.
+2. `log.Log.Info` emits a warning with the expression string and the result value.
+3. The overlay's `PriceNonNegative` status condition is set to `False` (reason: `NegativePrice`).
+
+Operators who want a scheduling incentive without distorting disruption cost math should prefer a very small positive price (e.g. `0.001`) over a negative value.
+
+**Status Conditions** <a name="status-conditions"></a>
+
+Two new status conditions are added to NodeOverlay alongside the existing `ValidationSucceeded`:
+
+| Condition | True | False |
+|-----------|------|-------|
+| `PriceApplied` | The overlay's price configuration (`price`, `priceAdjustment`, or `priceExpression`) matched at least one offering on at least one NodePool. | The price spec is set but no matching offerings were found across all NodePools. Reason: `NoMatchingInstanceTypes`. Overlays with no price spec are always `True`. |
+| `PriceNonNegative` | No CEL expression on this overlay produced a negative price for any evaluated offering. | At least one CEL expression evaluation produced a negative price. Reason: `NegativePrice`. Overlays without `priceExpression` are always `True`. |
+
+Both conditions are set during the NodeOverlay controller's reconcile loop, which runs at least every 6 hours and on any NodeOverlay, NodePool, or NodeClass change.
 
 **Backward Compatibility**
 
@@ -157,3 +179,4 @@ The existing `price` field is unchanged. Existing NodeOverlay resources that use
 - Harder to introspect programmatically (e.g. "what discounts apply to this instance type?") than a structured list of named adjustments.
 - Cannot compose adjustments across independently owned overlays—teams that want separate overlays for separate cost dimensions still need to merge them into a single expression (or use the weight-based highest-wins model at coarser granularity).
 - Expressions that are syntactically valid but semantically wrong (e.g. `self.price * 0.0`) will produce correct-but-unexpected prices with no warning.
+- Expressions that produce negative prices are permitted but distort Karpenter's disruption cost math (which uses the simulated price as a cost estimate). The `PriceNonNegative=False` status condition surfaces this, but the disruption behavior is still affected.
