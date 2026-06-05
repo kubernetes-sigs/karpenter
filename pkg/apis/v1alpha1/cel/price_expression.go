@@ -29,7 +29,6 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 var (
@@ -77,7 +76,7 @@ func Compile(expr string) (*PriceExpression, error) {
 }
 
 // Evaluate evaluates the price expression against the given base price and returns the result.
-// Negative results are permitted and returned as-is; a log warning is emitted.
+// Negative results are permitted and returned as-is.
 func (p *PriceExpression) Evaluate(price float64) (float64, error) {
 	out, _, err := p.prog.Eval(map[string]any{
 		"self": map[string]any{"price": price},
@@ -88,9 +87,6 @@ func (p *PriceExpression) Evaluate(price float64) (float64, error) {
 	result, err := toFloat64(out)
 	if err != nil {
 		return 0, fmt.Errorf("price expression %q: %w", p.expr, err)
-	}
-	if result < 0 {
-		log.Log.Info("price expression evaluated to negative value", "expression", p.expr, "result", result)
 	}
 	return result, nil
 }

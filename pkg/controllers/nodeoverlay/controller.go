@@ -349,8 +349,11 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 	for i := range overlayList {
 		stored := overlayList[i].DeepCopy()
 		setValidationCondition(&overlayList[i], overlayWithRuntimeValidationFailure, overlaysWithConflict, overlaysWithExpressionError)
-		setPriceAppliedCondition(&overlayList[i], overlaysWithPriceApplied)
+		setPriceAppliedCondition(&overlayList[i], overlaysWithPriceApplied, overlaysWithExpressionError)
 		setNonNegativeCondition(&overlayList[i], overlaysWithNegativePrice)
+		if overlaysWithNegativePrice[overlayList[i].Name] {
+			log.FromContext(ctx).Info("price expression evaluated to negative value", "overlay", overlayList[i].Name)
+		}
 
 		if !equality.Semantic.DeepEqual(stored, overlayList[i]) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
@@ -382,10 +385,12 @@ func setValidationCondition(overlay *v1alpha1.NodeOverlay, runtimeFailures map[s
 	}
 }
 
-func setPriceAppliedCondition(overlay *v1alpha1.NodeOverlay, overlaysWithPriceApplied map[string]bool) {
+func setPriceAppliedCondition(overlay *v1alpha1.NodeOverlay, overlaysWithPriceApplied map[string]bool, expressionErrors map[string]bool) {
 	hasPriceSpec := overlay.Spec.Price != nil || overlay.Spec.PriceAdjustment != nil || overlay.Spec.PriceExpression != nil
 	if !hasPriceSpec || overlaysWithPriceApplied[overlay.Name] {
 		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypePriceApplied)
+	} else if expressionErrors[overlay.Name] {
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceApplied, "ExpressionEvaluationError", "price expression failed to evaluate for one or more matched offerings")
 	} else {
 		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceApplied, "NoMatchingInstanceTypes", "price configuration did not match any instance types")
 	}

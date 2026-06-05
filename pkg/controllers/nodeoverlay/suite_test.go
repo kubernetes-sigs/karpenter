@@ -2910,6 +2910,8 @@ var _ = Describe("PriceNonNegative Condition", func() {
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
 		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceNonNegative)).To(BeFalse())
 		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceNonNegative).Reason).To(Equal("NegativePrice"))
+		// PriceNonNegative is informational only -- Ready must remain True
+		Expect(updatedOverlay.StatusConditions().Root().IsTrue()).To(BeTrue())
 	})
 	It("should set PriceNonNegative=True when price expression produces a non-negative price", func() {
 		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -3054,5 +3056,28 @@ var _ = Describe("PriceExpression Evaluation Error", func() {
 		Expect(err).To(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.50))
+	})
+	It("should set PriceApplied=False with ExpressionEvaluationError reason when expression fails to evaluate", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("self.notprice * 0.9"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("ExpressionEvaluationError"))
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceApplied)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceApplied).Reason).To(Equal("ExpressionEvaluationError"))
 	})
 })
