@@ -46,7 +46,6 @@ func (in *NodeOverlay) StatusConditions(opts ...status.ForOption) status.Conditi
 	return status.NewReadyConditions(
 		ConditionTypeValidationSucceeded,
 		ConditionTypePriceApplied,
-		ConditionTypePriceNonNegative,
 	).For(in, opts...)
 }
 

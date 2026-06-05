@@ -266,11 +266,10 @@ func (c *Controller) storeUpdatesForInstanceTypeOverride(ctx context.Context, st
 	return priceStored, negativePrice
 }
 
-// getOverlaidOfferings will validate that an instance type matches a set of node overlay requirements
-// if true, the set of Compatible offering. This function effectively assumes, that if the if there are no offering returned then
-// the instance type is not Compatible with the overlay requirements. In cases, were an capacity overlay is being intended to be applied
-// based on the offerings, this will be an all or nothing operation. If one offering matches to the requirements
-// it will be applied at the instance type level or all the offerings.
+// getOverlaidOfferings returns the offerings of the given instance type that are compatible with the
+// overlay requirements in the context of the given NodePool. If no offerings match, the instance type
+// is considered incompatible with the overlay and nil is returned. Capacity overlays are applied at the
+// instance type level: if any offering matches, the capacity change applies to the whole instance type.
 func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, overlayReq scheduling.Requirements) cloudprovider.Offerings {
 	// The additional requirements will be added to the instance type during scheduling simulation
 	// Since getting instance types is done on a NodePool level, these requirements were always assumed

@@ -77,7 +77,7 @@ func Compile(expr string) (*PriceExpression, error) {
 }
 
 // Evaluate evaluates the price expression against the given base price and returns the result.
-// Returns an error if the expression evaluates to a negative value.
+// Negative results are permitted and returned as-is; a log warning is emitted.
 func (p *PriceExpression) Evaluate(price float64) (float64, error) {
 	out, _, err := p.prog.Eval(map[string]any{
 		"self": map[string]any{"price": price},
@@ -89,10 +89,8 @@ func (p *PriceExpression) Evaluate(price float64) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("price expression %q: %w", p.expr, err)
 	}
-	// Negative prices are allowed — an operator may intentionally use a negative adjustment
-	// as a scheduling incentive. We warn so it's visible but do not reject it.
 	if result < 0 {
-		log.Log.Info("price expression evaluated to negative value", "expression", p.expr, "result", result)
+		log.Log.Info("price expression evaluated to negative value; set PriceNonNegative=False to suppress", "expression", p.expr, "result", result)
 	}
 	return result, nil
 }
