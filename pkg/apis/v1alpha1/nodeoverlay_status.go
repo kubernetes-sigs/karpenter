@@ -27,6 +27,9 @@ const (
 	// ConditionTypePriceApplied = "PriceApplied" condition indicates whether the overlay's
 	// price configuration was applied to at least one instance type offering
 	ConditionTypePriceApplied = "PriceApplied"
+	// ConditionTypePriceNonNegative = "PriceNonNegative" condition indicates whether the overlay's
+	// price expression produced non-negative prices for all matched offerings
+	ConditionTypePriceNonNegative = "PriceNonNegative"
 )
 
 // NodeOverlayStatus defines the observed state of NodeOverlay
@@ -43,6 +46,7 @@ func (in *NodeOverlay) StatusConditions(opts ...status.ForOption) status.Conditi
 	return status.NewReadyConditions(
 		ConditionTypeValidationSucceeded,
 		ConditionTypePriceApplied,
+		ConditionTypePriceNonNegative,
 	).For(in, opts...)
 }
 

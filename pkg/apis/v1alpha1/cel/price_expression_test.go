@@ -73,12 +73,12 @@ var _ = Describe("PriceExpression", func() {
 			Entry("zero base price", "self.price * 0.5", 0.0, 0.0),
 		)
 
-		It("returns an error for negative results", func() {
+		It("allows negative results and does not return an error", func() {
 			p, err := cel.Compile("self.price - 999.0")
 			Expect(err).NotTo(HaveOccurred())
-			_, err = p.Evaluate(1.0)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("negative"))
+			result, err := p.Evaluate(1.0)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeNumerically("~", -998.0, 1e-9))
 		})
 	})
 })
