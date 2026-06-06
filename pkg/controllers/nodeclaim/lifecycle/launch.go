@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
+	"strings"
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
@@ -34,10 +34,15 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
+
+// overlayStore is satisfied by *nodeoverlay.InstanceTypeStore; the interface breaks the import cycle
+// between the lifecycle and nodeoverlay packages (nodeoverlay tests use pkg/test/expectations which imports lifecycle).
+type overlayStore interface {
+	OverlaysApplied(nodePoolName, instanceTypeName, zone, capacityType string) []string
+}
 
 type Launch struct {
 	kubeClient    client.Client
@@ -45,7 +50,7 @@ type Launch struct {
 	cache         *cache.Cache // exists due to eventual consistency on the cache
 	recorder      events.Recorder
 	clock         clock.Clock
-	store         *nodeoverlay.InstanceTypeStore // nil when NodeOverlay feature gate is off
+	store         overlayStore // nil when NodeOverlay feature gate is off
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
@@ -83,8 +88,8 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	return reconcile.Result{}, nil
 }
 
-// annotateOverlayInfo sets price overlay annotations on the NodeClaim using the instance type store.
-// It is a no-op when the store is nil or no overlay applies to the launched offering.
+// annotateOverlayInfo records all overlay names applied to the launched offering as a
+// comma-separated annotation. It is a no-op when the store is nil or no overlay applies.
 func (l *Launch) annotateOverlayInfo(nodeClaim *v1.NodeClaim) {
 	if l.store == nil {
 		return
@@ -96,19 +101,14 @@ func (l *Launch) annotateOverlayInfo(nodeClaim *v1.NodeClaim) {
 	if nodePoolName == "" || instanceTypeName == "" {
 		return
 	}
-	if overlayName, adjustedPrice, ok := l.store.PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType); ok {
-		if nodeClaim.Annotations == nil {
-			nodeClaim.Annotations = map[string]string{}
-		}
-		nodeClaim.Annotations[v1alpha1.PriceOverlayAppliedAnnotationKey] = overlayName
-		nodeClaim.Annotations[v1alpha1.PriceOverlayAdjustedPriceAnnotationKey] = strconv.FormatFloat(adjustedPrice, 'f', -1, 64)
+	overlays := l.store.OverlaysApplied(nodePoolName, instanceTypeName, zone, capacityType)
+	if len(overlays) == 0 {
+		return
 	}
-	if overlayName, ok := l.store.CapacityOverlayName(nodePoolName, instanceTypeName); ok {
-		if nodeClaim.Annotations == nil {
-			nodeClaim.Annotations = map[string]string{}
-		}
-		nodeClaim.Annotations[v1alpha1.CapacityOverlayAppliedAnnotationKey] = overlayName
+	if nodeClaim.Annotations == nil {
+		nodeClaim.Annotations = map[string]string{}
 	}
+	nodeClaim.Annotations[v1alpha1.NodeOverlaysAppliedAnnotationKey] = strings.Join(overlays, ",")
 }
 
 func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {

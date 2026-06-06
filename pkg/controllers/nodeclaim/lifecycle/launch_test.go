@@ -18,7 +18,6 @@ package lifecycle_test
 
 import (
 	"fmt"
-	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,8 +28,8 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -128,8 +127,8 @@ var _ = Describe("Launch overlay annotations", func() {
 		nodePool = test.NodePool()
 	})
 
-	It("should annotate price overlay name and adjusted price when a price overlay applies to the launched offering", func() {
-		store := nodeoverlay.NewTestStoreWithPriceOverlay(nodePool.Name, "default-instance-type", "test-zone-1", "spot", "my-price-overlay", 0.50)
+	It("should annotate the overlay name when a price overlay applies to the launched offering", func() {
+		store := nodeoverlay.NewTestStoreWithPriceOverlay(nodePool.Name, "default-instance-type", "test-zone-1", "spot", "my-price-overlay")
 		ctrl := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil, store)
 
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -148,10 +147,7 @@ var _ = Describe("Launch overlay annotations", func() {
 		ExpectObjectReconciled(ctx, env.Client, ctrl, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Annotations[v1alpha1.PriceOverlayAppliedAnnotationKey]).To(Equal("my-price-overlay"))
-		adjustedPrice, err := strconv.ParseFloat(nodeClaim.Annotations[v1alpha1.PriceOverlayAdjustedPriceAnnotationKey], 64)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(adjustedPrice).To(BeNumerically("==", 0.50))
+		Expect(nodeClaim.Annotations[v1alpha1.NodeOverlaysAppliedAnnotationKey]).To(Equal("my-price-overlay"))
 	})
 
 	It("should not set price overlay annotations when no price overlay applies", func() {
@@ -166,12 +162,11 @@ var _ = Describe("Launch overlay annotations", func() {
 		ExpectObjectReconciled(ctx, env.Client, ctrl, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Annotations).NotTo(HaveKey(v1alpha1.PriceOverlayAppliedAnnotationKey))
-		Expect(nodeClaim.Annotations).NotTo(HaveKey(v1alpha1.PriceOverlayAdjustedPriceAnnotationKey))
+		Expect(nodeClaim.Annotations).NotTo(HaveKey(v1alpha1.NodeOverlaysAppliedAnnotationKey))
 	})
 
 	It("should not re-annotate on second reconcile once launched", func() {
-		store := nodeoverlay.NewTestStoreWithPriceOverlay(nodePool.Name, "default-instance-type", "test-zone-1", "spot", "my-price-overlay", 0.50)
+		store := nodeoverlay.NewTestStoreWithPriceOverlay(nodePool.Name, "default-instance-type", "test-zone-1", "spot", "my-price-overlay")
 		ctrl := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil, store)
 
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -193,6 +188,6 @@ var _ = Describe("Launch overlay annotations", func() {
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Annotations[v1alpha1.PriceOverlayAppliedAnnotationKey]).To(Equal("my-price-overlay"))
+		Expect(nodeClaim.Annotations[v1alpha1.NodeOverlaysAppliedAnnotationKey]).To(Equal("my-price-overlay"))
 	})
 })

@@ -42,7 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -77,7 +76,7 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, nodePoolState *nodepoolhealth.State, registrationHooks []cloudprovider.NodeLifecycleHook, store *nodeoverlay.InstanceTypeStore) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, nodePoolState *nodepoolhealth.State, registrationHooks []cloudprovider.NodeLifecycleHook, store overlayStore) *Controller {
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
