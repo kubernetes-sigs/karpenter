@@ -388,11 +388,11 @@ func setValidationCondition(overlay *v1alpha1.NodeOverlay, runtimeFailures map[s
 func setPriceAppliedCondition(overlay *v1alpha1.NodeOverlay, overlaysWithPriceApplied map[string]bool, expressionErrors map[string]bool) {
 	hasPriceSpec := overlay.Spec.Price != nil || overlay.Spec.PriceAdjustment != nil || overlay.Spec.PriceExpression != nil
 	if !hasPriceSpec || overlaysWithPriceApplied[overlay.Name] {
-		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypePriceApplied)
+		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypePriceAdjusted)
 	} else if expressionErrors[overlay.Name] {
-		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceApplied, "ExpressionEvaluationError", "price expression failed to evaluate for one or more matched offerings")
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceAdjusted, "ExpressionEvaluationError", "price expression failed to evaluate for one or more matched offerings")
 	} else {
-		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceApplied, "NoMatchingInstanceTypes", "price configuration did not match any instance types")
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceAdjusted, "NoMatchingInstanceTypes", "price configuration did not match any instance types")
 	}
 }
 

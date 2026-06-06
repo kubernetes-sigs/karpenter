@@ -30,6 +30,7 @@ import (
 
 type priceUpdate struct {
 	overlayName     string
+	adjustedPrice   float64
 	zone            string
 	capacityType    string
 	OverlayUpdate   *string
@@ -94,43 +95,59 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 	return internalStore.apply(nodePoolName, it), nil
 }
 
-// OverlaysApplied returns the unique names of all overlays (price and capacity) applied to
-// the given nodePool, instanceType, zone, and capacityType combination.
-func (s *InstanceTypeStore) OverlaysApplied(nodePoolName, instanceTypeName, zone, capacityType string) []string {
+// PriceOverlayForOffering returns the overlay name and adjusted price for the offering
+// matching the given nodePool, instanceType, zone, and capacityType. Returns ok=false
+// when no price overlay applies to this combination.
+func (s *InstanceTypeStore) PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType string) (overlayName string, adjustedPrice float64, ok bool) {
 	internalStore := lo.FromPtr(s.store.Load())
 	itUpdates, exists := internalStore.updates[nodePoolName]
 	if !exists {
-		return nil
+		return "", 0, false
 	}
 	itUpdate, exists := itUpdates[instanceTypeName]
 	if !exists {
-		return nil
+		return "", 0, false
 	}
-	var names []string
 	for _, pu := range itUpdate.Price {
-		if pu.zone == zone && pu.capacityType == capacityType && pu.overlayName != "" {
-			names = append(names, pu.overlayName)
+		if pu.zone == zone && pu.capacityType == capacityType {
+			return pu.overlayName, pu.adjustedPrice, true
 		}
 	}
-	if itUpdate.Capacity != nil && itUpdate.Capacity.overlayName != "" {
-		names = append(names, itUpdate.Capacity.overlayName)
+	return "", 0, false
+}
+
+// CapacityOverlayName returns the name of the overlay that applied a capacity change
+// for the given nodePool and instanceType. Returns ok=false when no capacity overlay applies.
+func (s *InstanceTypeStore) CapacityOverlayName(nodePoolName, instanceTypeName string) (overlayName string, ok bool) {
+	internalStore := lo.FromPtr(s.store.Load())
+	itUpdates, exists := internalStore.updates[nodePoolName]
+	if !exists {
+		return "", false
 	}
-	return lo.Uniq(names)
+	itUpdate, exists := itUpdates[instanceTypeName]
+	if !exists {
+		return "", false
+	}
+	if itUpdate.Capacity == nil || itUpdate.Capacity.overlayName == "" {
+		return "", false
+	}
+	return itUpdate.Capacity.overlayName, true
 }
 
 // NewTestStoreWithPriceOverlay creates an InstanceTypeStore pre-populated with a single price
 // overlay entry for the given nodePool, instanceType, zone, and capacityType.
 // Intended for use in tests.
-func NewTestStoreWithPriceOverlay(nodePoolName, instanceTypeName, zone, capacityType, overlayName string) *InstanceTypeStore {
+func NewTestStoreWithPriceOverlay(nodePoolName, instanceTypeName, zone, capacityType, overlayName string, adjustedPrice float64) *InstanceTypeStore {
 	s := NewInstanceTypeStore()
 	internal := newInternalInstanceTypeStore()
 	internal.updates[nodePoolName] = map[string]*instanceTypeUpdate{
 		instanceTypeName: {
 			Price: map[string]*priceUpdate{
 				zone + "/" + capacityType: {
-					overlayName:  overlayName,
-					zone:         zone,
-					capacityType: capacityType,
+					overlayName:   overlayName,
+					adjustedPrice: adjustedPrice,
+					zone:          zone,
+					capacityType:  capacityType,
 				},
 			},
 			Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
@@ -325,8 +342,17 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 			update.lowestWeight = nodeOverlay.Spec.Weight
 			continue
 		}
+		var adjustedPrice float64
+		if compiled != nil {
+			// Evaluation cannot fail here; pre-check in validateAndUpdateInstanceTypeOverrides
+			// already verified all offerings evaluate successfully.
+			adjustedPrice, _ = compiled.Evaluate(of.Price)
+		} else {
+			adjustedPrice = cloudprovider.AdjustedPrice(of.Price, lo.FromPtr(price))
+		}
 		i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()] = &priceUpdate{
 			overlayName:     nodeOverlay.Name,
+			adjustedPrice:   adjustedPrice,
 			zone:            of.Zone(),
 			capacityType:    of.CapacityType(),
 			OverlayUpdate:   price,

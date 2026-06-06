@@ -2825,8 +2825,8 @@ var _ = Describe("Failure Isolation", func() {
 	})
 })
 
-var _ = Describe("PriceApplied Condition", func() {
-	It("should set PriceApplied=True when price expression matches instance types", func() {
+var _ = Describe("PriceAdjusted Condition", func() {
+	It("should set PriceAdjusted=True when price expression matches instance types", func() {
 		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
 				Requirements: []v1alpha1.NodeSelectorRequirement{
@@ -2844,9 +2844,9 @@ var _ = Describe("PriceApplied Condition", func() {
 		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
-		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceApplied)).To(BeTrue())
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceAdjusted)).To(BeTrue())
 	})
-	It("should set PriceApplied=False when price expression matches no instance types", func() {
+	It("should set PriceAdjusted=False when price expression matches no instance types", func() {
 		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
 				Requirements: []v1alpha1.NodeSelectorRequirement{
@@ -2864,10 +2864,10 @@ var _ = Describe("PriceApplied Condition", func() {
 		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
-		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceApplied)).To(BeFalse())
-		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceApplied).Reason).To(Equal("NoMatchingInstanceTypes"))
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceAdjusted)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceAdjusted).Reason).To(Equal("NoMatchingInstanceTypes"))
 	})
-	It("should set PriceApplied=True when overlay has no price spec", func() {
+	It("should set PriceAdjusted=True when overlay has no price spec", func() {
 		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
 				Requirements: []v1alpha1.NodeSelectorRequirement{
@@ -2884,7 +2884,7 @@ var _ = Describe("PriceApplied Condition", func() {
 		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
-		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceApplied)).To(BeTrue())
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceAdjusted)).To(BeTrue())
 	})
 })
 
@@ -3057,7 +3057,7 @@ var _ = Describe("PriceExpression Evaluation Error", func() {
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.50))
 	})
-	It("should set PriceApplied=False with ExpressionEvaluationError reason when expression fails to evaluate", func() {
+	It("should set PriceAdjusted=False with ExpressionEvaluationError reason when expression fails to evaluate", func() {
 		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
 				Requirements: []v1alpha1.NodeSelectorRequirement{
@@ -3077,7 +3077,7 @@ var _ = Describe("PriceExpression Evaluation Error", func() {
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
 		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
 		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("ExpressionEvaluationError"))
-		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceApplied)).To(BeFalse())
-		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceApplied).Reason).To(Equal("ExpressionEvaluationError"))
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceAdjusted)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceAdjusted).Reason).To(Equal("ExpressionEvaluationError"))
 	})
 })
