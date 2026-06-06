@@ -139,15 +139,17 @@ CEL expressions are compiled once when the NodeOverlay controller reconciles, no
 
 1. On reconcile, call `cel.Compile(overlay.Spec.PriceExpression)` for each overlay with a `priceExpression`.
 2. If compilation fails, set `ValidationSucceeded=False` with reason `RuntimeValidation` (same path as existing runtime validation failures).
-3. Store the compiled `cel.Program` in the `priceUpdate` struct alongside the overlay update string.
-4. At reconcile time, evaluate the expression against each matched offering. If any offering fails to evaluate (e.g. a field access that compiles but has no value at runtime), set `ValidationSucceeded=False` with reason `ExpressionEvaluationError`. At scheduling time, evaluate the stored program against the cloud provider's offering price to produce the adjusted price.
+3. Before storing the overlay, evaluate the expression against every matched offering. If any matched offering fails to evaluate, set `ValidationSucceeded=False` with reason `ExpressionEvaluationError` and do not store the overlay. This prevents a high-weight invalid expression from blocking a lower-weight valid overlay that targets the same offerings.
+4. Store the compiled `cel.Program` in the `priceUpdate` struct alongside the overlay update string.
+5. At scheduling time, evaluate the stored program against the cloud provider's offering price to produce the adjusted price.
+6. Track the overlay name and adjusted price in the instance type store so Karpenter can annotate launched NodeClaims with the price overlay that affected the selected offering. Reserved offerings are distinguished by reservation ID in addition to instance type, zone, and capacity type.
 
 **Validation**
 
 - **`priceExpression` syntax**: Validated at admission time via `RuntimeValidate`. Any CEL parse or type-check error surfaces as a validation error on the overlay resource before it is applied.
 - **Return type**: The expression must return a numeric type (`double`, `int`, or `uint`). Expressions returning booleans, strings, or other types are rejected at compile time.
-- **Negative price**: Expressions that evaluate to a negative value are **permitted**. Negative prices are intentionally allowed so operators can use them as a scheduling incentive (Karpenter's `OrderByPrice` sorts cheaper offerings first, so a negative price causes those offerings to be strongly preferred). When a CEL expression produces a negative result, a `log.Info` warning is emitted. The overlay remains Ready.
-- **Runtime evaluation errors**: Expressions that compile successfully but fail to evaluate against matched offerings (e.g. accessing a field that does not exist in the expression environment) set `ValidationSucceeded=False` with reason `ExpressionEvaluationError`. The expression is still stored and applied; offerings where evaluation fails fall back to the cloud provider price.
+- **Negative price**: Expressions that evaluate to a negative value are **permitted**. Negative prices are intentionally allowed so operators can use them as a scheduling incentive (Karpenter's `OrderByPrice` sorts cheaper offerings first, so a negative price causes those offerings to be strongly preferred). When a CEL expression produces a negative result, a `log.Info` warning is emitted and the overlay surfaces `PriceNonNegative=False`. The overlay remains Ready.
+- **Runtime evaluation errors**: Expressions that compile successfully but fail to evaluate against matched offerings (e.g. accessing a field that is not present in the expression environment) set `ValidationSucceeded=False` and `PriceAdjusted=False` with reason `ExpressionEvaluationError`. The expression is not stored or applied. Lower-weight valid overlays can still apply to the affected offerings.
 - **Mutual exclusion**: Specifying `priceExpression` alongside `price` or `priceAdjustment` on the same resource is a validation error enforced at admission time via CEL XValidation rules on the CRD.
 
 **Negative Prices** <a name="negative-prices"></a>
@@ -156,13 +158,22 @@ The existing `price` and `priceAdjustment` fields clamp their result to `0` via 
 
 When the NodeOverlay controller evaluates a CEL expression at reconcile time and the result is negative:
 1. The price is applied as-is (not clamped). A negative price causes those offerings to sort ahead of all positive-priced offerings in `OrderByPrice`, acting as a hard scheduling preference.
-2. `log.Info` emits a warning with the expression string and the result value. The overlay's `Ready` condition is not affected.
+2. `log.Info` emits a warning with the overlay name.
+3. The overlay sets `PriceNonNegative=False` with reason `NegativePrice`. This condition is informational only; it is not part of `Ready`, so the overlay remains Ready if validation succeeds and the price configuration matches at least one offering.
 
 Operators who want a scheduling incentive without distorting disruption cost math should prefer a very small positive price (e.g. `0.001`) over a negative value.
 
 **Status Conditions** <a name="status-conditions"></a>
 
-`priceExpression` uses the existing `ValidationSucceeded` condition. No new conditions are added.
+NodeOverlay exposes status conditions for validation, price application, and negative-price observability:
+
+| Condition | Ready dependency | Description |
+|-----------|------------------|-------------|
+| `ValidationSucceeded` | Yes | Runtime validation, conflict detection, and expression evaluation succeeded. |
+| `PriceAdjusted` | Yes | The overlay has no price configuration, or its price configuration matched and adjusted at least one instance type offering. |
+| `PriceNonNegative` | No | All evaluated `priceExpression` results were non-negative. This is informational and does not affect `Ready`. |
+
+`ValidationSucceeded` reasons:
 
 | Reason | Description |
 |--------|-------------|
@@ -170,9 +181,34 @@ Operators who want a scheduling incentive without distorting disruption cost mat
 | `Conflict` | Two overlays of the same weight target the same offering. |
 | `ExpressionEvaluationError` | Expression compiled successfully but failed to evaluate against one or more matched offerings (e.g. accessing a key that is not in the expression environment). |
 
-`ValidationSucceeded=False` for any of these reasons sets `Ready=False`. Negative prices do not affect `ValidationSucceeded`; they emit a log warning only.
+`PriceAdjusted` reasons:
 
-The condition is updated during the NodeOverlay controller's reconcile loop, which runs at least every 6 hours and on any NodeOverlay, NodePool, or NodeClass change.
+| Reason | Description |
+|--------|-------------|
+| `NoMatchingInstanceTypes` | The overlay has price configuration, but it did not match any instance type offerings for the evaluated NodePools. |
+| `ExpressionEvaluationError` | Expression compiled successfully but failed to evaluate against one or more matched offerings. |
+
+`PriceNonNegative` reasons:
+
+| Reason | Description |
+|--------|-------------|
+| `NegativePrice` | The expression produced a negative price for one or more matched offerings. |
+
+`ValidationSucceeded=False` or `PriceAdjusted=False` sets `Ready=False`. `PriceNonNegative=False` does not affect `Ready`; it exists so operators can observe negative pricing without blocking intentionally negative cost models.
+
+The conditions are updated during the NodeOverlay controller's reconcile loop, which runs at least every 6 hours and on any NodeOverlay, NodePool, or NodeClass change.
+
+**NodeClaim observability** <a name="nodeclaim-observability"></a>
+
+When Karpenter launches a NodeClaim, it can resolve the concrete instance type offering selected by the cloud provider. At that point Karpenter annotates the NodeClaim with overlay information from the instance type store:
+
+| Annotation | Description |
+|------------|-------------|
+| `karpenter.sh/price-overlay-applied` | Name of the price overlay that adjusted the launched offering. |
+| `karpenter.sh/price-overlay-adjusted-price` | Adjusted price used for the launched offering. |
+| `karpenter.sh/capacity-overlay-applied` | Name of the capacity overlay that adjusted the launched instance type. |
+
+These annotations are best-effort observability. They are written during launch after the cloud provider returns concrete labels such as instance type, zone, capacity type, and reservation ID. If no overlay applies, the annotations are omitted.
 
 **Backward Compatibility**
 
@@ -192,4 +228,4 @@ The existing `price` field is unchanged. Existing NodeOverlay resources that use
 - Harder to introspect programmatically (e.g. "what discounts apply to this instance type?") than a structured list of named adjustments.
 - Cannot compose adjustments across independently owned overlays—teams that want separate overlays for separate cost dimensions still need to merge them into a single expression (or use the weight-based highest-wins model at coarser granularity).
 - Expressions that are syntactically valid but semantically wrong (e.g. `self.price * 0.0`) will produce correct-but-unexpected prices with no warning.
-- Expressions that produce negative prices are permitted but distort Karpenter's disruption cost math (which uses the simulated price as a cost estimate). Only a log warning is emitted; there is no status condition to alert operators proactively.
+- Expressions that produce negative prices are permitted but distort Karpenter's disruption cost math (which uses the simulated price as a cost estimate). The `PriceNonNegative` condition makes this visible, but Karpenter intentionally does not block the overlay.
