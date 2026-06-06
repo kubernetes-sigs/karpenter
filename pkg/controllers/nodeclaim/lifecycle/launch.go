@@ -41,7 +41,7 @@ import (
 // overlayStore is satisfied by *nodeoverlay.InstanceTypeStore; the interface breaks the import cycle
 // between the lifecycle and nodeoverlay packages (nodeoverlay tests use pkg/test/expectations which imports lifecycle).
 type overlayStore interface {
-	PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType string) (overlayName string, adjustedPrice float64, ok bool)
+	PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType, reservationID string) (overlayName string, adjustedPrice float64, ok bool)
 	CapacityOverlayName(nodePoolName, instanceTypeName string) (overlayName string, ok bool)
 }
 
@@ -99,10 +99,11 @@ func (l *Launch) annotateOverlayInfo(nodeClaim *v1.NodeClaim) {
 	instanceTypeName := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
 	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
 	capacityType := nodeClaim.Labels[v1.CapacityTypeLabelKey]
+	reservationID := nodeClaim.Labels[cloudprovider.ReservationIDLabel]
 	if nodePoolName == "" || instanceTypeName == "" {
 		return
 	}
-	if overlayName, adjustedPrice, ok := l.store.PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType); ok {
+	if overlayName, adjustedPrice, ok := l.store.PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType, reservationID); ok {
 		if nodeClaim.Annotations == nil {
 			nodeClaim.Annotations = map[string]string{}
 		}

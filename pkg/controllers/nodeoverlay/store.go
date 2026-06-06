@@ -29,10 +29,11 @@ import (
 )
 
 type priceUpdate struct {
-	overlayName     string
-	adjustedPrice   float64
-	zone            string
-	capacityType    string
+	overlayName    string
+	adjustedPrice  float64
+	zone           string
+	capacityType   string
+	reservationID  string
 	OverlayUpdate   *string
 	PriceExpression *cel.PriceExpression
 	lowestWeight    *int32
@@ -96,9 +97,10 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 }
 
 // PriceOverlayForOffering returns the overlay name and adjusted price for the offering
-// matching the given nodePool, instanceType, zone, and capacityType. Returns ok=false
-// when no price overlay applies to this combination.
-func (s *InstanceTypeStore) PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType string) (overlayName string, adjustedPrice float64, ok bool) {
+// matching the given nodePool, instanceType, zone, capacityType, and reservationID.
+// reservationID should be empty for non-reserved offerings. Returns ok=false when no
+// price overlay applies to this combination.
+func (s *InstanceTypeStore) PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType, reservationID string) (overlayName string, adjustedPrice float64, ok bool) {
 	internalStore := lo.FromPtr(s.store.Load())
 	itUpdates, exists := internalStore.updates[nodePoolName]
 	if !exists {
@@ -109,7 +111,7 @@ func (s *InstanceTypeStore) PriceOverlayForOffering(nodePoolName, instanceTypeNa
 		return "", 0, false
 	}
 	for _, pu := range itUpdate.Price {
-		if pu.zone == zone && pu.capacityType == capacityType {
+		if pu.zone == zone && pu.capacityType == capacityType && pu.reservationID == reservationID {
 			return pu.overlayName, pu.adjustedPrice, true
 		}
 	}
@@ -134,28 +136,6 @@ func (s *InstanceTypeStore) CapacityOverlayName(nodePoolName, instanceTypeName s
 	return itUpdate.Capacity.overlayName, true
 }
 
-// NewTestStoreWithPriceOverlay creates an InstanceTypeStore pre-populated with a single price
-// overlay entry for the given nodePool, instanceType, zone, and capacityType.
-// Intended for use in tests.
-func NewTestStoreWithPriceOverlay(nodePoolName, instanceTypeName, zone, capacityType, overlayName string, adjustedPrice float64) *InstanceTypeStore {
-	s := NewInstanceTypeStore()
-	internal := newInternalInstanceTypeStore()
-	internal.updates[nodePoolName] = map[string]*instanceTypeUpdate{
-		instanceTypeName: {
-			Price: map[string]*priceUpdate{
-				zone + "/" + capacityType: {
-					overlayName:   overlayName,
-					adjustedPrice: adjustedPrice,
-					zone:          zone,
-					capacityType:  capacityType,
-				},
-			},
-			Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
-		},
-	}
-	s.UpdateStore(internal)
-	return s
-}
 
 // InstanceTypeStore manages instance type updates for node pools.
 // It maintains a nested mapping structure where:
@@ -277,6 +257,9 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 			lowestWeight:                  nodeOverlay.Spec.Weight,
 		}
 	} else {
+		if i.updates[nodePoolName][instanceTypeName].Capacity.overlayName == "" {
+			i.updates[nodePoolName][instanceTypeName].Capacity.overlayName = nodeOverlay.Name
+		}
 		for resource, quantity := range nodeOverlay.Spec.Capacity {
 			if _, foundCapacityUpdate := i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource]; foundCapacityUpdate {
 				continue
@@ -355,6 +338,7 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 			adjustedPrice:   adjustedPrice,
 			zone:            of.Zone(),
 			capacityType:    of.CapacityType(),
+			reservationID:   of.ReservationID(),
 			OverlayUpdate:   price,
 			PriceExpression: compiled,
 			lowestWeight:    nodeOverlay.Spec.Weight,

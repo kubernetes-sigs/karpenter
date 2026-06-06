@@ -30,10 +30,52 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
+
+// fakeOverlayStore is a test double for overlayStore, used in overlay annotation tests
+// to avoid exporting test-only helpers from the production store package.
+type fakeOverlayStore struct {
+	// key: "nodePool/instanceType/zone/capacityType/reservationID"
+	priceEntries    map[string]fakePriceEntry
+	capacityEntries map[string]string // key: "nodePool/instanceType" -> overlayName
+}
+
+type fakePriceEntry struct {
+	overlayName   string
+	adjustedPrice float64
+}
+
+func newFakeOverlayStore() *fakeOverlayStore {
+	return &fakeOverlayStore{
+		priceEntries:    map[string]fakePriceEntry{},
+		capacityEntries: map[string]string{},
+	}
+}
+
+func (f *fakeOverlayStore) withPrice(nodePool, instanceType, zone, capacityType, reservationID, overlayName string, adjustedPrice float64) *fakeOverlayStore {
+	key := nodePool + "/" + instanceType + "/" + zone + "/" + capacityType + "/" + reservationID
+	f.priceEntries[key] = fakePriceEntry{overlayName: overlayName, adjustedPrice: adjustedPrice}
+	return f
+}
+
+func (f *fakeOverlayStore) withCapacity(nodePool, instanceType, overlayName string) *fakeOverlayStore {
+	f.capacityEntries[nodePool+"/"+instanceType] = overlayName
+	return f
+}
+
+func (f *fakeOverlayStore) PriceOverlayForOffering(nodePool, instanceType, zone, capacityType, reservationID string) (string, float64, bool) {
+	key := nodePool + "/" + instanceType + "/" + zone + "/" + capacityType + "/" + reservationID
+	e, ok := f.priceEntries[key]
+	return e.overlayName, e.adjustedPrice, ok
+}
+
+func (f *fakeOverlayStore) CapacityOverlayName(nodePool, instanceType string) (string, bool) {
+	name, ok := f.capacityEntries[nodePool+"/"+instanceType]
+	return name, ok
+}
 
 var _ = Describe("Launch", func() {
 	var nodePool *v1.NodePool
@@ -129,7 +171,7 @@ var _ = Describe("Launch overlay annotations", func() {
 	})
 
 	It("should annotate price overlay name and adjusted price when a price overlay applies to the launched offering", func() {
-		store := nodeoverlay.NewTestStoreWithPriceOverlay(nodePool.Name, "default-instance-type", "test-zone-1", "spot", "my-price-overlay", 0.50)
+		store := newFakeOverlayStore().withPrice(nodePool.Name, "default-instance-type", "test-zone-1", "spot", "", "my-price-overlay", 0.50)
 		ctrl := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil, store)
 
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -154,6 +196,55 @@ var _ = Describe("Launch overlay annotations", func() {
 		Expect(adjustedPrice).To(BeNumerically("==", 0.50))
 	})
 
+	It("should annotate capacity overlay name when a capacity overlay applies", func() {
+		store := newFakeOverlayStore().withCapacity(nodePool.Name, "default-instance-type", "my-capacity-overlay")
+		ctrl := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil, store)
+
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+			},
+			Spec: v1.NodeClaimSpec{
+				Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type"}},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, ctrl, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Annotations[v1alpha1.CapacityOverlayAppliedAnnotationKey]).To(Equal("my-capacity-overlay"))
+	})
+
+	It("should annotate the correct price overlay for a reserved offering distinguished by reservation ID", func() {
+		// Two reserved offerings in the same zone/capacityType but different reservation IDs and different overlay prices.
+		store := newFakeOverlayStore().
+			withPrice(nodePool.Name, "default-instance-type", "test-zone-1", "reserved", "res-aaa", "overlay-aaa", 0.30).
+			withPrice(nodePool.Name, "default-instance-type", "test-zone-1", "reserved", "res-bbb", "overlay-bbb", 0.60)
+		ctrl := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil, store)
+
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:                     nodePool.Name,
+					corev1.LabelInstanceTypeStable:          "default-instance-type",
+					corev1.LabelTopologyZone:                "test-zone-1",
+					v1.CapacityTypeLabelKey:                 "reserved",
+					testv1alpha1.LabelReservationID:         "res-bbb",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, ctrl, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Annotations[v1alpha1.PriceOverlayAppliedAnnotationKey]).To(Equal("overlay-bbb"))
+		adjustedPrice, err := strconv.ParseFloat(nodeClaim.Annotations[v1alpha1.PriceOverlayAdjustedPriceAnnotationKey], 64)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(adjustedPrice).To(BeNumerically("==", 0.60))
+	})
+
 	It("should not set price overlay annotations when no price overlay applies", func() {
 		ctrl := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil, nil)
 
@@ -171,7 +262,7 @@ var _ = Describe("Launch overlay annotations", func() {
 	})
 
 	It("should not re-annotate on second reconcile once launched", func() {
-		store := nodeoverlay.NewTestStoreWithPriceOverlay(nodePool.Name, "default-instance-type", "test-zone-1", "spot", "my-price-overlay", 0.50)
+		store := newFakeOverlayStore().withPrice(nodePool.Name, "default-instance-type", "test-zone-1", "spot", "", "my-price-overlay", 0.50)
 		ctrl := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil, store)
 
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
