@@ -227,11 +227,11 @@ var _ = Describe("Launch overlay annotations", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.NodePoolLabelKey:                     nodePool.Name,
-					corev1.LabelInstanceTypeStable:          "default-instance-type",
-					corev1.LabelTopologyZone:                "test-zone-1",
-					v1.CapacityTypeLabelKey:                 "reserved",
-					testv1alpha1.LabelReservationID:         "res-bbb",
+					v1.NodePoolLabelKey:             nodePool.Name,
+					corev1.LabelInstanceTypeStable:  "default-instance-type",
+					corev1.LabelTopologyZone:        "test-zone-1",
+					v1.CapacityTypeLabelKey:         "reserved",
+					testv1alpha1.LabelReservationID: "res-bbb",
 				},
 			},
 		})

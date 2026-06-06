@@ -29,11 +29,11 @@ import (
 )
 
 type priceUpdate struct {
-	overlayName    string
-	adjustedPrice  float64
-	zone           string
-	capacityType   string
-	reservationID  string
+	overlayName     string
+	adjustedPrice   float64
+	zone            string
+	capacityType    string
+	reservationID   string
 	OverlayUpdate   *string
 	PriceExpression *cel.PriceExpression
 	lowestWeight    *int32
@@ -135,7 +135,6 @@ func (s *InstanceTypeStore) CapacityOverlayName(nodePoolName, instanceTypeName s
 	}
 	return itUpdate.Capacity.overlayName, true
 }
-
 
 // InstanceTypeStore manages instance type updates for node pools.
 // It maintains a nested mapping structure where:
