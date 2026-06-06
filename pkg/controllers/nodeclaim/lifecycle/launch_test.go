@@ -55,13 +55,13 @@ func newFakeOverlayStore() *fakeOverlayStore {
 	}
 }
 
-func (f *fakeOverlayStore) withPrice(nodePool, instanceType, zone, capacityType, reservationID, overlayName string, adjustedPrice float64) *fakeOverlayStore {
+func (f *fakeOverlayStore) withPrice(nodePool, instanceType, zone, capacityType, reservationID, overlayName string, adjustedPrice float64) *fakeOverlayStore { //nolint:unparam
 	key := nodePool + "/" + instanceType + "/" + zone + "/" + capacityType + "/" + reservationID
 	f.priceEntries[key] = fakePriceEntry{overlayName: overlayName, adjustedPrice: adjustedPrice}
 	return f
 }
 
-func (f *fakeOverlayStore) withCapacity(nodePool, instanceType, overlayName string) *fakeOverlayStore {
+func (f *fakeOverlayStore) withCapacity(nodePool, instanceType, overlayName string) *fakeOverlayStore { //nolint:unparam
 	f.capacityEntries[nodePool+"/"+instanceType] = overlayName
 	return f
 }
