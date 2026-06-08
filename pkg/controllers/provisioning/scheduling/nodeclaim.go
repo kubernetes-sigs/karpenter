@@ -40,11 +40,11 @@ import (
 type NodeClaim struct {
 	NodeClaimTemplate
 
-	Pods               []*corev1.Pod
-	reservationManager *ReservationManager
-	topology           *Topology
-	instanceTypeGroups []InstanceTypeGroup
-	hostname           string
+	Pods                 []*corev1.Pod
+	reservationManager   *ReservationManager
+	topology             *Topology
+	daemonOverheadGroups []DaemonOverheadGroup
+	hostname             string
 
 	// We store the reserved offerings rather than appending reservation ID labels for two reasons:
 	// - We need to release any reservations that were made in previous iterations and are no longer compatible with the
@@ -82,7 +82,7 @@ var nodeID int64
 func NewNodeClaim(
 	nodeClaimTemplate *NodeClaimTemplate,
 	topology *Topology,
-	instanceTypeGroups []InstanceTypeGroup,
+	daemonOverheadGroups []DaemonOverheadGroup,
 	instanceTypes []*cloudprovider.InstanceType,
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
@@ -95,11 +95,10 @@ func NewNodeClaim(
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = corev1.ResourceList{}
 	// Deep copy host port usage so each NodeClaim can independently track port usage
-	groupsForNodeClaim := make([]InstanceTypeGroup, len(instanceTypeGroups))
-	for i, g := range instanceTypeGroups {
-		groupsForNodeClaim[i] = InstanceTypeGroup{
+	groupsForNodeClaim := make([]DaemonOverheadGroup, len(daemonOverheadGroups))
+	for i, g := range daemonOverheadGroups {
+		groupsForNodeClaim[i] = DaemonOverheadGroup{
 			InstanceTypes:  g.InstanceTypes,
-			DaemonPods:     g.DaemonPods,
 			DaemonOverhead: g.DaemonOverhead,
 			HostPortUsage:  g.HostPortUsage.DeepCopy(),
 		}
@@ -108,7 +107,7 @@ func NewNodeClaim(
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
 		topology:             topology,
-		instanceTypeGroups:   groupsForNodeClaim,
+		daemonOverheadGroups: groupsForNodeClaim,
 		hostname:             hostname,
 		reservedOfferings:    cloudprovider.Offerings{},
 		reservationManager:   reservationManager,
@@ -185,7 +184,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 
-	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, pod, podData.Requests, n.instanceTypeGroups, requests, relaxMinValues)
+	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, pod, podData.Requests, n.daemonOverheadGroups, requests, relaxMinValues)
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
 		for key, minValues := range unsatisfiableKeys {
@@ -217,7 +216,7 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 	n.topology.Register(corev1.LabelHostname, n.hostname)
 	n.topology.Record(pod, n.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	hostPorts := scheduling.GetHostPorts(pod)
-	for _, group := range n.instanceTypeGroups {
+	for _, group := range n.daemonOverheadGroups {
 		group.HostPortUsage.Add(pod, hostPorts)
 	}
 	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
@@ -297,7 +296,7 @@ func (n *NodeClaim) offeringsToReserve(
 func (n *NodeClaim) addDaemonRequests() {
 	remaining := sets.New(n.InstanceTypeOptions...)
 	var minDaemonOverhead corev1.ResourceList
-	for _, g := range n.instanceTypeGroups {
+	for _, g := range n.daemonOverheadGroups {
 		// Only consider groups that have at least one instance type still remaining
 		hasRemaining := false
 		for _, it := range g.InstanceTypes {
@@ -474,7 +473,7 @@ func (e InstanceTypeFilterError) Error() string {
 }
 
 //nolint:gocyclo
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, pod *corev1.Pod, podRequests corev1.ResourceList, instanceTypeGroups []InstanceTypeGroup, totalRequests corev1.ResourceList, relaxMinValues bool) (cloudprovider.InstanceTypes, map[string]int, error) {
+func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, pod *corev1.Pod, podRequests corev1.ResourceList, daemonOverheadGroups []DaemonOverheadGroup, totalRequests corev1.ResourceList, relaxMinValues bool) (cloudprovider.InstanceTypes, map[string]int, error) {
 	unsatisfiableKeys := map[string]int{}
 	// We hold the results of our scheduling simulation inside of this InstanceTypeFilterError struct
 	// to reduce the CPU load of having to generate the error string for a failed scheduling simulation
@@ -495,7 +494,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 	hostPorts := scheduling.GetHostPorts(pod)
 	eligibleInstanceTypes := sets.New(instanceTypes...)
 
-	for _, group := range instanceTypeGroups {
+	for _, group := range daemonOverheadGroups {
 		if portUsageErr := group.HostPortUsage.Conflicts(pod, hostPorts); portUsageErr != nil {
 			continue
 		}
