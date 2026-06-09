@@ -242,11 +242,8 @@ type Results struct {
 	PodErrors     map[*corev1.Pod]error
 }
 
-// Record sends eventing and log messages back for the results that were produced from a scheduling run
-// It also nominates nodes in the cluster state based on the scheduling run to signal to other components
-// leveraging the cluster state that a previous scheduling run that was recorded is relying on these nodes
-func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster, podErrCache *PodErrorCache) {
-	// Report failures and nominations
+// recordPodErrors reports pod scheduling failures via events and logs.
+func (r Results) recordPodErrors(ctx context.Context, recorder events.Recorder, podErrCache *PodErrorCache) {
 	for p, err := range r.PodErrors {
 		if IsReservedOfferingError(err) {
 			continue
@@ -261,6 +258,13 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 		}
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
+}
+
+// Record sends eventing and log messages back for the results that were produced from a scheduling run
+// It also nominates nodes in the cluster state based on the scheduling run to signal to other components
+// leveraging the cluster state that a previous scheduling run that was recorded is relying on these nodes
+func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster, podErrCache *PodErrorCache) {
+	r.recordPodErrors(ctx, recorder, podErrCache)
 	for _, existing := range r.ExistingNodes {
 		if len(existing.Pods) > 0 {
 			cluster.NominateNodeForPod(ctx, existing.ProviderID())
