@@ -135,7 +135,7 @@ Some Karpenter users today set `controller.kubernetes.io/pod-deletion-cost` on t
 
 The migration is controlled by the feature gate:
 
-- **Pre-cutover (alpha):** Feature gate off by default. The controller does not write `controller.kubernetes.io/pod-deletion-cost` unless enabled. Karpenter's consolidation scoring reads `karpenter.sh/disruption-cost` first; if absent, it falls back to `controller.kubernetes.io/pod-deletion-cost`. Customers who already set PDC for consolidation steering see no change in behavior. The deprecation announcement ships with alpha so the migration window is well-publicized.
+- **Alpha:** Feature gate off by default. The controller does not write `controller.kubernetes.io/pod-deletion-cost` unless enabled. Karpenter's consolidation scoring reads `karpenter.sh/disruption-cost` first; if absent, it falls back to `controller.kubernetes.io/pod-deletion-cost`. Customers who already set PDC for consolidation steering see no change in behavior. The deprecation announcement ships with alpha so the migration window is well-publicized.
 - **Beta:** Karpenter's consolidation scoring reads only `karpenter.sh/disruption-cost`. The fallback to `controller.kubernetes.io/pod-deletion-cost` is removed. Customers who have not migrated will see Karpenter's consolidation behavior revert to the no-steering default for the affected pods until they update their workload definitions.
 
 After promotion to beta, customers steering Karpenter consolidation must use `karpenter.sh/disruption-cost`. The legacy annotation continues to function for the ReplicaSet controller's own scale-down ordering (upstream Kubernetes behavior, unchanged), and the Karpenter controller continues to write it for that purpose when the feature gate is on.
