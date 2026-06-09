@@ -802,16 +802,7 @@ func schedulingErrorRank(err error) int {
 	}
 	var instanceTypeFilterError InstanceTypeFilterError
 	if errors.As(err, &instanceTypeFilterError) {
-		if !instanceTypeFilterError.fits {
-			return 0
-		}
-		if !instanceTypeFilterError.requirementsMet {
-			return 10
-		}
-		if !instanceTypeFilterError.hasOffering {
-			return 20
-		}
-		return 30
+		return instanceTypeFilterErrorRank(instanceTypeFilterError)
 	}
 	errString := err.Error()
 	switch {
@@ -828,6 +819,19 @@ func schedulingErrorRank(err error) int {
 	default:
 		return 50
 	}
+}
+
+func instanceTypeFilterErrorRank(e InstanceTypeFilterError) int {
+	if !e.fits {
+		return 0
+	}
+	if !e.requirementsMet {
+		return 10
+	}
+	if !e.hasOffering {
+		return 20
+	}
+	return 30
 }
 
 func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod, nodePoolMap map[string]*v1.NodePool, enforceConsolidateAfter bool) {
