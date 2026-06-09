@@ -77,7 +77,7 @@ func (env *Environment) ExpectDeleted(objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
 		Eventually(func(g Gomega) {
-			g.Expect(client.IgnoreNotFound(env.Client.Delete(env, object, client.PropagationPolicy(metav1.DeletePropagationForeground), &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))).To(Succeed())
+			g.Expect(client.IgnoreNotFound(env.Client.Delete(env, object, client.PropagationPolicy(metav1.DeletePropagationForeground), &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}))).To(Succeed())
 		}).WithTimeout(time.Second * 10).Should(Succeed())
 	}
 }
@@ -130,7 +130,7 @@ func (env *Environment) ExpectReplaceNodeClassCondition(nodeclass *unstructured.
 
 	tt, _, _ := unstructured.NestedSlice(result.Object, "status", "conditions")
 	for _, t := range tt {
-		cond := t.(map[string]interface{})
+		cond := t.(map[string]any)
 		if cond["type"].(string) == condition.Type {
 			continue
 		}
@@ -144,8 +144,8 @@ func (env *Environment) ExpectReplaceNodeClassCondition(nodeclass *unstructured.
 		})
 	}
 
-	err := unstructured.SetNestedSlice(result.Object, lo.Map(updateStatusCondition, func(condition metav1.Condition, _ int) interface{} {
-		b := map[string]interface{}{}
+	err := unstructured.SetNestedSlice(result.Object, lo.Map(updateStatusCondition, func(condition metav1.Condition, _ int) any {
+		b := map[string]any{}
 		b["type"] = condition.Type
 		b["reason"] = condition.Reason
 		b["status"] = string(condition.Status)
@@ -735,7 +735,7 @@ func (env *Environment) EventuallyExpectNodesUntaintedWithTimeout(timeout time.D
 	Eventually(func(g Gomega) {
 		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disrupted": "true"})).To(Succeed())
 		taintedNodeNames := lo.Map(nodeList.Items, func(n corev1.Node, _ int) string { return n.Name })
-		g.Expect(taintedNodeNames).ToNot(ContainElements(lo.Map(nodes, func(n *corev1.Node, _ int) interface{} { return n.Name })...))
+		g.Expect(taintedNodeNames).ToNot(ContainElements(lo.Map(nodes, func(n *corev1.Node, _ int) any { return n.Name })...))
 	}).WithTimeout(timeout).Should(Succeed())
 }
 

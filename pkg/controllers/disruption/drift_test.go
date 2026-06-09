@@ -91,7 +91,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, eligibleNodesLabels)
 
@@ -99,7 +99,7 @@ var _ = Describe("Drift", func() {
 			pod.SetAnnotations(map[string]string{})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, pod, nodeClaim)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, eligibleNodesLabels)
 		})
@@ -139,12 +139,12 @@ var _ = Describe("Drift", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 3, map[string]string{
@@ -182,7 +182,7 @@ var _ = Describe("Drift", func() {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			}
 
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// 3 pods to fit on 3 nodes that will be disrupted so that they're not empty
@@ -200,21 +200,21 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			// Bind the pods to the first n nodes.
-			for i := 0; i < len(pods); i++ {
+			for i := range pods {
 				ExpectApplied(ctx, env.Client, pods[i])
 				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			// Reconcile 5 times, enqueuing 3 commands total.
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				ExpectSingletonReconciled(ctx, disruptionController)
 			}
 
@@ -247,7 +247,7 @@ var _ = Describe("Drift", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -289,8 +289,8 @@ var _ = Describe("Drift", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
+								Controller:         new(true),
+								BlockOwnerDeletion: new(true),
 							},
 						}}})
 				// Bind the pods to the first 2 nodes for each nodepool.
@@ -301,7 +301,7 @@ var _ = Describe("Drift", func() {
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			// Reconcile 30 times, enqueuing 10 commands total
 			for range 30 {
 				ExpectSingletonReconciled(ctx, disruptionController)
@@ -361,7 +361,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -385,13 +385,13 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, podToExpire, node2)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node2}, []*v1.NodeClaim{nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node2}, []*v1.NodeClaim{nodeClaim2})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
 			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
@@ -406,7 +406,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
@@ -418,7 +418,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
@@ -430,7 +430,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -457,8 +457,8 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
@@ -483,7 +483,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 			// Process candidates
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -509,7 +509,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -530,7 +530,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -556,7 +556,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -574,11 +574,11 @@ var _ = Describe("Drift", func() {
 					},
 				},
 			})
-			pod.Status.StartTime = &metav1.Time{Time: fakeClock.Now()}
+			pod.Status.StartTime = &metav1.Time{Time: env.Clock.Now()}
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Grace period is still active, so drift should be blocked
@@ -587,10 +587,10 @@ var _ = Describe("Drift", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 
 			// Advance clock past the 2m grace period
-			fakeClock.Step(3 * time.Minute)
+			env.Clock.Step(3 * time.Minute)
 
 			// Re-update state and reconcile - drift should now proceed
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// The drifted node should now be disrupted since the grace period expired
@@ -616,8 +616,8 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -643,7 +643,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, nodeClaim2, node, node2, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -661,7 +661,7 @@ var _ = Describe("Drift", func() {
 					},
 				},
 			})
-			pod1.Status.StartTime = &metav1.Time{Time: fakeClock.Now()}
+			pod1.Status.StartTime = &metav1.Time{Time: env.Clock.Now()}
 
 			pod2 := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -670,13 +670,13 @@ var _ = Describe("Drift", func() {
 					},
 				},
 			})
-			pod2.Status.StartTime = &metav1.Time{Time: fakeClock.Now()}
+			pod2.Status.StartTime = &metav1.Time{Time: env.Clock.Now()}
 
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod1, pod2)
 			ExpectManualBinding(ctx, env.Client, pod1, node)
 			ExpectManualBinding(ctx, env.Client, pod2, node)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Both pods still within grace period, drift should be blocked
@@ -684,8 +684,8 @@ var _ = Describe("Drift", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 
 			// Advance past the 1m grace period but not the 3m one
-			fakeClock.Step(2 * time.Minute)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			env.Clock.Step(2 * time.Minute)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// pod2 still has active grace period, drift should still be blocked
@@ -693,8 +693,8 @@ var _ = Describe("Drift", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 
 			// Advance past the 3m grace period
-			fakeClock.Step(2 * time.Minute)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			env.Clock.Step(2 * time.Minute)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// All grace periods expired, drift should now proceed
@@ -717,8 +717,8 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -728,13 +728,13 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
@@ -766,8 +766,8 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
@@ -792,7 +792,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 			// Process candidates
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -812,7 +812,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
@@ -847,8 +847,8 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
@@ -874,7 +874,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim2)
@@ -902,7 +902,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
@@ -934,8 +934,8 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -946,7 +946,7 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			var wg sync.WaitGroup
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -1008,8 +1008,8 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}},
 				// Make each pod request about a third of the allocatable on the node
@@ -1039,13 +1039,13 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -1072,8 +1072,8 @@ var _ = Describe("Drift", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					},
 				},
@@ -1112,13 +1112,13 @@ var _ = Describe("Drift", func() {
 			ExpectManualBinding(ctx, env.Client, pods[1], node2)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
 			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
@@ -1135,7 +1135,7 @@ var _ = Describe("Drift", func() {
 		It("should not consider static nodepool for drift", func() {
 			staticNp := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
-					Replicas:   lo.ToPtr(int64(2)), // Static nodepool with 2 desired replica
+					Replicas:   new(int64(2)), // Static nodepool with 2 desired replica
 					Disruption: v1.Disruption{},
 				},
 			})
@@ -1158,14 +1158,14 @@ var _ = Describe("Drift", func() {
 			for _, nc := range nodeClaims {
 				nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			}
-			drift := disruption.NewDrift(env.Client, cluster, prov, recorder, fakeClock)
+			drift := disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock)
 
 			ExpectApplied(ctx, env.Client, staticNp, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, drift.ShouldDisrupt, drift.Class(), queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, drift.ShouldDisrupt, drift.Class(), queue)
 			Expect(err).To(Succeed())
 			Expect(candidates).To(HaveLen(0))
 		})

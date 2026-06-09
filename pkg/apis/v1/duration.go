@@ -41,7 +41,7 @@ type NillableDuration struct {
 func MustParseNillableDuration(val string) NillableDuration {
 	nd := NillableDuration{}
 	// Use %q instead of %s to ensure that we unmarshal the value as a string and not an int
-	lo.Must0(json.Unmarshal([]byte(fmt.Sprintf("%q", val)), &nd))
+	lo.Must0(json.Unmarshal(fmt.Appendf(nil, "%q", val), &nd))
 	return nd
 }
 
@@ -76,7 +76,7 @@ func (d NillableDuration) MarshalJSON() ([]byte, error) {
 }
 
 // ToUnstructured implements the value.UnstructuredConverter interface.
-func (d NillableDuration) ToUnstructured() interface{} {
+func (d NillableDuration) ToUnstructured() any {
 	if d.Raw != nil {
 		return d.Raw
 	}

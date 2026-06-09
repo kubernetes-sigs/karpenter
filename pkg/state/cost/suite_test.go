@@ -26,11 +26,9 @@ import (
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -52,7 +50,6 @@ import (
 
 var ctx context.Context
 var env *test.Environment
-var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var nodeOverlayStore *nodeoverlay.InstanceTypeStore
 var nodeOverlayController *nodeoverlay.Controller
@@ -72,10 +69,9 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
-	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
+	nodeOverlayController = nodeoverlay.NewController(env.Clock, env.Client, cloudProvider, nodeOverlayStore, cluster)
 	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 })
@@ -312,8 +308,8 @@ var _ = Describe("ClusterCost", func() {
 							Values:   []string{testNodePool.Name},
 						},
 					},
-					PriceAdjustment: lo.ToPtr("+2.5"),
-					Weight:          lo.ToPtr(int32(10000)),
+					PriceAdjustment: new("+2.5"),
+					Weight:          new(int32(10000)),
 				},
 			})
 
@@ -468,10 +464,10 @@ var _ = Describe("ClusterCost", func() {
 			wg.Add(numGoroutines)
 
 			// Launch multiple goroutines that concurrently add nodeclaims
-			for i := 0; i < numGoroutines; i++ {
+			for i := range numGoroutines {
 				go func(goroutineIndex int) {
 					defer wg.Done()
-					for j := 0; j < numOperationsPerGoroutine; j++ {
+					for j := range numOperationsPerGoroutine {
 						nodeClaimIndex := goroutineIndex*numOperationsPerGoroutine + j
 						Expect(clusterCost.UpdateNodeClaim(ctx, nodeClaims[nodeClaimIndex])).To(Succeed())
 					}
@@ -495,7 +491,7 @@ var _ = Describe("ClusterCost", func() {
 			var nodeClaims []*v1.NodeClaim
 
 			// Setup: Pre-populate with nodeclaims to remove
-			for i := 0; i < totalOperations; i++ {
+			for i := range totalOperations {
 				nodeClaim := createTestNodeClaim(testNodePool, testInstanceType.Name, spotOffering.CapacityType(), spotOffering.Zone())
 				nodeClaim.Name = fmt.Sprintf("test-nodeclaim-%d", i)
 				nodeClaims = append(nodeClaims, nodeClaim)
@@ -511,10 +507,10 @@ var _ = Describe("ClusterCost", func() {
 			wg.Add(numGoroutines)
 
 			// Launch multiple goroutines that concurrently remove nodeclaims
-			for i := 0; i < numGoroutines; i++ {
+			for i := range numGoroutines {
 				go func(goroutineIndex int) {
 					defer wg.Done()
-					for j := 0; j < numOperationsPerGoroutine; j++ {
+					for j := range numOperationsPerGoroutine {
 						nodeClaimIndex := goroutineIndex*numOperationsPerGoroutine + j
 						Expect(clusterCost.DeleteNodeClaim(ctx, client.ObjectKeyFromObject(nodeClaims[nodeClaimIndex]))).To(Succeed())
 					}
@@ -541,7 +537,7 @@ var _ = Describe("ClusterCost", func() {
 			var nodeClaims []*v1.NodeClaim
 
 			// Pre-create nodeclaims for concurrent operations
-			for i := 0; i < operationsPerWriter; i++ {
+			for i := range operationsPerWriter {
 				nodeClaim := createTestNodeClaim(testNodePool, testInstanceType.Name, spotOffering.CapacityType(), spotOffering.Zone())
 				nodeClaim.Name = fmt.Sprintf("test-nodeclaim-%d", i)
 				nodeClaims = append(nodeClaims, nodeClaim)
@@ -549,7 +545,7 @@ var _ = Describe("ClusterCost", func() {
 
 			// Launch reader goroutines that continuously read costs
 			wg.Add(numReaders)
-			for i := 0; i < numReaders; i++ {
+			for range numReaders {
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
@@ -572,11 +568,11 @@ var _ = Describe("ClusterCost", func() {
 
 			// Launch writer goroutines that add and remove nodeclaims
 			wg.Add(numWriters)
-			for i := 0; i < numWriters; i++ {
+			for i := range numWriters {
 				go func(_ int) {
 					defer GinkgoRecover()
 					defer wg.Done()
-					for j := 0; j < operationsPerWriter; j++ {
+					for j := range operationsPerWriter {
 						// Randomly add or remove nodeclaims
 						if j%2 == 0 {
 							Expect(clusterCost.UpdateNodeClaim(ctx, nodeClaims[j])).To(Succeed())

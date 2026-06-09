@@ -35,8 +35,6 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	clock "k8s.io/utils/clock/testing"
-
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
@@ -57,7 +55,6 @@ var (
 	nodePool              *v1.NodePool
 	nodePoolTwo           *v1.NodePool
 	cluster               *state.Cluster
-	fakeClock             *clock.FakeClock
 	nodeOverlayController *Controller
 	store                 *InstanceTypeStore
 )
@@ -72,9 +69,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
 	store = NewInstanceTypeStore()
-	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeOverlayController = NewController(env.Client, cloudProvider, store, cluster)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
+	nodeOverlayController = NewController(env.Clock, env.Client, cloudProvider, store, cluster)
 })
 
 var _ = BeforeEach(func() {
@@ -133,7 +129,7 @@ var _ = Describe("Validation", func() {
 						Values:   []string{"default-instance-type"},
 					},
 				},
-				Weight: lo.ToPtr(int32(10)),
+				Weight: new(int32(10)),
 			},
 		})
 		ExpectApplied(ctx, env.Client, overlay)
@@ -155,7 +151,7 @@ var _ = Describe("Validation", func() {
 							Operator: corev1.NodeSelectorOpExists,
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 
@@ -180,7 +176,7 @@ var _ = Describe("Validation", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("testResource"): resource.MustParse("5"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 
@@ -208,8 +204,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"arm64"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("1.03"),
+						Weight: new(int32(10)),
+						Price:  new("1.03"),
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -223,8 +219,8 @@ var _ = Describe("Validation", func() {
 								Operator: corev1.NodeSelectorOpExists,
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("23"),
+						Weight: new(int32(10)),
+						Price:  new("23"),
 					},
 				})
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
@@ -264,8 +260,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"arm64"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("1.03"),
+						Weight: new(int32(10)),
+						Price:  new("1.03"),
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -280,8 +276,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"ios"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("23"),
+						Weight: new(int32(10)),
+						Price:  new("23"),
 					},
 				})
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
@@ -352,8 +348,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"test-zone-1", "test-zone-4"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("1.03"),
+						Weight: new(int32(10)),
+						Price:  new("1.03"),
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -367,8 +363,8 @@ var _ = Describe("Validation", func() {
 								Operator: corev1.NodeSelectorOpExists,
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("23"),
+						Weight: new(int32(10)),
+						Price:  new("23"),
 					},
 				})
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
@@ -396,8 +392,8 @@ var _ = Describe("Validation", func() {
 								Operator: corev1.NodeSelectorOpExists,
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("1.03"),
+						Weight: new(int32(10)),
+						Price:  new("1.03"),
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -412,8 +408,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"spot"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("23"),
+						Weight: new(int32(10)),
+						Price:  new("23"),
 					},
 				})
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
@@ -442,8 +438,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"test-zone-6", "test-zone-4"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("1.03"),
+						Weight: new(int32(10)),
+						Price:  new("1.03"),
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -458,8 +454,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"spot"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("23"),
+						Weight: new(int32(10)),
+						Price:  new("23"),
 					},
 				})
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
@@ -487,8 +483,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"test-zone-1", "test-zone-4"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("1.03"),
+						Weight: new(int32(10)),
+						Price:  new("1.03"),
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -503,8 +499,8 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"spot"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("23"),
+						Weight: new(int32(10)),
+						Price:  new("23"),
 					},
 				})
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
@@ -537,7 +533,7 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"default-instance-type", "small-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -553,7 +549,7 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayB, changesOverlayB, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -570,8 +566,8 @@ var _ = Describe("Validation", func() {
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("1.03")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("23")}}),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-2")}}),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("1.03")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("23")}}),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-2")}}),
 		)
 		DescribeTable("should fail with pricing updates are the same overlays with overlapping requirements",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay) {
@@ -587,7 +583,7 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"default-instance-type", "small-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -603,7 +599,7 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayB, changesOverlayB, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -620,8 +616,8 @@ var _ = Describe("Validation", func() {
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("100")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("100")}}),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+100")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+100")}}),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("100")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("100")}}),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+100")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+100")}}),
 		)
 		DescribeTable("should pass with conflicting pricing updates overlays with mutually exclusive requirements",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay) {
@@ -637,7 +633,7 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"default-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -653,7 +649,7 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"default-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayB, changesOverlayB, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -669,8 +665,8 @@ var _ = Describe("Validation", func() {
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("23")}}),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-2")}}),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("23")}}),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-2")}}),
 		)
 		DescribeTable("should pass with conflicting pricing update overlays with mutually exclusive weights",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay) {
@@ -686,7 +682,7 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"default-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -702,7 +698,7 @@ var _ = Describe("Validation", func() {
 								Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(20)),
+						Weight: new(int32(20)),
 					},
 				})
 				Expect(mergo.Merge(overlayB, changesOverlayB, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -718,8 +714,8 @@ var _ = Describe("Validation", func() {
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("34")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("2")}}),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-4")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-2")}}),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("34")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("2")}}),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-4")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-2")}}),
 		)
 	})
 	Context("Capacity Adjustment", func() {
@@ -736,7 +732,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
@@ -754,7 +750,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
@@ -786,7 +782,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("hugepage-1Gi"): resource.MustParse("2Gi"),
 					},
@@ -804,7 +800,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
@@ -822,7 +818,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("hugepage-1Gi"): resource.MustParse("3Gi"),
 					},
@@ -857,7 +853,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
@@ -875,7 +871,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
@@ -907,7 +903,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
@@ -925,7 +921,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
 					},
@@ -957,7 +953,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("55"),
 					},
@@ -975,7 +971,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(20)),
+					Weight: new(int32(20)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
 					},
@@ -1007,7 +1003,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("55"),
 					},
@@ -1025,7 +1021,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(20)),
+					Weight: new(int32(20)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/buz"): resource.MustParse("5"),
 					},
@@ -1061,7 +1057,7 @@ var _ = Describe("Instance Type Controller", func() {
 									Values:   []string{nodePool.Name},
 								},
 							},
-							Weight: lo.ToPtr(int32(10)),
+							Weight: new(int32(10)),
 						},
 					})
 					Expect(mergo.Merge(overlay, changesOverlay, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1087,8 +1083,8 @@ var _ = Describe("Instance Type Controller", func() {
 					Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 					Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
 				},
-				Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("13234.223")}}, 13234.223),
-				Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}}, 1001.020),
+				Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("13234.223")}}, 13234.223),
+				Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+1000")}}, 1001.020),
 			)
 			DescribeTable("should pass with conflicting pricing update overlays for all nodepools",
 				func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay, expectedValueOne float64, expectedValueTwo float64) {
@@ -1101,7 +1097,7 @@ var _ = Describe("Instance Type Controller", func() {
 									Values:   []string{nodePool.Name},
 								},
 							},
-							Weight: lo.ToPtr(int32(10)),
+							Weight: new(int32(10)),
 						},
 					})
 					Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1114,7 +1110,7 @@ var _ = Describe("Instance Type Controller", func() {
 									Values:   []string{nodePoolTwo.Name},
 								},
 							},
-							Weight: lo.ToPtr(int32(10)),
+							Weight: new(int32(10)),
 						},
 					})
 
@@ -1142,14 +1138,14 @@ var _ = Describe("Instance Type Controller", func() {
 					Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", expectedValueTwo))
 				},
 				Entry("Price",
-					v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("13234.223")}},
-					v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("232.11")}},
+					v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("13234.223")}},
+					v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("232.11")}},
 					13234.223,
 					232.11,
 				),
 				Entry("PriceAdjustment",
-					v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}},
-					v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+2500")}},
+					v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+1000")}},
+					v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+2500")}},
 					1001.020,
 					2501.020,
 				),
@@ -1168,7 +1164,7 @@ var _ = Describe("Instance Type Controller", func() {
 									Values:   []string{"test-value"},
 								},
 							},
-							Weight: lo.ToPtr(int32(10)),
+							Weight: new(int32(10)),
 						},
 					})
 					Expect(mergo.Merge(overlay, changesOverlay, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1193,8 +1189,8 @@ var _ = Describe("Instance Type Controller", func() {
 					Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 					Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", expectedValue))
 				},
-				Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("13234.223")}}, 13234.223),
-				Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}}, 1001.020),
+				Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("13234.223")}}, 13234.223),
+				Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+1000")}}, 1001.020),
 			)
 		})
 		DescribeTable("should not apply pricing updates for invalid overlays",
@@ -1209,7 +1205,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Operator: corev1.NodeSelectorOpExists,
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlay, changesOverlay, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1229,8 +1225,8 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", expectedValue))
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("13234.223")}}, 1.02),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}}, 1.02),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("13234.223")}}, 1.02),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+1000")}}, 1.02),
 		)
 		DescribeTable("should not apply adjustments for overlays that do not overlap with instance types requirements",
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
@@ -1243,7 +1239,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"default-instance-type-not-found"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlay, changesOverlay, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1259,8 +1255,8 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("13234.223")}}, 1.02),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}}, 1.02),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("13234.223")}}, 1.02),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+1000")}}, 1.02),
 		)
 		DescribeTable("should apply pricing updates for instances types",
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
@@ -1273,7 +1269,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"default-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlay, changesOverlay, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1289,8 +1285,8 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", expectedValue))
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("13234.223")}}, 13234.223),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}}, 1001.020),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("13234.223")}}, 13234.223),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+1000")}}, 1001.020),
 		)
 		DescribeTable("should apply pricing updates for instances types for capacity type",
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
@@ -1326,7 +1322,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"on-demand"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlay, changesOverlay, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1355,8 +1351,8 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(len(instanceTypeList[0].Offerings.Compatible(spotReq))).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings.Compatible(spotReq)[0].Price).To(BeNumerically("~", 1.020))
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("12321.32")}}, 12321.32),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}}, 1005.020),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("12321.32")}}, 12321.32),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+1000")}}, 1005.020),
 		)
 		DescribeTable("should apply pricing updates for instances types for availability zone",
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
@@ -1392,7 +1388,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"test-zone-1"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlay, changesOverlay, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1421,8 +1417,8 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(len(instanceTypeList[0].Offerings.Compatible(zoneTwoReq))).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings.Compatible(zoneTwoReq)[0].Price).To(BeNumerically("~", 5.020))
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("121.421")}}, 121.421),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+1000")}}, 1001.020),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("121.421")}}, 121.421),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+1000")}}, 1001.020),
 		)
 		DescribeTable("should update price updates offerings instance types from multiple overlays",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay, expectedValueOne float64, expectedValueTwo float64, expectedValueThree float64) {
@@ -1466,7 +1462,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"test-zone-2", "test-zone-4"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1479,7 +1475,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"spot"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayB, changesOverlayB, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1517,15 +1513,15 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(instanceTypeList[0].Offerings.Compatible(capacityReq)[0].Price).To(BeNumerically("~", expectedValueThree))
 			},
 			Entry("Price",
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("121.421")}},
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("165.421")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("121.421")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("165.421")}},
 				121.421,
 				121.421,
 				165.421,
 			),
 			Entry("PriceAdjustment",
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+201")}},
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-0.5")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+201")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-0.5")}},
 				203.020,
 				205.020,
 				0.52,
@@ -1576,7 +1572,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"test-zone-2"},
 							},
 						},
-						Weight: lo.ToPtr(int32(20)),
+						Weight: new(int32(20)),
 					},
 				})
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1593,7 +1589,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"test-zone-2", "test-zone-4"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayB, changesOverlayB, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1624,14 +1620,14 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(instanceTypeList[0].Offerings.Compatible(zoneTwoReq)[0].Price).To(BeNumerically("~", expectedValueTwo))
 			},
 			Entry("Price",
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("121.421")}},
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("165.421")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("121.421")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("165.421")}},
 				121.421,
 				165.421,
 			),
 			Entry("PriceAdjustment",
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+201")}},
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-1.5")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+201")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-1.5")}},
 				203.020,
 				2.520,
 			),
@@ -1651,7 +1647,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"default-instance-type", "small-instance-type", "gpu-vendor-b-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1667,7 +1663,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"small-instance-type", "gpu-vendor-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayB, changesOverlayB, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1703,12 +1699,12 @@ var _ = Describe("Instance Type Controller", func() {
 				}
 			},
 			Entry("Price",
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("382")}},
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("100")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("382")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("100")}},
 			),
 			Entry("PriceAdjustment",
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-23")}},
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+10")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-23")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+10")}},
 			),
 		)
 		DescribeTable("should not partial apply for a subset of nodepools",
@@ -1736,7 +1732,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"default-instance-type", "small-instance-type", "gpu-vendor-b-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayA, changesOverlayA, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1753,7 +1749,7 @@ var _ = Describe("Instance Type Controller", func() {
 								Values:   []string{"small-instance-type", "gpu-vendor-instance-type"},
 							},
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				Expect(mergo.Merge(overlayB, changesOverlayB, mergo.WithOverride, mergo.WithSliceDeepCopy)).To(Succeed())
@@ -1808,12 +1804,12 @@ var _ = Describe("Instance Type Controller", func() {
 				}
 			},
 			Entry("Price",
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("382")}},
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("100")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("382")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("100")}},
 			),
 			Entry("PriceAdjustment",
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+10")}},
-				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-23")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+10")}},
+				v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-23")}},
 			),
 		)
 	})
@@ -1832,7 +1828,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Capacity: corev1.ResourceList{
 							corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
@@ -1868,7 +1864,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Capacity: corev1.ResourceList{
 							corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -1883,7 +1879,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Capacity: corev1.ResourceList{
 							corev1.ResourceName("dumb-devices/bar"): resource.MustParse("2"),
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlayA, overlayB)
@@ -1927,7 +1923,7 @@ var _ = Describe("Instance Type Controller", func() {
 						Capacity: corev1.ResourceList{
 							corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 						},
-						Weight: lo.ToPtr(int32(10)),
+						Weight: new(int32(10)),
 					},
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
@@ -1968,7 +1964,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
@@ -1996,7 +1992,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
@@ -2024,7 +2020,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
@@ -2095,7 +2091,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -2110,7 +2106,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("hugepages-1Gi"): resource.MustParse("2Gi"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
@@ -2173,7 +2169,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -2188,7 +2184,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("hugepages-1Gi"): resource.MustParse("2Gi"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
@@ -2266,7 +2262,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
-					Weight: lo.ToPtr(int32(20)),
+					Weight: new(int32(20)),
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -2281,7 +2277,7 @@ var _ = Describe("Instance Type Controller", func() {
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("hugepages-1Gi"): resource.MustParse("2Gi"),
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 				},
 			})
 			// should not be valid
@@ -2323,7 +2319,7 @@ var _ = Describe("Instance Type Controller", func() {
 							Values:   []string{"default-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
 					},
@@ -2341,7 +2337,7 @@ var _ = Describe("Instance Type Controller", func() {
 							Values:   []string{"default-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(20)),
+					Weight: new(int32(20)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("99"),
 					},
@@ -2382,7 +2378,7 @@ var _ = Describe("Instance Type Controller", func() {
 							Values:   []string{"default-instance-type", "small-instance-type", "gpu-vendor-b-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/buz"): resource.MustParse("54"),
 					},
@@ -2400,7 +2396,7 @@ var _ = Describe("Instance Type Controller", func() {
 							Values:   []string{"small-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/buz"): resource.MustParse("21"),
 					},
@@ -2461,7 +2457,7 @@ var _ = Describe("Instance Type Controller", func() {
 							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/buz"): resource.MustParse("54"),
 					},
@@ -2479,7 +2475,7 @@ var _ = Describe("Instance Type Controller", func() {
 							Values:   []string{"small-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
-					Weight: lo.ToPtr(int32(10)),
+					Weight: new(int32(10)),
 					Capacity: corev1.ResourceList{
 						corev1.ResourceName("smarter-devices/buz"): resource.MustParse("21"),
 					},
@@ -2547,8 +2543,8 @@ var _ = Describe("Instance Type Controller", func() {
 						Values:   []string{"default-instance-type"},
 					},
 				},
-				PriceAdjustment: lo.ToPtr("+1000.0"),
-				Weight:          lo.ToPtr(int32(10)),
+				PriceAdjustment: new("+1000.0"),
+				Weight:          new(int32(10)),
 			},
 		})
 		overlayCapacity := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -2563,7 +2559,7 @@ var _ = Describe("Instance Type Controller", func() {
 				Capacity: corev1.ResourceList{
 					corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 				},
-				Weight: lo.ToPtr(int32(10)),
+				Weight: new(int32(10)),
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice, overlayCapacity)
@@ -2595,7 +2591,7 @@ var _ = Describe("Instance Type Controller", func() {
 				Capacity: corev1.ResourceList{
 					corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 				},
-				Weight: lo.ToPtr(int32(10)),
+				Weight: new(int32(10)),
 			},
 		})
 
@@ -2622,16 +2618,21 @@ var _ = Describe("Instance Type Controller", func() {
 				Capacity: corev1.ResourceList{
 					corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 				},
-				Weight: lo.ToPtr(int32(10)),
+				Weight: new(int32(10)),
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
+		// Reconcile returns the per-NodePool errors as a multierr so they
+		// get surfaced by controller-runtime, but the healthy pools are
+		// still evaluated and the store is still updated.
 		ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
 
+		// The failing pool should not be in evaluatedNodePools
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).ToNot(BeNil())
-		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		_, err = store.ApplyAll(nodePool.Name, []*cloudprovider.InstanceType{})
 		Expect(err).ToNot(BeNil())
+		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 0))
 	})
 	It("should not return instance type requirements with nodepool, nodeclass, and custom nodepool labels", func() {
@@ -2650,7 +2651,7 @@ var _ = Describe("Instance Type Controller", func() {
 				Capacity: corev1.ResourceList{
 					corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 				},
-				Weight: lo.ToPtr(int32(10)),
+				Weight: new(int32(10)),
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
@@ -2664,5 +2665,102 @@ var _ = Describe("Instance Type Controller", func() {
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodePoolLabelKey))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind())))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElements(lo.Keys(nodePool.Spec.Template.Labels)))
+	})
+})
+
+var _ = Describe("Failure Isolation", func() {
+	It("should evaluate healthy NodePools when one NodePool fails GetInstanceTypes", func() {
+		// Create a second NodePool that will fail
+		brokenNodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, nodePool, brokenNodePool)
+
+		// Inject an error for only the broken NodePool
+		cloudProvider.ErrorsForNodePool[brokenNodePool.Name] = fmt.Errorf("resolving node class, AKSNodeClass not found")
+
+		// Reconcile returns the aggregated per-NodePool errors so they
+		// are logged by controller-runtime, which handles requeue via the
+		// rate limiter.
+		ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
+
+		// The healthy NodePool should be evaluated and usable
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+
+		// The broken NodePool should NOT be in evaluatedNodePools, so ApplyAll returns UnevaluatedNodePoolError
+		brokenInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, brokenNodePool)
+		Expect(err).ToNot(BeNil()) // ErrorsForNodePool returns error
+		Expect(brokenInstanceTypes).To(BeEmpty())
+		_, err = store.ApplyAll(brokenNodePool.Name, []*cloudprovider.InstanceType{})
+		Expect(err).ToNot(BeNil())
+		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue())
+	})
+	It("should update the store even when one NodePool fails", func() {
+		brokenNodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, nodePool, brokenNodePool)
+
+		cloudProvider.ErrorsForNodePool[brokenNodePool.Name] = fmt.Errorf("resolving node class, AKSNodeClass not found")
+
+		// Reset store to simulate fresh Karpenter startup (empty evaluatedNodePools)
+		store.Reset()
+
+		// Before reconcile, healthy pool should be unevaluated
+		_, err := store.ApplyAll(nodePool.Name, []*cloudprovider.InstanceType{})
+		Expect(err).ToNot(BeNil())
+		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue())
+
+		// After reconcile, healthy pool should be evaluated despite broken pool.
+		// The reconciler returns the per-NodePool error as a multierr.
+		ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
+
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+	})
+	It("should use normal requeue interval when all NodePools succeed", func() {
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		result := ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		// No failures, standard 6h polling interval
+		Expect(result.RequeueAfter).To(Equal(6 * time.Hour))
+	})
+	It("should recover when a previously failing NodePool becomes healthy", func() {
+		brokenNodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, nodePool, brokenNodePool)
+
+		// First reconcile: one pool fails, so the reconciler returns the
+		// multierr and controller-runtime handles requeue via rate limiter.
+		cloudProvider.ErrorsForNodePool[brokenNodePool.Name] = fmt.Errorf("resolving node class, AKSNodeClass not found")
+		ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
+
+		// Verify broken pool is unevaluated
+		_, err := store.ApplyAll(brokenNodePool.Name, []*cloudprovider.InstanceType{})
+		Expect(err).ToNot(BeNil())
+		Expect(cloudprovider.IsUnevaluatedNodePoolError(err)).To(BeTrue())
+
+		// Fix the broken pool (transient error resolved)
+		delete(cloudProvider.ErrorsForNodePool, brokenNodePool.Name)
+
+		// Second reconcile: all pools succeed
+		result := ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+		Expect(result.RequeueAfter).To(Equal(6 * time.Hour))
+
+		// Both pools should now be evaluated
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+
+		brokenInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, brokenNodePool)
+		Expect(err).To(BeNil())
+		brokenInstanceTypes, err = store.ApplyAll(brokenNodePool.Name, brokenInstanceTypes)
+		Expect(err).To(BeNil())
+		Expect(len(brokenInstanceTypes)).To(BeNumerically("==", 1))
 	})
 })

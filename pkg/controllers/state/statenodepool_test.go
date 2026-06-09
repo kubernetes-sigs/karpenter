@@ -111,13 +111,11 @@ var _ = Describe("NodePoolState", func() {
 			requestPerGoroutine := int64(1)
 			limit := int64(5)
 
-			for i := 0; i < numGoroutines; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+			for range numGoroutines {
+				wg.Go(func() {
 					granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, limit, requestPerGoroutine)
 					atomic.AddInt64(&totalGranted, granted)
-				}()
+				})
 			}
 
 			wg.Wait()
@@ -167,12 +165,10 @@ var _ = Describe("NodePoolState", func() {
 			numGoroutines := 50
 			releasePerGoroutine := int64(2)
 
-			for i := 0; i < numGoroutines; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+			for range numGoroutines {
+				wg.Go(func() {
 					cluster.NodePoolState.ReleaseNodeCount(nodePool.Name, releasePerGoroutine)
-				}()
+				})
 			}
 
 			wg.Wait()
