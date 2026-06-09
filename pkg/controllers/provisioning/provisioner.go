@@ -85,6 +85,7 @@ type Provisioner struct {
 	recorder       events.Recorder
 	cm             *pretty.ChangeMonitor
 	clock          clock.Clock
+	podErrorCache  *scheduler.PodErrorCache
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
@@ -100,6 +101,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		recorder:       recorder,
 		cm:             pretty.NewChangeMonitor(),
 		clock:          clock,
+		podErrorCache:  scheduler.NewPodErrorCache(),
 	}
 	return p
 }
@@ -406,7 +408,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		// Only passing existing nodes here and not new nodeClaims because
 		// these nodeClaims don't have a name until they are created
 		results.ExistingNodeToPodMapping())
-	results.Record(ctx, p.recorder, p.cluster)
+	results.Record(ctx, p.recorder, p.cluster, p.podErrorCache)
 	return results, nil
 }
 

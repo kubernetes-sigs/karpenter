@@ -245,7 +245,7 @@ type Results struct {
 // Record sends eventing and log messages back for the results that were produced from a scheduling run
 // It also nominates nodes in the cluster state based on the scheduling run to signal to other components
 // leveraging the cluster state that a previous scheduling run that was recorded is relying on these nodes
-func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
+func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster, podErrCache *PodErrorCache) {
 	// Report failures and nominations
 	for p, err := range r.PodErrors {
 		if IsReservedOfferingError(err) {
@@ -256,7 +256,9 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Info("skipping pod with Dynamic Resource Allocation requirements, not yet supported by Karpenter")
 			continue
 		}
-		log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
+		if podErrCache.ShouldLog(p, err) {
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
+		}
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {
