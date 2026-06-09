@@ -2,7 +2,7 @@
 
 ## Summary
 
-This RFC proposes a new feature-gated controller for Karpenter that ranks nodes by consolidation preference and propagates that ranking to pods via the `controller.kubernetes.io/pod-deletion-cost` annotation. This also introduces `karpenter.sh/disruption-cost` as the user-facing annotation for influencing consolidation priority, replacing direct use of `pod-deletion-cost` for that purpose. By aligning the ReplicaSet controller's scale-down decisions with Karpenter's consolidation targets, we measurably reduce voluntary pod disruption rate. This is tracked and validated via the pod disruption metrics being added in [kubernetes-sigs/karpenter#2892](https://github.com/kubernetes-sigs/karpenter/pull/2892). The feature is off by default and configured entirely through feature gates and CLI flags, with no CRD changes required.
+This RFC proposes a new feature-gated controller for Karpenter that ranks nodes by consolidation preference and propagates that ranking to pods via the `controller.kubernetes.io/pod-deletion-cost` annotation. By aligning the ReplicaSet controller's scale-down decisions with Karpenter's consolidation targets, we measurably reduce voluntary pod disruption rate. This is tracked and validated via the pod disruption metrics being added in [kubernetes-sigs/karpenter#2892](https://github.com/kubernetes-sigs/karpenter/pull/2892). The feature is off by default and configured entirely through feature gates and CLI flags, with no CRD changes required. This RFC also introduces `karpenter.sh/disruption-cost` as a Karpenter-specific user-facing annotation for steering consolidation, replacing direct use of `controller.kubernetes.io/pod-deletion-cost` for that purpose.
 
 ## Motivation
 
@@ -18,7 +18,7 @@ A root cause is a coordination gap between two independent controllers operating
 
 ### Why node-level ranking is the right signal
 
-The `pod-deletion-cost` annotation is the only existing communication channel between Karpenter and the ReplicaSet controller. Karpenter doesn't consolidate pods; it consolidates nodes. When it evaluates a consolidation move, the atomic unit is a node: "can I drain this entire node and either delete it or replace it with something cheaper?" If we ranked pods independently by resource usage, age, or some pod-level heuristic, the ReplicaSet controller might delete a pod from Node A (because that pod scored low individually) while leaving all other pods on Node A intact. That doesn't help Karpenter. Node A still can't be easily consolidated because it still has pods. The "hint" was spent on a decision that doesn't move the system toward an easier-to-consolidate state.
+The `pod-deletion-cost` annotation is the only existing communication channel that the ReplicaSet controller honors when ordering scale-down deletions. Karpenter doesn't consolidate pods; it consolidates nodes. When it evaluates a consolidation move, the atomic unit is a node: "can I drain this entire node and either delete it or replace it with something cheaper?" If we ranked pods independently by resource usage, age, or some pod-level heuristic, the ReplicaSet controller might delete a pod from Node A (because that pod scored low individually) while leaving all other pods on Node A intact. That doesn't help Karpenter. Node A still can't be easily consolidated because it still has pods. The "hint" was spent on a decision that doesn't move the system toward an easier-to-consolidate state.
 
 When pods inherit their node's rank, all pods on the same node share the same deletion cost. The ReplicaSet controller's deletion probability becomes uniform within a node but ordered across nodes, exactly matching the structure of Karpenter's consolidation decisions. The practical consequence is signal alignment:
 
@@ -66,7 +66,21 @@ For ConsolidateWhenEmpty NodePools, concentrating pod deletions on specific node
 
 ## Proposal
 
-We introduce a new feature-gated controller that automatically manages the `controller.kubernetes.io/pod-deletion-cost` annotation on pods running on Karpenter-managed nodes that are replicaset owned. The controller ranks nodes using Karpenter's disruption cost heuristic, assigns deletion cost values to pods so that Kubernetes' ReplicaSet scale-down logic preferentially removes pods from the best consolidation targets first, and partitions nodes Karpenter cannot act on separately to protect them from early eviction.
+We introduce a new feature-gated controller that automatically writes the `controller.kubernetes.io/pod-deletion-cost` annotation on pods running on Karpenter-managed nodes that are replicaset-owned. The controller ranks nodes using Karpenter's disruption cost heuristic and assigns deletion cost values to pods so that Kubernetes' ReplicaSet scale-down logic preferentially removes pods from the best consolidation targets first, and partitions nodes Karpenter cannot act on separately to protect them from early eviction. Independently, this RFC introduces `karpenter.sh/disruption-cost` as the user-facing annotation for steering Karpenter consolidation; see "Annotation roles" and "Migration and forced cutover" below.
+
+### Annotation roles
+
+Two distinct annotations are involved. Each has a single purpose and a single primary writer:
+
+- **`controller.kubernetes.io/pod-deletion-cost`** — the upstream Kubernetes annotation. Its documented consumer is the ReplicaSet controller, which honors it when ordering scale-down deletions. This RFC adds a Karpenter controller that writes this annotation on pods on Karpenter-managed nodes so the ReplicaSet controller's scale-down ordering aligns with Karpenter's consolidation ranking. The ReplicaSet controller remains the primary consumer.
+- **`karpenter.sh/disruption-cost`** — a new Karpenter-specific user-facing annotation. Customers set it on workloads to influence which pods Karpenter prefers to evict during consolidation. Karpenter's consolidation scoring reads this annotation. This is the customer's interface for steering consolidation; it is not consumed by the ReplicaSet controller.
+
+The two annotations are unrelated in semantics: one tells the ReplicaSet controller about scale-down order, the other tells Karpenter about consolidation preference. They are split because conflating them on the legacy annotation, as some customers do today, makes both jobs harder.
+
+The behavior of the controller and Karpenter's consolidation read paths is gated:
+
+- **Feature gate ON (`PodDeletionCostManagement=true`):** The controller writes `controller.kubernetes.io/pod-deletion-cost` directly on pods on Karpenter-managed nodes, computing each pod's value from its node's rank. Karpenter's consolidation scoring reads only `karpenter.sh/disruption-cost`. There is no overwrite-protection for customer-set PDC values: the gate-ON state is the user stating they are ok with us managing their deletion-cost annotations. Customers steering consolidation are expected to be on `karpenter.sh/disruption-cost` by then.
+- **Feature gate OFF (default):** The pod-deletion-cost controller's reconciler does not run. Karpenter writes nothing to `controller.kubernetes.io/pod-deletion-cost`. Karpenter's consolidation scoring reads `karpenter.sh/disruption-cost` first; if that annotation is absent on a pod, it falls back to `controller.kubernetes.io/pod-deletion-cost`. This preserves current behavior for customers who have not enabled the feature gate. Because the controller is write-disabled in this state, customer-set PDC values cannot be overwritten by Karpenter during the migration window.
 
 ### How it works
 
@@ -75,8 +89,7 @@ The controller reconciles on a periodic interval, gated behind the `PodDeletionC
 1. For nodes that have changed since last reconcile.
 2. Partitions nodes into Draining, Drifted, Disruptable, and Not Disruptable
 3. Ranks Drifted and Disruptable nodes by the current Karpenter consolidation candidate ranking function. Draining nodes get a fixed minimum value. Not Disruptable nodes are excluded from ranking.
-4. Ranks Drifted and Disruptable nodes by the current Karpenter consolidation candidate ranking function. Draining nodes are marked as the best to disrupt. Not Disruptable nodes are excluded from ranking.
-5. For each eligible node's pods, writes the pod-deletion-cost annotation along with ownership and conflict-detection annotations (the three-annotation protocol described in Risks). Skips pods with customer-set deletion costs. Nodes that drop out of scope have their managed annotations cleaned up.
+4. For each eligible node's pods, writes the pod-deletion-cost annotation along with ownership and conflict-detection annotations (the three-annotation protocol described in Risks). Skips pods with customer-set deletion costs. Nodes that drop out of scope have their managed annotations cleaned up.
 
 The hard cap of 50 nodes is the alpha default; we will collect feedback and adjust for beta. Implementation may use sparse numbering to reduce the number of annotation updates needed when individual nodes are added or removed from the ranking.
 
@@ -84,7 +97,7 @@ The hard cap of 50 nodes is the alpha default; we will collect feedback and adju
 
 No CRD changes. The feature is purely controller-side, gated behind `PodDeletionCostManagement` and configured via CLI flags / environment variables. RBAC is extended to add `update` and `patch` verbs on pods. The controller only processes pods on Karpenter-managed nodes, and the feature gate ensures the code path is dormant unless enabled. A future refinement could use server-side apply with a dedicated field manager to narrow the effective scope.
 
-This RFC also introduces `karpenter.sh/disruption-cost` as a new user-facing annotation (see Migration section below for details and precedence rules).
+This RFC also introduces `karpenter.sh/disruption-cost` as a new user-facing annotation; see Annotation roles and Migration sections.
 
 ### Configuration
 
@@ -110,23 +123,23 @@ All nodes have the same disruption cost, so the ranking engine breaks ties by no
 
 Additional examples (partial drain convergence, drifted node draining, disrupted + PDB-blocked priority) are in Appendix B.
 
-### Migration: separating consolidation steering from RS coordination
+### Migration
 
-Some Karpenter users currently set `controller.kubernetes.io/pod-deletion-cost` on their pods to influence which pods Karpenter prefers to evict during consolidation. With this controller also writing pod-deletion-cost for RS coordination, the same annotation now serves two purposes. To resolve this, we introduce `karpenter.sh/disruption-cost` as the user-facing annotation for steering consolidation behavior.
+Some Karpenter users today set `controller.kubernetes.io/pod-deletion-cost` on their pods to influence which pods Karpenter prefers to evict during consolidation. Going forward the user-facing annotation for that purpose is `karpenter.sh/disruption-cost`. We are not deprecating `controller.kubernetes.io/pod-deletion-cost` itself; its upstream Kubernetes meaning, consumed by the ReplicaSet controller, continues unchanged. We are deprecating the practice of *using it to steer Karpenter consolidation*.
 
-The consolidation scoring precedence becomes:
-1. `karpenter.sh/disruption-cost` (if set by user)
-2. `controller.kubernetes.io/pod-deletion-cost` (only if NOT auto-managed by this controller)
-3. Default
+The migration is controlled by the feature gate:
 
-When the deletion cost controller is enabled and manages a pod's deletion cost (sentinel annotation present), consolidation scoring ignores that pod's `pod-deletion-cost` since it reflects RS ranking, not user intent. Users who want to protect specific pods from consolidation should migrate to `karpenter.sh/disruption-cost`.
+- **Pre-cutover (alpha):** Feature gate off by default. The controller does not write `controller.kubernetes.io/pod-deletion-cost` unless enabled. Karpenter's consolidation scoring reads `karpenter.sh/disruption-cost` first; if absent, it falls back to `controller.kubernetes.io/pod-deletion-cost`. Customers who already set PDC for consolidation steering see no change in behavior. The deprecation announcement ships with alpha so the migration window is well-publicized.
+- **Beta:** Karpenter's consolidation scoring reads only `karpenter.sh/disruption-cost`. The fallback to `controller.kubernetes.io/pod-deletion-cost` is removed. Customers who have not migrated will see Karpenter's consolidation behavior revert to the no-steering default for the affected pods until they update their workload definitions.
+
+After promotion to beta, customers steering Karpenter consolidation must use `karpenter.sh/disruption-cost`. The legacy annotation continues to function for the ReplicaSet controller's own scale-down ordering (upstream Kubernetes behavior, unchanged), and the Karpenter controller continues to write it for that purpose when the feature gate is on.
 
 ## Observability
 
 The controller exposes the following Prometheus metrics:
 
 - `karpenter_pod_deletion_cost_nodes_ranked` (gauge): Number of nodes ranked in the most recent cycle
-- `karpenter_pod_deletion_cost_pods_updated_total` (counter, labels: result=[updated|skipped_customer|skipped_unchanged|error]): Pod annotation outcomes per cycle
+- `karpenter_pod_deletion_cost_pods_updated_total` (counter, labels: result=[updated|skipped_unchanged|error]): Pod annotation outcomes per cycle
 - `karpenter_pod_deletion_cost_ranking_duration_seconds` (histogram): Time to compute node rankings
 - `karpenter_pod_deletion_cost_annotation_duration_seconds` (histogram): Time to write pod annotations
 - `karpenter_pod_deletion_cost_reconcile_skipped_total` (counter): Cycles skipped due to no state change
@@ -135,11 +148,11 @@ A high skip rate indicates stable cluster state. Zero skips combined with high a
 
 ## Rollout and Graduation
 
-- Alpha: gate off by default, no stability guarantees. Hard cap of 50 nodes.
-- Beta: gate on by default, API stable, cleanup-on-disable implemented, evaluate topology-aware ranking factors, adjust node cap based on feedback.
-- GA: evaluate always on vs keeping the feature gate going forward.
-- Rollback from beta: disabling the gate stops new annotation writes. Existing annotations persist on pods until those pods are replaced. Cleanup-on-disable (removing managed annotations when the gate is turned off) is a beta deliverable to make rollback clean.
-- Migration requires no action on upgrade; enabling requires RBAC review and annotation audit.
+- **Alpha:** gate off by default, no stability guarantees. Hard cap of 50 nodes. Karpenter's consolidation reads `karpenter.sh/disruption-cost` first with fallback to `controller.kubernetes.io/pod-deletion-cost`. The controller does not run. Deprecation announcement for the consolidation-steering use of the legacy annotation goes out in the alpha release notes.
+- **Beta:** gate on by default, API stable. Migration to `karpenter.sh/disruption-cost` should be complete.
+- **GA:** Evaluate always on vs keeping the feature gate going forward.
+- **Rollback from beta:** disabling the gate stops new annotation writes. Existing `controller.kubernetes.io/pod-deletion-cost` annotations the controller wrote persist on pods until those pods are replaced (and continue to be honored by the ReplicaSet controller in the meantime, which is benign). Cleanup-on-disable (removing controller-written annotations when the gate is turned off) is a beta deliverable to make rollback clean.
+- **Upgrade requirements:** before adopting the cutover Karpenter release, operators must replace any remaining `controller.kubernetes.io/pod-deletion-cost` annotations they relied on for Karpenter consolidation steering with `karpenter.sh/disruption-cost`. Enabling the feature gate also requires the standard RBAC review.
 
 ## Alternatives Considered
 
@@ -153,13 +166,23 @@ The ranking strategies that matter most require the same cluster state Karpenter
 
 The ranking function should be factored into a shared location that the consolidation controller can also consume, establishing a single source of truth for "how much do we want to consolidate this node." This avoids drift between the deletion cost controller's ranking and consolidation candidate selection.
 
+### Continue overloading `controller.kubernetes.io/pod-deletion-cost` for consolidation steering
+
+We could leave `controller.kubernetes.io/pod-deletion-cost` as the single annotation that does both jobs (hint to the ReplicaSet controller and steer Karpenter consolidation) and design a coexistence protocol so the new controller's writes don't clobber customer-set values. An earlier draft of this RFC took that approach: a three-annotation ownership/conflict-detection protocol with `karpenter.sh/managed-deletion-cost` and `karpenter.sh/last-assigned-deletion-cost`.
+
+We chose against it because one annotation cannot carry two different meanings at once. The ReplicaSet controller wants to be told which pods to delete first. Karpenter consolidation wants to be told which pods customers care about preserving. The values that satisfy each interpretation are not the same, and sometimes point in opposite directions. Splitting the two purposes onto two annotations gives each a single owner and a single semantic, eliminates the ownership protocol, and lets Karpenter's controller write `controller.kubernetes.io/pod-deletion-cost` freely without negotiating with customer-set values.
+
+### Coexistence protocol without a forced cutover
+
+We could keep the multi-annotation coexistence protocol indefinitely, never forcing migration. Doing so leaves the protocol's complexity (ownership flag, last-assigned tracking, restart-safe conflict detection) in the controller indefinitely. The protocol exists only to handle pods where a customer has set the legacy annotation for consolidation steering; once customers have migrated to `karpenter.sh/disruption-cost`, the protocol carries no traffic. The next K8s minor cutover provides a single boundary at which to retire it.
+
 ## Risks and Mitigations
 
-- **Stale annotations after controller is disabled (Medium):** Pods retain annotations indefinitely when the feature gate is turned off. *Mitigation:* Annotations live on pods, which are ephemeral. New pods start clean. Staleness is bounded by pod lifetime. Cleanup-on-disable is a beta deliverable that will actively remove managed annotations when the gate is turned off.
+- **Stale annotations after controller is disabled (Medium):** Pods retain `controller.kubernetes.io/pod-deletion-cost` values written by the controller indefinitely when the feature gate is turned off. This is benign for the ReplicaSet controller (the values still rank Karpenter-managed nodes' pods reasonably), but operators may want a clean slate. *Mitigation:* Annotations live on pods, which are ephemeral. New pods start clean. Staleness is bounded by pod lifetime. Cleanup-on-disable is a beta deliverable that will actively remove controller-written annotations when the gate is turned off.
 
 - **Consolidation-optimized deletions may temporarily violate topology spread constraints (Low):** When the controller concentrates deletions on specific nodes, the resulting pod distribution may temporarily violate `topologySpreadConstraints` until the scheduler places replacement pods. This is the same behavior as the current spreading heuristic; neither approach guarantees constraint satisfaction during scale-down. The Kubernetes scheduler enforces topology spread when placing new pods, so any temporary imbalance is corrected on the next scheduling cycle. Operators with strict spreading requirements can leave the feature disabled. Graduation criteria: "Beta: evaluate whether topology-aware ranking factors should be added."
 
-- **Annotation conflicts with customer-set pod deletion costs (Medium):** An operator or another controller may have already set `controller.kubernetes.io/pod-deletion-cost` on pods. If Karpenter overwrites those values, it silently breaks the operator's intended behavior. *Mitigation:* Three-annotation protocol. Karpenter sets three annotations when managing a pod: (1) `controller.kubernetes.io/pod-deletion-cost: "<rank>"` for the RS controller, (2) `karpenter.sh/managed-deletion-cost: "true"` as an ownership flag, (3) `karpenter.sh/last-assigned-deletion-cost: "<rank>"` recording what Karpenter last wrote. If a pod has a deletion cost but lacks the ownership flag, it is treated as customer-managed and skipped. If a pod has the ownership flag but its current pod-deletion-cost differs from last-assigned, a third party changed the value and Karpenter yields control (removes its annotations, skips the pod). This mechanism survives controller restarts because the expected value is persisted on the pod itself. Karpenter-managed ranks are always negative (starting at -n), so customer-set positive values naturally take precedence without special handling.
+- **Customers who miss the migration window (Medium):** A customer who is using `controller.kubernetes.io/pod-deletion-cost` for Karpenter consolidation steering today and does not migrate before adopting the cutover Karpenter release will see Karpenter's consolidation behavior revert to the no-steering default for those pods (the `controller.kubernetes.io/pod-deletion-cost` annotation continues to influence the ReplicaSet controller's scale-down ordering, but no longer Karpenter's consolidation scoring). *Mitigation:* The deprecation announcement ships at alpha, giving a full release cycle of advance notice before the cutover. The fallback path during alpha and beta means existing configurations work unchanged until the customer voluntarily upgrades to the cutover release. Release notes for the cutover release will call out the change explicitly. Customers upgrading their Kubernetes minor are already in a workload-review window where annotation churn is expected.
 
 ## Open Questions
 
@@ -170,9 +193,8 @@ The ranking function should be factored into a shared location that the consolid
 ### Security
 
 - **RBAC expansion:** Karpenter's ClusterRole gains `update` and `patch` on pods (cluster-wide). Minimum privilege needed for annotation management. Operators with tightly scoped RBAC should review.
-- **No secrets or sensitive data:** Annotations contain only integer rank values and a boolean flag.
+- **No secrets or sensitive data:** Annotations contain only integer rank values.
 - **No new network access:** Communicates only with the Kubernetes API server using the existing service account.
-- **Annotation injection:** A malicious actor with pod write access could set `karpenter.sh/managed-deletion-cost: "true"` to trick Karpenter into managing their deletion cost. Low severity since the attacker already needs pod write access.
 
 ### Performance
 
@@ -255,7 +277,7 @@ The [kubernetes/enhancements#5982](https://github.com/kubernetes/enhancements/is
 - Ships entirely within Karpenter (no upstream Kubernetes changes required)
 - Works with all existing Kubernetes versions that support pod-deletion-cost
 - Can be feature-gated and iterated on independently
-- Tradeoff: operational complexity (annotation management, change detection, three-annotation protocol)
+- Tradeoff: operational complexity (annotation management, change detection, reconcile loop)
 
 **KEP (on hold):**
 - Eliminates the need for an external annotation-management controller
@@ -270,7 +292,7 @@ The [kubernetes/enhancements#5982](https://github.com/kubernetes/enhancements/is
 
 Multiple systems may want to influence pod deletion priority: the node autoscaler (consolidation targets), a drift controller (nodes needing replacement), a traffic shaper (replicas already being drained), or the scheduler (topology-aware candidates). Today these would all fight over a single annotation.
 
-A dedicated API object (for example, a `PodDisruptionPreference` resource or a new field on NodeClaim) would let each system express its input independently using server-side apply with distinct field managers. A reconciler would merge these inputs into the final `pod-deletion-cost` annotation that the RS controller consumes.
+A dedicated API object (for example, a `PodDisruptionPreference` resource or a new field on NodeClaim) would let each system express its input independently using server-side apply with distinct field managers. A reconciler would merge these inputs into the final `controller.kubernetes.io/pod-deletion-cost` annotation that the ReplicaSet controller consumes.
 
 ### Scheduler library integration
 
@@ -278,4 +300,4 @@ As Karpenter upstreams into the kube-scheduler via the scheduler library, the me
 
 ### Deprecation path
 
-Once a proper API or scheduler integration exists, the annotation-management controller described in this RFC can be deprecated. The controller is designed to be replaceable: it writes standard `pod-deletion-cost` annotations that any future mechanism would also produce. No workload changes would be needed when migrating to a better signal delivery mechanism.
+Once a proper API or scheduler integration exists, the annotation-management controller described in this RFC can be deprecated. The controller is designed to be replaceable: it writes standard `controller.kubernetes.io/pod-deletion-cost` annotations that any future mechanism would also produce. No workload changes would be needed when migrating to a better signal delivery mechanism.
