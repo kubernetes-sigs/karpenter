@@ -166,6 +166,7 @@ var _ = AfterEach(func() {
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
 	disruption.NodepoolDecisionsPerformed.Reset()
+	disruption.EvaluationDurationSeconds.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -1946,6 +1947,25 @@ var _ = Describe("Metrics", func() {
 			metrics.NodePoolLabel: nodePool.Name,
 			"decision":            "delete",
 			metrics.ReasonLabel:   "empty",
+		})
+	})
+	It("should fire evaluation duration metrics for every attempted disruption method", func() {
+		nodeClaims[0].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+		pod := test.Pod()
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaims[0], nodes[0], pod)
+		ExpectManualBinding(ctx, env.Client, pod, nodes[0])
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
+		ExpectSingletonReconciled(ctx, disruptionController)
+
+		ExpectMetricHistogramSampleCountValue("karpenter_voluntary_disruption_decision_evaluation_duration_seconds", 1, map[string]string{
+			disruption.MethodLabel: "Emptiness",
+			metrics.ReasonLabel:    "empty",
+		})
+		ExpectMetricHistogramSampleCountValue("karpenter_voluntary_disruption_decision_evaluation_duration_seconds", 1, map[string]string{
+			disruption.MethodLabel: "StaticDrift",
+			metrics.ReasonLabel:    "drifted",
 		})
 	})
 	It("should fire metrics for single node delete disruption", func() {

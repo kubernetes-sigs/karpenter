@@ -21,6 +21,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -181,6 +182,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
+		MethodLabel:            methodLabel(disruption),
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
@@ -228,6 +230,14 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 	return true, nil
+}
+
+func methodLabel(method Method) string {
+	t := reflect.TypeOf(method)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t.Name()
 }
 
 func (c *Controller) recordRun(s string) {
