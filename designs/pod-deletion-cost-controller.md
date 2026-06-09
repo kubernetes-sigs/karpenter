@@ -41,7 +41,7 @@ Only Drifted and Disruptable nodes receive sequential negative ranks such that n
 
 ### Why Karpenter is the right place for this
 
-Karpenter already maintains the cluster state (`state.Cluster`) needed to rank nodes. A standalone controller would duplicate this informer cache, adding redundant API server watch load. The ranking function is the same function as consolidation candidate sorting; co-locating them prevents divergence between "how Karpenter picks consolidation targets" and "how pods are ranked for deletion." This controller extends Karpenter's node-level reasoning to influence ReplicaSet behavior, reusing the same sort order. It does not run the scheduling simulation or make consolidation decisions itself. It helps the ReplicaSet controller set up better consolidation opportunities by concentrating scale-down on the right nodes. Because the ranking lives inside Karpenter, future iterations can incorporate scheduling constraints like topology spread constraints without re-deriving signals independently.
+Karpenter already maintains the cluster state (`state.Cluster`) needed to rank nodes. A standalone controller would duplicate this informer cache, adding redundant API server watch load. The ranking is also literally the same function the consolidation controller uses to sort candidates: the deletion cost controller calls the consolidation controller's exported sort, rather than defining its own. See "Shared ranking function" below. That keeps "how Karpenter picks consolidation targets" and "how pods are ranked for deletion" as one piece of code with one owner. This controller extends Karpenter's node-level reasoning to influence ReplicaSet behavior, reusing the same sort order. It does not run the scheduling simulation or make consolidation decisions itself. It helps the ReplicaSet controller set up better consolidation opportunities by concentrating scale-down on the right nodes. Future changes to consolidation candidate selection (e.g. topology-aware factors) automatically flow through.
 
 ### Evidence
 
@@ -88,10 +88,16 @@ The controller reconciles on a periodic interval, gated behind the `PodDeletionC
 
 1. For nodes that have changed since last reconcile.
 2. Partitions nodes into Draining, Drifted, Disruptable, and Not Disruptable
-3. Ranks Drifted and Disruptable nodes by the current Karpenter consolidation candidate ranking function. Draining nodes get a fixed minimum value. Not Disruptable nodes are excluded from ranking.
+3. Ranks Drifted and Disruptable nodes by calling the shared candidate ranking function described in "Shared ranking function" below. Draining nodes get a fixed minimum value. Not Disruptable nodes are excluded from ranking.
 4. For each eligible node's pods, writes the pod-deletion-cost annotation along with ownership and conflict-detection annotations (the three-annotation protocol described in Risks). Skips pods with customer-set deletion costs. Nodes that drop out of scope have their managed annotations cleaned up.
 
 The hard cap of 50 nodes is the alpha default; we will collect feedback and adjust for beta. Implementation may use sparse numbering to reduce the number of annotation updates needed when individual nodes are added or removed from the ranking.
+
+### Shared ranking function
+
+The deletion cost controller does not define its own node-ranking algorithm. It calls the same exported function the consolidation controller uses to order candidates. Today that is `sortCandidates` in `pkg/controllers/disruption/consolidation.go`. The Balanced Consolidation work in [#2962](https://github.com/kubernetes-sigs/karpenter/pull/2962) reshapes that sort from disruption-cost ascending to savings-ratio descending. The implementation will lift the comparator out of `sortCandidates` into an exported helper in the same package so both consumers depend on it directly.
+
+This is a design constraint, not an implementation note. There is one source of truth for "how much do we want to consolidate this node," owned by the consolidation controller. Future changes to candidate selection (different cost factors, topology awareness, scheduling-feasibility filters) automatically flow into the deletion cost controller without re-derivation. The deletion cost controller composes additional behavior on top of the shared rank: partitioning by Draining/Drifted/Disruptable/Not Disruptable, mapping to negative integer values, and writing pod annotations. Those concerns are specific to RS coordination and stay here.
 
 ### API changes
 
@@ -162,9 +168,7 @@ Pod-level ranking spreads ReplicaSet deletions across many nodes rather than con
 
 ### Standalone controller outside Karpenter
 
-The ranking strategies that matter most require the same cluster state Karpenter already maintains in its state.Cluster informer cache. A standalone controller would duplicate this state and API server watch load. If the ranking logic evolves to directly consume Karpenter's consolidation scoring, that integration is trivial when they share a process. The operational cost is also higher: separate RBAC, Helm chart, release lifecycle, etc. For a feature tightly coupled to consolidation behavior, co-location is the right call, but the controller could certainly be kept independent and still work the same.
-
-The ranking function should be factored into a shared location that the consolidation controller can also consume, establishing a single source of truth for "how much do we want to consolidate this node." This avoids drift between the deletion cost controller's ranking and consolidation candidate selection.
+The ranking strategies that matter most require the same cluster state Karpenter already maintains in its state.Cluster informer cache. A standalone controller would duplicate this state and API server watch load. The operational cost is also higher: separate RBAC, Helm chart, release lifecycle, etc. For a feature tightly coupled to consolidation behavior, co-location is the right call, but the controller could certainly be kept independent and still work the same. The "Shared ranking function" subsection above describes how this design avoids ranking-logic drift regardless of which process the controller runs in.
 
 ### Continue overloading `controller.kubernetes.io/pod-deletion-cost` for consolidation steering
 
