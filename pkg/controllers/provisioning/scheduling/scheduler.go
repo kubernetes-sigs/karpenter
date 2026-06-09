@@ -728,7 +728,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
 		r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
 		if err != nil {
-			errs[i] = err
+			errs[i] = serrors.Wrap(err, "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 
 			// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
 			// with a lower weight. We could consider allowing "fallback" to NodePools with equal weight if they also have
@@ -786,7 +786,48 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil
 	}
+	sortSchedulingErrors(errs)
 	return multierr.Combine(errs...)
+}
+
+func sortSchedulingErrors(errs []error) {
+	sort.SliceStable(errs, func(i, j int) bool {
+		return schedulingErrorRank(errs[i]) < schedulingErrorRank(errs[j])
+	})
+}
+
+func schedulingErrorRank(err error) int {
+	if err == nil {
+		return 100
+	}
+	var instanceTypeFilterError InstanceTypeFilterError
+	if errors.As(err, &instanceTypeFilterError) {
+		if !instanceTypeFilterError.fits {
+			return 0
+		}
+		if !instanceTypeFilterError.requirementsMet {
+			return 10
+		}
+		if !instanceTypeFilterError.hasOffering {
+			return 20
+		}
+		return 30
+	}
+	errString := err.Error()
+	switch {
+	case strings.Contains(errString, "exceed") && strings.Contains(errString, "resources"):
+		return 0
+	case strings.Contains(errString, "incompatible requirements"):
+		return 10
+	case strings.Contains(errString, "offering"):
+		return 20
+	case strings.Contains(errString, "host port") || strings.Contains(errString, "volume"):
+		return 30
+	case strings.Contains(errString, "did not tolerate taint"):
+		return 40
+	default:
+		return 50
+	}
 }
 
 func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod, nodePoolMap map[string]*v1.NodePool, enforceConsolidateAfter bool) {
