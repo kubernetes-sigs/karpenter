@@ -89,7 +89,7 @@ The controller reconciles on a periodic interval, gated behind the `PodDeletionC
 1. For nodes that have changed since last reconcile.
 2. Partitions nodes into Draining, Drifted, Disruptable, and Not Disruptable
 3. Ranks Drifted and Disruptable nodes by calling the shared candidate ranking function described in "Shared ranking function" below. Draining nodes get a fixed minimum value. Not Disruptable nodes are excluded from ranking.
-4. For each eligible node's pods, writes the pod-deletion-cost annotation along with ownership and conflict-detection annotations (the three-annotation protocol described in Risks). Skips pods with customer-set deletion costs. Nodes that drop out of scope have their managed annotations cleaned up.
+4. For each eligible node's pods, writes `controller.kubernetes.io/pod-deletion-cost` with the value derived from the node's rank. The controller writes this annotation directly: with the gate on, customer-set values on these pods are overwritten (customers steering Karpenter consolidation are expected to be on `karpenter.sh/disruption-cost` by then). Nodes that drop out of scope have their managed annotations cleaned up.
 
 The hard cap of 50 nodes is the alpha default; we will collect feedback and adjust for beta. Implementation may use sparse numbering to reduce the number of annotation updates needed when individual nodes are added or removed from the ranking.
 
