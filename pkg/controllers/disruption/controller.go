@@ -234,7 +234,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 
 func methodLabel(method Method) string {
 	t := reflect.TypeOf(method)
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t.Name()
