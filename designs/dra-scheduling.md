@@ -615,35 +615,3 @@ When the scheduling loop completes and NodeClaims are finalized:
 1. Collect the set of DRA driver names from all ResourceClaims of pods scheduled to the NodeClaim.
 2. Set the `karpenter.sh/dra-drivers` annotation on the NodeClaim (per the lifecycle doc).
 3. The finalized NodeClaim carries both the standard resource requests and the DRA driver annotation for the initialization controller to gate on.
-
----
-
-## Resolved Design Decisions
-
-1. **Single DFS per instance type**: The allocator uses a single DFS traversal per instance type with in-cluster devices iterated before template devices, rather than a two-stage approach (Stage 1: in-cluster only, Stage 2: per-instance-type in-flight). The DFS search order *is* the prioritization mechanism — in-cluster devices are naturally preferred (tried first), and the search falls through to template devices when needed. This is simpler and avoids the artificial stage boundary that would prevent inter-request constraints from spanning in-cluster and template devices within a single search.
-
-2. **DFS timeout**: 5 second per-pod timeout, with the overall scheduling loop timeout as a hard upper bound.
-
-3. **CEL cache scope**: Created per `Allocate()` call (per child allocator) to avoid write-contention on cache misses. Sharing on the top-level allocator with RWMutex protection was considered but the performance tradeoff has not been validated as worthwhile.
-
-4. **Pool cache strategy**: Incrementally narrowed. On commit, the cache stores the pre-filter pool superset. On subsequent allocations, this superset is re-filtered against tightened requirements.
-
-5. **All-mode device handling**: Pre-compute the predetermined device set per instance type during validation and store in `RequestData` (within `ClaimData.Requests`).
-
-6. **Unsupported constraint types**: Fail the allocation for the claim, following upstream behavior. Unknown constraint types indicate API version skew.
-
-7. **Attribute binding integration with MatchAttribute**: Attribute bindings are a fallback only — consulted when the constrained attribute is absent from the in-memory template. The concrete and binding paths are mutually exclusive per attribute. A single claim may have multiple `MatchAttribute` constraints where some use direct comparison and others use bindings.
-
-8. **Deleting nodes and ResourceSlices**: ResourceSlices owned by deleting nodes are excluded from the allocator's in-cluster slice set at construction time (not inside the allocator). Ownership is determined via `metadata.ownerReferences`. This is distinct from deleting-pod device filtering — deleting-node filtering removes *capacity*; deleting-pod filtering removes *allocations*.
-
-9. **ResourceClaim state classification**: All of a pod's ResourceClaims are passed to the allocator regardless of state. Already-allocated claims (in-cluster and in-memory) contribute topology requirements and may cause early failure; only unallocated claims proceed through DFS.
-
-10. **In-memory claim reuse**: Per-claim allocation metadata (NodeClaim ID, template device usage, topology) is recorded on commit and used to short-circuit DFS when subsequent pods reference the same ResourceClaim.
-
-11. **Instance type release**: `ReleaseInstanceType()` enables the scheduler to free device reservations when pruning instance types, preventing phantom resource exhaustion.
-
----
-
-## Open Design Decisions
-
-1. **Error reporting**: When allocation fails for all instance types, the error should indicate *why* — selector mismatch, constraint violation, or insufficient devices. However, with potentially hundreds of instance types, reporting per-instance-type failure reasons has high cardinality. This needs further design exploration before inclusion.
