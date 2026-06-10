@@ -58,18 +58,6 @@ Karpenter must make provisioning decisions for pods that require DRA devices bef
 
 2. **Cross-NodeClaim device contention.** Multiple NodeClaims may compete for the same in-cluster devices. Since only one instance type will ultimately be provisioned per NodeClaim, the allocator must track device reservations at the correct granularity: globally across NodeClaims, but conditionally within a single NodeClaim's instance type candidates.
 
-### Key References
-
-| Reference | Path |
-|-----------|------|
-| Upstream stable allocator | `/Users/jmdeal/projects/kubernetes/staging/src/k8s.io/dynamic-resource-allocation/structured/internal/stable/` |
-| Attribute bindings impl | `/Users/jmdeal/projects/karpenter/pkg/scheduling/dynamicresources/attributebindings.go` |
-| Attribute bindings tests | `/Users/jmdeal/projects/karpenter/pkg/scheduling/dynamicresources/suite_test.go` |
-| Karpenter scheduler | `pkg/controllers/provisioning/scheduling/scheduler.go` |
-| NodeClaim scheduling | `pkg/controllers/provisioning/scheduling/nodeclaim.go` |
-| NodeClaim lifecycle doc | `designs/dra/nodeclaim-lifecycle.md` |
-| Cloud provider doc | `designs/dra/cloudprovider.md` |
-
 ---
 
 ## Scope Exclusions
