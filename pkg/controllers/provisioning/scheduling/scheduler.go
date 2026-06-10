@@ -52,9 +52,9 @@ import (
 )
 
 const (
-	// podSchedulingErrorLogTimeout defines how long to wait before logging the same pod scheduling error again.
+	// PodSchedulingErrorLogTimeout defines how long to wait before logging the same pod scheduling error again.
 	// This prevents log spam when a pod repeatedly fails to schedule for expected reasons (e.g., incompatible NodePool).
-	podSchedulingErrorLogTimeout = 5 * time.Minute
+	PodSchedulingErrorLogTimeout = 5 * time.Minute
 )
 
 type ReservedOfferingMode int
@@ -96,6 +96,7 @@ type options struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+	logErrorCache           *cache.Cache
 }
 
 type Options = option.Function[options]
@@ -117,6 +118,18 @@ var NumConcurrentReconciles = func(numConcurrentReconciles int) func(*options) {
 var MinValuesPolicy = func(policy karpopts.MinValuesPolicy) func(*options) {
 	return func(opts *options) {
 		opts.minValuesPolicy = policy
+	}
+}
+
+// WithLogErrorCache enables deduplication of pod scheduling error logs by sharing
+// a cache across scheduling runs. Without this option the scheduler does no log
+// dedup and emits an error log every time a pod fails to schedule. Callers that
+// suppress logs anyway (e.g. disruption simulations using NopLogger) should NOT
+// supply this option, because writing to a shared cache would silently suppress
+// real provisioning logs for the same pod+error pair.
+var WithLogErrorCache = func(c *cache.Cache) func(*options) {
+	return func(opts *options) {
+		opts.logErrorCache = c
 	}
 }
 
@@ -183,6 +196,7 @@ func NewScheduler(
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
 		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
+		logErrorCache:           option.Resolve(opts...).logErrorCache,
 	}
 	s.calculateExistingNodeClaims(ctx, stateNodes, daemonSetPods)
 	return s
@@ -215,6 +229,7 @@ type Scheduler struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+	logErrorCache           *cache.Cache
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -326,7 +341,7 @@ func (r Results) shouldLogPodError(p *corev1.Pod, err error) bool {
 	if _, found := r.logErrorCache.Get(key); found {
 		return false
 	}
-	r.logErrorCache.Set(key, nil, podSchedulingErrorLogTimeout)
+	r.logErrorCache.Set(key, nil, PodSchedulingErrorLogTimeout)
 	return true
 }
 
@@ -463,7 +478,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
 		PodErrors:     podErrors,
-		logErrorCache: cache.New(podSchedulingErrorLogTimeout, 10*time.Minute),
+		logErrorCache: s.logErrorCache,
 	}, ctx.Err()
 }
 

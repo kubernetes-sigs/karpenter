@@ -29,6 +29,7 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/patrickmn/go-cache"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -86,6 +87,10 @@ type Provisioner struct {
 	recorder       events.Recorder
 	cm             *pretty.ChangeMonitor
 	clock          clock.Clock
+	// logErrorCache deduplicates pod scheduling error logs across scheduling cycles. It is
+	// owned by the Provisioner (a long-lived singleton) so dedup survives across Reconcile
+	// calls. Mirrors the instance-scoped cache pattern in events.Recorder.
+	logErrorCache *cache.Cache
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
@@ -101,6 +106,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		recorder:       recorder,
 		cm:             pretty.NewChangeMonitor(),
 		clock:          clock,
+		logErrorCache:  cache.New(scheduler.PodSchedulingErrorLogTimeout, 10*time.Minute),
 	}
 	return p
 }
@@ -345,6 +351,11 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		scheduler.DisableReservedCapacityFallback,
 		scheduler.NumConcurrentReconciles(int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))),
 		scheduler.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy),
+		// Only the provisioning path enables log deduplication; disruption
+		// simulations call NewScheduler without this option so their
+		// (already log-suppressed) failures do not pollute the cache and
+		// silently hide real provisioning errors for the same pod.
+		scheduler.WithLogErrorCache(p.logErrorCache),
 	}
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduler.IgnorePreferences)
