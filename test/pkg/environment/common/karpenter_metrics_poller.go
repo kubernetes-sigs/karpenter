@@ -17,19 +17,19 @@ limitations under the License.
 package common
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
 type ResourceSample struct {
@@ -217,40 +217,33 @@ func (mp *KarpenterMetricsPoller) scrapeMetrics(ctx context.Context, podName str
 		return 0, 0, fmt.Errorf("proxy GET /metrics: %w", err)
 	}
 
-	var foundMem, foundCPU bool
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		if v, ok := parseMetricLine(line, "process_resident_memory_bytes "); ok {
-			memBytes = v
-			foundMem = true
-		} else if v, ok := parseMetricLine(line, "process_cpu_seconds_total "); ok {
-			cpuSeconds = v
-			foundCPU = true
-		}
-		if foundMem && foundCPU {
-			break
-		}
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+	families, err := parser.TextToMetricFamilies(bytes.NewReader(data))
+	if err != nil {
+		return 0, 0, fmt.Errorf("parsing metrics: %w", err)
 	}
 
-	if !foundMem || !foundCPU {
-		return 0, 0, &metricsNotFoundError{foundMem: foundMem, foundCPU: foundCPU}
+	memBytes = getGaugeValue(families, "process_resident_memory_bytes")
+	cpuSeconds = getCounterValue(families, "process_cpu_seconds_total")
+
+	if memBytes == 0 && cpuSeconds == 0 {
+		return 0, 0, &metricsNotFoundError{foundMem: false, foundCPU: false}
 	}
 	return memBytes, cpuSeconds, nil
 }
 
-func parseMetricLine(line, prefix string) (float64, bool) {
-	if !strings.HasPrefix(line, prefix) {
-		return 0, false
+func getGaugeValue(families map[string]*dto.MetricFamily, name string) float64 {
+	if mf, ok := families[name]; ok && len(mf.GetMetric()) > 0 {
+		return mf.GetMetric()[0].GetGauge().GetValue()
 	}
-	v, err := strconv.ParseFloat(strings.TrimPrefix(line, prefix), 64)
-	if err != nil {
-		return 0, false
+	return 0
+}
+
+func getCounterValue(families map[string]*dto.MetricFamily, name string) float64 {
+	if mf, ok := families[name]; ok && len(mf.GetMetric()) > 0 {
+		return mf.GetMetric()[0].GetCounter().GetValue()
 	}
-	return v, true
+	return 0
 }
 
 func (mp *KarpenterMetricsPoller) recordError(err error) {
