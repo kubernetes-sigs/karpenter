@@ -45,7 +45,7 @@ func (c *PodErrorCache) ShouldLog(p *corev1.Pod, err error) bool {
 	if c == nil {
 		return true
 	}
-	key := fmt.Sprintf("%s:%T", p.UID, err)
+	key := fmt.Sprintf("%s:%s", p.UID, err.Error())
 	if _, found := c.cache.Get(key); found {
 		return false
 	}
