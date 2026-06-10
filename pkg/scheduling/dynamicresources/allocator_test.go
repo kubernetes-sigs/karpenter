@@ -122,6 +122,7 @@ func makeTemplate(driver, pool string, deviceNames ...string) *cloudprovider.Res
 	}
 }
 
+// nolint:unparam
 func makeTemplateWithAttrs(driver, pool string, specs ...apiDeviceSpec) *cloudprovider.ResourceSliceTemplate {
 	devices := make([]cloudprovider.Device, len(specs))
 	for i, spec := range specs {
