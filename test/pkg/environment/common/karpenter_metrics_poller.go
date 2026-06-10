@@ -18,12 +18,11 @@ package common
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,30 +30,27 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
-	"k8s.io/apimachinery/pkg/util/rand"
 )
 
-// ResourceSample represents a single point-in-time measurement of container resource usage
 type ResourceSample struct {
 	Timestamp time.Time
-	MemoryMB  float64
-	CPUCores  float64
+	MemoryMB  float64 // process resident memory in MB
+	CPUCores  float64 // CPU usage rate in cores (computed from delta)
 }
 
-// ResourceStats holds aggregated statistics computed from a time series of samples
 type ResourceStats struct {
-	P95MemoryMB float64
-	AvgMemoryMB float64
-	MaxMemoryMB float64
-	P95CPUCores float64
-	AvgCPUCores float64
-	MaxCPUCores float64
-	SampleCount int
+	P95MemoryMB float64 // 95th percentile memory usage in MB
+	AvgMemoryMB float64 // average memory usage in MB
+	MaxMemoryMB float64 // peak memory usage in MB
+	P95CPUCores float64 // 95th percentile CPU usage in cores
+	AvgCPUCores float64 // average CPU usage in cores
+	MaxCPUCores float64 // peak CPU usage in cores
+	SampleCount int     // number of samples collected
 }
 
-// KarpenterMetricsPoller polls the Karpenter pod's /metrics endpoint directly
-// for process-level CPU and memory usage. It uses a single long-lived port-forward
-// and computes CPU rate from the delta of process_cpu_seconds_total between samples.
+// KarpenterMetricsPoller polls the Karpenter pod's /metrics endpoint via the
+// API server pod proxy for process-level CPU and memory usage. It computes
+// CPU rate from the delta of process_cpu_seconds_total between samples.
 type KarpenterMetricsPoller struct {
 	env     *Environment
 	mu      sync.Mutex
@@ -64,8 +60,6 @@ type KarpenterMetricsPoller struct {
 	errors  int
 }
 
-// StartKarpenterMetricsPoller begins polling the Karpenter pod's /metrics endpoint
-// for process resource usage every 5 seconds.
 func StartKarpenterMetricsPoller(env *Environment) *KarpenterMetricsPoller {
 	ctx, cancel := context.WithCancel(env.Context)
 	mp := &KarpenterMetricsPoller{
@@ -77,7 +71,6 @@ func StartKarpenterMetricsPoller(env *Environment) *KarpenterMetricsPoller {
 	return mp
 }
 
-// Stop stops the poller and returns aggregated resource statistics.
 func (mp *KarpenterMetricsPoller) Stop() ResourceStats {
 	mp.cancel()
 	<-mp.done
@@ -97,11 +90,8 @@ func (mp *KarpenterMetricsPoller) Stop() ResourceStats {
 	return stats
 }
 
-// pollerState holds mutable state for the polling loop
 type pollerState struct {
-	localPort      int
-	pfCtx          context.Context
-	pfCancel       context.CancelFunc
+	podName        string
 	prevCPUSeconds float64
 	prevTime       time.Time
 	firstSample    bool
@@ -111,44 +101,45 @@ type pollerState struct {
 func (mp *KarpenterMetricsPoller) run(ctx context.Context) {
 	defer close(mp.done)
 
-	state := &pollerState{
-		localPort:   rand.IntnRange(10000, 49151),
-		firstSample: true,
-	}
-	state.pfCtx, state.pfCancel = context.WithCancel(ctx)
-	defer state.pfCancel()
+	state := &pollerState{firstSample: true}
 
-	GinkgoWriter.Printf("KarpenterMetricsPoller: starting, establishing port-forward on local port %d\n", state.localPort)
-
-	if err := mp.establishPortForward(state.pfCtx, state.localPort); err != nil {
-		mp.recordError(fmt.Errorf("initial port-forward failed: %w", err))
+	pod, err := mp.env.FindActiveKarpenterPod(ctx)
+	if err != nil || pod == nil {
+		mp.recordError(fmt.Errorf("finding karpenter pod: %w", err))
 		return
 	}
-	GinkgoWriter.Printf("KarpenterMetricsPoller: port-forward established successfully on port %d\n", state.localPort)
+	state.podName = pod.Name
+	GinkgoWriter.Printf("KarpenterMetricsPoller: starting, scraping pod %s/%s via API server proxy\n", pod.Namespace, pod.Name)
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
-		if !mp.pollOnce(ctx, state) {
-			return
-		}
+		mp.pollOnce(ctx, state)
 		select {
 		case <-ctx.Done():
 			GinkgoWriter.Printf("KarpenterMetricsPoller: context canceled, collected %d samples total\n", state.sampleNum)
-			state.pfCancel()
 			return
 		case <-ticker.C:
 		}
 	}
 }
 
-// pollOnce performs a single scrape and records the sample. Returns false if the poller should stop.
-func (mp *KarpenterMetricsPoller) pollOnce(ctx context.Context, state *pollerState) bool {
+func (mp *KarpenterMetricsPoller) pollOnce(ctx context.Context, state *pollerState) {
 	now := time.Now()
-	memBytes, cpuSeconds, err := mp.scrapeMetrics(state.localPort)
+	memBytes, cpuSeconds, err := mp.scrapeMetrics(ctx, state.podName)
 	if err != nil {
-		return mp.handleScrapeError(ctx, state, err)
+		var notFound *metricsNotFoundError
+		if !errors.As(err, &notFound) {
+			// Pod may have been replaced (e.g. leader election change). Try to find the new one.
+			if pod, findErr := mp.env.FindActiveKarpenterPod(ctx); findErr == nil && pod != nil && pod.Name != state.podName {
+				GinkgoWriter.Printf("KarpenterMetricsPoller: active pod changed from %s to %s\n", state.podName, pod.Name)
+				state.podName = pod.Name
+				state.firstSample = true
+			}
+		}
+		mp.recordError(err)
+		return
 	}
 
 	if state.firstSample {
@@ -156,11 +147,10 @@ func (mp *KarpenterMetricsPoller) pollOnce(ctx context.Context, state *pollerSta
 	} else {
 		mp.recordSample(state, now, memBytes, cpuSeconds)
 	}
-	return true
 }
 
-// metricsNotFoundError indicates the HTTP request succeeded but the response
-// didn't contain the expected metrics (pod is temporarily overloaded/busy).
+// metricsNotFoundError indicates the HTTP response was missing expected metrics
+// (pod temporarily overloaded).
 type metricsNotFoundError struct {
 	foundMem bool
 	foundCPU bool
@@ -168,32 +158,6 @@ type metricsNotFoundError struct {
 
 func (e *metricsNotFoundError) Error() string {
 	return fmt.Sprintf("metrics not found in response (mem=%v, cpu=%v)", e.foundMem, e.foundCPU)
-}
-
-func (mp *KarpenterMetricsPoller) handleScrapeError(ctx context.Context, state *pollerState, err error) bool {
-	mp.recordError(err)
-
-	// If the response came back but was missing metrics, the pod is just busy.
-	// Skip this sample and try again next tick — don't tear down the port-forward.
-	var notFound *metricsNotFoundError
-	if errors.As(err, &notFound) {
-		return true
-	}
-
-	// Actual connection failure — try to reconnect
-	GinkgoWriter.Printf("KarpenterMetricsPoller: scrape failed (%v), attempting port-forward reconnect\n", err)
-	state.pfCancel()
-	state.localPort = rand.IntnRange(10000, 49151)
-	state.pfCtx, state.pfCancel = context.WithCancel(ctx)
-	if pfErr := mp.establishPortForward(state.pfCtx, state.localPort); pfErr != nil {
-		mp.recordError(fmt.Errorf("port-forward re-establish failed: %w", pfErr))
-		GinkgoWriter.Printf("KarpenterMetricsPoller: reconnect failed, giving up: %v\n", pfErr)
-		state.pfCancel()
-		return false
-	}
-	GinkgoWriter.Printf("KarpenterMetricsPoller: reconnected successfully on port %d\n", state.localPort)
-	state.firstSample = true
-	return true
 }
 
 func (mp *KarpenterMetricsPoller) recordFirstSample(state *pollerState, now time.Time, memBytes, cpuSeconds float64) {
@@ -246,63 +210,15 @@ func (mp *KarpenterMetricsPoller) recordSample(state *pollerState, now time.Time
 	}
 }
 
-func (mp *KarpenterMetricsPoller) establishPortForward(ctx context.Context, localPort int) error {
-	findCtx, findCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer findCancel()
-
-	pod, err := mp.env.FindActiveKarpenterPod(findCtx)
-	if err != nil || pod == nil {
-		return fmt.Errorf("finding karpenter pod: %w", err)
-	}
-	GinkgoWriter.Printf("KarpenterMetricsPoller: found karpenter pod %s/%s, establishing port-forward %d->8080\n",
-		pod.Namespace, pod.Name, localPort)
-
-	// Pass the long-lived ctx so the port-forward stays alive until ctx is canceled.
-	// PortForwardPod blocks until the connection is ready or fails.
-	if err := mp.env.PortForwardPod(ctx, pod, 8080, localPort); err != nil {
-		return fmt.Errorf("port-forward to karpenter pod %s: %w", pod.Name, err)
-	}
-
-	// Verify connectivity — retry a few times since the pod may be temporarily busy
-	for attempt := range 3 {
-		memBytes, cpuSeconds, err := mp.scrapeMetrics(localPort)
-		if err == nil {
-			GinkgoWriter.Printf("KarpenterMetricsPoller: connectivity verified - process_resident_memory_bytes=%.0f, process_cpu_seconds_total=%.4f\n",
-				memBytes, cpuSeconds)
-			return nil
-		}
-		var notFound *metricsNotFoundError
-		if errors.As(err, &notFound) && attempt < 2 {
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		return fmt.Errorf("connectivity check failed after port-forward: %w", err)
-	}
-	return nil
-}
-
-// scrapeMetrics fetches /metrics from the given local port and extracts
-// process_resident_memory_bytes and process_cpu_seconds_total.
-var scrapeClient = &http.Client{Timeout: 5 * time.Second}
-
-func (mp *KarpenterMetricsPoller) scrapeMetrics(port int) (memBytes float64, cpuSeconds float64, err error) {
-	resp, err := scrapeClient.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", port)) //nolint:gosec
+// scrapeMetrics uses the API server pod proxy to fetch /metrics from the Karpenter pod.
+func (mp *KarpenterMetricsPoller) scrapeMetrics(ctx context.Context, podName string) (memBytes float64, cpuSeconds float64, err error) {
+	data, err := mp.env.KubeClient.CoreV1().Pods("kube-system").ProxyGet("http", podName, "8080", "/metrics", nil).DoRaw(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("GET /metrics: %w", err)
-	}
-	// Drain the full response body before closing to avoid sending a TCP RST
-	// through the port-forward tunnel (which causes noisy "connection reset by peer" logs).
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, 0, fmt.Errorf("GET /metrics returned status %d", resp.StatusCode)
+		return 0, 0, fmt.Errorf("proxy GET /metrics: %w", err)
 	}
 
 	var foundMem, foundCPU bool
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "#") {
@@ -326,7 +242,6 @@ func (mp *KarpenterMetricsPoller) scrapeMetrics(port int) (memBytes float64, cpu
 	return memBytes, cpuSeconds, nil
 }
 
-// parseMetricLine checks if a line starts with the given prefix and returns the parsed float value.
 func parseMetricLine(line, prefix string) (float64, bool) {
 	if !strings.HasPrefix(line, prefix) {
 		return 0, false
@@ -347,8 +262,6 @@ func (mp *KarpenterMetricsPoller) recordError(err error) {
 	}
 }
 
-// computeStats calculates P95, average, and max from a slice of resource samples.
-// The first sample's CPU value (always 0) is excluded from CPU statistics.
 func computeStats(samples []ResourceSample) ResourceStats {
 	if len(samples) == 0 {
 		return ResourceStats{}
@@ -391,8 +304,6 @@ func computeStats(samples []ResourceSample) ResourceStats {
 	return stats
 }
 
-// percentile returns the p-th percentile of a slice of float64 values using
-// linear interpolation. The input slice is sorted in place.
 func percentile(values []float64, p float64) float64 {
 	sort.Float64s(values)
 	if len(values) == 0 {
