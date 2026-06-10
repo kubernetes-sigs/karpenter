@@ -71,7 +71,7 @@ var _ = Describe("Ranking", func() {
 			pod2 := test.Pod(test.PodOptions{NodeName: nodes[2].Name})
 			ExpectApplied(ctx, env.Client, dndPod, pod0, pod2)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode
@@ -120,7 +120,7 @@ var _ = Describe("Ranking", func() {
 			for _, n := range nodes {
 				ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: n.Name}))
 			}
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode
@@ -151,7 +151,7 @@ var _ = Describe("Ranking", func() {
 					NodeName:   n.Name,
 				}))
 			}
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode
@@ -179,7 +179,7 @@ var _ = Describe("Ranking", func() {
 			for _, n := range nodes {
 				ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: n.Name}))
 			}
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode
@@ -221,7 +221,7 @@ var _ = Describe("Ranking", func() {
 				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
 				NodeName:   nodes[3].Name,
 			}))
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode
@@ -306,7 +306,7 @@ var _ = Describe("Ranking", func() {
 				NodeName:   nodes[3].Name,
 			}))
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode
@@ -346,7 +346,7 @@ var _ = Describe("Ranking", func() {
 			// Node 1: normal
 			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[1].Name}))
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode
@@ -411,7 +411,7 @@ var _ = Describe("Ranking", func() {
 			// Node 2: normal
 			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode
@@ -483,7 +483,7 @@ var _ = Describe("Ranking", func() {
 			// Node 2: normal (Group C)
 			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
 			var stateNodes []*state.StateNode

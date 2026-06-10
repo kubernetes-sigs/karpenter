@@ -52,7 +52,7 @@ var _ = Describe("Annotation", func() {
 			}
 			pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
@@ -88,7 +88,7 @@ var _ = Describe("Annotation", func() {
 				NodeName: nodes[0].Name,
 			})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
@@ -122,7 +122,7 @@ var _ = Describe("Annotation", func() {
 				NodeName: nodes[0].Name,
 			})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
@@ -149,7 +149,7 @@ var _ = Describe("Annotation", func() {
 			}
 			pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
@@ -179,7 +179,7 @@ var _ = Describe("Annotation", func() {
 				pods[i] = test.Pod(test.PodOptions{NodeName: nodes[0].Name})
 				ExpectApplied(ctx, env.Client, pods[i])
 			}
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
@@ -206,7 +206,7 @@ var _ = Describe("Annotation", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
@@ -231,7 +231,7 @@ var _ = Describe("Annotation", func() {
 			pod0 := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
 			pod1 := test.Pod(test.PodOptions{NodeName: nodes[1].Name})
 			ExpectApplied(ctx, env.Client, pod0, pod1)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
@@ -284,7 +284,7 @@ var _ = Describe("Annotation", func() {
 				NodeName: nodes[0].Name,
 			})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
@@ -311,7 +311,7 @@ var _ = Describe("Annotation", func() {
 			}
 			pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {

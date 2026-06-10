@@ -71,7 +71,7 @@ var _ = Describe("Controller", func() {
 		pod0 := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
 		pod1 := test.Pod(test.PodOptions{NodeName: nodes[1].Name})
 		ExpectApplied(ctx, env.Client, pod0, pod1)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
 		result, err := controller.Reconcile(ctx)
@@ -108,7 +108,7 @@ var _ = Describe("Controller", func() {
 		}
 		pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
 		ExpectApplied(ctx, env.Client, pod)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
 
@@ -153,7 +153,7 @@ var _ = Describe("Controller", func() {
 				pods[i] = test.Pod(test.PodOptions{NodeName: n.Name})
 				ExpectApplied(ctx, env.Client, pods[i])
 			}
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
 			result, err := controller.Reconcile(ctx)
