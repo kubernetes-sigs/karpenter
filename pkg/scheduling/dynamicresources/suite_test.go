@@ -43,6 +43,9 @@ func TestDynamicResources(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
+	if env.Version.Minor() < 34 {
+		Skip("DRA is only available in K8s versions >= 1.34.x")
+	}
 })
 
 var _ = AfterSuite(func() {
