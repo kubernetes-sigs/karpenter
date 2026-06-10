@@ -81,7 +81,7 @@ func (a *Allocator) ResourceClaimAllocationMetadata() map[ResourceClaimID]*Resou
 // with the ResourceClaim, and the set of devices allocated to the ResourceClaim on a per-instance type basis.
 type ResourceClaimAllocationMetadata struct {
 	// NodeClaimID is the NodeClaim that is transitively associated with the ResourceClaim's allocation, via the pod it
-	// was allocated for. If the ResourceClaim was satisifed using any template devices, pods referencing this
+	// was allocated for. If the ResourceClaim was satisfied using any template devices, pods referencing this
 	// ResourceClaim may not be bound to any other NodeClaim.
 	NodeClaimID NodeClaimID
 
@@ -162,7 +162,7 @@ type Allocation interface {
 
 // allocation commits per-instance-type device allocations (both in-cluster and template).
 type allocation struct {
-	// allocator is a reference to the top-level allocator that will be mutated when this allocation is commited.
+	// allocator is a reference to the top-level allocator that will be mutated when this allocation is committed.
 	allocator *Allocator
 
 	// nodeClaimID represents the source NodeClaim the devices were transitvely allocated for
@@ -173,7 +173,7 @@ type allocation struct {
 	// claimMetadata represents the allocation metadata for each ResourceClaim, keyed by the ResourceClaim name. This
 	// tracks both devices (for observability / testing) and topology requirements (for non-node local binding).
 	claimMetadata map[ResourceClaimID]*ResourceClaimAllocationMetadata
-	// filteredPools represents the set of pools that will be available from the NodeClaim if this allocation is commited.
+	// filteredPools represents the set of pools that will be available from the NodeClaim if this allocation is committed.
 	// This reduces the number of pools we need to filter during subsequent allocations for the NodeClaim.
 	filteredPools []*Pool
 }
@@ -224,7 +224,7 @@ func (a *Allocator) ReleaseInstanceType(ctx context.Context, nodeClaimID NodeCla
 		// If any of the pruned instance types contributed to the total requirements for the ResourceClaim, we should
 		// recompute the requirements. Although this is not strictly necessary, it may unblock placement of subsequent pods
 		// in the simulation which were previously blocked due to these constraints. Doing this in a single simulation
-		// increases the upper-bound for binpacking efficency.
+		// increases the upper-bound for binpacking efficiency.
 		if needsRecomputation {
 			updatedReqs := scheduling.NewRequirements()
 			for _, itReqs := range meta.ContributedRequirements {
@@ -360,10 +360,7 @@ func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.Res
 	for _, claim := range claims {
 		// In-cluster allocated: status.allocation is set.
 		if claim.Status.Allocation != nil {
-			reqs, err := nodeSelectorsToRequirements(claim.Status.Allocation.NodeSelector)
-			if err != nil {
-				return classificationResult{}, serrors.Wrap(fmt.Errorf("building requirements from node selector, %w", err), "ResourceClaim", klog.KObj(claim))
-			}
+			reqs := nodeSelectorsToRequirements(claim.Status.Allocation.NodeSelector)
 			if reqs != nil {
 				if !result.requirements.IsCompatible(*reqs, scheduling.AllowUndefinedWellKnownLabels) {
 					return classificationResult{}, serrors.Wrap(fmt.Errorf("in-cluster allocation topology is incompatible with NodeClaim requirements"), "ResourceClaim", klog.KObj(claim))
@@ -458,6 +455,8 @@ type deviceAllocationMetadata struct {
 // allocate runs a per-instance-type DFS over in-cluster and template devices.
 // In-cluster devices are iterated first so the DFS naturally prefers them, minimizing
 // variance across instance types. Each IT gets a full DFS; ITs whose DFS fails are pruned.
+//
+//nolint:gocyclo
 func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult, error) {
 	var survivingITs []InstanceTypeID
 	deviceIDsByIT := make(map[InstanceTypeID][]DeviceID)
@@ -645,6 +644,8 @@ func (a *allocator) dfsAllMode(claimIdx, reqIdx, slotIdx int, cd *ClaimData, rd 
 
 // tryDevice attempts to allocate a single device at the given position in the DFS tree.
 // Returns true if the subtree rooted at this device leads to a complete solution.
+//
+//nolint:gocyclo
 func (a *allocator) tryDevice(
 	claimIdx, reqIdx, slotIdx int,
 	cd *ClaimData,

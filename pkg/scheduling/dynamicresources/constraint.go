@@ -72,6 +72,7 @@ type AttributeBindingFallback struct {
 	InstanceTypeID InstanceTypeID
 }
 
+//nolint:gocyclo
 func (m *MatchAttributeConstraint) Add(requestName string, device cloudprovider.Device, deviceID DeviceID) bool {
 	if !m.appliesTo(requestName) {
 		return true

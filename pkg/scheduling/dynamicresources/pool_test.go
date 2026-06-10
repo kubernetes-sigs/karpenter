@@ -51,12 +51,12 @@ func withAllNodes() func(*resourcev1.ResourceSlice) {
 	}
 }
 
-func withNodeSelector(key string, values ...string) func(*resourcev1.ResourceSlice) {
+func withZoneSelector(values ...string) func(*resourcev1.ResourceSlice) {
 	return func(s *resourcev1.ResourceSlice) {
 		s.Spec.NodeSelector = &corev1.NodeSelector{
 			NodeSelectorTerms: []corev1.NodeSelectorTerm{
 				{MatchExpressions: []corev1.NodeSelectorRequirement{
-					{Key: key, Operator: corev1.NodeSelectorOpIn, Values: values},
+					{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: values},
 				}},
 			},
 		}
@@ -136,7 +136,7 @@ var _ = Describe("Pool Gathering", func() {
 		It("should build a pool from a nodeSelector slice matching requirements", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 				),
 			}
@@ -147,7 +147,7 @@ var _ = Describe("Pool Gathering", func() {
 		It("should exclude pools with only incompatible nodeSelector slices", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "eu-west-1a"),
+					withZoneSelector("eu-west-1a"),
 					withAPIDevices("gpu-0"),
 				),
 			}
@@ -483,12 +483,12 @@ var _ = Describe("Pool Gathering", func() {
 				// The pool should be considered complete because all slices exist globally.
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a",
-						withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+						withZoneSelector("us-west-2a"),
 						withAPIDevices("gpu-0"),
 						withGeneration(1, 2),
 					),
 					makeAPISlice("s2", "gpu.example.com", "pool-a",
-						withNodeSelector(corev1.LabelTopologyZone, "eu-west-1a"), // non-matching
+						withZoneSelector("eu-west-1a"), // non-matching
 						withAPIDevices("gpu-1"),
 						withGeneration(1, 2),
 					),
@@ -507,12 +507,12 @@ var _ = Describe("Pool Gathering", func() {
 				// The gen 1 data is obsolete — the pool should be dropped.
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s-old", "gpu.example.com", "pool-a",
-						withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+						withZoneSelector("us-west-2a"),
 						withAPIDevices("gpu-0"),
 						withGeneration(1, 1),
 					),
 					makeAPISlice("s-new", "gpu.example.com", "pool-a",
-						withNodeSelector(corev1.LabelTopologyZone, "eu-west-1a"), // non-matching
+						withZoneSelector("eu-west-1a"), // non-matching
 						withAPIDevices("gpu-new"),
 						withGeneration(2, 1),
 					),
@@ -526,17 +526,17 @@ var _ = Describe("Pool Gathering", func() {
 				// Pool has 3 slices: 2 match, 1 doesn't. All same generation.
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a",
-						withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+						withZoneSelector("us-west-2a"),
 						withAPIDevices("gpu-0"),
 						withGeneration(1, 3),
 					),
 					makeAPISlice("s2", "gpu.example.com", "pool-a",
-						withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+						withZoneSelector("us-west-2b"),
 						withAPIDevices("gpu-1"),
 						withGeneration(1, 3),
 					),
 					makeAPISlice("s3", "gpu.example.com", "pool-a",
-						withNodeSelector(corev1.LabelTopologyZone, "eu-west-1a"),
+						withZoneSelector("eu-west-1a"),
 						withAPIDevices("gpu-2"),
 						withGeneration(1, 3),
 					),
@@ -559,7 +559,7 @@ var _ = Describe("Pool Gathering", func() {
 		It("should retain pools with compatible slices", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 				),
 			}
@@ -576,7 +576,7 @@ var _ = Describe("Pool Gathering", func() {
 		It("should exclude pools with incompatible slices after requirement tightening", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 				),
 			}
@@ -617,11 +617,11 @@ var _ = Describe("Pool Gathering", func() {
 		It("should retain some pools and exclude others", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 				),
 				makeAPISlice("s2", "nic.example.com", "pool-b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("nic-0"),
 				),
 			}
@@ -643,11 +643,11 @@ var _ = Describe("Pool Gathering", func() {
 			)
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-1"),
 				),
 			}

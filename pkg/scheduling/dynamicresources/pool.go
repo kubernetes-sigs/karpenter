@@ -192,7 +192,6 @@ func nodeSelectorsMatch(ns *corev1.NodeSelector, requirements scheduling.Require
 	return false
 }
 
-
 // sliceEntry pairs a ResourceSlice with whether it matched the node requirements.
 type sliceEntry struct {
 	slice   ResourceSlice

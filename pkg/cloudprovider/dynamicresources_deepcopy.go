@@ -20,6 +20,35 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 )
 
+func (in *DynamicResources) DeepCopyInto(out *DynamicResources) {
+	*out = *in
+	if in.ResourceSliceTemplates != nil {
+		out.ResourceSliceTemplates = make([]*ResourceSliceTemplate, len(in.ResourceSliceTemplates))
+		for i := range in.ResourceSliceTemplates {
+			if in.ResourceSliceTemplates[i] != nil {
+				out.ResourceSliceTemplates[i] = in.ResourceSliceTemplates[i].DeepCopy()
+			}
+		}
+	}
+	if in.AttributeBindings != nil {
+		out.AttributeBindings = make([]*AttributeBinding, len(in.AttributeBindings))
+		for i := range in.AttributeBindings {
+			if in.AttributeBindings[i] != nil {
+				out.AttributeBindings[i] = in.AttributeBindings[i].DeepCopy()
+			}
+		}
+	}
+}
+
+func (in *DynamicResources) DeepCopy() *DynamicResources {
+	if in == nil {
+		return nil
+	}
+	out := new(DynamicResources)
+	in.DeepCopyInto(out)
+	return out
+}
+
 func (in *ResourceSliceTemplate) DeepCopyInto(out *ResourceSliceTemplate) {
 	*out = *in
 	if in.Devices != nil {

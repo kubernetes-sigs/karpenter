@@ -42,9 +42,9 @@ type fakeNodeClaim struct {
 	resourceSlices map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice
 }
 
-func (f *fakeNodeClaim) ID() dynamicresources.NodeClaimID            { return f.id }
-func (f *fakeNodeClaim) NodePoolID() dynamicresources.NodePoolID     { return f.nodePoolID }
-func (f *fakeNodeClaim) Requirements() scheduling.Requirements       { return f.requirements }
+func (f *fakeNodeClaim) ID() dynamicresources.NodeClaimID                 { return f.id }
+func (f *fakeNodeClaim) NodePoolID() dynamicresources.NodePoolID          { return f.nodePoolID }
+func (f *fakeNodeClaim) Requirements() scheduling.Requirements            { return f.requirements }
 func (f *fakeNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID { return f.instanceTypes }
 func (f *fakeNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
 	return f.resourceSlices
@@ -68,8 +68,8 @@ func makeNodeClaimWithID(ncID string, itNames ...string) *fakeNodeClaim {
 	}
 }
 
-func makeNodeClaimWithTemplates(itName string, templates ...*cloudprovider.ResourceSliceTemplate) *fakeNodeClaim {
-	return makeNodeClaimWithTemplatesAndID("test-nc", itName, templates...)
+func makeNodeClaimWithTemplates(templates ...*cloudprovider.ResourceSliceTemplate) *fakeNodeClaim {
+	return makeNodeClaimWithTemplatesAndID("test-nc", "it-1", templates...)
 }
 
 func makeNodeClaimWithTemplatesAndID(ncID, itName string, templates ...*cloudprovider.ResourceSliceTemplate) *fakeNodeClaim {
@@ -498,7 +498,7 @@ var _ = Describe("Allocator", func() {
 
 		It("should allocate from templates when in-cluster devices are insufficient", func() {
 			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 3))
@@ -511,7 +511,7 @@ var _ = Describe("Allocator", func() {
 
 		It("should prefer in-cluster devices over templates", func() {
 			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
 			// Request 2 devices — should be satisfied entirely by in-cluster.
@@ -642,7 +642,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1), withAPIDevices("gpu-0")),
 			}
 			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
 			claim := makeClaim("c1", allRequest("req-1", "gpu"))
@@ -947,12 +947,12 @@ var _ = Describe("Allocator", func() {
 			// Two zonal slices: one in us-west-2a, one in us-west-2b.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-us-west-2a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-us-west-2b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-1"),
 					withGeneration(1, 1),
 				),
@@ -991,12 +991,12 @@ var _ = Describe("Allocator", func() {
 			// since the first device tightens requirements and eliminates the other zone's pool.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0", "gpu-a1"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-zone-b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-b0", "gpu-b1"),
 					withGeneration(1, 1),
 				),
@@ -1025,12 +1025,12 @@ var _ = Describe("Allocator", func() {
 			// Requirements are restored to the broad set, then zone B succeeds.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-zone-b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-b0", "gpu-b1"),
 					withGeneration(1, 1),
 				),
@@ -1056,7 +1056,7 @@ var _ = Describe("Allocator", func() {
 			// Only one zone available, but the device is in a different zone.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "eu-west-1a"),
+					withZoneSelector("eu-west-1a"),
 					withAPIDevices("gpu-0"),
 					withGeneration(1, 1),
 				),
@@ -1126,7 +1126,7 @@ var _ = Describe("Allocator", func() {
 	Describe("Template device tracking after commit", func() {
 		It("should block template devices for the same NC/IT after commit", func() {
 			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
 
@@ -1185,7 +1185,7 @@ var _ = Describe("Allocator", func() {
 			}
 
 			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithAttrs("gpu.example.com", "pool-b",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
 						"gpu.example.com/numa": {StringValue: ptr.To("node-2")},
@@ -1301,7 +1301,7 @@ var _ = Describe("Allocator", func() {
 			})
 
 			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), bindings, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1", "tgpu-2"),
 			)
 			// Request 2 with NUMA constraint. tgpu-0 and tgpu-1 are bound, tgpu-2 is not.
@@ -1506,7 +1506,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
 			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
@@ -1599,12 +1599,12 @@ var _ = Describe("Allocator", func() {
 			// Only the us-west-2a pool should be available.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-zone-b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-b0"),
 					withGeneration(1, 1),
 				),
@@ -1739,7 +1739,7 @@ var _ = Describe("Allocator", func() {
 			// First: allocate a claim on NC-A that pins to us-west-2a via a zonal device.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 					withGeneration(1, 1),
 				),
@@ -1845,12 +1845,12 @@ var _ = Describe("Allocator", func() {
 			// IT-B: requirements tightened to zone-A. Only zone-A pool visible. Only 1 device. No template. Fails. Pruned.
 			inClusterSlices2 := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-zone-b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-b0"),
 					withGeneration(1, 1),
 				),
@@ -1883,12 +1883,12 @@ var _ = Describe("Allocator", func() {
 			// Both ITs can use zone-A devices. After IT-A tightens to zone-A, IT-B also succeeds.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0", "gpu-a1"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-zone-b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-b0", "gpu-b1"),
 					withGeneration(1, 1),
 				),
@@ -1921,7 +1921,7 @@ var _ = Describe("Allocator", func() {
 			// After releasing both, TotalRequirements is empty.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0"),
 					withGeneration(1, 1),
 				),
@@ -1963,7 +1963,7 @@ var _ = Describe("Allocator", func() {
 		It("should empty TotalRequirements when all instance types are released", func() {
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0", "gpu-a1"),
 					withGeneration(1, 1),
 				),
@@ -2000,7 +2000,7 @@ var _ = Describe("Allocator", func() {
 			// Three ITs all allocating zone-A devices. Release middle IT. TotalRequirements remains zone-A.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0", "gpu-a1", "gpu-a2"),
 					withGeneration(1, 1),
 				),
@@ -2013,7 +2013,7 @@ var _ = Describe("Allocator", func() {
 				requirements: scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
 				),
-				instanceTypes: []dynamicresources.InstanceTypeID{unique.Make("it-a"), unique.Make("it-b"), unique.Make("it-c")},
+				instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-a"), unique.Make("it-b"), unique.Make("it-c")},
 				resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
 			}
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
@@ -2039,7 +2039,7 @@ var _ = Describe("Allocator", func() {
 	Describe("Validation errors through Allocate()", func() {
 		It("should return error when DeviceClass does not exist", func() {
 			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
 			claim := makeClaim("c1", exactRequest("req-1", "nonexistent-class", 1))
@@ -2052,7 +2052,7 @@ var _ = Describe("Allocator", func() {
 		It("should return error for unsupported selector type", func() {
 			// Use a request-level non-CEL selector (API server validates class selectors).
 			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
 			// A claim with a request that has a non-CEL selector (empty DeviceSelector).
@@ -2083,7 +2083,7 @@ var _ = Describe("Allocator", func() {
 
 		It("should return error for FirstAvailable request", func() {
 			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
 			// A request with no Exactly field (FirstAvailable).
@@ -2105,7 +2105,7 @@ var _ = Describe("Allocator", func() {
 
 		It("should return error for unsupported constraint type", func() {
 			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
 			// A claim with an empty constraint (no MatchAttribute set).
@@ -2174,7 +2174,7 @@ var _ = Describe("Allocator", func() {
 
 			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), bindings, env.Client)
 			// Template device WITHOUT the numa attribute (will use binding fallback path).
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithAttrs("gpu.example.com", "pool-tmpl",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{}),
 				),
@@ -2217,7 +2217,7 @@ var _ = Describe("Allocator", func() {
 			})
 
 			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), bindings, env.Client)
-			nc := makeNodeClaimWithTemplates("it-1",
+			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithAttrs("gpu.example.com", "pool-tmpl",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{}),
 					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{}),
@@ -2390,7 +2390,7 @@ var _ = Describe("Allocator", func() {
 			// Each IT should have its own entry in ContributedRequirements.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0"),
 					withGeneration(1, 1),
 				),
@@ -2456,7 +2456,7 @@ var _ = Describe("Allocator", func() {
 			// incorrectly share the same itReqs object, giving both claims the union of all topology.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-only",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0"),
 					withGeneration(1, 1),
 				),
@@ -2622,12 +2622,12 @@ var _ = Describe("Allocator", func() {
 			// NC requires zone-C but all pools are zone-A/B.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-zone-b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-1"),
 					withGeneration(1, 1),
 				),
@@ -2789,7 +2789,7 @@ var _ = Describe("Allocator", func() {
 		It("should propagate in-memory topology requirements to the allocation result", func() {
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 					withGeneration(1, 1),
 				),
@@ -2829,7 +2829,7 @@ var _ = Describe("Allocator", func() {
 		It("should fail when in-memory topology requirements are incompatible with NodeClaim", func() {
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-0"),
 					withGeneration(1, 1),
 				),
@@ -2888,22 +2888,22 @@ var _ = Describe("Allocator", func() {
 
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "gpu-pool-us-west-2a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "gpu-pool-us-west-2b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-b0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s3", "fpga.example.com", "fpga-pool-us-west-2a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("fpga-a0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s4", "fpga.example.com", "fpga-pool-us-west-2b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("fpga-b0"),
 					withGeneration(1, 1),
 				),
@@ -2968,12 +2968,12 @@ var _ = Describe("Allocator", func() {
 			// Create two in-memory claims pinned to different zones.
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-zone-a",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2a"),
+					withZoneSelector("us-west-2a"),
 					withAPIDevices("gpu-a0"),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s2", "gpu.example.com", "pool-zone-b",
-					withNodeSelector(corev1.LabelTopologyZone, "us-west-2b"),
+					withZoneSelector("us-west-2b"),
 					withAPIDevices("gpu-b0"),
 					withGeneration(1, 1),
 				),

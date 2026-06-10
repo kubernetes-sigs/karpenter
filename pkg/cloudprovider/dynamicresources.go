@@ -24,7 +24,6 @@ import (
 
 // DynamicResources contains DRA device metadata for an instance type. Cloud providers populate this
 // to enable DRA-aware scheduling simulation.
-// +k8s:deepcopy-gen=true
 type DynamicResources struct {
 	// ResourceSliceTemplates describes the DRA devices expected on this instance type.
 	// Each entry is an in-memory template for a ResourceSlice that the corresponding

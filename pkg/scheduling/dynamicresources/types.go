@@ -208,14 +208,14 @@ func (s *templateSlice) ResourceSliceCount() int64 {
 
 // nodeSelectorsToRequirements extracts scheduling requirements from a NodeSelector.
 // Returns nil if the NodeSelector is nil (no topology constraints).
-func nodeSelectorsToRequirements(ns *corev1.NodeSelector) (*scheduling.Requirements, error) {
+func nodeSelectorsToRequirements(ns *corev1.NodeSelector) *scheduling.Requirements {
 	if ns == nil {
-		return nil, nil
+		return nil
 	}
 	reqs := scheduling.NewRequirements()
 	for _, term := range ns.NodeSelectorTerms {
 		termReqs := scheduling.NewNodeSelectorRequirements(term.MatchExpressions...)
 		reqs.Add(termReqs.Values()...)
 	}
-	return &reqs, nil
+	return &reqs
 }

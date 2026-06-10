@@ -70,6 +70,8 @@ type ClaimData struct {
 // ValidateClaimRequest parses a ResourceClaim, resolves its DeviceClass references, and builds
 // the constraint and request metadata needed for allocation. Returns an error if any request
 // is invalid (missing class, unsupported selector/constraint type, etc.).
+//
+//nolint:gocyclo
 func ValidateClaimRequest(
 	ctx context.Context,
 	kubeClient client.Client,
@@ -158,6 +160,7 @@ func ValidateClaimRequest(
 	return data, nil
 }
 
+//nolint:gocyclo
 func validateExactRequest(
 	ctx context.Context,
 	kubeClient client.Client,
