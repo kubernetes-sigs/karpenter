@@ -556,7 +556,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			allocator:     a.Allocator,
 			nodeClaimID:   a.nodeClaim.ID(),
 			deviceIDsByIT: deviceIDsByIT,
-			filteredPools: a.pools,
+			filteredPools: FilterPools(initialPools, a.requirements),
 			claimMetadata: claimAllocMetaByRC,
 		},
 	}, nil
