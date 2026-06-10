@@ -192,7 +192,7 @@ var _ = Describe("Ranking", func() {
 
 			// Ranks should be sequential starting from -len(nodes)
 			baseRank := -len(stateNodes)
-			rankValues := make(map[int]bool)
+			rankValues := map[int]bool{}
 			for _, r := range ranks {
 				rankValues[r.Rank] = true
 			}

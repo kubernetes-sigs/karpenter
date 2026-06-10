@@ -119,18 +119,18 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	nodePoolMap, err := c.buildNodePoolMap(ctx)
 	if err != nil {
-		return reconciler.Result{RequeueAfter: reconcileInterval}, fmt.Errorf("building node pool map, %w", err)
+		return reconciler.Result{}, fmt.Errorf("building node pool map, %w", err)
 	}
 
 	nodeRanks, err := c.rankingEngine.RankNodes(ctx, nodes, nodePoolMap)
 	if err != nil {
-		return reconciler.Result{RequeueAfter: reconcileInterval}, fmt.Errorf("ranking nodes, %w", err)
+		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
 
 	activeRanks := c.boundAndCleanup(ctx, nodeRanks)
 
 	if err := c.annotationMgr.UpdatePodDeletionCosts(ctx, activeRanks); err != nil {
-		return reconciler.Result{RequeueAfter: reconcileInterval}, fmt.Errorf("updating pod deletion costs, %w", err)
+		return reconciler.Result{}, fmt.Errorf("updating pod deletion costs, %w", err)
 	}
 
 	log.FromContext(ctx).V(1).WithValues("nodeCount", len(activeRanks)).Info("updated pod deletion costs")
