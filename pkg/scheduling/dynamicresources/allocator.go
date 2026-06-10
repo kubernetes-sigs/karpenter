@@ -745,6 +745,11 @@ func (a *allocator) restoreState(pools []*Pool) {
 	a.pools = pools
 	a.allocatedDevices = sets.New[DeviceID]()
 	a.snapshots = nil
+	for _, cd := range a.claimData {
+		for _, c := range cd.Constraints {
+			c.Reset()
+		}
+	}
 	// NOTE: Requirements are not reset since instance type requirements are accumulated to ensure the result is
 	// representable by a NodeClaim.
 }

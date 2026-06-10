@@ -579,6 +579,128 @@ var _ = Describe("Allocator", func() {
 		})
 	})
 
+	Describe("Multi-IT constraint isolation", func() {
+		It("should not leak constraint state between instance type iterations", func() {
+			// IT-A has template devices with numa=node-0, IT-B has template devices with numa=node-1.
+			// Both should independently satisfy a MatchAttribute constraint on numa.
+			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
+				"it-a": {makeTemplateWithAttrs("gpu.example.com", "pool-a",
+					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+					}),
+					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+					}),
+				)},
+				"it-b": {makeTemplateWithAttrs("gpu.example.com", "pool-b",
+					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+					}),
+					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+					}),
+				)},
+			})
+			claim := makeClaimWithConstraints("c1",
+				[]resourcev1.DeviceConstraint{
+					{MatchAttribute: ptr.To(resourcev1.FullyQualifiedName("gpu.example.com/numa"))},
+				},
+				exactRequest("req-1", "gpu", 2),
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.InstanceTypes).To(HaveLen(2))
+		})
+
+		It("should not leak binding fallback state between instance type iterations", func() {
+			// IT-A uses binding fallback (devices lack the attribute), IT-B has concrete attribute values.
+			// Both should independently satisfy the constraint.
+			devA0 := deviceID("gpu.example.com", "pool-a", "tgpu-0")
+			devA1 := deviceID("gpu.example.com", "pool-a", "tgpu-1")
+
+			bindings := dynamicresources.BuildAttributeBindings(map[string][]*cloudprovider.InstanceType{
+				"test-np": {
+					&cloudprovider.InstanceType{
+						Name: "it-a",
+						DynamicResources: cloudprovider.DynamicResources{
+							AttributeBindings: []*cloudprovider.AttributeBinding{
+								{
+									Attribute: "gpu.example.com/numa",
+									Devices:   []cloudprovider.DeviceID{devA0.DeviceID, devA1.DeviceID},
+								},
+							},
+						},
+					},
+				},
+			})
+
+			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), bindings, env.Client)
+			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
+				"it-a": {makeTemplate("gpu.example.com", "pool-a", "tgpu-0", "tgpu-1")},
+				"it-b": {makeTemplateWithAttrs("gpu.example.com", "pool-b",
+					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+					}),
+					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+					}),
+				)},
+			})
+			claim := makeClaimWithConstraints("c1",
+				[]resourcev1.DeviceConstraint{
+					{MatchAttribute: ptr.To(resourcev1.FullyQualifiedName("gpu.example.com/numa"))},
+				},
+				exactRequest("req-1", "gpu", 2),
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.InstanceTypes).To(HaveLen(2))
+		})
+
+		It("should still allow second IT to succeed when first IT fails constraints", func() {
+			// IT-A has devices with conflicting NUMA values (can't satisfy constraint).
+			// IT-B has devices with matching NUMA values (can satisfy).
+			// Verifies that failed DFS backtracking leaves clean state.
+			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
+				"it-a": {makeTemplateWithAttrs("gpu.example.com", "pool-a",
+					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+					}),
+					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+					}),
+				)},
+				"it-b": {makeTemplateWithAttrs("gpu.example.com", "pool-b",
+					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-2")},
+					}),
+					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"gpu.example.com/numa": {StringValue: ptr.To("node-2")},
+					}),
+				)},
+			})
+			claim := makeClaimWithConstraints("c1",
+				[]resourcev1.DeviceConstraint{
+					{MatchAttribute: ptr.To(resourcev1.FullyQualifiedName("gpu.example.com/numa"))},
+				},
+				exactRequest("req-1", "gpu", 2),
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			// Only it-b should survive (it-a has conflicting NUMA values).
+			Expect(result.InstanceTypes).To(HaveLen(1))
+			Expect(result.InstanceTypes[0].Value()).To(Equal("it-b"))
+		})
+	})
+
 	Describe("Commit protocol", func() {
 		It("should mark in-cluster devices as allocated after commit", func() {
 			inClusterSlices := []dynamicresources.ResourceSlice{

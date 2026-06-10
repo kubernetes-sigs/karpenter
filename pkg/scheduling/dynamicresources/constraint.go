@@ -34,6 +34,8 @@ type Constraint interface {
 	Add(requestName string, device cloudprovider.Device, deviceID DeviceID) bool
 	// Remove is called during backtracking to reverse one successful Add().
 	Remove(requestName string, device cloudprovider.Device, deviceID DeviceID)
+	// Reset clears all mutable state, returning the constraint to its initial (unpinned) condition.
+	Reset()
 }
 
 // MatchAttributeConstraint enforces that all devices allocated for the constrained requests
@@ -139,6 +141,12 @@ func (m *MatchAttributeConstraint) Remove(requestName string, device cloudprovid
 		m.AttributeValue = nil
 		m.UsedBinding = false
 	}
+}
+
+func (m *MatchAttributeConstraint) Reset() {
+	m.AttributeValue = nil
+	m.UsedBinding = false
+	m.AllocatedDeviceIDs = nil
 }
 
 func (m *MatchAttributeConstraint) appliesTo(requestName string) bool {

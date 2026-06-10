@@ -233,6 +233,33 @@ var _ = Describe("Constraints", func() {
 				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
 				Expect(c.Add("req-b", deviceWithoutZone("dev-b"), devB)).To(BeTrue())
 			})
+
+			It("should clear UsedBinding flag on Reset allowing switch to concrete path", func() {
+				c := newConstraintWithBindings()
+				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.UsedBinding).To(BeTrue())
+				c.Reset()
+				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+			})
+		})
+
+		Describe("Reset()", func() {
+			It("should clear pinned attribute value and allow re-pinning to a different value", func() {
+				c := newConstraint()
+				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				c.Reset()
+				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-east-1a"), devA)).To(BeTrue())
+			})
+
+			It("should clear all mutable state", func() {
+				c := newConstraint()
+				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
+				c.Reset()
+				Expect(c.AllocatedDeviceIDs).To(BeNil())
+				Expect(c.AttributeValue).To(BeNil())
+				Expect(c.UsedBinding).To(BeFalse())
+			})
 		})
 
 		Describe("LookupAttribute", func() {
