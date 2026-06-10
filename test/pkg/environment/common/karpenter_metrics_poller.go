@@ -21,11 +21,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"sort"
 	"sync"
 	"time"
 
+	"github.com/montanaflynn/stats"
 	. "github.com/onsi/ginkgo/v2"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -260,57 +259,36 @@ func computeStats(samples []ResourceSample) ResourceStats {
 		return ResourceStats{}
 	}
 
-	memValues := make([]float64, len(samples))
-	var memSum, memMax float64
-
+	memValues := make(stats.Float64Data, len(samples))
 	for i, s := range samples {
 		memValues[i] = s.MemoryMB
-		memSum += s.MemoryMB
-		memMax = math.Max(memMax, s.MemoryMB)
 	}
 
 	// Skip the first sample for CPU (always 0 since rate needs two points)
-	var cpuValues []float64
-	var cpuSum, cpuMax float64
+	var cpuValues stats.Float64Data
 	if len(samples) > 1 {
-		for _, s := range samples[1:] {
-			cpuValues = append(cpuValues, s.CPUCores)
-			cpuSum += s.CPUCores
-			cpuMax = math.Max(cpuMax, s.CPUCores)
+		cpuValues = make(stats.Float64Data, len(samples)-1)
+		for i, s := range samples[1:] {
+			cpuValues[i] = s.CPUCores
 		}
 	}
 
-	n := float64(len(samples))
-	stats := ResourceStats{
-		P95MemoryMB: percentile(memValues, 0.95),
-		AvgMemoryMB: memSum / n,
+	memP95, _ := stats.Percentile(memValues, 95)
+	memAvg, _ := stats.Mean(memValues)
+	memMax, _ := stats.Max(memValues)
+
+	result := ResourceStats{
+		P95MemoryMB: memP95,
+		AvgMemoryMB: memAvg,
 		MaxMemoryMB: memMax,
 		SampleCount: len(samples),
 	}
 
 	if len(cpuValues) > 0 {
-		stats.P95CPUCores = percentile(cpuValues, 0.95)
-		stats.AvgCPUCores = cpuSum / float64(len(cpuValues))
-		stats.MaxCPUCores = cpuMax
+		result.P95CPUCores, _ = stats.Percentile(cpuValues, 95)
+		result.AvgCPUCores, _ = stats.Mean(cpuValues)
+		result.MaxCPUCores, _ = stats.Max(cpuValues)
 	}
 
-	return stats
-}
-
-func percentile(values []float64, p float64) float64 {
-	sort.Float64s(values)
-	if len(values) == 0 {
-		return 0
-	}
-	if len(values) == 1 {
-		return values[0]
-	}
-	rank := p * float64(len(values)-1)
-	lower := int(math.Floor(rank))
-	upper := int(math.Ceil(rank))
-	if lower == upper {
-		return values[lower]
-	}
-	frac := rank - float64(lower)
-	return values[lower]*(1-frac) + values[upper]*frac
+	return result
 }
