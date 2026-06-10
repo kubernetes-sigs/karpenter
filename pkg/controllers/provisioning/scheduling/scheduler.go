@@ -723,7 +723,9 @@ func schedulingErrorRank(err error) int {
 	}
 	errString := err.Error()
 	switch {
-	case strings.Contains(errString, "exceed") && strings.Contains(errString, "resources"):
+	case strings.Contains(errString, "exceed") && (strings.Contains(errString, "resources") || strings.Contains(errString, "limits")):
+		return 0
+	case strings.Contains(errString, "exhausted"):
 		return 0
 	case strings.Contains(errString, "incompatible requirements"):
 		return 10
