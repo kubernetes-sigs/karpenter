@@ -27,7 +27,6 @@ import (
 const (
 	voluntaryDisruptionSubsystem = "voluntary_disruption"
 	decisionLabel                = "decision"
-	MethodLabel                  = "method"
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
 )
@@ -44,10 +43,10 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "decision_evaluation_duration_seconds",
-			Help:      "Duration of the disruption decision evaluation process in seconds. Labeled by method, reason, and consolidation type.",
+			Help:      "Duration of the disruption decision evaluation process in seconds. Labeled by reason and consolidation type.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{MethodLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+		[]string{metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
 	DecisionsPerformedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
