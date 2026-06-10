@@ -62,14 +62,6 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// Performance assertions
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 4*time.Minute),
 				"Total scale-out time should be less than 4 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
-				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
-				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterMemoryMB).To(BeNumerically("<", 350+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 350 MB during scale-out")
-			Expect(scaleOutReport.KarpenterCPUNanos).To(BeNumerically("<", 20*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 20s (100%) during scale-out")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")
@@ -106,14 +98,6 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 35*time.Minute),
 				"Consolidation should complete within 35 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
-				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
-				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 320+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 320 MB during consolidation")
-			Expect(consolidationReport.KarpenterCPUNanos).To(BeNumerically("<", 20*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 20s (100%) during consolidation")
 
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()

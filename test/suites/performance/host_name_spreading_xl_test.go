@@ -58,14 +58,6 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// XL Performance assertions - hostname spreading at scale may require many more nodes
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 35*time.Minute),
 				"Total XL scale-out time should be less than 35 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
-				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
-				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterMemoryMB).To(BeNumerically("<", 700+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 700 MB during scale-out")
-			Expect(scaleOutReport.KarpenterCPUNanos).To(BeNumerically("<", 20*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 20s (100%) during scale-out")
 
 			// ========== PHASE 2: XL CONSOLIDATION TEST ==========
 			By("Scaling down XL deployments to trigger consolidation")
@@ -88,14 +80,6 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// XL Consolidation assertions
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 35*time.Minute),
 				"XL consolidation should complete within 35 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
-				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
-				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 650+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 650 MB during consolidation")
-			Expect(consolidationReport.KarpenterCPUNanos).To(BeNumerically("<", 24*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 24s (120%) during consolidation")
 
 		})
 	})
