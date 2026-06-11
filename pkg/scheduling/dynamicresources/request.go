@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"unique"
 
+	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -95,6 +96,8 @@ func ValidateClaimRequest(
 				AttributeBindingFallback: bindingFallback,
 			}
 			data.Constraints = append(data.Constraints, mac)
+		case c.DistinctAttribute != nil:
+			return nil, fmt.Errorf("claim %q: DistinctAttribute constraints not done yet", claim.Name)
 		default:
 			return nil, fmt.Errorf("claim %q: unsupported constraint type", claim.Name)
 		}
@@ -304,8 +307,10 @@ func DeviceMatchesSelectors(
 		}
 
 		match, _, err := result.DeviceMatches(ctx, dracel.Device{
-			Driver:     deviceID.Driver.Value(),
-			Attributes: device.Attributes,
+			Driver:                   deviceID.Driver.Value(),
+			Attributes:               device.Attributes,
+			Capacity:                 device.Capacity,
+			AllowMultipleAllocations: lo.ToPtr(device.AllowMultipleAllocations),
 		})
 		if err != nil {
 			return false, fmt.Errorf("CEL expression %q evaluation failed: %w", s.CEL.Expression, err)

@@ -132,9 +132,15 @@ func (s *apiServerSlice) Devices() []cloudprovider.Device {
 			for k, v := range d.Attributes {
 				attrs[k] = v
 			}
+			capacity := make(map[resourcev1.QualifiedName]resourcev1.DeviceCapacity, len(d.Capacity))
+			for k, v := range d.Capacity {
+				capacity[k] = v
+			}
 			s.devices[i] = cloudprovider.Device{
-				Name:       unique.Make(d.Name),
-				Attributes: attrs,
+				Name:                     unique.Make(d.Name),
+				Attributes:               attrs,
+				Capacity:                 capacity,
+				AllowMultipleAllocations: lo.FromPtr(d.AllowMultipleAllocations),
 			}
 		}
 	}

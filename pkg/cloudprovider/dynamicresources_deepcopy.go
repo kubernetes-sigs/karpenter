@@ -76,6 +76,12 @@ func (in *Device) DeepCopyInto(out *Device) {
 			out.Attributes[key] = *val.DeepCopy()
 		}
 	}
+	if in.Capacity != nil {
+		out.Capacity = make(map[resourcev1.QualifiedName]resourcev1.DeviceCapacity, len(in.Capacity))
+		for key, val := range in.Capacity {
+			out.Capacity[key] = *val.DeepCopy()
+		}
+	}
 }
 
 func (in *Device) DeepCopy() *Device {

@@ -59,7 +59,9 @@ type Device struct {
 	Name unique.Handle[string]
 	// Attributes are the device's properties used for CEL selector evaluation and
 	// MatchAttribute constraint checking.
-	Attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute
+	Attributes               map[resourcev1.QualifiedName]resourcev1.DeviceAttribute
+	Capacity                 map[resourcev1.QualifiedName]resourcev1.DeviceCapacity
+	AllowMultipleAllocations bool
 }
 
 // AttributeBinding declares that a set of devices on an instance type will share a common

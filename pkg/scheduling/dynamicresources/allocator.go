@@ -317,7 +317,7 @@ func (a *Allocator) Allocate(
 		nodeClaim:            nodeClaim,
 		pools:                pools,
 		templateDevicesByIT:  templateDevicesByIT,
-		celCache:             dracel.NewCache(0, dracel.Features{}),
+		celCache:             dracel.NewCache(0, dracel.Features{EnableConsumableCapacity: true}),
 		allocatedDevices:     sets.New[DeviceID](),
 		deviceMatchesRequest: make(map[matchKey]bool),
 		requirements:         classifyRes.requirements,
