@@ -148,7 +148,3 @@ type DRAConfigList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []DRAConfig `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&DRAConfig{}, &DRAConfigList{})
-}
