@@ -253,7 +253,7 @@ func (r Results) recordPodErrors(ctx context.Context, recorder events.Recorder, 
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Info("skipping pod with Dynamic Resource Allocation requirements, not yet supported by Karpenter")
 			continue
 		}
-		if podErrCache.ShouldLog(p, err) {
+		if podErrCache.ShouldLog(p) {
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
 		}
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
@@ -713,6 +713,18 @@ func sortSchedulingErrors(errs []error) {
 	})
 }
 
+var schedulingErrorRankRules = []struct {
+	rank    int
+	matches func(string) bool
+}{
+	{rank: 0, matches: isResourceConstraintError},
+	{rank: 0, matches: containsSchedulingError("exhausted")},
+	{rank: 10, matches: containsSchedulingError("incompatible requirements")},
+	{rank: 20, matches: containsSchedulingError("offering")},
+	{rank: 30, matches: hasHostPortOrVolumeError},
+	{rank: 40, matches: containsSchedulingError("did not tolerate taint")},
+}
+
 func schedulingErrorRank(err error) int {
 	if err == nil {
 		return 100
@@ -722,22 +734,29 @@ func schedulingErrorRank(err error) int {
 		return instanceTypeFilterErrorRank(instanceTypeFilterError)
 	}
 	errString := err.Error()
-	switch {
-	case strings.Contains(errString, "exceed") && (strings.Contains(errString, "resources") || strings.Contains(errString, "limits")):
-		return 0
-	case strings.Contains(errString, "exhausted"):
-		return 0
-	case strings.Contains(errString, "incompatible requirements"):
-		return 10
-	case strings.Contains(errString, "offering"):
-		return 20
-	case strings.Contains(errString, "host port") || strings.Contains(errString, "volume"):
-		return 30
-	case strings.Contains(errString, "did not tolerate taint"):
-		return 40
-	default:
-		return 50
+	for _, rule := range schedulingErrorRankRules {
+		if rule.matches(errString) {
+			return rule.rank
+		}
 	}
+	return 50
+}
+
+func containsSchedulingError(substr string) func(string) bool {
+	return func(errString string) bool {
+		return strings.Contains(errString, substr)
+	}
+}
+
+func isResourceConstraintError(errString string) bool {
+	if !strings.Contains(errString, "exceed") {
+		return false
+	}
+	return strings.Contains(errString, "resources") || strings.Contains(errString, "limits")
+}
+
+func hasHostPortOrVolumeError(errString string) bool {
+	return strings.Contains(errString, "host port") || strings.Contains(errString, "volume")
 }
 
 func instanceTypeFilterErrorRank(e InstanceTypeFilterError) int {

@@ -17,7 +17,6 @@ limitations under the License.
 package scheduling
 
 import (
-	"fmt"
 	"time"
 
 	gocache "github.com/patrickmn/go-cache"
@@ -26,9 +25,9 @@ import (
 
 const podSchedulingErrorLogTimeout = 5 * time.Minute
 
-// PodErrorCache suppresses repeated "could not schedule pod" log lines for the same pod+error
-// combination across scheduling cycles. It must be held on a long-lived struct (e.g. Provisioner)
-// so the deduplication window survives across reconcile loops.
+// PodErrorCache suppresses repeated "could not schedule pod" log lines for the same pod across
+// scheduling cycles. It must be held on a long-lived struct (e.g. Provisioner) so the
+// deduplication window survives across reconcile loops.
 type PodErrorCache struct {
 	cache *gocache.Cache
 }
@@ -39,13 +38,13 @@ func NewPodErrorCache() *PodErrorCache {
 	}
 }
 
-// ShouldLog returns true the first time a given pod+error pair is seen, and false until
+// ShouldLog returns true the first time a given pod is seen, and false until
 // podSchedulingErrorLogTimeout elapses.
-func (c *PodErrorCache) ShouldLog(p *corev1.Pod, err error) bool {
+func (c *PodErrorCache) ShouldLog(p *corev1.Pod) bool {
 	if c == nil {
 		return true
 	}
-	key := fmt.Sprintf("%s:%s", p.UID, err.Error())
+	key := string(p.UID)
 	if _, found := c.cache.Get(key); found {
 		return false
 	}

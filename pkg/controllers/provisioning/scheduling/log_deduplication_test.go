@@ -17,8 +17,6 @@ limitations under the License.
 package scheduling
 
 import (
-	"errors"
-	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -32,57 +30,40 @@ func podWithUID(uid string) *corev1.Pod {
 
 func TestPodErrorCache_LogsFirstOccurrence(t *testing.T) {
 	c := NewPodErrorCache()
-	if !c.ShouldLog(podWithUID("p1"), errors.New("err")) {
+	if !c.ShouldLog(podWithUID("p1")) {
 		t.Fatal("expected true on first occurrence")
 	}
 }
 
-func TestPodErrorCache_SuppressesRepeatSameType(t *testing.T) {
+func TestPodErrorCache_SuppressesRepeatSamePod(t *testing.T) {
 	c := NewPodErrorCache()
-	err := errors.New("err")
-	c.ShouldLog(podWithUID("p1"), err)
-	if c.ShouldLog(podWithUID("p1"), err) {
-		t.Fatal("expected false on repeated same-type error")
+	c.ShouldLog(podWithUID("p1"))
+	if c.ShouldLog(podWithUID("p1")) {
+		t.Fatal("expected false on repeated same pod")
 	}
 }
 
-func TestPodErrorCache_AllowsDifferentMessagesOfSameType(t *testing.T) {
-	// Key uses err.Error() so distinct messages are treated as distinct errors, even if
-	// they share the same Go type. This avoids over-deduplication when errors are wrapped
-	// (e.g. via serrors.Wrap) and all carry the same concrete type.
+func TestPodErrorCache_SuppressesSamePodWithDifferentError(t *testing.T) {
 	c := NewPodErrorCache()
-	c.ShouldLog(podWithUID("p1"), errors.New("message one"))
-	if !c.ShouldLog(podWithUID("p1"), errors.New("message two")) {
-		t.Fatal("expected true: different messages should not be deduplicated")
-	}
-}
-
-func TestPodErrorCache_AllowsDifferentErrorMessages(t *testing.T) {
-	// Key is the error message string; different messages are always distinct entries.
-	type errA struct{ error }
-	c := NewPodErrorCache()
-	if !c.ShouldLog(podWithUID("p1"), errA{errors.New("error for nodepool A")}) {
-		t.Fatal("expected true for first message")
-	}
-	if !c.ShouldLog(podWithUID("p1"), errA{errors.New("error for nodepool B")}) {
-		t.Fatal("expected true for different message (different nodepool failure)")
+	c.ShouldLog(podWithUID("p1"))
+	if c.ShouldLog(podWithUID("p1")) {
+		t.Fatal("expected false for same pod even if the scheduling error changed")
 	}
 }
 
 func TestPodErrorCache_AllowsDifferentPods(t *testing.T) {
 	c := NewPodErrorCache()
-	err := fmt.Errorf("err")
-	if !c.ShouldLog(podWithUID("p1"), err) {
+	if !c.ShouldLog(podWithUID("p1")) {
 		t.Fatal("expected true for pod p1")
 	}
-	if !c.ShouldLog(podWithUID("p2"), err) {
+	if !c.ShouldLog(podWithUID("p2")) {
 		t.Fatal("expected true for pod p2 (different pod)")
 	}
 }
 
 func TestPodErrorCache_NilReceiverAlwaysLogs(t *testing.T) {
 	var c *PodErrorCache
-	if !c.ShouldLog(podWithUID("p1"), errors.New("err")) {
+	if !c.ShouldLog(podWithUID("p1")) {
 		t.Fatal("expected true for nil cache")
 	}
 }
