@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -41,6 +42,10 @@ var _ = Describe("DynamicResources", func() {
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
 									"gpu.nvidia.com/model": {StringValue: ptr.To("H100")},
 								},
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.nvidia.com/memory": {Value: resource.MustParse("80Gi")},
+								},
+								AllowMultipleAllocations: true,
 							},
 						},
 					},
@@ -64,11 +69,17 @@ var _ = Describe("DynamicResources", func() {
 			Expect(copied.AttributeBindings).To(HaveLen(1))
 			Expect(copied.AttributeBindings[0].Devices).To(HaveLen(2))
 
+			dev := copied.ResourceSliceTemplates[0].Devices[0]
+			Expect(dev.AllowMultipleAllocations).To(BeTrue())
+			Expect(dev.Capacity).To(HaveLen(1))
+			Expect(dev.Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+
 			// Mutating the copy should not affect the original
-			copied.ResourceSliceTemplates[0].Devices[0].Attributes["gpu.nvidia.com/model"] = resourcev1.DeviceAttribute{
-				StringValue: ptr.To("A100"),
-			}
+			dev.Attributes["gpu.nvidia.com/model"] = resourcev1.DeviceAttribute{StringValue: ptr.To("A100")}
 			Expect(*original.ResourceSliceTemplates[0].Devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal("H100"))
+
+			dev.Capacity["gpu.nvidia.com/memory"] = resourcev1.DeviceCapacity{Value: resource.MustParse("40Gi")}
+			Expect(original.ResourceSliceTemplates[0].Devices[0].Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
 
 			copied.AttributeBindings[0].Devices = copied.AttributeBindings[0].Devices[:1]
 			Expect(original.AttributeBindings[0].Devices).To(HaveLen(2))

@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -55,6 +56,10 @@ var _ = Describe("ResourceSlice Interface", func() {
 								"gpu.nvidia.com/model":  {StringValue: ptr.To("H100")},
 								"gpu.nvidia.com/memory": {IntValue: ptr.To(int64(80))},
 							},
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.nvidia.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+							AllowMultipleAllocations: ptr.To(true),
 						},
 						{
 							Name: "gpu-1",
@@ -62,6 +67,7 @@ var _ = Describe("ResourceSlice Interface", func() {
 								"gpu.nvidia.com/model":  {StringValue: ptr.To("H100")},
 								"gpu.nvidia.com/memory": {IntValue: ptr.To(int64(80))},
 							},
+							AllowMultipleAllocations: nil,
 						},
 					},
 				},
@@ -81,14 +87,19 @@ var _ = Describe("ResourceSlice Interface", func() {
 			Expect(slice.Potential()).To(BeFalse())
 		})
 
-		It("should convert devices with interned names and attributes", func() {
+		It("should convert devices with interned names, attributes, capacity, and AllowMultipleAllocations", func() {
 			devices := slice.Devices()
 			Expect(devices).To(HaveLen(2))
 			Expect(devices[0].Name).To(Equal(unique.Make("gpu-0")))
 			Expect(devices[0].Attributes).To(HaveLen(2))
 			Expect(devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal(ptr.To("H100")))
 			Expect(devices[0].Attributes["gpu.nvidia.com/memory"].IntValue).To(Equal(ptr.To(int64(80))))
+			Expect(devices[0].Capacity).To(HaveLen(1))
+			Expect(devices[0].Capacity["gpu.nvidia.com/vram"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+			Expect(devices[0].AllowMultipleAllocations).To(BeTrue())
 			Expect(devices[1].Name).To(Equal(unique.Make("gpu-1")))
+			Expect(devices[1].Capacity).To(BeEmpty())
+			Expect(devices[1].AllowMultipleAllocations).To(BeFalse())
 		})
 
 		It("should cache devices on repeated calls", func() {
@@ -140,6 +151,7 @@ var _ = Describe("ResourceSlice Interface", func() {
 			slice = dynamicresources.NewAPIServerSlice(apiSlice)
 			Expect(slice.Devices()).To(BeEmpty())
 		})
+
 	})
 
 	Describe("TemplateSlice", func() {
@@ -158,6 +170,10 @@ var _ = Describe("ResourceSlice Interface", func() {
 						Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
 							"gpu.nvidia.com/model": {StringValue: ptr.To("A100")},
 						},
+						Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+							"gpu.nvidia.com/memory": {Value: resource.MustParse("80Gi")},
+						},
+						AllowMultipleAllocations: true,
 					},
 				},
 			}
@@ -176,11 +192,14 @@ var _ = Describe("ResourceSlice Interface", func() {
 			Expect(slice.Potential()).To(BeTrue())
 		})
 
-		It("should return devices directly from the template", func() {
+		It("should return devices with attributes, capacity, and AllowMultipleAllocations", func() {
 			devices := slice.Devices()
 			Expect(devices).To(HaveLen(1))
 			Expect(devices[0].Name).To(Equal(unique.Make("gpu-0")))
 			Expect(devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal(ptr.To("A100")))
+			Expect(devices[0].Capacity).To(HaveLen(1))
+			Expect(devices[0].Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+			Expect(devices[0].AllowMultipleAllocations).To(BeTrue())
 		})
 
 		It("should return nil NodeSelector", func() {

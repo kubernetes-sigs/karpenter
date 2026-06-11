@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
 	"k8s.io/utils/ptr"
@@ -40,7 +41,7 @@ var _ = Describe("Request Validation", func() {
 	)
 
 	BeforeEach(func() {
-		celCache = dracel.NewCache(100, dracel.Features{})
+		celCache = dracel.NewCache(100, dracel.Features{EnableConsumableCapacity: true})
 
 		// Create DeviceClasses in the API server.
 		ExpectApplied(ctx, env.Client,
@@ -448,6 +449,25 @@ var _ = Describe("Request Validation", func() {
 			Expect(ok).To(BeTrue())
 			Expect(mac.AttributeBindingFallback).ToNot(BeNil())
 			Expect(mac.AttributeBindingFallback.NodePool).To(Equal("default"))
+		})
+
+		It("should fail on DistinctAttribute constraints (not yet supported)", func() {
+			attr := resourcev1.FullyQualifiedName("gpu.example.com/numa-node")
+			claim := &resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
+				Spec: resourcev1.ResourceClaimSpec{
+					Devices: resourcev1.DeviceClaim{
+						Constraints: []resourcev1.DeviceConstraint{
+							{DistinctAttribute: &attr},
+						},
+					},
+				},
+			}
+
+			_, err := dynamicresources.ValidateClaimRequest(ctx, env.Client, claim, pools, nil, celCache, nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("DistinctAttribute"))
+			Expect(err.Error()).To(ContainSubstring("not done yet"))
 		})
 
 		It("should fail on unsupported constraint types", func() {
@@ -1234,10 +1254,16 @@ var _ = Describe("Request Validation", func() {
 					"gpu.example.com/model":  {StringValue: ptr.To("H100")},
 					"gpu.example.com/memory": {IntValue: ptr.To(int64(80))},
 				},
+				Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+					"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+				},
+				AllowMultipleAllocations: true,
 			}
 			selectors := []resourcev1.DeviceSelector{
 				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "H100"`}},
 				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].memory > 40`}},
+				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.capacity["gpu.example.com"].vram.isGreaterThan(quantity("40Gi"))`}},
+				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.allowMultipleAllocations == true`}},
 			}
 
 			match, err := dynamicresources.DeviceMatchesSelectors(ctx, d,
@@ -1295,6 +1321,38 @@ var _ = Describe("Request Validation", func() {
 				deviceID("gpu.example.com", "pool", "gpu-0"), selectors, celCache)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to compile"))
+		})
+
+		It("should not match when capacity selector fails", func() {
+			d := cloudprovider.Device{
+				Name: unique.Make("gpu-0"),
+				Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+					"gpu.example.com/memory": {Value: resource.MustParse("20Gi")},
+				},
+			}
+			selectors := []resourcev1.DeviceSelector{
+				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.capacity["gpu.example.com"].memory.isGreaterThan(quantity("40Gi"))`}},
+			}
+
+			match, err := dynamicresources.DeviceMatchesSelectors(ctx, d,
+				deviceID("gpu.example.com", "pool", "gpu-0"), selectors, celCache)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(match).To(BeFalse())
+		})
+
+		It("should not match when AllowMultipleAllocations is false", func() {
+			d := cloudprovider.Device{
+				Name:                     unique.Make("exclusive-gpu"),
+				AllowMultipleAllocations: false,
+			}
+			selectors := []resourcev1.DeviceSelector{
+				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.allowMultipleAllocations == true`}},
+			}
+
+			match, err := dynamicresources.DeviceMatchesSelectors(ctx, d,
+				deviceID("gpu.example.com", "pool", "exclusive-gpu"), selectors, celCache)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(match).To(BeFalse())
 		})
 	})
 })
