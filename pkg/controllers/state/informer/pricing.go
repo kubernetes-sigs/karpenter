@@ -23,9 +23,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/mitchellh/hashstructure/v2"
 	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/types"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,7 +42,6 @@ type PricingController struct {
 	client        client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clusterCost   *cost.ClusterCost
-	npOfMap       map[types.NamespacedName]uint64
 }
 
 func NewPricingController(client client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *PricingController {
@@ -52,7 +49,6 @@ func NewPricingController(client client.Client, cloudProvider cloudprovider.Clou
 		client:        client,
 		cloudProvider: cloudProvider,
 		clusterCost:   clusterCost,
-		npOfMap:       make(map[types.NamespacedName]uint64),
 	}
 }
 
@@ -63,7 +59,6 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		return reconciler.Result{}, err
 	}
 
-	newNpOfMap := make(map[types.NamespacedName]uint64, len(npl.Items))
 	var errs error
 	for _, np := range npl.Items {
 		newIts, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
@@ -71,44 +66,13 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 			errs = multierr.Append(errs, err)
 			continue
 		}
-
-		key := client.ObjectKeyFromObject(&np)
-		hash := hashOfferings(newIts)
-		newNpOfMap[key] = hash
-
-		if oldHash, exists := c.npOfMap[key]; exists && oldHash == hash {
-			continue
-		}
 		c.clusterCost.UpdateOfferings(ctx, &np, newIts)
 	}
 	if errs != nil {
 		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", errs)
 	}
-	c.npOfMap = newNpOfMap
 
 	return reconciler.Result{RequeueAfter: 1 * time.Hour}, nil
-}
-
-func hashOfferings(instanceTypes []*cloudprovider.InstanceType) uint64 {
-	type offeringSnapshot struct {
-		InstanceName string
-		Zone         string
-		CapacityType string
-		Price        float64
-	}
-	var snapshots []offeringSnapshot
-	for _, it := range instanceTypes {
-		for _, o := range it.Offerings {
-			snapshots = append(snapshots, offeringSnapshot{
-				InstanceName: it.Name,
-				Zone:         o.Zone(),
-				CapacityType: o.CapacityType(),
-				Price:        o.Price,
-			})
-		}
-	}
-	h, _ := hashstructure.Hash(snapshots, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
-	return h
 }
 
 func (c *PricingController) Name() string {
