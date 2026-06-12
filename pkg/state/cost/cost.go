@@ -283,10 +283,11 @@ func (cc *ClusterCost) internalRemoveOffering(npName string, offeringKey Offerin
 	}
 
 	oc.Count--
-	npc.offeringCounts[offeringKey] = oc
 	npc.cost -= oc.Price
 	if oc.Count == 0 {
 		delete(npc.offeringCounts, offeringKey)
+	} else {
+		npc.offeringCounts[offeringKey] = oc
 	}
 	if len(npc.offeringCounts) == 0 {
 		delete(cc.npCostMap, npName)
