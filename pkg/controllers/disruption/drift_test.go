@@ -103,6 +103,72 @@ var _ = Describe("Drift", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, eligibleNodesLabels)
 		})
+		It("should fire NodeClaimsDisruptedTotal and PodsDisruptedTotal metrics when a drifted node is disrupted", func() {
+			labels := map[string]string{"app": "test"}
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			// Create 3 RS-owned (reschedulable) pods on the drifted nodeClaim
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					},
+				},
+			})
+
+			// Create a second node to absorb the rescheduled pods
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool, nodeClaim, node, nodeClaim2, node2)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
+			ExpectManualBinding(ctx, env.Client, pods[2], node)
+
+			// Inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			// Reconcile the queue to execute termination of the drifted node
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			capacityType := nodeClaim.Labels[v1.CapacityTypeLabelKey]
+			metricLabels := map[string]string{
+				metrics.ReasonLabel:       "drifted",
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: capacityType,
+			}
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, metricLabels)
+			ExpectMetricCounterValue(metrics.PodsDisruptedTotal, 3, metricLabels)
+		})
 	})
 	Context("Budgets", func() {
 		var numNodes = 10

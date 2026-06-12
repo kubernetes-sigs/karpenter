@@ -85,6 +85,10 @@ func (c *Candidate) OwnedByStaticNodePool() bool {
 	return c.NodePool.Spec.Replicas != nil
 }
 
+func (c *Candidate) ReschedulablePodCount() int {
+	return len(c.reschedulablePods)
+}
+
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
 	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string,
