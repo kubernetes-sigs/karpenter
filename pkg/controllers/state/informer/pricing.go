@@ -23,9 +23,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/types"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,7 +42,6 @@ type PricingController struct {
 	client        client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clusterCost   *cost.ClusterCost
-	npOfMap       map[types.NamespacedName]map[cost.OfferingKey]float64
 }
 
 func NewPricingController(client client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *PricingController {
@@ -62,26 +59,11 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		return reconciler.Result{}, err
 	}
 
-	newNpOfMap := make(map[types.NamespacedName]map[cost.OfferingKey]float64)
 	var errs error
 	for _, np := range npl.Items {
-		oldOfs, exists := c.npOfMap[client.ObjectKeyFromObject(&np)]
 		newIts, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
 		if err != nil {
 			errs = multierr.Append(errs, err)
-			continue
-		}
-
-		newNpOfMap[client.ObjectKeyFromObject(&np)] = make(map[cost.OfferingKey]float64)
-
-		for _, it := range newIts {
-			for _, o := range it.Offerings {
-				offeringKey := cost.OfferingKey{InstanceName: it.Name, Zone: o.Zone(), CapacityType: o.CapacityType()}
-				newNpOfMap[client.ObjectKeyFromObject(&np)][offeringKey] = o.Price
-			}
-		}
-
-		if exists && equal(oldOfs, newNpOfMap[client.ObjectKeyFromObject(&np)]) {
 			continue
 		}
 		c.clusterCost.UpdateOfferings(ctx, &np, newIts)
@@ -89,25 +71,8 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 	if errs != nil {
 		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", errs)
 	}
-	c.npOfMap = newNpOfMap
 
 	return reconciler.Result{RequeueAfter: 1 * time.Hour}, nil
-}
-
-func equal(oldOfs map[cost.OfferingKey]float64, newOfs map[cost.OfferingKey]float64) bool {
-	if len(lo.Values(oldOfs)) != len(newOfs) {
-		return false
-	}
-	for newOf, newPrice := range newOfs {
-		oldPrice, exists := oldOfs[newOf]
-		if !exists {
-			return false
-		}
-		if oldPrice != newPrice {
-			return false
-		}
-	}
-	return true
 }
 
 func (c *PricingController) Name() string {
