@@ -53,23 +53,11 @@ import (
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-// evictionMode determines how the Queue removes a pod from its node.
-type evictionMode int
-
-const (
-	// modeEvict uses the Kubernetes eviction subresource and respects PDBs.
-	modeEvict evictionMode = iota
-	// modeForceDelete uses kubeClient.Delete with a clamped grace period and
-	// bypasses PDBs. Used when a pod's terminationGracePeriodSeconds would
-	// otherwise extend past the node's terminationGracePeriod.
-	modeForceDelete
-)
-
-// queueItem holds the per-pod state needed by the Queue's reconciler.
+// queueItem holds the per-pod state needed by the Queue's reconciler. The
+// reconciler decides at reconcile time whether to evict or force-delete based
+// on nodeTerminationTime and the pod's grace period — there is no upfront
+// per-pod mode. A nil nodeTerminationTime means "no deadline; always evict".
 type queueItem struct {
-	mode evictionMode
-	// nodeTerminationTime is set when mode == modeForceDelete. It is used to
-	// clamp the pod's grace period at delete time.
 	nodeTerminationTime *time.Time
 }
 
@@ -158,39 +146,19 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
 
-// Add adds pods to the Queue for eviction via the Kubernetes eviction API.
-// Pods already enqueued (in any mode) are left untouched so that an in-flight
-// force-delete is not downgraded to an eviction.
-func (q *Queue) Add(pods ...*corev1.Pod) {
+// Add enqueues pods for drain. The queue decides per reconcile whether to
+// evict (respecting PDB) or force-delete based on whether the pod's grace
+// period would extend past nodeTerminationTime; pass nil to disable the
+// force-delete path entirely. Re-adding a pod overwrites its deadline so the
+// next reconcile picks up the latest value.
+func (q *Queue) Add(nodeTerminationTime *time.Time, pods ...*corev1.Pod) {
 	q.Lock()
 	defer q.Unlock()
 
 	for _, pod := range pods {
 		qk := NewQueueKey(pod)
-		if _, ok := q.items[qk]; ok {
-			continue
-		}
-		q.items[qk] = queueItem{mode: modeEvict}
-		q.source <- event.TypedGenericEvent[*corev1.Pod]{Object: pod}
-	}
-}
-
-// AddForceDelete adds pods to the Queue to be force-deleted with a grace period
-// clamped to the node's remaining terminationGracePeriod. This bypasses PDBs
-// and the do-not-disrupt annotation. If a pod is already enqueued for eviction,
-// its entry is upgraded to force-delete so that the next reconcile honors the
-// new mode.
-func (q *Queue) AddForceDelete(nodeTerminationTime *time.Time, pods ...*corev1.Pod) {
-	q.Lock()
-	defer q.Unlock()
-
-	for _, pod := range pods {
-		qk := NewQueueKey(pod)
-		// Overwrite any existing entry so a pod already enqueued for eviction is
-		// upgraded to force-delete. The reconciler reads the mode at the start of
-		// each reconcile, so the upgrade takes effect on the next attempt.
 		_, enqueued := q.items[qk]
-		q.items[qk] = queueItem{mode: modeForceDelete, nodeTerminationTime: nodeTerminationTime}
+		q.items[qk] = queueItem{nodeTerminationTime: nodeTerminationTime}
 		if !enqueued {
 			q.source <- event.TypedGenericEvent[*corev1.Pod]{Object: pod}
 		}
@@ -219,10 +187,40 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		return reconcile.Result{}, nil
 	}
 
-	if item.mode == modeForceDelete {
+	if needsForceDelete(pod, item.nodeTerminationTime, q.clock) {
 		return q.forceDelete(ctx, pod, item.nodeTerminationTime)
 	}
+	// Pod is terminal (Failed/Succeeded) or terminating so drop the queue entry.
+	// Reconcile won't fire again once the pod is gone, so this is our only chance to clean up.
+	if !podutils.IsActive(pod) {
+		q.complete(pod)
+		return reconcile.Result{}, nil
+	}
+	// Active but not evictable (do-not-disrupt). Stay enqueued under the queue's exponential backoff.
+	// The next reconcile picks the right path when the
+	// annotation clears or the deadline crosses needsForceDelete's threshold.
+	if !podutils.IsEvictable(pod, q.clock, q.recorder) {
+		return reconcile.Result{Requeue: true}, nil
+	}
 	return q.evict(ctx, pod)
+}
+
+// needsForceDelete reports whether the pod should be force-deleted now: its
+// grace period would (or already does) extend past nodeTerminationTime if
+// allowed to run on its own. Re-evaluated on every reconcile, so a pod stuck
+// on a PDB upgrades to force-delete naturally once the deadline passes.
+func needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time, clk clock.Clock) bool {
+	if nodeTerminationTime == nil {
+		return false
+	}
+	if podutils.IsTerminating(pod) {
+		return podutils.IsPodEligibleForForcedEviction(pod, nodeTerminationTime)
+	}
+	if pod.Spec.TerminationGracePeriodSeconds == nil {
+		return false
+	}
+	deleteTime := nodeTerminationTime.Add(time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second * -1)
+	return clk.Now().After(deleteTime)
 }
 
 // evict removes a pod via the Kubernetes eviction subresource, respecting PDBs.

@@ -96,23 +96,13 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-	// Pods whose terminationGracePeriodSeconds would extend past the node's
-	// terminationGracePeriod are routed to the eviction queue's force-delete
-	// path so they get as much of their grace period as possible before the
-	// node is forcefully terminated. This bypasses PDBs and the
-	// do-not-disrupt annotation.
-	t.evictionQueue.AddForceDelete(nodeGracePeriodExpirationTime, lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return podutil.IsWaitingEviction(p, t.clock) &&
-			(!podutil.IsTerminating(p) || podutil.IsPodEligibleForForcedEviction(p, nodeGracePeriodExpirationTime)) &&
-			t.shouldForceDeleteNow(p, nodeGracePeriodExpirationTime)
-	})...)
-	// Monitor pods in pod groups that either haven't been evicted or are actively evicting
+	// Hand the queue every pod we're waiting on plus the node's deadline. The
+	// queue picks evict vs force-delete vs requeue per pod, per reconcile —
+	// the terminator does no per-pod drain decisioning.
 	podGroups := t.groupPodsByPriority(lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) }))
 	for _, group := range podGroups {
 		if len(group) > 0 {
-			// Only add pods to the eviction queue that haven't been evicted yet. Pods already enqueued
-			// for force-delete are skipped by Add, so this won't downgrade them to a PDB-respecting eviction.
-			t.evictionQueue.Add(lo.Filter(group, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p, t.clock, t.recorder) })...)
+			t.evictionQueue.Add(nodeGracePeriodExpirationTime, group...)
 			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", lo.SumBy(podGroups, func(pods []*corev1.Pod) int { return len(pods) })))
 		}
 	}
@@ -138,17 +128,4 @@ func (t *Terminator) groupPodsByPriority(pods []*corev1.Pod) [][]*corev1.Pod {
 		}
 	}
 	return [][]*corev1.Pod{nonCriticalNonDaemon, nonCriticalDaemon, criticalNonDaemon, criticalDaemon}
-}
-
-// shouldForceDeleteNow reports whether the pod's terminationGracePeriodSeconds
-// would extend past the node's grace period expiration if eviction is allowed
-// to run its course, meaning the pod must be force-deleted now to give it as
-// much of its requested grace period as possible.
-func (t *Terminator) shouldForceDeleteNow(pod *corev1.Pod, nodeGracePeriodExpirationTime *time.Time) bool {
-	// k8s defaults TerminationGracePeriodSeconds to 30s, so we should never see a nil value.
-	if nodeGracePeriodExpirationTime == nil || pod.Spec.TerminationGracePeriodSeconds == nil {
-		return false
-	}
-	deleteTime := nodeGracePeriodExpirationTime.Add(time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second * -1)
-	return t.clock.Now().After(deleteTime)
 }

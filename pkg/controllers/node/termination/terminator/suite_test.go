@@ -107,13 +107,13 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should succeed with no event when the pod UID conflicts", func() {
 			ExpectApplied(ctx, env.Client, pod, node)
-			queue.Add(pod)
+			queue.Add(nil, pod)
 			pod.UID = uuid.NewUUID()
 			Expect(queue.Has(pod)).To(BeFalse())
 		})
 		It("should succeed with an evicted event when there are no PDBs", func() {
 			ExpectApplied(ctx, env.Client, pod, node)
-			queue.Add(pod)
+			queue.Add(nil, pod)
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			ExpectMetricCounterValue(terminator.PodsEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
@@ -124,14 +124,14 @@ var _ = Describe("Eviction/Queue", func() {
 				MaxUnavailable: &intstr.IntOrString{IntVal: 1},
 			})
 			ExpectApplied(ctx, env.Client, pod, node)
-			queue.Add(pod)
+			queue.Add(nil, pod)
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
 			ExpectApplied(ctx, env.Client, pdb, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
-			queue.Add(pod)
+			queue.Add(nil, pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			//nolint:staticcheck
 			Expect(result.Requeue).To(BeTrue())
@@ -148,7 +148,7 @@ var _ = Describe("Eviction/Queue", func() {
 			})
 			ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
-			queue.Add(pod)
+			queue.Add(nil, pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			//nolint:staticcheck
 			Expect(result.Requeue).To(BeTrue())
@@ -170,7 +170,7 @@ var _ = Describe("Eviction/Queue", func() {
 						if cancelContext.Err() != nil {
 							return
 						}
-						queue.Add(pod)
+						queue.Add(nil, pod)
 					}
 				}()
 			}
@@ -182,7 +182,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
 			ExpectApplied(ctx, env.Client, pod, node)
-			queue.Add(pod)
+			queue.Add(nil, pod)
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
 			ExpectMetricCounterValue(terminator.PodsEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
@@ -207,7 +207,7 @@ var _ = Describe("Eviction/Queue", func() {
 
 			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
-			queue.Add(pod)
+			queue.Add(nil, pod)
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: "SpotInterruption"})
@@ -223,7 +223,7 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			nodeTerminationTime := env.Clock.Now().Add(time.Minute * 1)
-			queue.AddForceDelete(&nodeTerminationTime, pod)
+			queue.Add(&nodeTerminationTime, pod)
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			// The blocking PDB (MaxUnavailable: 0) would reject an eviction; force-delete
 			// issues a Delete directly, so the pod gets a deletion timestamp regardless.
@@ -239,12 +239,12 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectApplied(ctx, env.Client, pdb, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
-			queue.Add(pod)
+			queue.Add(nil, pod)
 			nodeTerminationTime := env.Clock.Now().Add(time.Minute * 1)
-			queue.AddForceDelete(&nodeTerminationTime, pod)
+			queue.Add(&nodeTerminationTime, pod)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			// Had the entry stayed modeEvict, the blocking PDB would reject the eviction and
+			// Had the deadline stayed nil, the blocking PDB would reject the eviction and
 			// the pod would have no deletion timestamp. The timestamp proves the upgrade took effect.
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
@@ -253,7 +253,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should clean up the queue entry when the pod is already gone", func() {
 			nodeTerminationTime := env.Clock.Now().Add(time.Minute * 1)
-			queue.AddForceDelete(&nodeTerminationTime, pod)
+			queue.Add(&nodeTerminationTime, pod)
 			// The pod was never created, so the force-delete sees a NotFound and clears the entry.
 			// Reconcile is called directly because AsReconciler (used by ExpectObjectReconciled)
 			// would short-circuit on the missing pod before reaching the queue.
@@ -278,7 +278,7 @@ var _ = Describe("Eviction/Queue", func() {
 			// Without the clamp the grace period would be <=0, sending gracePeriodSeconds=0
 			// to the API (force-delete). The clamp must produce >= 1.
 			pastTerminationTime := env.Clock.Now().Add(-1 * time.Hour)
-			queue.AddForceDelete(&pastTerminationTime, pod)
+			queue.Add(&pastTerminationTime, pod)
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 
 			// Verify the delete was graceful (not a force-delete): the Disrupted event must have
