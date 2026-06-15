@@ -18,6 +18,7 @@ package node
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,7 @@ import (
 const (
 	nodeName  = "node_name"
 	nodePhase = "phase"
+	managed   = "managed"
 )
 
 var (
@@ -138,7 +140,7 @@ func initializeMetrics() {
 			Name:      "utilization_percent",
 			Help:      "Utilization of allocatable resources by pod requests",
 		},
-		[]string{metrics.ResourceTypeLabel},
+		[]string{metrics.ResourceTypeLabel, managed},
 	)
 }
 
@@ -156,6 +158,7 @@ func nodeLabelNames() []string {
 		sets.New(lo.Values(getWellKnownLabels())...).UnsortedList(),
 		nodeName,
 		nodePhase,
+		managed,
 	)
 }
 
@@ -204,7 +207,19 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetric {
+	// Partition nodes by whether they are managed by this Karpenter instance (i.e. have a
+	// NodeClaim owned by the configured cloud provider). Emitting utilization with a "managed"
+	// dimension lets dashboards filter out nodes Karpenter doesn't manage, which would otherwise
+	// skew the cluster utilization numbers.
+	managedNodes, unmanagedNodes := lo.FilterReject(nodes, func(n *state.StateNode, _ int) bool {
+		return n.Managed()
+	})
 
+	res := buildUtilizationForNodes(managedNodes, true)
+	return append(res, buildUtilizationForNodes(unmanagedNodes, false)...)
+}
+
+func buildUtilizationForNodes(nodes state.StateNodes, isManaged bool) []*metrics.StoreMetric {
 	// Aggregate resources allocated/utilized for all the nodes and pods inside the nodes
 	allocatableAggregate, utilizedAggregate := corev1.ResourceList{}, corev1.ResourceList{}
 
@@ -233,7 +248,10 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 		res = append(res, &metrics.StoreMetric{
 			GaugeMetric: ClusterUtilization,
 			Value:       utilizationPercentage,
-			Labels:      map[string]string{metrics.ResourceTypeLabel: resourceNameToString(resourceName)},
+			Labels: map[string]string{
+				metrics.ResourceTypeLabel: resourceNameToString(resourceName),
+				managed:                   strconv.FormatBool(isManaged),
+			},
 		})
 	}
 
@@ -241,6 +259,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 }
 
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
+	isManaged := strconv.FormatBool(n.Managed())
 	for gaugeMetric, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		SystemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
 		TotalPodRequests:    n.PodRequests(),
@@ -250,18 +269,22 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 		Allocatable:         n.Node.Status.Allocatable,
 	} {
 		for resourceName, quantity := range resourceList {
+			labels := getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName))
+			labels[managed] = isManaged
 			res = append(res, &metrics.StoreMetric{
 				GaugeMetric: gaugeMetric,
 				Value:       lo.Ternary(resourceName == corev1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
-				Labels:      getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName)),
+				Labels:      labels,
 			})
 		}
 	}
+	labels := getNodeLabels(n.Node)
+	labels[managed] = isManaged
 	return append(res,
 		&metrics.StoreMetric{
 			GaugeMetric: Lifetime,
 			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
-			Labels:      getNodeLabels(n.Node),
+			Labels:      labels,
 		})
 }
 
