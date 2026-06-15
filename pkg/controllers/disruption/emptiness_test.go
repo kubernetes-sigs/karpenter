@@ -89,14 +89,14 @@ var _ = Describe("Emptiness", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
 
 			ExpectDeleted(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
@@ -126,13 +126,13 @@ var _ = Describe("Emptiness", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -168,13 +168,13 @@ var _ = Describe("Emptiness", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -209,13 +209,13 @@ var _ = Describe("Emptiness", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := range numNodes {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -246,7 +246,7 @@ var _ = Describe("Emptiness", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -279,7 +279,7 @@ var _ = Describe("Emptiness", func() {
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
@@ -311,7 +311,7 @@ var _ = Describe("Emptiness", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
+			for i := range nps {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
@@ -344,7 +344,7 @@ var _ = Describe("Emptiness", func() {
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
@@ -368,7 +368,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
@@ -385,7 +385,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
@@ -405,7 +405,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -419,7 +419,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -433,7 +433,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
@@ -451,7 +451,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -465,7 +465,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -478,7 +478,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2, nodePool)
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 		ExpectSingletonReconciled(ctx, disruptionController)
 
 		cmds := queue.GetCommands()
@@ -542,7 +542,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -577,8 +577,8 @@ var _ = Describe("Emptiness", func() {
 						Kind:               "DaemonSet",
 						Name:               ds.Name,
 						UID:                ds.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -589,7 +589,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		ExpectSingletonReconciled(ctx, disruptionController)
 		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
@@ -626,8 +626,8 @@ var _ = Describe("Emptiness", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -647,7 +647,7 @@ var _ = Describe("Emptiness", func() {
 		}
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		ExpectSingletonReconciled(ctx, disruptionController)
 		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
@@ -684,8 +684,8 @@ var _ = Describe("Emptiness", func() {
 						Kind:               "StatefulSet",
 						Name:               ss.Name,
 						UID:                ss.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -700,7 +700,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectExists(ctx, env.Client, pod)
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectSingletonReconciled(ctx, disruptionController)
 		cmds := queue.GetCommands()
@@ -716,11 +716,11 @@ var _ = Describe("Emptiness", func() {
 		ExpectExists(ctx, env.Client, node)
 	})
 	It("should wait for the node TTL for empty nodes before consolidating", func() {
-		disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+		disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
 		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
 
 		finished := atomic.Bool{}
 		ExpectParallelized(
@@ -730,13 +730,13 @@ var _ = Describe("Emptiness", func() {
 			},
 			func() {
 				// wait for the controller to block on the validation timeout
-				Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+				Eventually(env.Clock.HasWaiters, time.Second*10).Should(BeTrue())
 				// controller should be blocking during the timeout
 				Expect(finished.Load()).To(BeFalse())
 				// and the node should not be deleted yet
 				ExpectExists(ctx, env.Client, nodeClaims[0])
 				// advance the clock so that the timeout expires
-				fakeClock.Step(31 * time.Second)
+				env.Clock.Step(31 * time.Second)
 				// controller should finish
 				Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			},
@@ -756,7 +756,7 @@ var _ = Describe("Emptiness", func() {
 		It("should not consolidate static NodePool nodes", func() {
 			staticNp := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
-					Replicas:   lo.ToPtr(int64(2)), // Static nodepool with 2 desired replica
+					Replicas:   new(int64(2)), // Static nodepool with 2 desired replica
 					Disruption: v1.Disruption{},
 				},
 			})
@@ -779,7 +779,7 @@ var _ = Describe("Emptiness", func() {
 			for _, nc := range nodeClaims {
 				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 			}
-			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			c := disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
 			emptyConsolidation := disruption.NewEmptiness(c)
 			singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c)
 			multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c)
@@ -787,17 +787,17 @@ var _ = Describe("Emptiness", func() {
 			ExpectApplied(ctx, env.Client, staticNp, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 			Expect(candidates).To(HaveLen(0))
 
-			candidates, err = disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
+			candidates, err = disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 			Expect(candidates).To(HaveLen(0))
 
-			candidates, err = disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
+			candidates, err = disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 			Expect(candidates).To(HaveLen(0))
 		})
@@ -805,7 +805,7 @@ var _ = Describe("Emptiness", func() {
 	Context("Buffer pod protection", func() {
 		It("should not disrupt a node that hosts virtual buffer pods", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			// Mark the node as hosting buffer pods
 			cluster.UpdateBufferPodCounts(map[string]int{
@@ -822,7 +822,7 @@ var _ = Describe("Emptiness", func() {
 
 		It("should disrupt a node once buffer pods are cleared", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			// First: mark node as hosting buffer pods
 			cluster.UpdateBufferPodCounts(map[string]int{
@@ -846,7 +846,7 @@ var _ = Describe("Emptiness", func() {
 
 		It("should only protect the specific node with buffer pods, not others", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, nodeClaim2, node2)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 			// Only node1 hosts buffer pods
 			cluster.UpdateBufferPodCounts(map[string]int{
@@ -867,7 +867,7 @@ var _ = Describe("Emptiness", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			// Node has both real pods and buffer pods
 			cluster.UpdateBufferPodCounts(map[string]int{
@@ -883,7 +883,7 @@ var _ = Describe("Emptiness", func() {
 
 		It("should protect multiple nodes that each host buffer pods", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, nodeClaim2, node2)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 			// Both nodes host buffer pods
 			cluster.UpdateBufferPodCounts(map[string]int{
@@ -901,7 +901,7 @@ var _ = Describe("Emptiness", func() {
 
 		It("should not protect a node with zero buffer pod count", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			// Buffer pods were cleared (count = 0 explicitly)
 			cluster.UpdateBufferPodCounts(map[string]int{

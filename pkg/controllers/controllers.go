@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/capacitybuffer"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
@@ -98,7 +99,6 @@ func NewControllers(
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
-
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
@@ -113,10 +113,10 @@ func NewControllers(
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
-		nodepoolreadiness.NewController(kubeClient, cloudProvider),
-		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider, npState),
+		nodepoolreadiness.NewController(clock, kubeClient, cloudProvider),
+		nodepoolregistrationhealth.NewController(clock, kubeClient, cloudProvider, npState),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
-		nodepoolvalidation.NewController(kubeClient, cloudProvider),
+		nodepoolvalidation.NewController(clock, kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState, o.registrationHooks),
@@ -126,6 +126,10 @@ func NewControllers(
 		nodehydration.NewController(kubeClient, cloudProvider),
 	}
 
+	if !options.FromContext(ctx).IgnoreDRARequests {
+		controllers = append(controllers, deviceallocation.NewController(kubeClient))
+	}
+
 	if !options.FromContext(ctx).DisableClusterStateObservability {
 		controllers = append(controllers,
 			metricspod.NewController(kubeClient, cluster),
@@ -133,20 +137,20 @@ func NewControllers(
 			metricsnode.NewController(cluster),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.EmitDeprecatedMetrics,
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey)...),
 			),
 			status.NewController[*v1.NodePool](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.EmitDeprecatedMetrics,
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 			),
 			status.NewGenericObjectController[*corev1.Node](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey, v1.NodeInitializedLabelKey)...)),
 		)
@@ -163,7 +167,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
-		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
+		controllers = append(controllers, nodeoverlay.NewController(clock, kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
 	}
 
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {

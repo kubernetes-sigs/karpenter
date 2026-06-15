@@ -23,7 +23,6 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -667,7 +666,7 @@ var _ = Describe("Instance Type Selection", func() {
 					Operator: corev1.NodeSelectorOpIn,
 					Values:   []string{"instance-type-1", "instance-type-2"},
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -762,7 +761,7 @@ var _ = Describe("Instance Type Selection", func() {
 					Operator: corev1.NodeSelectorOpGt,
 					Values:   []string{"2"},
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -838,7 +837,7 @@ var _ = Describe("Instance Type Selection", func() {
 					Key:      instanceGeneration,
 					Operator: corev1.NodeSelectorOpExists,
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -944,7 +943,7 @@ var _ = Describe("Instance Type Selection", func() {
 					Operator: corev1.NodeSelectorOpLt,
 					Values:   []string{"4"},
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1021,7 +1020,7 @@ var _ = Describe("Instance Type Selection", func() {
 					Operator: corev1.NodeSelectorOpLt,
 					Values:   []string{"4"},
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1106,14 +1105,14 @@ var _ = Describe("Instance Type Selection", func() {
 					Operator: corev1.NodeSelectorOpIn,
 					Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
 
-					MinValues: lo.ToPtr(1),
+					MinValues: new(1),
 				},
 				{
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpNotIn,
 					Values:   []string{"instance-type-3"},
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1223,14 +1222,14 @@ var _ = Describe("Instance Type Selection", func() {
 					Operator: corev1.NodeSelectorOpGt,
 					Values:   []string{"2"},
 
-					MinValues: lo.ToPtr(1),
+					MinValues: new(1),
 				},
 				{
 					Key:      instanceGeneration,
 					Operator: corev1.NodeSelectorOpLt,
 					Values:   []string{"5"},
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1276,7 +1275,7 @@ var _ = Describe("Instance Type Selection", func() {
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpExists,
 
-					MinValues: lo.ToPtr(11),
+					MinValues: new(11),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1336,7 +1335,7 @@ var _ = Describe("Instance Type Selection", func() {
 					Operator: corev1.NodeSelectorOpIn,
 					Values:   []string{"instance-type-1", "instance-type-2"},
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1406,14 +1405,14 @@ var _ = Describe("Instance Type Selection", func() {
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpExists,
 
-					MinValues: lo.ToPtr(1),
+					MinValues: new(1),
 				},
 				{
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpIn,
 					Values:   []string{"instance-type-1", "instance-type-2"},
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1488,14 +1487,14 @@ var _ = Describe("Instance Type Selection", func() {
 					Key:      corev1.LabelArchStable,
 					Operator: corev1.NodeSelectorOpExists,
 
-					MinValues: lo.ToPtr(2),
+					MinValues: new(2),
 				},
 				{
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpIn,
 					Values:   []string{"instance-type-1", "instance-type-2"},
 
-					MinValues: lo.ToPtr(1),
+					MinValues: new(1),
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)

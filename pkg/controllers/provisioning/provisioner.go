@@ -138,10 +138,12 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	if err != nil {
 		return reconciler.Result{}, err
 	}
-	// Update CapacityBuffer provisioning status based on whether the simulation
-	// placed each buffer's virtual pods onto existing capacity or required new
-	// NodeClaims. Runs even when len(NewNodeClaims) == 0 so buffers that fit on
-	// existing capacity flip to Provisioning=True.
+	// Update CapacityBuffer state. Two things happen here:
+	// 1. Patch the Provisioning condition on each buffer (FitsExistingCapacity vs RequiresNewCapacity).
+	// 2. Update cluster.bufferPodCounts so the emptiness disruption path knows
+	//    which nodes host buffer capacity and should not be deleted as "empty".
+	//    Consolidation does NOT use this — it naturally accounts for buffer pods
+	//    because GetPendingPods injects them into the simulation's pending set.
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
 		if err := p.updateBufferProvisioningStatus(ctx, results); err != nil {
 			log.FromContext(ctx).Error(err, "updating CapacityBuffer provisioning status")
@@ -548,9 +550,9 @@ func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 // getVolumeTopologyRequirements collects volume topology requirements for each pod
 // WITHOUT modifying the pods. These requirements will be added to nodeRequirements
 // (for NodeClaim zone selection) but NOT to pod affinities (for correct TSC counting).
-func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, map[types.UID]scheduling.Requirements, error) {
+func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, map[types.UID][]scheduling.Requirements, error) {
 	var schedulablePods []*corev1.Pod
-	volumeReqs := make(map[types.UID]scheduling.Requirements)
+	volumeReqs := make(map[types.UID][]scheduling.Requirements)
 	for _, pod := range pods {
 		reqs, err := p.volumeTopology.GetRequirements(ctx, pod)
 		if err != nil {

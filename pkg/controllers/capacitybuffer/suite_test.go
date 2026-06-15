@@ -100,7 +100,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
 
 			cb = ExpectExists(ctx, env.Client, cb)
-			cond := findCondition(cb.Status.Conditions, ReadyForProvisioningCondition)
+			cond := findCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
 			Expect(cond).ToNot(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 			Expect(cond.Reason).To(Equal(ReasonResolved))
@@ -127,7 +127,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
 
 			cb = ExpectExists(ctx, env.Client, cb)
-			cond := findCondition(cb.Status.Conditions, ReadyForProvisioningCondition)
+			cond := findCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
 			Expect(cond).ToNot(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(ReasonPodTemplateNotFound))
@@ -179,12 +179,14 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
 
 			cb = ExpectExists(ctx, env.Client, cb)
-			cond := findCondition(cb.Status.Conditions, ReadyForProvisioningCondition)
+			cond := findCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
 			Expect(cond).ToNot(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 			Expect(cb.Status.Replicas).ToNot(BeNil())
 			// 20% of 10 = 2
 			Expect(*cb.Status.Replicas).To(Equal(int32(2)))
+			// scalableRef does not set PodTemplateRef in status
+			Expect(cb.Status.PodTemplateRef).To(BeNil())
 		})
 
 		It("should set ReadyForProvisioning=False when scalable ref is not found", func() {
@@ -206,7 +208,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
 
 			cb = ExpectExists(ctx, env.Client, cb)
-			cond := findCondition(cb.Status.Conditions, ReadyForProvisioningCondition)
+			cond := findCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
 			Expect(cond).ToNot(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(ReasonScalableRefNotFound))

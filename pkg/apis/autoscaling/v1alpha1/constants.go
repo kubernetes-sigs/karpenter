@@ -16,6 +16,8 @@ limitations under the License.
 
 package v1alpha1
 
+import "math"
+
 // Constants shared across the CapacityBuffer controller, the provisioner, and
 // any downstream consumer (disruption, metrics). Mirrors upstream Cluster
 // Autoscaler constants at
@@ -39,5 +41,5 @@ const (
 	// future preemption / disruption logic can identify them as low-value.
 	// NOTE: Karpenter's scheduler currently sorts the queue by resource size,
 	// not priority, so this value does not affect scheduling order today.
-	VirtualPodPriority int32 = -1000
+	VirtualPodPriority int32 = math.MinInt32
 )

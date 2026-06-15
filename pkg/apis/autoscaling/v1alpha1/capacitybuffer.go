@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 // Upstream source: k8s.io/autoscaler/cluster-autoscaler/apis/capacitybuffer/autoscaling.x-k8s.io/v1alpha1
+// Used this commit - d75b23c039d8596e70565cb8c5186e15a1f21301
 // These types are copied from the upstream CapacityBuffer API to avoid pulling in the entire
 // autoscaler module and its transitive dependencies. Keep in sync with upstream as needed.
 

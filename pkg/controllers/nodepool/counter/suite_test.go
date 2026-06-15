@@ -19,15 +19,12 @@ package counter_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -52,7 +49,6 @@ var ctx context.Context
 var env *test.Environment
 var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
-var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
 var node, node2 *corev1.Node
 
@@ -65,9 +61,8 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
-	fakeClock = clock.NewFakeClock(time.Now())
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodePoolInformerController = informer.NewNodePoolController(env.Client, cloudProvider, cluster, clusterCost)
@@ -160,7 +155,7 @@ var _ = Describe("Counter", func() {
 	It("should set the counter from the nodeClaim and then to the node when it initializes", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
 		// Don't initialize the node yet
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 		// Inform cluster state about node and nodeClaim readiness
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -180,7 +175,7 @@ var _ = Describe("Counter", func() {
 		}
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
 		// Don't initialize the node yet
-		ExpectMakeNodesInitialized(ctx, env.Client, node)
+		ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
 		// Inform cluster state about node and nodeClaim readiness
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -195,7 +190,7 @@ var _ = Describe("Counter", func() {
 	})
 	It("should increase the counter when new nodes are created", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
@@ -211,7 +206,7 @@ var _ = Describe("Counter", func() {
 	})
 	It("should decrease the counter when an existing node is deleted", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
@@ -244,7 +239,7 @@ var _ = Describe("Counter", func() {
 	})
 	It("should zero out the counter when all nodes are deleted", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
@@ -278,7 +273,7 @@ var _ = Describe("Counter", func() {
 		})
 		It("should set Status.Nodes to 2 when two nodes exist", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 			nodePool = ExpectExists(ctx, env.Client, nodePool)
@@ -294,14 +289,14 @@ var _ = Describe("Counter", func() {
 
 			// Add first node
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 			nodePool = ExpectExists(ctx, env.Client, nodePool)
 			Expect(*nodePool.Status.Nodes).To(Equal(int64(1)))
 
 			// Add second node
 			ExpectApplied(ctx, env.Client, node2, nodeClaim2)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 			nodePool = ExpectExists(ctx, env.Client, nodePool)
 			Expect(*nodePool.Status.Nodes).To(Equal(int64(2)))
@@ -327,7 +322,7 @@ var _ = Describe("Counter", func() {
 			// Create a second nodepool
 			nodePool2 := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
-					Replicas: lo.ToPtr(int64(2)),
+					Replicas: new(int64(2)),
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool2)
@@ -335,7 +330,7 @@ var _ = Describe("Counter", func() {
 
 			// Create nodes for first nodepool
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			// Create nodes for second nodepool
 			instanceType := cloudProvider.InstanceTypes[0]
@@ -365,7 +360,7 @@ var _ = Describe("Counter", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, node3, nodeClaim3, node4, nodeClaim4)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node3, node4}, []*v1.NodeClaim{nodeClaim3, nodeClaim4})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node3, node4}, []*v1.NodeClaim{nodeClaim3, nodeClaim4})
 
 			// Reconcile both nodepools
 			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
@@ -383,7 +378,7 @@ var _ = Describe("Counter", func() {
 			// Create a static nodepool with 3 desired replicas
 			staticNodePool := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
-					Replicas: lo.ToPtr(int64(3)),
+					Replicas: new(int64(3)),
 				},
 			})
 			ExpectApplied(ctx, env.Client, staticNodePool)
@@ -418,7 +413,7 @@ var _ = Describe("Counter", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, staticNode1, staticNodeClaim1, staticNode2, staticNodeClaim2)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{staticNode1, staticNode2}, []*v1.NodeClaim{staticNodeClaim1, staticNodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{staticNode1, staticNode2}, []*v1.NodeClaim{staticNodeClaim1, staticNodeClaim2})
 
 			// Reconcile the static nodepool
 			ExpectObjectReconciled(ctx, env.Client, nodePoolController, staticNodePool)

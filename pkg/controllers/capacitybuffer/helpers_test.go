@@ -22,226 +22,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
 )
 
 var _ = Describe("Helpers", func() {
-	Context("extractPodSpecFromUnstructured", func() {
-		It("should extract containers from a Deployment-like object", func() {
-			obj := &unstructured.Unstructured{Object: map[string]interface{}{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
-				"metadata":   map[string]interface{}{"name": "test-deploy", "namespace": "default"},
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"containers": []interface{}{
-								map[string]interface{}{
-									"name":  "app",
-									"image": "nginx:latest",
-									"resources": map[string]interface{}{
-										"requests": map[string]interface{}{
-											"cpu":    "500m",
-											"memory": "256Mi",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			}}
-
-			podSpec, err := extractPodSpecFromUnstructured(obj)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(podSpec.Containers).To(HaveLen(1))
-			Expect(podSpec.Containers[0].Name).To(Equal("app"))
-			Expect(podSpec.Containers[0].Image).To(Equal("nginx:latest"))
-			Expect(podSpec.Containers[0].Resources.Requests[v1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
-			Expect(podSpec.Containers[0].Resources.Requests[v1.ResourceMemory]).To(Equal(resource.MustParse("256Mi")))
-		})
-
-		It("should extract multiple containers", func() {
-			obj := &unstructured.Unstructured{Object: map[string]interface{}{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
-				"metadata":   map[string]interface{}{"name": "multi", "namespace": "default"},
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"containers": []interface{}{
-								map[string]interface{}{
-									"name":  "app",
-									"image": "app:v1",
-									"resources": map[string]interface{}{
-										"requests": map[string]interface{}{"cpu": "1"},
-									},
-								},
-								map[string]interface{}{
-									"name":  "sidecar",
-									"image": "envoy:latest",
-									"resources": map[string]interface{}{
-										"requests": map[string]interface{}{"cpu": "200m"},
-									},
-								},
-							},
-						},
-					},
-				},
-			}}
-
-			podSpec, err := extractPodSpecFromUnstructured(obj)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(podSpec.Containers).To(HaveLen(2))
-			Expect(podSpec.Containers[0].Name).To(Equal("app"))
-			Expect(podSpec.Containers[1].Name).To(Equal("sidecar"))
-		})
-
-		It("should return error when spec.template.spec is missing", func() {
-			obj := &unstructured.Unstructured{Object: map[string]interface{}{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
-				"metadata":   map[string]interface{}{"name": "no-template", "namespace": "default"},
-				"spec":       map[string]interface{}{},
-			}}
-
-			_, err := extractPodSpecFromUnstructured(obj)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.template.spec not found"))
-		})
-
-		It("should return empty containers when containers key is missing", func() {
-			obj := &unstructured.Unstructured{Object: map[string]interface{}{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
-				"metadata":   map[string]interface{}{"name": "empty", "namespace": "default"},
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{},
-					},
-				},
-			}}
-
-			podSpec, err := extractPodSpecFromUnstructured(obj)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(podSpec.Containers).To(BeEmpty())
-		})
-
-		It("should handle containers with no resources", func() {
-			obj := &unstructured.Unstructured{Object: map[string]interface{}{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
-				"metadata":   map[string]interface{}{"name": "no-res", "namespace": "default"},
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"containers": []interface{}{
-								map[string]interface{}{
-									"name":  "app",
-									"image": "pause",
-								},
-							},
-						},
-					},
-				},
-			}}
-
-			podSpec, err := extractPodSpecFromUnstructured(obj)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(podSpec.Containers).To(HaveLen(1))
-			Expect(podSpec.Containers[0].Resources.Requests).To(BeNil())
-		})
-
-		It("should handle resource limits in addition to requests", func() {
-			obj := &unstructured.Unstructured{Object: map[string]interface{}{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
-				"metadata":   map[string]interface{}{"name": "with-limits", "namespace": "default"},
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"containers": []interface{}{
-								map[string]interface{}{
-									"name": "app",
-									"resources": map[string]interface{}{
-										"requests": map[string]interface{}{"cpu": "500m"},
-										"limits":   map[string]interface{}{"cpu": "1"},
-									},
-								},
-							},
-						},
-					},
-				},
-			}}
-
-			podSpec, err := extractPodSpecFromUnstructured(obj)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(podSpec.Containers[0].Resources.Requests[v1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
-			Expect(podSpec.Containers[0].Resources.Limits[v1.ResourceCPU]).To(Equal(resource.MustParse("1")))
-		})
-	})
-
-	Context("extractContainers", func() {
-		It("should return nil for missing containers key", func() {
-			result := extractContainers(map[string]interface{}{})
-			Expect(result).To(BeNil())
-		})
-
-		It("should return nil when containers is not a list", func() {
-			result := extractContainers(map[string]interface{}{
-				"containers": "not-a-list",
-			})
-			Expect(result).To(BeNil())
-		})
-
-		It("should skip non-map entries in the containers list", func() {
-			result := extractContainers(map[string]interface{}{
-				"containers": []interface{}{
-					"not-a-map",
-					map[string]interface{}{"name": "valid"},
-				},
-			})
-			Expect(result).To(HaveLen(1))
-			Expect(result[0].Name).To(Equal("valid"))
-		})
-	})
-
-	Context("parseResourceList", func() {
-		It("should parse valid quantities", func() {
-			rl := parseResourceList(map[string]interface{}{
-				"cpu":    "2",
-				"memory": "4Gi",
-			})
-			Expect(rl[v1.ResourceCPU]).To(Equal(resource.MustParse("2")))
-			Expect(rl[v1.ResourceMemory]).To(Equal(resource.MustParse("4Gi")))
-		})
-
-		It("should skip non-string values", func() {
-			rl := parseResourceList(map[string]interface{}{
-				"cpu":    123,
-				"memory": "1Gi",
-			})
-			Expect(rl).To(HaveLen(1))
-			Expect(rl[v1.ResourceMemory]).To(Equal(resource.MustParse("1Gi")))
-		})
-
-		It("should skip unparseable quantities", func() {
-			rl := parseResourceList(map[string]interface{}{
-				"cpu":    "notaresource!!!",
-				"memory": "512Mi",
-			})
-			Expect(rl).To(HaveLen(1))
-			Expect(rl[v1.ResourceMemory]).To(Equal(resource.MustParse("512Mi")))
-		})
-
-		It("should return empty list for empty map", func() {
-			rl := parseResourceList(map[string]interface{}{})
-			Expect(rl).To(BeEmpty())
-		})
-	})
-
 	Context("calculateLimitReplicas", func() {
 		It("should calculate replicas based on CPU limits", func() {
 			podSpec := &v1.PodSpec{
@@ -494,6 +279,143 @@ var _ = Describe("Helpers", func() {
 			mem := total[v1.ResourceMemory]
 			Expect(cpu.MilliValue()).To(Equal(int64(1000)))
 			Expect(mem.Value()).To(Equal(int64(1024 * 1024 * 1024)))
+		})
+
+		It("should sum sidecar init containers with regular containers", func() {
+			always := v1.ContainerRestartPolicyAlways
+			podSpec := &v1.PodSpec{
+				InitContainers: []v1.Container{
+					{
+						RestartPolicy: &always,
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("500m")},
+						},
+					},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+					}},
+				},
+			}
+			// Sidecar (500m) + regular (1) = 1500m
+			total := totalPodRequests(podSpec)
+			cpu := total[v1.ResourceCPU]
+			Expect(cpu.MilliValue()).To(Equal(int64(1500)))
+		})
+
+		It("should sum multiple sidecar init containers with regular containers", func() {
+			always := v1.ContainerRestartPolicyAlways
+			podSpec := &v1.PodSpec{
+				InitContainers: []v1.Container{
+					{
+						RestartPolicy: &always,
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("500m")},
+						},
+					},
+					{
+						RestartPolicy: &always,
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("200m")},
+						},
+					},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+					}},
+				},
+			}
+			// Sidecars (500m + 200m) + regular (1) = 1700m
+			total := totalPodRequests(podSpec)
+			cpu := total[v1.ResourceCPU]
+			Expect(cpu.MilliValue()).To(Equal(int64(1700)))
+		})
+
+		It("should use max of regular init container + preceding sidecars vs running total", func() {
+			always := v1.ContainerRestartPolicyAlways
+			podSpec := &v1.PodSpec{
+				InitContainers: []v1.Container{
+					{
+						RestartPolicy: &always,
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("500m")},
+						},
+					},
+					{
+						// Regular init container: initUse = 4 CPU + 500m sidecar = 4500m
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4")},
+						},
+					},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+					}},
+				},
+			}
+			// reqs = regular (1) + sidecar (500m) = 1500m
+			// initUse = regular init (4) + sidecar (500m) = 4500m
+			// effective = max(1500m, 4500m) = 4500m
+			total := totalPodRequests(podSpec)
+			cpu := total[v1.ResourceCPU]
+			Expect(cpu.MilliValue()).To(Equal(int64(4500)))
+		})
+
+		It("should handle sidecar after regular init container", func() {
+			always := v1.ContainerRestartPolicyAlways
+			podSpec := &v1.PodSpec{
+				InitContainers: []v1.Container{
+					{
+						// Regular init runs first alone: initUse = 4 CPU
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4")},
+						},
+					},
+					{
+						// Sidecar starts after: summed with regular containers
+						RestartPolicy: &always,
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("500m")},
+						},
+					},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+					}},
+				},
+			}
+			// reqs = regular (1) + sidecar (500m) = 1500m
+			// initUse = regular init (4) + no preceding sidecars = 4000m
+			// effective = max(1500m, 4000m) = 4000m
+			total := totalPodRequests(podSpec)
+			cpu := total[v1.ResourceCPU]
+			Expect(cpu.MilliValue()).To(Equal(int64(4000)))
+		})
+
+		It("should not treat init containers without restartPolicy as sidecars", func() {
+			podSpec := &v1.PodSpec{
+				InitContainers: []v1.Container{
+					{
+						// No RestartPolicy — regular init container
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2")},
+						},
+					},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+					}},
+				},
+			}
+			// Regular init (2) > regular container (1) → effective = 2 CPU
+			total := totalPodRequests(podSpec)
+			cpu := total[v1.ResourceCPU]
+			Expect(cpu.MilliValue()).To(Equal(int64(2000)))
 		})
 	})
 

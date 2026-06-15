@@ -139,7 +139,7 @@ var _ = Describe("Termination", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		// Initialize the NodeClaim
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
 		node.Status.Capacity = corev1.ResourceList{
@@ -308,7 +308,7 @@ var _ = Describe("Termination", func() {
 	It("should not delete nodes without provider ids if the NodeClaim hasn't been launched yet", func() {
 		// Generate 10 nodes, none of which have a provider id
 		var nodes []*corev1.Node
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			nodes = append(nodes, test.Node())
 		}
 		ExpectApplied(ctx, env.Client, lo.Map(nodes, func(n *corev1.Node, _ int) client.Object { return n })...)

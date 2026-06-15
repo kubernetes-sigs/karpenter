@@ -22,12 +22,11 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -76,13 +75,11 @@ func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1alpha1.Capa
 
 	// Resolve pod shape and compute replicas. On failure, the condition is set
 	// to False with a descriptive reason—we still patch status so users see why.
-	podSpec, resolveErr := c.resolvePodSpec(ctx, cb)
+	podSpec, scalableReplicas, resolveErr := c.resolvePodSpec(ctx, cb)
 	if resolveErr == nil {
-		replicas, calcErr := c.calculateReplicas(ctx, cb, podSpec)
-		if calcErr == nil {
-			setCondition(cb, ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
-			cb.Status.Replicas = &replicas
-		}
+		replicas := c.calculateReplicas(cb, podSpec, scalableReplicas)
+		setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
+		cb.Status.Replicas = &replicas
 	}
 	cb.Status.ProvisioningStrategy = cb.Spec.ProvisioningStrategy
 
@@ -111,15 +108,19 @@ func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1alpha1.Capa
 	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
-func (c *Controller) resolvePodSpec(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (*v1.PodSpec, error) {
+// resolvePodSpec returns the pod spec and, for scalableRef buffers, the
+// workload's current replica count (used for percentage calculations).
+// For podTemplateRef buffers, scalableReplicas is 0.
+func (c *Controller) resolvePodSpec(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (*v1.PodSpec, int32, error) {
 	if cb.Spec.PodTemplateRef != nil {
-		return c.resolvePodTemplateRef(ctx, cb)
+		spec, err := c.resolvePodTemplateRef(ctx, cb)
+		return spec, 0, err
 	}
 	if cb.Spec.ScalableRef != nil {
 		return c.resolveScalableRef(ctx, cb)
 	}
-	setCondition(cb, ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed, "Neither podTemplateRef nor scalableRef is set")
-	return nil, fmt.Errorf("neither podTemplateRef nor scalableRef is set")
+	setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed, "Neither podTemplateRef nor scalableRef is set")
+	return nil, 0, fmt.Errorf("neither podTemplateRef nor scalableRef is set")
 }
 
 func (c *Controller) resolvePodTemplateRef(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (*v1.PodSpec, error) {
@@ -129,10 +130,10 @@ func (c *Controller) resolvePodTemplateRef(ctx context.Context, cb *autoscalingv
 		Namespace: cb.Namespace,
 	}, pt); err != nil {
 		if errors.IsNotFound(err) {
-			setCondition(cb, ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonPodTemplateNotFound,
+			setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonPodTemplateNotFound,
 				fmt.Sprintf("PodTemplate %q not found in namespace %q", cb.Spec.PodTemplateRef.Name, cb.Namespace))
 		} else {
-			setCondition(cb, ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed,
+			setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed,
 				fmt.Sprintf("Failed to get PodTemplate: %v", err))
 		}
 		return nil, err
@@ -143,50 +144,71 @@ func (c *Controller) resolvePodTemplateRef(ctx context.Context, cb *autoscalingv
 	return &pt.Template.Spec, nil
 }
 
-// resolveScalableRef fetches the referenced workload (e.g. Deployment, StatefulSet)
-// via unstructured GET and extracts its pod template spec. We use unstructured
-// to avoid importing every possible workload type.
-func (c *Controller) resolveScalableRef(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (*v1.PodSpec, error) {
+// resolveScalableRef fetches the referenced workload using typed Gets and returns
+// both its pod template spec and current replica count.
+func (c *Controller) resolveScalableRef(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (*v1.PodSpec, int32, error) {
 	ref := cb.Spec.ScalableRef
-	gvk := schema.GroupVersionKind{
-		Group:   ref.APIGroup,
-		Kind:    ref.Kind,
-		Version: "v1",
-	}
-	if ref.APIGroup == "apps" || ref.APIGroup == "" {
-		gvk.Group = "apps"
-		gvk.Version = "v1"
-	}
+	key := types.NamespacedName{Name: ref.Name, Namespace: cb.Namespace}
 
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(gvk)
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{
-		Name:      ref.Name,
-		Namespace: cb.Namespace,
-	}, obj); err != nil {
+	podSpec, replicas, err := c.getWorkloadPodSpecAndReplicas(ctx, ref.APIGroup, ref.Kind, key)
+	if err != nil {
 		if errors.IsNotFound(err) {
-			setCondition(cb, ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonScalableRefNotFound,
+			setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonScalableRefNotFound,
 				fmt.Sprintf("%s %q not found in namespace %q", ref.Kind, ref.Name, cb.Namespace))
 		} else {
-			setCondition(cb, ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed,
+			setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed,
 				fmt.Sprintf("Failed to get scalable resource: %v", err))
 		}
-		return nil, err
+		return nil, 0, err
 	}
+	return podSpec, replicas, nil
+}
 
-	podSpec, err := extractPodSpecFromUnstructured(obj)
-	if err != nil {
-		setCondition(cb, ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed,
-			fmt.Sprintf("Failed to extract pod spec from %s/%s: %v", ref.Kind, ref.Name, err))
-		return nil, err
+// getWorkloadPodSpecAndReplicas performs a typed Get for supported workload kinds
+// and returns the pod spec and replica count.
+func (c *Controller) getWorkloadPodSpecAndReplicas(ctx context.Context, apiGroup, kind string, key types.NamespacedName) (*v1.PodSpec, int32, error) {
+	group := apiGroup
+	if group == "" {
+		group = "apps"
 	}
+	if group != "apps" {
+		return nil, 0, fmt.Errorf("unsupported scalableRef kind %s/%s", apiGroup, kind)
+	}
+	switch kind {
+	case "Deployment":
+		obj := &appsv1.Deployment{}
+		if err := c.kubeClient.Get(ctx, key, obj); err != nil {
+			return nil, 0, err
+		}
+		return &obj.Spec.Template.Spec, replicaCount(obj.Spec.Replicas), nil
+	case "StatefulSet":
+		obj := &appsv1.StatefulSet{}
+		if err := c.kubeClient.Get(ctx, key, obj); err != nil {
+			return nil, 0, err
+		}
+		return &obj.Spec.Template.Spec, replicaCount(obj.Spec.Replicas), nil
+	case "ReplicaSet":
+		obj := &appsv1.ReplicaSet{}
+		if err := c.kubeClient.Get(ctx, key, obj); err != nil {
+			return nil, 0, err
+		}
+		return &obj.Spec.Template.Spec, replicaCount(obj.Spec.Replicas), nil
+	default:
+		return nil, 0, fmt.Errorf("unsupported scalableRef kind %s/%s", apiGroup, kind)
+	}
+}
 
-	return podSpec, nil
+func replicaCount(r *int32) int32 {
+	if r == nil {
+		return 0
+	}
+	return *r
 }
 
 // calculateReplicas gathers all applicable constraints (fixed, percentage, limits)
-// and returns the minimum. This ensures we never exceed any single constraint.
-func (c *Controller) calculateReplicas(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer, podSpec *v1.PodSpec) (int32, error) {
+// and returns the minimum. scalableReplicas is the workload's current replica count
+// (from resolveScalableRef); it is 0 for podTemplateRef buffers.
+func (c *Controller) calculateReplicas(cb *autoscalingv1alpha1.CapacityBuffer, podSpec *v1.PodSpec, scalableReplicas int32) int32 {
 	var candidates []int32
 
 	if cb.Spec.Replicas != nil {
@@ -194,10 +216,6 @@ func (c *Controller) calculateReplicas(ctx context.Context, cb *autoscalingv1alp
 	}
 
 	if cb.Spec.Percentage != nil && cb.Spec.ScalableRef != nil {
-		scalableReplicas, err := c.getScalableReplicas(ctx, cb)
-		if err != nil {
-			return 0, err
-		}
 		candidates = append(candidates, calculatePercentageReplicas(scalableReplicas, *cb.Spec.Percentage))
 	}
 
@@ -209,45 +227,16 @@ func (c *Controller) calculateReplicas(ctx context.Context, cb *autoscalingv1alp
 	}
 
 	if len(candidates) == 0 {
-		return 0, nil
+		return 0
 	}
 
-	// Use the minimum of all constraints
 	result := candidates[0]
 	for _, c := range candidates[1:] {
 		if c < result {
 			result = c
 		}
 	}
-	return result, nil
-}
-
-func (c *Controller) getScalableReplicas(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (int32, error) {
-	ref := cb.Spec.ScalableRef
-	gvk := schema.GroupVersionKind{
-		Group:   ref.APIGroup,
-		Kind:    ref.Kind,
-		Version: "v1",
-	}
-	if ref.APIGroup == "apps" || ref.APIGroup == "" {
-		gvk.Group = "apps"
-		gvk.Version = "v1"
-	}
-
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(gvk)
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{
-		Name:      ref.Name,
-		Namespace: cb.Namespace,
-	}, obj); err != nil {
-		return 0, err
-	}
-
-	replicas, found, err := unstructured.NestedInt64(obj.Object, "spec", "replicas")
-	if err != nil || !found {
-		return 0, fmt.Errorf("unable to read spec.replicas from %s/%s", ref.Kind, ref.Name)
-	}
-	return int32(replicas), nil
+	return result
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
@@ -129,6 +130,9 @@ type InstanceType struct {
 	Offerings Offerings
 	// Resources are the full resource capacities for this instance type
 	Capacity corev1.ResourceList
+	// DynamicResources contains DRA device metadata for this instance type.
+	// Cloud providers that do not support DRA may leave this as the zero value.
+	DynamicResources DynamicResources
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
 	Overhead               *InstanceTypeOverhead
@@ -179,6 +183,7 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 			(*out)[key] = val.DeepCopy()
 		}
 	}
+	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
 	if in.Overhead != nil {
 		in, out := &in.Overhead, &out.Overhead
 		*out = new(InstanceTypeOverhead)
@@ -622,4 +627,16 @@ func IsUnevaluatedNodePoolError(err error) bool {
 	}
 	var onatnpErr *UnevaluatedNodePoolError
 	return errors.As(err, &onatnpErr)
+}
+
+// DeviceID is a hashable, unique ID for a device. This ID is absolute - depending on the driver, pool, and device
+// names - as opposed to relative - depending on in-memory indexes.
+type DeviceID struct {
+	Driver unique.Handle[string]
+	Pool   unique.Handle[string]
+	Device unique.Handle[string]
+}
+
+func (id DeviceID) String() string {
+	return fmt.Sprintf("%s/%s/%s", id.Driver.Value(), id.Pool.Value(), id.Device.Value())
 }

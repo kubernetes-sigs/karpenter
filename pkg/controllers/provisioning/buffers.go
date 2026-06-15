@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,11 +34,6 @@ import (
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 )
 
-// appendVirtualPods lists all CapacityBuffers that are ReadyForProvisioning,
-// resolves their PodTemplate, and appends in-memory virtual pods to the
-// pending-pod list. Virtual pods never round-trip through etcd; they exist
-// only for the duration of one scheduling simulation.
-//
 // Called from GetPendingPods AFTER the Validate()/filter step so we skip PVC
 // validation and don't pollute cluster state with synthetic decisions.
 // listBuffersReadyForProvisioning returns all CapacityBuffers whose
@@ -56,7 +52,7 @@ func (p *Provisioner) listBuffersReadyForProvisioning(ctx context.Context) ([]*a
 		if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
 			continue
 		}
-		if cb.Status.PodTemplateRef == nil {
+		if cb.Status.PodTemplateRef == nil && cb.Spec.ScalableRef == nil {
 			continue
 		}
 		out = append(out, cb)
@@ -64,6 +60,15 @@ func (p *Provisioner) listBuffersReadyForProvisioning(ctx context.Context) ([]*a
 	return out, nil
 }
 
+// appendVirtualPods lists all CapacityBuffers that are ReadyForProvisioning,
+// resolves their PodTemplate, and appends in-memory virtual pods to the
+// pending-pod list. Virtual pods never round-trip through etcd; they exist
+// only for the duration of one scheduling simulation.
+//
+// TODO: Consider having the buffer controller precompute virtual pods into an
+// in-memory store (similar to pkg/controllers/state/Cluster) so this hot path
+// becomes a cache read instead of List + Get per scheduling pass.
+// Issue - https://github.com/kubernetes-sigs/karpenter/issues/3090
 func (p *Provisioner) appendVirtualPods(ctx context.Context, pods []*corev1.Pod) []*corev1.Pod {
 	buffers, err := p.listBuffersReadyForProvisioning(ctx)
 	if err != nil {
@@ -81,17 +86,60 @@ func (p *Provisioner) appendVirtualPods(ctx context.Context, pods []*corev1.Pod)
 	return pods
 }
 
-// resolveVirtualPodSpec fetches the PodTemplate referenced by the buffer's
-// status and returns its pod spec.
+// resolveVirtualPodSpec fetches the pod spec for a buffer. For podTemplateRef
+// buffers it reads the PodTemplate object; for scalableRef buffers it fetches
+// the workload and extracts spec.template.spec.
 func (p *Provisioner) resolveVirtualPodSpec(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (corev1.PodSpec, error) {
-	pt := &corev1.PodTemplate{}
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{
-		Name:      cb.Status.PodTemplateRef.Name,
-		Namespace: cb.Namespace,
-	}, pt); err != nil {
-		return corev1.PodSpec{}, fmt.Errorf("getting PodTemplate %q: %w", cb.Status.PodTemplateRef.Name, err)
+	if cb.Status.PodTemplateRef != nil {
+		pt := &corev1.PodTemplate{}
+		if err := p.kubeClient.Get(ctx, types.NamespacedName{
+			Name:      cb.Status.PodTemplateRef.Name,
+			Namespace: cb.Namespace,
+		}, pt); err != nil {
+			return corev1.PodSpec{}, fmt.Errorf("getting PodTemplate %q: %w", cb.Status.PodTemplateRef.Name, err)
+		}
+		return pt.Template.Spec, nil
 	}
-	return pt.Template.Spec, nil
+	if cb.Spec.ScalableRef != nil {
+		return p.resolveScalableRefPodSpec(ctx, cb)
+	}
+	return corev1.PodSpec{}, fmt.Errorf("buffer %q has neither podTemplateRef in status nor scalableRef in spec", cb.Name)
+}
+
+// resolveScalableRefPodSpec fetches the workload referenced by scalableRef using
+// typed Gets and returns its pod spec.
+func (p *Provisioner) resolveScalableRefPodSpec(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (corev1.PodSpec, error) {
+	ref := cb.Spec.ScalableRef
+	key := types.NamespacedName{Name: ref.Name, Namespace: cb.Namespace}
+	group := ref.APIGroup
+	if group == "" {
+		group = "apps"
+	}
+	if group != "apps" {
+		return corev1.PodSpec{}, fmt.Errorf("unsupported scalableRef kind %s/%s", ref.APIGroup, ref.Kind)
+	}
+	switch ref.Kind {
+	case "Deployment":
+		obj := &appsv1.Deployment{}
+		if err := p.kubeClient.Get(ctx, key, obj); err != nil {
+			return corev1.PodSpec{}, fmt.Errorf("getting Deployment %q: %w", ref.Name, err)
+		}
+		return obj.Spec.Template.Spec, nil
+	case "StatefulSet":
+		obj := &appsv1.StatefulSet{}
+		if err := p.kubeClient.Get(ctx, key, obj); err != nil {
+			return corev1.PodSpec{}, fmt.Errorf("getting StatefulSet %q: %w", ref.Name, err)
+		}
+		return obj.Spec.Template.Spec, nil
+	case "ReplicaSet":
+		obj := &appsv1.ReplicaSet{}
+		if err := p.kubeClient.Get(ctx, key, obj); err != nil {
+			return corev1.PodSpec{}, fmt.Errorf("getting ReplicaSet %q: %w", ref.Name, err)
+		}
+		return obj.Spec.Template.Spec, nil
+	default:
+		return corev1.PodSpec{}, fmt.Errorf("unsupported scalableRef kind %s/%s", ref.APIGroup, ref.Kind)
+	}
 }
 
 // buildVirtualPods materializes N identical placeholder pods for a buffer using
@@ -143,11 +191,13 @@ func buildVirtualPods(cb *autoscalingv1alpha1.CapacityBuffer, spec corev1.PodSpe
 func sanitizeVirtualPodSpec(spec corev1.PodSpec) corev1.PodSpec {
 	spec = *spec.DeepCopy()
 	spec.NodeName = ""
-	// Drop any PVC-backed volumes and their mounts to avoid PVC topology checks.
+	// Drop PVC-backed and ephemeral volumes and their mounts. Ephemeral volumes
+	// derive a PVC name from the pod name; for virtual pods that PVC will never
+	// exist, causing topology resolution errors.
 	keepVolumes := spec.Volumes[:0]
 	droppedVolumeNames := map[string]struct{}{}
 	for _, v := range spec.Volumes {
-		if v.PersistentVolumeClaim != nil {
+		if v.PersistentVolumeClaim != nil || v.Ephemeral != nil {
 			droppedVolumeNames[v.Name] = struct{}{}
 			continue
 		}
@@ -310,8 +360,18 @@ func computeProvisioningCondition(cb *autoscalingv1alpha1.CapacityBuffer, s *buf
 
 // bufferPodCountsFromResults builds a providerID→count mapping of how many
 // virtual buffer pods were placed on each existing node during this scheduling
-// pass. Used to update cluster state so disruption knows which nodes host
-// buffer capacity and should not be treated as empty.
+// pass. Used to update cluster state (Cluster.bufferPodCounts) so the emptiness
+// disruption path knows which nodes host buffer capacity.
+//
+// Only ExistingNodes are counted — pods on NewNodeClaims don't have a providerID
+// yet, and those nodes are naturally protected from consolidation by the
+// Consolidatable condition timer (which hasn't elapsed on a brand-new node).
+//
+// Consolidation does NOT consult this mapping. Instead, it naturally accounts
+// for buffer pods because SimulateScheduling calls GetPendingPods (which injects
+// virtual pods). The simulation must fit all pending pods (including virtual ones)
+// onto the remaining/replacement nodes, so a replacement that's too small to
+// host the buffer will be rejected.
 func bufferPodCountsFromResults(results scheduler.Results) map[string]int {
 	counts := map[string]int{}
 	for _, existing := range results.ExistingNodes {

@@ -245,7 +245,7 @@ func UpdateNodeOwnerReferences(nodeClaim *v1.NodeClaim, node *corev1.Node) *core
 		Kind:               gvk.Kind,
 		Name:               nodeClaim.Name,
 		UID:                nodeClaim.UID,
-		BlockOwnerDeletion: lo.ToPtr(true),
+		BlockOwnerDeletion: new(true),
 	})
 	return node
 }

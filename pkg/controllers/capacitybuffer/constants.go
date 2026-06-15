@@ -16,16 +16,7 @@ limitations under the License.
 
 package capacitybuffer
 
-import autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
-
-// Re-exports of shared API-level constants so existing call sites in this
-// package keep working. New code should import from the API package directly.
 const (
-	ActiveProvisioningStrategy    = autoscalingv1alpha1.ActiveProvisioningStrategy
-	ReadyForProvisioningCondition = autoscalingv1alpha1.ReadyForProvisioningCondition
-	ProvisioningCondition         = autoscalingv1alpha1.ProvisioningCondition
-	LimitedByQuotasCondition      = autoscalingv1alpha1.LimitedByQuotasCondition
-
 	CapacityBufferKind       = "CapacityBuffer"
 	CapacityBufferApiVersion = "autoscaling.x-k8s.io/v1alpha1"
 

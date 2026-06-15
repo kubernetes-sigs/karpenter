@@ -17,10 +17,11 @@ limitations under the License.
 package provisioning
 
 import (
-	"testing"
-
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -29,313 +30,414 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
-func readyBuffer(name string, replicas int32) *autoscalingv1alpha1.CapacityBuffer {
-	cb := &autoscalingv1alpha1.CapacityBuffer{
+var _ = Describe("buildVirtualPods", func() {
+	It("should create the correct number of pods with expected metadata", func() {
+		cb := readyBuffer("web", 3)
+		spec := corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app", Image: "pause:v1"}},
+		}
+
+		pods := buildVirtualPods(cb, spec)
+		Expect(pods).To(HaveLen(3))
+
+		for i, p := range pods {
+			idx := i + 1
+			Expect(p.Name).To(Equal("capacity-buffer-web-" + itoa(idx)))
+			Expect(p.Namespace).To(Equal("default"))
+			Expect(string(p.UID)).To(Equal("uid-web-" + itoa(idx)))
+			Expect(p.Annotations[autoscalingv1alpha1.FakePodAnnotationKey]).To(Equal("true"))
+			Expect(p.Labels[autoscalingv1alpha1.BufferNameLabel]).To(Equal("web"))
+			Expect(p.Spec.Priority).ToNot(BeNil())
+			Expect(*p.Spec.Priority).To(Equal(autoscalingv1alpha1.VirtualPodPriority))
+			Expect(p.Spec.NodeName).To(BeEmpty())
+
+			hasUnschedulable := false
+			for _, c := range p.Status.Conditions {
+				if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
+					hasUnschedulable = true
+				}
+			}
+			Expect(hasUnschedulable).To(BeTrue(), "pod[%d] missing PodScheduled=False/Unschedulable condition", i)
+		}
+	})
+
+	It("should produce deterministic UIDs across calls", func() {
+		cb := readyBuffer("web", 2)
+		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
+		a := buildVirtualPods(cb, spec)
+		b := buildVirtualPods(cb, spec)
+		Expect(a).To(HaveLen(len(b)))
+		for i := range a {
+			Expect(a[i].UID).To(Equal(b[i].UID))
+		}
+	})
+
+	It("should return nil for zero replicas", func() {
+		cb := readyBuffer("web", 0)
+		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
+		Expect(buildVirtualPods(cb, spec)).To(BeNil())
+	})
+})
+
+var _ = Describe("sanitizeVirtualPodSpec", func() {
+	It("should drop PVC volumes and their mounts", func() {
+		spec := corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "app",
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: "data", MountPath: "/data"},
+					{Name: "config", MountPath: "/config"},
+				},
+			}},
+			InitContainers: []corev1.Container{{
+				Name: "init",
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: "data", MountPath: "/init-data"},
+				},
+			}},
+			Volumes: []corev1.Volume{
+				{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "my-pvc"}}},
+				{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "cfg"}}}},
+			},
+		}
+
+		result := sanitizeVirtualPodSpec(spec)
+
+		Expect(result.Volumes).To(HaveLen(1))
+		Expect(result.Volumes[0].Name).To(Equal("config"))
+		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
+		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("config"))
+		Expect(result.InitContainers[0].VolumeMounts).To(BeEmpty())
+	})
+
+	It("should drop ephemeral volumes and their mounts", func() {
+		spec := corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "app",
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: "scratch", MountPath: "/scratch"},
+					{Name: "config", MountPath: "/config"},
+				},
+			}},
+			Volumes: []corev1.Volume{
+				{Name: "scratch", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+						Spec: corev1.PersistentVolumeClaimSpec{},
+					},
+				}}},
+				{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "cfg"}}}},
+			},
+		}
+
+		result := sanitizeVirtualPodSpec(spec)
+
+		Expect(result.Volumes).To(HaveLen(1))
+		Expect(result.Volumes[0].Name).To(Equal("config"))
+		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
+		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("config"))
+	})
+
+	It("should drop both PVC and ephemeral volumes together", func() {
+		spec := corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "app",
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: "pvc-vol", MountPath: "/data"},
+					{Name: "eph-vol", MountPath: "/scratch"},
+					{Name: "secret-vol", MountPath: "/secret"},
+				},
+			}},
+			Volumes: []corev1.Volume{
+				{Name: "pvc-vol", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "my-pvc"}}},
+				{Name: "eph-vol", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{},
+				}}},
+				{Name: "secret-vol", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "s"}}},
+			},
+		}
+
+		result := sanitizeVirtualPodSpec(spec)
+
+		Expect(result.Volumes).To(HaveLen(1))
+		Expect(result.Volumes[0].Name).To(Equal("secret-vol"))
+		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
+		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("secret-vol"))
+	})
+})
+
+var _ = Describe("IsVirtualPod", func() {
+	It("should return false for nil pod", func() {
+		Expect(IsVirtualPod(nil)).To(BeFalse())
+	})
+
+	It("should return false for pod without annotations", func() {
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real"}}
+		Expect(IsVirtualPod(p)).To(BeFalse())
+	})
+
+	It("should return true for virtual pod", func() {
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{autoscalingv1alpha1.FakePodAnnotationKey: "true"},
+		}}
+		Expect(IsVirtualPod(p)).To(BeTrue())
+	})
+
+	It("should return false for pod with other annotations only", func() {
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{"other": "value"},
+		}}
+		Expect(IsVirtualPod(p)).To(BeFalse())
+	})
+})
+
+var _ = Describe("classifyBufferPods", func() {
+	It("should bucket virtual pods by buffer name across existing and new nodes", func() {
+		cbA := readyBuffer("a", 3)
+		cbB := readyBuffer("b", 2)
+		buffers := map[string]*autoscalingv1alpha1.CapacityBuffer{"a": cbA, "b": cbB}
+		spec := corev1.PodSpec{}
+
+		aPods := buildVirtualPods(cbA, spec)
+		bPods := buildVirtualPods(cbB, spec)
+
+		results := scheduler.Results{
+			ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{aPods[0], aPods[1]}}},
+			NewNodeClaims: []*scheduler.NodeClaim{{Pods: []*corev1.Pod{aPods[2], bPods[0], bPods[1]}}},
+			PodErrors:     map[*corev1.Pod]error{},
+		}
+
+		summary := classifyBufferPods(results, buffers)
+		Expect(summary["a"].existing).To(Equal(2))
+		Expect(summary["a"].requiresNewClaim).To(Equal(1))
+		Expect(summary["b"].existing).To(Equal(0))
+		Expect(summary["b"].requiresNewClaim).To(Equal(2))
+		Expect(summary["a"].desiredReplicas).To(Equal(3))
+	})
+
+	It("should ignore real pods", func() {
+		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
+		results := scheduler.Results{
+			ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{realPod}}},
+		}
+		summary := classifyBufferPods(results, map[string]*autoscalingv1alpha1.CapacityBuffer{})
+		Expect(summary).To(BeEmpty())
+	})
+})
+
+var _ = Describe("computeProvisioningCondition", func() {
+	It("should return True/FitsExistingCapacity when all pods fit", func() {
+		cb := readyBuffer("web", 3)
+		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 3, desiredReplicas: 3})
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal("FitsExistingCapacity"))
+	})
+
+	It("should return False/RequiresNewCapacity when new nodes are needed", func() {
+		cb := readyBuffer("web", 3)
+		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 1, requiresNewClaim: 2, desiredReplicas: 3})
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("RequiresNewCapacity"))
+	})
+
+	It("should return False/NotReadyForProvisioning when buffer is not ready", func() {
+		notReady := readyBuffer("web", 3)
+		notReady.Status.Conditions[0].Status = metav1.ConditionFalse
+		cond := computeProvisioningCondition(notReady, nil)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("NotReadyForProvisioning"))
+	})
+
+	It("should return False/BufferEmpty when replicas is zero", func() {
+		empty := readyBuffer("web", 0)
+		cond := computeProvisioningCondition(empty, nil)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("BufferEmpty"))
+	})
+
+	It("should return nil when ready but no results observed", func() {
+		cb := readyBuffer("web", 3)
+		cond := computeProvisioningCondition(cb, nil)
+		Expect(cond).To(BeNil())
+	})
+})
+
+var _ = Describe("bufferPodCountsFromResults", func() {
+	It("should count virtual pods per providerID on existing nodes", func() {
+		cbA := readyBuffer("a", 3)
+		cbB := readyBuffer("b", 2)
+		spec := corev1.PodSpec{}
+
+		aPods := buildVirtualPods(cbA, spec)
+		bPods := buildVirtualPods(cbB, spec)
+		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real-pod", Namespace: "default"}}
+
+		nodeA := makeExistingNode("provider-a")
+		nodeA.Pods = []*corev1.Pod{aPods[0], aPods[1], realPod}
+
+		nodeB := makeExistingNode("provider-b")
+		nodeB.Pods = []*corev1.Pod{bPods[0], bPods[1]}
+
+		results := scheduler.Results{
+			ExistingNodes: []*scheduler.ExistingNode{nodeA, nodeB},
+			NewNodeClaims: []*scheduler.NodeClaim{{Pods: []*corev1.Pod{aPods[2]}}},
+			PodErrors:     map[*corev1.Pod]error{},
+		}
+
+		counts := bufferPodCountsFromResults(results)
+		Expect(counts["provider-a"]).To(Equal(2))
+		Expect(counts["provider-b"]).To(Equal(2))
+	})
+
+	It("should return empty map for empty results", func() {
+		counts := bufferPodCountsFromResults(scheduler.Results{})
+		Expect(counts).To(BeEmpty())
+	})
+
+	It("should return empty map when only real pods are present", func() {
+		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
+		nodeA := makeExistingNode("provider-a")
+		nodeA.Pods = []*corev1.Pod{realPod}
+
+		results := scheduler.Results{
+			ExistingNodes: []*scheduler.ExistingNode{nodeA},
+		}
+		counts := bufferPodCountsFromResults(results)
+		Expect(counts).To(BeEmpty())
+	})
+})
+
+var _ = Describe("listBuffersReadyForProvisioning", func() {
+	It("should include scalableRef buffers without Status.PodTemplateRef", func() {
+		cb := readyScalableRefBuffer("scalable", 3)
+		Expect(cb.Status.PodTemplateRef).To(BeNil())
+
+		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		Expect(buffers).To(HaveLen(1))
+		Expect(buffers[0].Name).To(Equal("scalable"))
+	})
+
+	It("should exclude buffers with neither PodTemplateRef nor ScalableRef", func() {
+		cb := &autoscalingv1alpha1.CapacityBuffer{
+			ObjectMeta: metav1.ObjectMeta{Name: "orphan", Namespace: "default"},
+			Spec:       autoscalingv1alpha1.CapacityBufferSpec{Replicas: lo.ToPtr(int32(2))},
+			Status: autoscalingv1alpha1.CapacityBufferStatus{
+				Replicas: lo.ToPtr(int32(2)),
+				Conditions: []metav1.Condition{{
+					Type:   autoscalingv1alpha1.ReadyForProvisioningCondition,
+					Status: metav1.ConditionTrue,
+					Reason: "Resolved",
+				}},
+			},
+		}
+		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		Expect(buffers).To(BeEmpty())
+	})
+
+	It("should exclude buffers with zero replicas", func() {
+		cb := readyScalableRefBuffer("zero", 0)
+		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		Expect(buffers).To(BeEmpty())
+	})
+
+	It("should exclude buffers without ReadyForProvisioning condition", func() {
+		cb := readyScalableRefBuffer("notready", 3)
+		cb.Status.Conditions[0].Status = metav1.ConditionFalse
+		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		Expect(buffers).To(BeEmpty())
+	})
+
+	It("should include podTemplateRef buffers with Status.PodTemplateRef set", func() {
+		cb := readyBuffer("ptref", 2)
+		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		Expect(buffers).To(HaveLen(1))
+	})
+})
+
+var _ = Describe("buildVirtualPods with scalableRef buffer", func() {
+	It("should create pods with expected metadata for scalableRef buffers", func() {
+		cb := readyScalableRefBuffer("scalable-app", 2)
+		spec := corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}},
+		}
+
+		pods := buildVirtualPods(cb, spec)
+		Expect(pods).To(HaveLen(2))
+
+		for i, p := range pods {
+			idx := i + 1
+			Expect(p.Name).To(Equal("capacity-buffer-scalable-app-" + itoa(idx)))
+			Expect(p.Namespace).To(Equal("default"))
+			Expect(p.Annotations[autoscalingv1alpha1.FakePodAnnotationKey]).To(Equal("true"))
+			Expect(p.Labels[autoscalingv1alpha1.BufferNameLabel]).To(Equal("scalable-app"))
+			Expect(*p.Spec.Priority).To(Equal(autoscalingv1alpha1.VirtualPodPriority))
+		}
+	})
+})
+
+var _ = Describe("computeProvisioningCondition with scalableRef buffer", func() {
+	It("should return True/FitsExistingCapacity for scalableRef buffer when all pods fit", func() {
+		cb := readyScalableRefBuffer("scalable", 2)
+		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 2, desiredReplicas: 2})
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal("FitsExistingCapacity"))
+	})
+
+	It("should return False/RequiresNewCapacity for scalableRef buffer when new nodes needed", func() {
+		cb := readyScalableRefBuffer("scalable", 3)
+		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 1, requiresNewClaim: 2, desiredReplicas: 3})
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("RequiresNewCapacity"))
+	})
+})
+
+// filterReadyBuffers mirrors the filtering logic of listBuffersReadyForProvisioning
+// without needing a real kube client.
+func filterReadyBuffers(items []*autoscalingv1alpha1.CapacityBuffer) []*autoscalingv1alpha1.CapacityBuffer {
+	var out []*autoscalingv1alpha1.CapacityBuffer
+	for _, cb := range items {
+		if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition) {
+			continue
+		}
+		if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
+			continue
+		}
+		if cb.Status.PodTemplateRef == nil && cb.Spec.ScalableRef == nil {
+			continue
+		}
+		out = append(out, cb)
+	}
+	return out
+}
+
+func readyScalableRefBuffer(name string, replicas int32) *autoscalingv1alpha1.CapacityBuffer {
+	return &autoscalingv1alpha1.CapacityBuffer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID("uid-" + name),
 		},
+		Spec: autoscalingv1alpha1.CapacityBufferSpec{
+			ScalableRef: &autoscalingv1alpha1.ScalableRef{
+				APIGroup: "apps",
+				Kind:     "Deployment",
+				Name:     name + "-deploy",
+			},
+			Percentage: lo.ToPtr(int32(20)),
+		},
 		Status: autoscalingv1alpha1.CapacityBufferStatus{
 			Replicas: lo.ToPtr(replicas),
-			PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{
-				Name: name + "-template",
-			},
 			Conditions: []metav1.Condition{{
 				Type:   autoscalingv1alpha1.ReadyForProvisioningCondition,
 				Status: metav1.ConditionTrue,
+				Reason: "Resolved",
 			}},
 		},
-	}
-	return cb
-}
-
-func TestBuildVirtualPods(t *testing.T) {
-	cb := readyBuffer("web", 3)
-	spec := corev1.PodSpec{
-		Containers: []corev1.Container{{Name: "app", Image: "pause:v1"}},
-	}
-
-	pods := buildVirtualPods(cb, spec)
-	if len(pods) != 3 {
-		t.Fatalf("expected 3 pods, got %d", len(pods))
-	}
-	for i, p := range pods {
-		assertVirtualPodMetadata(t, p, i, "web")
-	}
-}
-
-func assertVirtualPodMetadata(t *testing.T, p *corev1.Pod, idx int, bufferName string) {
-	t.Helper()
-	i := idx + 1
-	if p.Name != "capacity-buffer-"+bufferName+"-"+itoa(i) {
-		t.Errorf("pod[%d] name = %q, want capacity-buffer-%s-%d", idx, p.Name, bufferName, i)
-	}
-	if p.Namespace != "default" {
-		t.Errorf("pod[%d] namespace = %q, want default", idx, p.Namespace)
-	}
-	if string(p.UID) != "uid-"+bufferName+"-"+itoa(i) {
-		t.Errorf("pod[%d] UID = %q, want uid-%s-%d", idx, p.UID, bufferName, i)
-	}
-	if p.Annotations[autoscalingv1alpha1.FakePodAnnotationKey] != "true" {
-		t.Errorf("pod[%d] missing fake-pod annotation", idx)
-	}
-	if p.Labels[autoscalingv1alpha1.BufferNameLabel] != bufferName {
-		t.Errorf("pod[%d] missing buffer-name label", idx)
-	}
-	if p.Spec.Priority == nil || *p.Spec.Priority != autoscalingv1alpha1.VirtualPodPriority {
-		t.Errorf("pod[%d] priority = %v, want %d", idx, p.Spec.Priority, autoscalingv1alpha1.VirtualPodPriority)
-	}
-	if p.Spec.NodeName != "" {
-		t.Errorf("pod[%d] nodeName should be empty, got %q", idx, p.Spec.NodeName)
-	}
-	assertHasUnschedulableCondition(t, p, idx)
-}
-
-func assertHasUnschedulableCondition(t *testing.T, p *corev1.Pod, idx int) {
-	t.Helper()
-	for _, c := range p.Status.Conditions {
-		if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
-			return
-		}
-	}
-	t.Errorf("pod[%d] missing PodScheduled=False/Unschedulable condition", idx)
-}
-
-func TestBuildVirtualPodsDeterministicUID(t *testing.T) {
-	cb := readyBuffer("web", 2)
-	spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
-	a := buildVirtualPods(cb, spec)
-	b := buildVirtualPods(cb, spec)
-	if len(a) != len(b) {
-		t.Fatalf("mismatched lengths: %d vs %d", len(a), len(b))
-	}
-	for i := range a {
-		if a[i].UID != b[i].UID {
-			t.Errorf("UID[%d] not deterministic: %q vs %q", i, a[i].UID, b[i].UID)
-		}
-	}
-}
-
-func TestBuildVirtualPodsZeroReplicas(t *testing.T) {
-	cb := readyBuffer("web", 0)
-	spec := corev1.PodSpec{}
-	if pods := buildVirtualPods(cb, spec); len(pods) != 0 {
-		t.Errorf("expected 0 pods for zero replicas, got %d", len(pods))
-	}
-	cb.Status.Replicas = nil
-	if pods := buildVirtualPods(cb, spec); len(pods) != 0 {
-		t.Errorf("expected 0 pods for nil replicas, got %d", len(pods))
-	}
-}
-
-func TestSanitizeVirtualPodSpecDropsPVCs(t *testing.T) {
-	spec := corev1.PodSpec{
-		NodeName: "should-be-cleared",
-		Volumes: []corev1.Volume{
-			{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{}}},
-			{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc1"}}},
-		},
-		Containers: []corev1.Container{{
-			Name: "app",
-			VolumeMounts: []corev1.VolumeMount{
-				{Name: "config", MountPath: "/config"},
-				{Name: "data", MountPath: "/data"},
-			},
-		}},
-	}
-	out := sanitizeVirtualPodSpec(spec)
-	if out.NodeName != "" {
-		t.Errorf("NodeName should be cleared")
-	}
-	if len(out.Volumes) != 1 || out.Volumes[0].Name != "config" {
-		t.Errorf("PVC volume should be dropped, got %+v", out.Volumes)
-	}
-	if len(out.Containers[0].VolumeMounts) != 1 || out.Containers[0].VolumeMounts[0].Name != "config" {
-		t.Errorf("PVC volumeMount should be dropped, got %+v", out.Containers[0].VolumeMounts)
-	}
-}
-
-func TestIsVirtualPod(t *testing.T) {
-	cases := []struct {
-		name string
-		pod  *corev1.Pod
-		want bool
-	}{
-		{"nil pod", nil, false},
-		{"no annotations", &corev1.Pod{}, false},
-		{
-			"virtual pod",
-			&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{autoscalingv1alpha1.FakePodAnnotationKey: "true"},
-			}},
-			true,
-		},
-		{
-			"other annotations only",
-			&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{"something-else": "value"},
-			}},
-			false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := IsVirtualPod(tc.pod); got != tc.want {
-				t.Errorf("IsVirtualPod(%+v) = %v, want %v", tc.pod, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestClassifyBufferPods(t *testing.T) {
-	cbA := readyBuffer("a", 3)
-	cbB := readyBuffer("b", 2)
-	buffers := map[string]*autoscalingv1alpha1.CapacityBuffer{
-		"a": cbA, "b": cbB,
-	}
-	spec := corev1.PodSpec{}
-
-	// Build 3 virtual pods for A and 2 for B. Put 2 of A on existing capacity,
-	// 1 of A on a new NodeClaim. All 2 of B on new NodeClaim. No failures.
-	aPods := buildVirtualPods(cbA, spec)
-	bPods := buildVirtualPods(cbB, spec)
-
-	results := scheduler.Results{
-		ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{aPods[0], aPods[1]}}},
-		NewNodeClaims: []*scheduler.NodeClaim{{Pods: []*corev1.Pod{aPods[2], bPods[0], bPods[1]}}},
-		PodErrors:     map[*corev1.Pod]error{},
-	}
-
-	summary := classifyBufferPods(results, buffers)
-	if summary["a"].existing != 2 {
-		t.Errorf("buffer a existing = %d, want 2", summary["a"].existing)
-	}
-	if summary["a"].requiresNewClaim != 1 {
-		t.Errorf("buffer a requiresNewClaim = %d, want 1", summary["a"].requiresNewClaim)
-	}
-	if summary["b"].existing != 0 {
-		t.Errorf("buffer b existing = %d, want 0", summary["b"].existing)
-	}
-	if summary["b"].requiresNewClaim != 2 {
-		t.Errorf("buffer b requiresNewClaim = %d, want 2", summary["b"].requiresNewClaim)
-	}
-	if summary["a"].desiredReplicas != 3 {
-		t.Errorf("buffer a desiredReplicas = %d, want 3", summary["a"].desiredReplicas)
-	}
-}
-
-func TestClassifyBufferPodsIgnoresRealPods(t *testing.T) {
-	realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
-	results := scheduler.Results{
-		ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{realPod}}},
-	}
-	summary := classifyBufferPods(results, map[string]*autoscalingv1alpha1.CapacityBuffer{})
-	if len(summary) != 0 {
-		t.Errorf("real pods should be ignored, got %d buckets", len(summary))
-	}
-}
-
-func TestComputeProvisioningCondition(t *testing.T) {
-	cb := readyBuffer("web", 3)
-
-	t.Run("fits existing capacity", func(t *testing.T) {
-		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 3, desiredReplicas: 3})
-		assertCondition(t, cond, metav1.ConditionTrue, "FitsExistingCapacity")
-	})
-
-	t.Run("requires new capacity", func(t *testing.T) {
-		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{existing: 1, requiresNewClaim: 2, desiredReplicas: 3})
-		assertCondition(t, cond, metav1.ConditionFalse, "RequiresNewCapacity")
-	})
-
-	t.Run("not ready for provisioning", func(t *testing.T) {
-		notReady := readyBuffer("web", 3)
-		notReady.Status.Conditions[0].Status = metav1.ConditionFalse
-		cond := computeProvisioningCondition(notReady, nil)
-		assertCondition(t, cond, metav1.ConditionFalse, "NotReadyForProvisioning")
-	})
-
-	t.Run("buffer empty", func(t *testing.T) {
-		empty := readyBuffer("web", 0)
-		cond := computeProvisioningCondition(empty, nil)
-		assertCondition(t, cond, metav1.ConditionFalse, "BufferEmpty")
-	})
-
-	t.Run("ready but no results", func(t *testing.T) {
-		cond := computeProvisioningCondition(cb, nil)
-		if cond != nil {
-			t.Errorf("got %+v, want nil (leave condition unchanged)", cond)
-		}
-	})
-}
-
-func assertCondition(t *testing.T, cond *metav1.Condition, wantStatus metav1.ConditionStatus, wantReason string) {
-	t.Helper()
-	if cond == nil {
-		t.Fatalf("condition is nil, want status=%s reason=%s", wantStatus, wantReason)
-	}
-	if cond.Status != wantStatus || cond.Reason != wantReason {
-		t.Errorf("got status=%s reason=%s, want status=%s reason=%s", cond.Status, cond.Reason, wantStatus, wantReason)
-	}
-}
-
-func TestBufferPodCountsFromResults(t *testing.T) {
-	cbA := readyBuffer("a", 3)
-	cbB := readyBuffer("b", 2)
-	spec := corev1.PodSpec{}
-
-	aPods := buildVirtualPods(cbA, spec)
-	bPods := buildVirtualPods(cbB, spec)
-	realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real-pod", Namespace: "default"}}
-
-	nodeA := makeExistingNode("provider-a")
-	nodeA.Pods = []*corev1.Pod{aPods[0], aPods[1], realPod}
-
-	nodeB := makeExistingNode("provider-b")
-	nodeB.Pods = []*corev1.Pod{bPods[0], bPods[1]}
-
-	results := scheduler.Results{
-		ExistingNodes: []*scheduler.ExistingNode{nodeA, nodeB},
-		NewNodeClaims: []*scheduler.NodeClaim{{Pods: []*corev1.Pod{aPods[2]}}},
-		PodErrors:     map[*corev1.Pod]error{},
-	}
-
-	counts := bufferPodCountsFromResults(results)
-
-	// provider-a has 2 virtual pods (real pods excluded)
-	if counts["provider-a"] != 2 {
-		t.Errorf("provider-a count = %d, want 2", counts["provider-a"])
-	}
-	// provider-b has 2 virtual pods
-	if counts["provider-b"] != 2 {
-		t.Errorf("provider-b count = %d, want 2", counts["provider-b"])
-	}
-	// Pods on new NodeClaims are not counted (those nodes don't exist yet)
-	if _, ok := counts["new-node"]; ok {
-		t.Errorf("new node claims should not be in counts")
-	}
-}
-
-func TestBufferPodCountsFromResultsEmpty(t *testing.T) {
-	results := scheduler.Results{}
-	counts := bufferPodCountsFromResults(results)
-	if len(counts) != 0 {
-		t.Errorf("expected empty map, got %v", counts)
-	}
-}
-
-func TestBufferPodCountsFromResultsNoVirtualPods(t *testing.T) {
-	realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
-	nodeA := makeExistingNode("provider-a")
-	nodeA.Pods = []*corev1.Pod{realPod}
-
-	results := scheduler.Results{
-		ExistingNodes: []*scheduler.ExistingNode{nodeA},
-	}
-	counts := bufferPodCountsFromResults(results)
-	if len(counts) != 0 {
-		t.Errorf("expected empty map when no virtual pods, got %v", counts)
 	}
 }
 
@@ -347,7 +449,29 @@ func makeExistingNode(providerID string) *scheduler.ExistingNode {
 	return &scheduler.ExistingNode{StateNode: sn}
 }
 
-// itoa is a tiny local integer-to-string used to avoid importing strconv.
+func readyBuffer(name string, replicas int32) *autoscalingv1alpha1.CapacityBuffer {
+	return &autoscalingv1alpha1.CapacityBuffer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			UID:       types.UID("uid-" + name),
+		},
+		Spec: autoscalingv1alpha1.CapacityBufferSpec{
+			PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: name + "-template"},
+			Replicas:       lo.ToPtr(replicas),
+		},
+		Status: autoscalingv1alpha1.CapacityBufferStatus{
+			Replicas:       lo.ToPtr(replicas),
+			PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: name + "-template"},
+			Conditions: []metav1.Condition{{
+				Type:   autoscalingv1alpha1.ReadyForProvisioningCondition,
+				Status: metav1.ConditionTrue,
+				Reason: "Resolved",
+			}},
+		},
+	}
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"

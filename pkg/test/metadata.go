@@ -67,7 +67,7 @@ func TemplateObjectMeta(overrides ...v1.ObjectMeta) v1.ObjectMeta {
 	}, overrides...)
 }
 
-func MustMerge[T interface{}](dest T, srcs ...T) T {
+func MustMerge[T any](dest T, srcs ...T) T {
 	for _, src := range srcs {
 		if err := mergo.Merge(&dest, src, mergo.WithOverride); err != nil {
 			panic(fmt.Sprintf("Failed to merge object: %s", err))

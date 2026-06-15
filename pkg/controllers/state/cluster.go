@@ -86,7 +86,25 @@ type Cluster struct {
 	lastUnsyncedLogTime time.Time
 	antiAffinityPods    sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
 
-	bufferPodCounts sync.Map // provider id (string) -> int: number of virtual buffer pods placed on this node
+	// bufferPodCounts tracks how many virtual CapacityBuffer pods the provisioner's
+	// scheduling simulation placed on each node (keyed by providerID). This is
+	// rebuilt wholesale after every provisioning pass — it is NOT incremental.
+	//
+	// Used by:
+	//   - disruption/emptiness.go: prevents empty-consolidation of nodes that host
+	//     buffer capacity (HasBufferPods check in ShouldDisrupt).
+	//
+	// NOT used by consolidation — consolidation naturally accounts for buffer pods
+	// because SimulateScheduling calls GetPendingPods which injects virtual pods
+	// into the pending set. Any replacement must fit both real and virtual pods.
+	//
+	// Future extensions:
+	//   - Metrics: expose per-node buffer pod counts as a Prometheus gauge.
+	//   - Disruption cost weighting: use the count to increase disruption cost so
+	//     consolidation prefers to evict nodes without buffer capacity first.
+	//   - Buffer-aware bin packing: pass counts into the scheduler to prefer
+	//     co-locating buffer pods on fewer nodes for consolidation efficiency.
+	bufferPodCounts sync.Map // provider id (string) -> int
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
@@ -218,7 +236,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 // currently bound to a node. The pod returned may not be up-to-date with respect to status, however since the
 // anti-affinity terms can't be modified, they will be correct.
 func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node) bool) {
-	c.antiAffinityPods.Range(func(key, value interface{}) bool {
+	c.antiAffinityPods.Range(func(key, value any) bool {
 		pod := value.(*corev1.Pod)
 		c.mu.RLock()
 		defer c.mu.RUnlock()
@@ -285,6 +303,11 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 // UpdateBufferPodCounts replaces the entire buffer pod count mapping with the
 // new counts. Called by the provisioner after each scheduling pass to reflect
 // which nodes are hosting virtual buffer pods. Nodes not in the map are cleared.
+//
+// The mapping is derived from Results.ExistingNodes — each ExistingNode.Pods
+// entry that carries the fake-pod annotation is counted. When buffer capacity
+// is consumed (real pods take the space), virtual pods move to other nodes or
+// new NodeClaims, and this map updates accordingly on the next pass.
 func (c *Cluster) UpdateBufferPodCounts(counts map[string]int) {
 	// Clear all existing entries, then store new ones. sync.Map doesn't have a
 	// bulk-replace, so we range-delete first.
