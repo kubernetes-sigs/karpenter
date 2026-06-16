@@ -130,6 +130,9 @@ type InstanceType struct {
 	Offerings Offerings
 	// Resources are the full resource capacities for this instance type
 	Capacity corev1.ResourceList
+	// DynamicResources contains DRA device metadata for this instance type.
+	// Cloud providers that do not support DRA may leave this as the zero value.
+	DynamicResources DynamicResources
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
 	Overhead               *InstanceTypeOverhead
@@ -180,6 +183,7 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 			(*out)[key] = val.DeepCopy()
 		}
 	}
+	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
 	if in.Overhead != nil {
 		in, out := &in.Overhead, &out.Overhead
 		*out = new(InstanceTypeOverhead)
