@@ -57,6 +57,12 @@ var _ = BeforeSuite(func() {
 	if env.Version.Minor() < 34 {
 		Skip("ResourceClaims are only available starting in K8s version >= 1.34.x")
 	}
+	// The resource.k8s.io/v1 API group requires runtime components that envtest
+	// may not provide. Skip if the apiserver doesn't actually serve it.
+	dc := env.KubernetesInterface.Discovery()
+	if _, err := dc.ServerResourcesForGroupVersion("resource.k8s.io/v1"); err != nil {
+		Skip("resource.k8s.io/v1 API group not available in this envtest environment")
+	}
 	ctx = options.ToContext(ctx, test.Options())
 })
 
