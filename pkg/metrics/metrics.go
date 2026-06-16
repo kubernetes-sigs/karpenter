@@ -50,11 +50,12 @@ var (
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
 			Name:      "terminated_total",
-			Help:      "Number of nodeclaims terminated in total by Karpenter. Labeled by the owning nodepool.",
+			Help:      "Number of nodeclaims terminated in total by Karpenter. Labeled by the owning nodepool, capacity type, and zone.",
 		},
 		[]string{
 			NodePoolLabel,
 			CapacityTypeLabel,
+			ZoneLabel,
 		},
 	)
 	NodeClaimsDisruptedTotal = opmetrics.NewPrometheusCounter(
@@ -77,10 +78,11 @@ var (
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
 			Name:      "created_total",
-			Help:      "Number of nodes created in total by Karpenter. Labeled by owning nodepool.",
+			Help:      "Number of nodes created in total by Karpenter. Labeled by owning nodepool and zone.",
 		},
 		[]string{
 			NodePoolLabel,
+			ZoneLabel,
 		},
 	)
 	NodesTerminatedTotal = opmetrics.NewPrometheusCounter(
@@ -89,10 +91,11 @@ var (
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
 			Name:      "terminated_total",
-			Help:      "Number of nodes terminated in total by Karpenter. Labeled by owning nodepool.",
+			Help:      "Number of nodes terminated in total by Karpenter. Labeled by owning nodepool and zone.",
 		},
 		[]string{
 			NodePoolLabel,
+			ZoneLabel,
 		},
 	)
 )
