@@ -34,6 +34,23 @@ func TestReconciles(t *testing.T) {
 }
 
 var _ = Describe("DaemonSetUtils", func() {
+	It("should generate a unique UID for each pod created", func() {
+		ds1 := test.DaemonSet(test.DaemonSetOptions{
+			PodOptions: test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+			},
+		})
+		ds2 := test.DaemonSet(test.DaemonSetOptions{
+			PodOptions: test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}},
+			},
+		})
+		p1 := daemonset.PodForDaemonSet(ds1)
+		p2 := daemonset.PodForDaemonSet(ds2)
+		Expect(p1.UID).ToNot(BeEmpty())
+		Expect(p2.UID).ToNot(BeEmpty())
+		Expect(p1.UID).ToNot(Equal(p2.UID))
+	})
 	It("should merge resource limits into requests if no requests exists for the given container", func() {
 		inputRequirements := corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{
