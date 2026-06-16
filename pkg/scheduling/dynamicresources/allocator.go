@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
 	"k8s.io/klog/v2"
@@ -125,17 +126,24 @@ type ResourceClaimAllocationMetadata struct {
 	Devices map[InstanceTypeID][]DeviceID
 }
 
+type AllocatedDeviceState struct {
+	// ExclusiveDevices contains devices that are exclusively allocated (one claim owns them).
+	ExclusiveDevices sets.Set[cloudprovider.DeviceID]
+	// ConsumedCapacity maps multi-allocatable devices to their aggregated consumed capacity.
+	ConsumedCapacity map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+}
+
 // NewAllocator constructs an Allocator for a single scheduling loop.
 // allocatedDevices contains the set of in-cluster devices that are already allocated;
 // these are converted internally to the scheduling DeviceID type.
 func NewAllocator(
 	inClusterSlices []ResourceSlice,
-	allocatedDevices sets.Set[cloudprovider.DeviceID],
+	allocatedDevices AllocatedDeviceState,
 	attributeBindings AttributeBindings,
 	kubeClient client.Client,
 ) *Allocator {
 	return &Allocator{
-		allocationTracker:       NewAllocationTracker(allocatedDevices.UnsortedList()...),
+		allocationTracker:       NewAllocationTracker(allocatedDevices.ExclusiveDevices.UnsortedList()...), // TODO: at later step
 		attributeBindings:       attributeBindings,
 		kubeClient:              kubeClient,
 		inClusterSlices:         inClusterSlices,

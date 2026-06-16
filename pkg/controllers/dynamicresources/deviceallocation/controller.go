@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -42,27 +43,40 @@ import (
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 )
 
+// SOME NOTES
+// Controller responsible for tracking allocated devices based on ResourceClaim statuses.
+// The controller provides an iterator interface which will be consumed by the provisioner and disruption controllers when creating the DRA allocator (PR to follow).
+
+// SOME CONSIDERATIONS
+// Multiple pods can consume the same ResourceClaim.
+// To avoid overprovisioning, we need to release a device when all pods with reservations for that device are in a deleting state.
+// A subset of pods deleting is not sufficient since it won't result in the device being released.
+
+// TODO
+// Needs to aggregate per-device consumed capacity across all claims
+// Multiple claims can reference the same device.
+
 const (
 	minReconciles = 10
 	maxReconciles = 3000
 )
 
-type Controller struct {
-	kubeClient client.Client
+// DeviceContribution records what a single claim contributes to a device's allocation
+type DeviceContribution struct {
+	// ConsumedCapacity is the capacity this claim consumes on the device.
+	// nil for exclusive allocations.
+	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+}
 
-	mu               sync.RWMutex
-	allocatedDevices map[cloudprovider.DeviceID]Metadata
-	claimsPerDevice  map[cloudprovider.DeviceID]sets.Set[types.NamespacedName]
-	devicesPerClaim  map[types.NamespacedName]sets.Set[cloudprovider.DeviceID]
-	metadataPerClaim map[types.NamespacedName]Metadata
-
-	hydrationCh   chan struct{}
-	hydrationOnce sync.Once
+type ClaimMetadata struct {
+	Releasable    bool
+	PodUIDs       []types.UID
+	Contributions map[cloudprovider.DeviceID]DeviceContribution
 }
 
 // Metadata contains supplementary information about an allocated device, derived from the ReservedFor status of all
 // ResourceClaims that reference it.
-type Metadata struct {
+type DeviceMetadata struct {
 	// Releasable is true when every ResourceClaim referencing the device has a non-empty ReservedFor list composed
 	// entirely of pod consumers. A device that is not reserved, or that is reserved by any non-pod consumer, is not
 	// releasable.
@@ -71,15 +85,31 @@ type Metadata struct {
 	// device. Non-pod consumer UIDs are excluded. Duplicates are possible and consumers should not assume uniqueness.
 	// This is intentionally a slice rather than a set for performance reasons, as membership is expected to be small.
 	PodUIDs []types.UID
+	// Shared is true when the device is multi-allocatable.
+	Shared bool
+	// ConsumedCapacity is the aggregated capacity consumed across all claims referencing this device.
+	// Only populated when Shared is true.
+	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+}
+
+type Controller struct {
+	kubeClient client.Client
+
+	mu               sync.RWMutex
+	allocatedDevices map[cloudprovider.DeviceID]DeviceMetadata
+	claimsPerDevice  map[cloudprovider.DeviceID]sets.Set[types.NamespacedName]
+	claimMetadata    map[types.NamespacedName]ClaimMetadata
+
+	hydrationCh   chan struct{}
+	hydrationOnce sync.Once
 }
 
 func NewController(kubeClient client.Client) *Controller {
 	return &Controller{
 		kubeClient:       kubeClient,
-		allocatedDevices: make(map[cloudprovider.DeviceID]Metadata),
+		allocatedDevices: make(map[cloudprovider.DeviceID]DeviceMetadata),
 		claimsPerDevice:  make(map[cloudprovider.DeviceID]sets.Set[types.NamespacedName]),
-		devicesPerClaim:  make(map[types.NamespacedName]sets.Set[cloudprovider.DeviceID]),
-		metadataPerClaim: make(map[types.NamespacedName]Metadata),
+		claimMetadata:    make(map[types.NamespacedName]ClaimMetadata),
 		hydrationCh:      make(chan struct{}),
 	}
 }
@@ -119,24 +149,35 @@ func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	allocatedDevices := make(sets.Set[cloudprovider.DeviceID], len(claim.Status.Allocation.Devices.Results))
+	contributions := make(map[cloudprovider.DeviceID]DeviceContribution, len(claim.Status.Allocation.Devices.Results))
 	for i := range claim.Status.Allocation.Devices.Results {
 		result := &claim.Status.Allocation.Devices.Results[i]
-		allocatedDevices.Insert(cloudprovider.DeviceID{
+		deviceID := cloudprovider.DeviceID{
 			Driver: unique.Make(result.Driver),
 			Pool:   unique.Make(result.Pool),
 			Device: unique.Make(result.Device),
-		})
+		}
+		contributions[deviceID] = DeviceContribution{ConsumedCapacity: result.ConsumedCapacity}
 	}
 
-	devicesToRemove := c.devicesPerClaim[nn].Difference(allocatedDevices)
+	devicesToRemove := make(sets.Set[cloudprovider.DeviceID])
+	for device := range c.claimMetadata[nn].Contributions {
+		if _, still := contributions[device]; !still {
+			devicesToRemove.Insert(device)
+		}
+	}
+
 	var devicesToAdd sets.Set[cloudprovider.DeviceID]
 	if log.FromContext(ctx).V(1).Enabled() {
-		devicesToAdd = allocatedDevices.Difference(c.devicesPerClaim[nn])
+		devicesToAdd = make(sets.Set[cloudprovider.DeviceID])
+		for device := range contributions {
+			if _, existed := c.claimMetadata[nn].Contributions[device]; !existed {
+				devicesToAdd.Insert(device)
+			}
+		}
 	}
 
-	c.devicesPerClaim[nn] = allocatedDevices
-	c.metadataPerClaim[nn] = claimMetadata(claim)
+	c.claimMetadata[nn] = claimMetadata(claim, contributions)
 	for device := range devicesToRemove {
 		c.claimsPerDevice[device].Delete(nn)
 		if len(c.claimsPerDevice[device]) == 0 {
@@ -146,7 +187,7 @@ func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName
 			c.allocatedDevices[device] = c.computeDeviceMetadata(device)
 		}
 	}
-	for device := range allocatedDevices {
+	for device := range contributions {
 		claims, ok := c.claimsPerDevice[device]
 		if !ok {
 			claims = sets.New[types.NamespacedName]()
@@ -162,7 +203,7 @@ func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName
 			"ResourceClaim", klog.KRef(nn.Namespace, nn.Name),
 			"added", lo.Map(lo.Keys(devicesToAdd), deviceIDToString),
 			"removed", lo.Map(lo.Keys(devicesToRemove), deviceIDToString),
-			"tracked", lo.Map(lo.Keys(allocatedDevices), deviceIDToString),
+			"tracked", lo.Map(lo.Keys(contributions), deviceIDToString),
 		)
 	}
 }
@@ -171,8 +212,7 @@ func (c *Controller) finalizeClaim(ctx context.Context, nn types.NamespacedName)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	devices := c.devicesPerClaim[nn]
-	delete(c.metadataPerClaim, nn)
+	devices := c.claimMetadata[nn].Contributions
 	for device := range devices {
 		claims := c.claimsPerDevice[device]
 		claims.Delete(nn)
@@ -183,7 +223,7 @@ func (c *Controller) finalizeClaim(ctx context.Context, nn types.NamespacedName)
 			c.allocatedDevices[device] = c.computeDeviceMetadata(device)
 		}
 	}
-	delete(c.devicesPerClaim, nn)
+	delete(c.claimMetadata, nn)
 	if log.FromContext(ctx).V(1).Enabled() {
 		log.FromContext(ctx).V(1).Info(
 			"updated tracked devices for claim",
@@ -197,10 +237,10 @@ func (c *Controller) finalizeClaim(ctx context.Context, nn types.NamespacedName)
 
 // AllocatedDevices returns an iterator over all allocated devices and their metadata. The read lock is held for the
 // duration of iteration and released when the iterator completes or the caller breaks out of the loop.
-func (c *Controller) AllocatedDevices(ctx context.Context) (iter.Seq2[cloudprovider.DeviceID, Metadata], error) {
+func (c *Controller) AllocatedDevices(ctx context.Context) (iter.Seq2[cloudprovider.DeviceID, DeviceMetadata], error) {
 	select {
 	case <-c.hydrationCh:
-		return func(yield func(cloudprovider.DeviceID, Metadata) bool) {
+		return func(yield func(cloudprovider.DeviceID, DeviceMetadata) bool) {
 			c.mu.RLock()
 			defer c.mu.RUnlock()
 			for id, meta := range c.allocatedDevices {
@@ -215,8 +255,8 @@ func (c *Controller) AllocatedDevices(ctx context.Context) (iter.Seq2[cloudprovi
 }
 
 // claimMetadata computes Metadata for a single claim from its ReservedFor entries.
-func claimMetadata(claim *resourcev1.ResourceClaim) Metadata {
-	meta := Metadata{Releasable: len(claim.Status.ReservedFor) > 0}
+func claimMetadata(claim *resourcev1.ResourceClaim, contributions map[cloudprovider.DeviceID]DeviceContribution) ClaimMetadata {
+	meta := ClaimMetadata{Releasable: len(claim.Status.ReservedFor) > 0, Contributions: contributions}
 	for i := range claim.Status.ReservedFor {
 		ref := &claim.Status.ReservedFor[i]
 		if ref.Resource == string(corev1.ResourcePods) && ref.APIGroup == "" {
@@ -230,14 +270,20 @@ func claimMetadata(claim *resourcev1.ResourceClaim) Metadata {
 
 // computeDeviceMetadata aggregates metadata across all claims that reference a device.
 // Must be called while holding c.mu.
-func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) Metadata {
-	meta := Metadata{Releasable: true}
+func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) DeviceMetadata {
+	meta := DeviceMetadata{Releasable: true}
 	for nn := range c.claimsPerDevice[device] {
-		claimMeta := c.metadataPerClaim[nn]
+		claimMeta := c.claimMetadata[nn]
 		if !claimMeta.Releasable {
 			meta.Releasable = false
 		}
 		meta.PodUIDs = append(meta.PodUIDs, claimMeta.PodUIDs...)
+
+		contributions := claimMeta.Contributions[device]
+		if contributions.ConsumedCapacity != nil {
+			meta.Shared = true
+			meta.ConsumedCapacity = addCapacity(meta.ConsumedCapacity, contributions.ConsumedCapacity)
+		}
 	}
 	return meta
 }
@@ -252,4 +298,16 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 
 func deviceIDToString(d cloudprovider.DeviceID, _ int) string {
 	return d.String()
+}
+
+func addCapacity(dest, src map[resourcev1.QualifiedName]resource.Quantity) map[resourcev1.QualifiedName]resource.Quantity {
+	if dest == nil {
+		dest = make(map[resourcev1.QualifiedName]resource.Quantity, len(src))
+	}
+	for name, quantity := range src {
+		current := dest[name]
+		current.Add(quantity)
+		dest[name] = current
+	}
+	return dest
 }
