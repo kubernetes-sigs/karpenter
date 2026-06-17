@@ -648,4 +648,68 @@ var _ = Describe("Resources", func() {
 			})
 		})
 	})
+	Context("MaxResources", func() {
+		It("should return empty list for no inputs", func() {
+			result := resources.MaxResources()
+			Expect(result).To(BeEmpty())
+		})
+		It("should return the same list for a single input", func() {
+			result := resources.MaxResources(v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("2"),
+				v1.ResourceMemory: resource.MustParse("4Gi"),
+			})
+			Expect(result[v1.ResourceCPU]).To(Equal(resource.MustParse("2")))
+			Expect(result[v1.ResourceMemory]).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should return the maximum of each resource across multiple lists", func() {
+			result := resources.MaxResources(
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("4Gi")},
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("2Gi")},
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("8Gi")},
+			)
+			Expect(result[v1.ResourceCPU]).To(Equal(resource.MustParse("3")))
+			Expect(result[v1.ResourceMemory]).To(Equal(resource.MustParse("8Gi")))
+		})
+		It("should include resources that only appear in some lists", func() {
+			result := resources.MaxResources(
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+				v1.ResourceList{v1.ResourceMemory: resource.MustParse("2Gi")},
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("3")},
+			)
+			Expect(result[v1.ResourceCPU]).To(Equal(resource.MustParse("3")))
+			Expect(result[v1.ResourceMemory]).To(Equal(resource.MustParse("2Gi")))
+		})
+	})
+	Context("MinResources", func() {
+		It("should return empty list for no inputs", func() {
+			result := resources.MinResources()
+			Expect(result).To(BeEmpty())
+		})
+		It("should return the same list for a single input", func() {
+			result := resources.MinResources(v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("2"),
+				v1.ResourceMemory: resource.MustParse("4Gi"),
+			})
+			Expect(result[v1.ResourceCPU]).To(Equal(resource.MustParse("2")))
+			Expect(result[v1.ResourceMemory]).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should return the minimum of each resource across multiple lists", func() {
+			result := resources.MinResources(
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("8Gi")},
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("6Gi")},
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("1Gi")},
+			)
+			Expect(result[v1.ResourceCPU]).To(Equal(resource.MustParse("2")))
+			Expect(result[v1.ResourceMemory]).To(Equal(resource.MustParse("1Gi")))
+		})
+		It("should only include resources present in all lists", func() {
+			result := resources.MinResources(
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("4Gi")},
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("3")},
+				v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
+			)
+			Expect(result[v1.ResourceCPU]).To(Equal(resource.MustParse("1")))
+			Expect(result).ToNot(HaveKey(v1.ResourceMemory))
+		})
+	})
 })

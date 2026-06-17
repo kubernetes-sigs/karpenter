@@ -1954,6 +1954,33 @@ var _ = Describe("Provisioning", func() {
 			})
 			ExpectScheduled(ctx, env.Client, pod)
 		})
+		It("should not double-count daemon overhead when multiple pods are scheduled to the same nodeclaim", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Mi")}},
+				}},
+			))
+			pod1 := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Mi")}},
+				},
+			)
+			pod2 := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Mi")}},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			// Total should be: 2 pods (1 cpu each) + 1 daemon (1 cpu) = 3 cpu, not 4 cpu
+			ExpectNodeClaimRequests(cloudProvider.CreateCalls[0], corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("3"),
+				corev1.ResourceMemory: resource.MustParse("3Mi"),
+				corev1.ResourcePods:   resource.MustParse("3"),
+			})
+			ExpectScheduled(ctx, env.Client, pod1)
+			ExpectScheduled(ctx, env.Client, pod2)
+		})
 	})
 	Context("Volume Topology Requirements", func() {
 		var storageClass *storagev1.StorageClass
