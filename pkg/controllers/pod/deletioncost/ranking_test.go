@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
@@ -60,26 +61,26 @@ var _ = Describe("Ranking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// Put a do-not-disrupt pod on node 1
-			dndPod := test.Pod(test.PodOptions{
+			dndPod := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"},
 				},
 				NodeName: nodes[1].Name,
 			})
 			// Normal pods on nodes 0 and 2
-			pod0 := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
-			pod2 := test.Pod(test.PodOptions{NodeName: nodes[2].Name})
+			pod0 := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			pod2 := rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name})
 			ExpectApplied(ctx, env.Client, dndPod, pod0, pod2)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(3))
 
@@ -102,8 +103,8 @@ var _ = Describe("Ranking", func() {
 		})
 
 		It("should handle empty node list", func() {
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
-			ranks, err := engine.RankNodes(ctx, nil, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, nil, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(BeEmpty())
 		})
@@ -118,17 +119,17 @@ var _ = Describe("Ranking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			for _, n := range nodes {
-				ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: n.Name}))
+				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: n.Name}))
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(3))
 			for _, r := range ranks {
@@ -146,20 +147,20 @@ var _ = Describe("Ranking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			for _, n := range nodes {
-				ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
 					NodeName:   n.Name,
 				}))
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(2))
 			for _, r := range ranks {
@@ -177,17 +178,17 @@ var _ = Describe("Ranking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			for _, n := range nodes {
-				ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: n.Name}))
+				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: n.Name}))
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 
 			// Ranks should be sequential starting from -len(nodes)
@@ -211,25 +212,25 @@ var _ = Describe("Ranking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// Nodes 0,2 normal; nodes 1,3 DND
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[0].Name}))
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
 				NodeName:   nodes[1].Name,
 			}))
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
 				NodeName:   nodes[3].Name,
 			}))
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(4))
 
@@ -271,7 +272,7 @@ var _ = Describe("Ranking", func() {
 			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
 			ExpectApplied(ctx, env.Client, nodes[0])
 
-			pdbBlockedPod := test.Pod(test.PodOptions{
+			pdbBlockedPod := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"app": "blocked"},
 				},
@@ -297,24 +298,24 @@ var _ = Describe("Ranking", func() {
 			ExpectApplied(ctx, env.Client, pdb)
 
 			// Node 1: normal pod
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[1].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name}))
 			// Node 2: normal pod
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name}))
 			// Node 3: do-not-disrupt pod
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
 				NodeName:   nodes[3].Name,
 			}))
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(4))
 
@@ -341,20 +342,20 @@ var _ = Describe("Ranking", func() {
 			// Node 0: disrupted taint but no PDB-blocked pods
 			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
 			ExpectApplied(ctx, env.Client, nodes[0])
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[0].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name}))
 
 			// Node 1: normal
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[1].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name}))
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(2))
 
@@ -381,13 +382,13 @@ var _ = Describe("Ranking", func() {
 
 			// Node 0: 3 PDB-blocked pods
 			for i := 0; i < 3; i++ {
-				ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
 					NodeName:   nodes[0].Name,
 				}))
 			}
 			// Node 1: 1 PDB-blocked pod
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
 				NodeName:   nodes[1].Name,
 			}))
@@ -409,17 +410,17 @@ var _ = Describe("Ranking", func() {
 			ExpectApplied(ctx, env.Client, pdb)
 
 			// Node 2: normal
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name}))
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(3))
 
@@ -455,7 +456,7 @@ var _ = Describe("Ranking", func() {
 			// Node 0: disrupted + PDB-blocked (Group A)
 			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
 			ExpectApplied(ctx, env.Client, nodes[0])
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
 				NodeName:   nodes[0].Name,
 			}))
@@ -478,20 +479,20 @@ var _ = Describe("Ranking", func() {
 			// Node 1: drifted (Group B)
 			nodeClaims[1].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nodeClaims[1])
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[1].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name}))
 
 			// Node 2: normal (Group C)
-			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{NodeName: nodes[2].Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name}))
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			engine := deletioncost.NewRankingEngine(env.Client, cluster, fakeClock)
+			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := engine.RankNodes(ctx, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(3))
 
@@ -509,6 +510,101 @@ var _ = Describe("Ranking", func() {
 			// Group A gets math.MinInt32, Group B < Group C
 			Expect(groupARank).To(Equal(math.MinInt32))
 			Expect(groupBRank).To(BeNumerically("<", groupCRank))
+		})
+	})
+
+	Context("Per-NodePool budgets", func() {
+		It("should respect per-NodePool consolidation budgets across multiple pools", func() {
+			// Two NodePools with different budgets:
+			//  - poolA: Nodes "100%" — all normal nodes can land in Group C
+			//  - poolB: Nodes "0"   — every normal node overflows to Group D
+			poolA := test.NodePool()
+			poolA.Name = "pool-a"
+			poolA.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
+			poolA.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+
+			poolB := test.NodePool()
+			poolB.Name = "pool-b"
+			poolB.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
+			poolB.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+
+			ExpectApplied(ctx, env.Client, poolA, poolB)
+
+			// One node per pool, one normal pod each.
+			ncA, nA := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: poolA.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ncB, nB := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: poolB.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, ncA, nA, ncB, nB)
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nA.Name}))
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nB.Name}))
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nA, nB}, []*v1.NodeClaim{ncA, ncB})
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{
+				poolA.Name: poolA,
+				poolB.Name: poolB,
+			})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(2))
+
+			// poolA's node should be in Group C (HasDoNotDisrupt=false),
+			// poolB's node should overflow to Group D (HasDoNotDisrupt=true).
+			for _, r := range ranks {
+				switch r.Node.Labels()[v1.NodePoolLabelKey] {
+				case poolA.Name:
+					Expect(r.HasDoNotDisrupt).To(BeFalse(), "poolA node should be in Group C with budget 100%")
+				case poolB.Name:
+					Expect(r.HasDoNotDisrupt).To(BeTrue(), "poolB node should overflow to Group D with budget 0")
+				}
+			}
+		})
+	})
+
+	Context("50-node cap", func() {
+		It("should drop excess nodes beyond maxNodesPerCycle in the controller", func() {
+			// The 50-node cap is enforced by the controller (not RankNodes itself).
+			// Build 55 nodes, run a full reconcile, and confirm only the top
+			// 50 ranked pods received an annotation; the remaining pods are
+			// untouched.
+			const totalNodes = 55
+			const cap = 50
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(totalNodes, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			pods := make([]*corev1.Pod, totalNodes)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				pods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[i].Name})
+				ExpectApplied(ctx, env.Client, pods[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Count how many of the 55 pods got the deletion-cost annotation.
+			annotated := 0
+			for _, p := range pods {
+				updated := &corev1.Pod{}
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(p), updated)).To(Succeed())
+				if _, ok := updated.Annotations[corev1.PodDeletionCost]; ok {
+					annotated++
+				}
+			}
+			Expect(annotated).To(Equal(cap), "exactly maxNodesPerCycle (50) pods should receive the annotation")
 		})
 	})
 })

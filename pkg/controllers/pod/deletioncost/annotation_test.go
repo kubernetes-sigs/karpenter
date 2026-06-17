@@ -50,7 +50,7 @@ var _ = Describe("Annotation", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
+			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
@@ -59,9 +59,9 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -10, HasDoNotDisrupt: false}}
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
@@ -79,7 +79,7 @@ var _ = Describe("Annotation", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			pod := test.Pod(test.PodOptions{
+			pod := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						corev1.PodDeletionCost: "100",
@@ -95,9 +95,9 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -10, HasDoNotDisrupt: false}}
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
@@ -113,7 +113,7 @@ var _ = Describe("Annotation", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			pod := test.Pod(test.PodOptions{
+			pod := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						corev1.PodDeletionCost: "-5",
@@ -129,9 +129,9 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -20, HasDoNotDisrupt: false}}
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
@@ -147,7 +147,7 @@ var _ = Describe("Annotation", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
+			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
@@ -156,9 +156,9 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -3, HasDoNotDisrupt: false}}
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
@@ -176,7 +176,7 @@ var _ = Describe("Annotation", func() {
 			}
 			pods := make([]*corev1.Pod, 3)
 			for i := range pods {
-				pods[i] = test.Pod(test.PodOptions{NodeName: nodes[0].Name})
+				pods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
 				ExpectApplied(ctx, env.Client, pods[i])
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
@@ -186,9 +186,9 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -7, HasDoNotDisrupt: false}}
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			for _, pod := range pods {
 				updatedPod := &corev1.Pod{}
@@ -213,10 +213,10 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -1, HasDoNotDisrupt: false}}
 			// Should not error even with no pods
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 		})
 
 		It("should update pods across multiple ranked nodes", func() {
@@ -228,8 +228,8 @@ var _ = Describe("Annotation", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			pod0 := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
-			pod1 := test.Pod(test.PodOptions{NodeName: nodes[1].Name})
+			pod0 := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			pod1 := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
 			ExpectApplied(ctx, env.Client, pod0, pod1)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
@@ -239,12 +239,12 @@ var _ = Describe("Annotation", func() {
 			}
 			Expect(stateNodes).To(HaveLen(2))
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{
 				{Node: stateNodes[0], Rank: -10, HasDoNotDisrupt: false},
 				{Node: stateNodes[1], Rank: -9, HasDoNotDisrupt: false},
 			}
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			// Both pods should have their respective node's rank
 			for _, sn := range stateNodes {
@@ -275,7 +275,7 @@ var _ = Describe("Annotation", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			pod := test.Pod(test.PodOptions{
+			pod := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						corev1.PodDeletionCost: "5",
@@ -291,9 +291,9 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: 10, HasDoNotDisrupt: true}}
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
@@ -309,7 +309,7 @@ var _ = Describe("Annotation", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
+			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
@@ -318,9 +318,9 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			mgr := deletioncost.NewAnnotationManager(env.Client, recorder)
+			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: 10, HasDoNotDisrupt: true}}
-			Expect(mgr.UpdatePodDeletionCosts(ctx, nodeRanks)).To(Succeed())
+			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())

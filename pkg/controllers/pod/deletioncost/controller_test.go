@@ -53,7 +53,7 @@ var _ = Describe("Controller", func() {
 		opts.FeatureGates.PodDeletionCostManagement = false
 		disabledCtx := options.ToContext(ctx, opts)
 
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
 		result, err := controller.Reconcile(disabledCtx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.RequeueAfter).ToNot(BeZero())
@@ -68,12 +68,12 @@ var _ = Describe("Controller", func() {
 		for i := range nodeClaims {
 			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 		}
-		pod0 := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
-		pod1 := test.Pod(test.PodOptions{NodeName: nodes[1].Name})
+		pod0 := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+		pod1 := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
 		ExpectApplied(ctx, env.Client, pod0, pod1)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
 		result, err := controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
@@ -91,7 +91,7 @@ var _ = Describe("Controller", func() {
 	})
 
 	It("should skip reconciliation when no nodes exist", func() {
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
 		result, err := controller.Reconcile(ctx)
 		Expect(err).To(Succeed())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
@@ -106,11 +106,11 @@ var _ = Describe("Controller", func() {
 		for i := range nodeClaims {
 			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 		}
-		pod := test.Pod(test.PodOptions{NodeName: nodes[0].Name})
+		pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
 
 		// First reconcile — should process (change detected). The pod's
 		// ResourceVersion bumps because the controller writes the
@@ -150,12 +150,12 @@ var _ = Describe("Controller", func() {
 			}
 			pods := make([]*corev1.Pod, len(nodes))
 			for i, n := range nodes {
-				pods[i] = test.Pod(test.PodOptions{NodeName: n.Name})
+				pods[i] = rsOwnedPod(test.PodOptions{NodeName: n.Name})
 				ExpectApplied(ctx, env.Client, pods[i])
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, recorder)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
 			result, err := controller.Reconcile(ctx)
 			Expect(err).To(Succeed())
 			Expect(result.RequeueAfter).To(Equal(time.Minute))

@@ -24,6 +24,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	clock "k8s.io/utils/clock/testing"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
@@ -86,3 +89,25 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cluster.Reset()
 })
+
+// rsOwnedPod returns a test pod with a synthetic ReplicaSet owner reference so
+// the deletion-cost partition logic does not classify it as a non-RS-owned
+// pod (Group A). Tests that care about the non-RS-owned classification
+// construct pods directly with `test.Pod`.
+func rsOwnedPod(opts ...test.PodOptions) *corev1.Pod {
+	rsOwner := metav1.OwnerReference{
+		APIVersion:         "apps/v1",
+		Kind:               "ReplicaSet",
+		Name:               "test-rs",
+		UID:                types.UID("test-rs-uid"),
+		Controller:         lo.ToPtr(true),
+		BlockOwnerDeletion: lo.ToPtr(true),
+	}
+	if len(opts) == 0 {
+		opts = []test.PodOptions{{}}
+	}
+	// Inject the owner reference into the first option block so it merges
+	// with any user-supplied ObjectMeta fields.
+	opts[0].OwnerReferences = append(opts[0].OwnerReferences, rsOwner)
+	return test.Pod(opts...)
+}
