@@ -96,5 +96,59 @@ var _ = Describe("DynamicResources", func() {
 			Expect(copied.ResourceSliceTemplates).To(BeNil())
 			Expect(copied.AttributeBindings).To(BeNil())
 		})
+
+		It("should deep copy SharedCounters and ConsumesCounters", func() {
+			original := cloudprovider.DynamicResources{
+				ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{
+					{
+						Driver: unique.Make("gpu.nvidia.com"),
+						Pool:   cloudprovider.ResourcePool{Name: unique.Make("mig-pool")},
+						SharedCounters: []resourcev1.CounterSet{
+							{
+								Name: "gpu-slices",
+								Counters: map[string]resourcev1.Counter{
+									"memory":        {Value: resource.MustParse("80Gi")},
+									"compute-units": {Value: resource.MustParse("7")},
+								},
+							},
+						},
+						Devices: []cloudprovider.Device{
+							{
+								Name: unique.Make("mig-3g.40gb-0"),
+								ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+									{
+										CounterSet: "gpu-slices",
+										Counters: map[string]resourcev1.Counter{
+											"memory":        {Value: resource.MustParse("40Gi")},
+											"compute-units": {Value: resource.MustParse("3")},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			copied := original.DeepCopy()
+
+			// Verify structural correctness
+			Expect(copied.ResourceSliceTemplates).To(HaveLen(1))
+			tmpl := copied.ResourceSliceTemplates[0]
+			Expect(tmpl.SharedCounters).To(HaveLen(1))
+			Expect(tmpl.SharedCounters[0].Name).To(Equal("gpu-slices"))
+			Expect(tmpl.SharedCounters[0].Counters).To(HaveLen(2))
+			Expect(tmpl.Devices[0].ConsumesCounters).To(HaveLen(1))
+			Expect(tmpl.Devices[0].ConsumesCounters[0].CounterSet).To(Equal("gpu-slices"))
+			Expect(tmpl.Devices[0].ConsumesCounters[0].Counters).To(HaveLen(2))
+
+			// Mutating SharedCounters on the copy should not affect the original
+			tmpl.SharedCounters[0].Counters["memory"] = resourcev1.Counter{Value: resource.MustParse("10Gi")}
+			Expect(original.ResourceSliceTemplates[0].SharedCounters[0].Counters["memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+
+			// Mutating ConsumesCounters on the copy should not affect the original
+			tmpl.Devices[0].ConsumesCounters[0].Counters["memory"] = resourcev1.Counter{Value: resource.MustParse("5Gi")}
+			Expect(original.ResourceSliceTemplates[0].Devices[0].ConsumesCounters[0].Counters["memory"].Value.Equal(resource.MustParse("40Gi"))).To(BeTrue())
+		})
 	})
 })

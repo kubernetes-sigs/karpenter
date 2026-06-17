@@ -22,8 +22,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -152,6 +152,49 @@ var _ = Describe("ResourceSlice Interface", func() {
 			Expect(slice.Devices()).To(BeEmpty())
 		})
 
+		It("should convert devices with ConsumesCounters", func() {
+			apiSlice.Spec.Devices = []resourcev1.Device{
+				{
+					Name: "mig-3g.40gb-0",
+					ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+						{
+							CounterSet: "gpu-slices",
+							Counters: map[string]resourcev1.Counter{
+								"memory":        {Value: resource.MustParse("40Gi")},
+								"compute-units": {Value: resource.MustParse("3")},
+							},
+						},
+					},
+				},
+			}
+			slice = dynamicresources.NewAPIServerSlice(apiSlice)
+			devices := slice.Devices()
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].ConsumesCounters).To(HaveLen(1))
+			Expect(devices[0].ConsumesCounters[0].CounterSet).To(Equal("gpu-slices"))
+			Expect(devices[0].ConsumesCounters[0].Counters).To(HaveLen(2))
+			Expect(devices[0].ConsumesCounters[0].Counters["memory"].Value.Equal(resource.MustParse("40Gi"))).To(BeTrue())
+			Expect(devices[0].ConsumesCounters[0].Counters["compute-units"].Value.Equal(resource.MustParse("3"))).To(BeTrue())
+		})
+
+		It("should return SharedCounters from the API object", func() {
+			apiSlice.Spec.SharedCounters = []resourcev1.CounterSet{
+				{
+					Name: "gpu-slices",
+					Counters: map[string]resourcev1.Counter{
+						"memory":        {Value: resource.MustParse("80Gi")},
+						"compute-units": {Value: resource.MustParse("7")},
+					},
+				},
+			}
+			slice = dynamicresources.NewAPIServerSlice(apiSlice)
+			counters := slice.SharedCounters()
+			Expect(counters).To(HaveLen(1))
+			Expect(counters[0].Name).To(Equal("gpu-slices"))
+			Expect(counters[0].Counters).To(HaveLen(2))
+			Expect(counters[0].Counters["memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+		})
+
 	})
 
 	Describe("TemplateSlice", func() {
@@ -208,6 +251,48 @@ var _ = Describe("ResourceSlice Interface", func() {
 
 		It("should return false for AllNodes", func() {
 			Expect(slice.AllNodes()).To(BeFalse())
+		})
+
+		It("should return SharedCounters from the template", func() {
+			template.SharedCounters = []resourcev1.CounterSet{
+				{
+					Name: "gpu-slices",
+					Counters: map[string]resourcev1.Counter{
+						"memory":        {Value: resource.MustParse("80Gi")},
+						"compute-units": {Value: resource.MustParse("7")},
+					},
+				},
+			}
+			slice = dynamicresources.NewTemplateSlice(template)
+			counters := slice.SharedCounters()
+			Expect(counters).To(HaveLen(1))
+			Expect(counters[0].Name).To(Equal("gpu-slices"))
+			Expect(counters[0].Counters).To(HaveLen(2))
+			Expect(counters[0].Counters["memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+		})
+
+		It("should return devices with ConsumesCounters", func() {
+			template.Devices = []cloudprovider.Device{
+				{
+					Name: unique.Make("mig-3g.40gb-0"),
+					ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+						{
+							CounterSet: "gpu-slices",
+							Counters: map[string]resourcev1.Counter{
+								"memory":        {Value: resource.MustParse("40Gi")},
+								"compute-units": {Value: resource.MustParse("3")},
+							},
+						},
+					},
+				},
+			}
+			slice = dynamicresources.NewTemplateSlice(template)
+			devices := slice.Devices()
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].ConsumesCounters).To(HaveLen(1))
+			Expect(devices[0].ConsumesCounters[0].CounterSet).To(Equal("gpu-slices"))
+			Expect(devices[0].ConsumesCounters[0].Counters["memory"].Value.Equal(resource.MustParse("40Gi"))).To(BeTrue())
+			Expect(devices[0].ConsumesCounters[0].Counters["compute-units"].Value.Equal(resource.MustParse("3"))).To(BeTrue())
 		})
 	})
 })
