@@ -176,7 +176,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
-		controllers = append(controllers, deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, recorder))
+		controllers = append(controllers, deletioncost.NewController(clock, kubeClient, cloudProvider, cluster))
 	}
 
 	return controllers

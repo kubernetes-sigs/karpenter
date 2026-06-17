@@ -34,13 +34,17 @@ const (
 var noLabels = map[string]string{}
 
 var (
-	nodesRankedTotal = opmetrics.NewPrometheusCounter(
+	// nodes_ranked is a gauge of the number of nodes ranked in the most
+	// recent reconcile cycle. RFC §"Observability" calls for a gauge so
+	// operators can see the current managed-node footprint, not a monotonic
+	// total.
+	nodesRanked = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
-		prometheus.CounterOpts{
+		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
-			Name:      "nodes_ranked_total",
-			Help:      "Number of nodes ranked in total by the pod deletion cost controller.",
+			Name:      "nodes_ranked",
+			Help:      "Number of nodes ranked in the most recent reconcile cycle by the pod deletion cost controller.",
 		},
 		[]string{},
 	)
@@ -50,7 +54,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
 			Name:      "pods_updated_total",
-			Help:      "Number of pod deletion cost annotations updated in total. Labeled by result (success, skipped_unchanged, error).",
+			Help:      "Number of pod deletion cost annotations updated in total. Labeled by result (updated, skipped_unchanged, error).",
 		},
 		[]string{resultLabel},
 	)
@@ -76,12 +80,12 @@ var (
 		},
 		[]string{},
 	)
-	skippedNoChangesTotal = opmetrics.NewPrometheusCounter(
+	reconcileSkippedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
-			Name:      "skipped_no_changes_total",
+			Name:      "reconcile_skipped_total",
 			Help:      "Number of reconcile loops skipped due to no changes detected in cluster state.",
 		},
 		[]string{},

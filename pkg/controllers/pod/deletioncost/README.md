@@ -54,10 +54,11 @@ Group D nodes have any pod-deletion-cost annotation removed.
 --feature-gates=PodDeletionCostManagement=true
 ```
 
-The gate defaults to `false`. When off, the controller is not registered and
-nothing in this package runs. Flipping the gate at runtime currently requires
-a process restart because the controller is registered conditionally; the
-in-Reconcile gate check is defensive only.
+The gate defaults to `false`. Registration is conditional: when the gate is
+off at process start, the controller is not registered and nothing in this
+package runs. The `Reconcile` method also checks the gate on every loop and
+returns early if it has been flipped to false at runtime, providing a
+defensive shutoff path that doesn't require a process restart.
 
 ### Graduation criteria
 

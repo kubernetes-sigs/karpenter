@@ -23,7 +23,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
-	"k8s.io/apimachinery/pkg/util/sets"
+	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,7 +33,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
@@ -48,14 +47,12 @@ const (
 // Reconcile is serialized by the singleton reconciler helper, so the
 // per-controller fields below are written without explicit synchronization.
 type Controller struct {
+	clock         clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
 
-	rankingEngine          *RankingEngine
-	annotationMgr          *AnnotationManager
 	lastConsolidationState time.Time
-	previouslyLabeledNodes sets.Set[string]
 }
 
 // NewController creates a new pod deletion cost controller.
@@ -64,15 +61,12 @@ func NewController(
 	kubeClient client.Client,
 	cloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
-	recorder events.Recorder,
 ) *Controller {
 	return &Controller{
-		kubeClient:             kubeClient,
-		cloudProvider:          cloudProvider,
-		cluster:                cluster,
-		rankingEngine:          NewRankingEngine(kubeClient, cluster, clk),
-		annotationMgr:          NewAnnotationManager(kubeClient, recorder),
-		previouslyLabeledNodes: sets.New[string](),
+		clock:         clk,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
+		cluster:       cluster,
 	}
 }
 
@@ -122,18 +116,19 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, fmt.Errorf("building node pool map, %w", err)
 	}
 
-	nodeRanks, err := c.rankingEngine.RankNodes(ctx, nodes, nodePoolMap)
+	nodeRanks, err := RankNodes(ctx, c.kubeClient, c.cluster, c.clock, nodes, nodePoolMap)
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
+	if len(nodeRanks) > maxNodesPerCycle {
+		nodeRanks = nodeRanks[:maxNodesPerCycle]
+	}
 
-	activeRanks := c.boundAndCleanup(ctx, nodeRanks)
-
-	if err := c.annotationMgr.UpdatePodDeletionCosts(ctx, activeRanks); err != nil {
+	if err := UpdatePodDeletionCosts(ctx, c.kubeClient, nodeRanks); err != nil {
 		return reconciler.Result{}, fmt.Errorf("updating pod deletion costs, %w", err)
 	}
 
-	log.FromContext(ctx).V(1).WithValues("nodeCount", len(activeRanks)).Info("updated pod deletion costs")
+	log.FromContext(ctx).V(1).WithValues("nodeCount", len(nodeRanks)).Info("updated pod deletion costs")
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }
 
@@ -144,7 +139,7 @@ func (c *Controller) shouldSkipUnchanged(ctx context.Context) bool {
 	currentState := c.cluster.ConsolidationState()
 	if currentState.Equal(c.lastConsolidationState) {
 		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
-		skippedNoChangesTotal.Add(1, noLabels)
+		reconcileSkippedTotal.Add(1, noLabels)
 		return true
 	}
 	c.lastConsolidationState = currentState
@@ -157,34 +152,5 @@ func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodeP
 	if err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
-	nodePoolMap := make(map[string]*v1.NodePool, len(nodePools))
-	for _, np := range nodePools {
-		nodePoolMap[np.Name] = np
-	}
-	return nodePoolMap, nil
-}
-
-// boundAndCleanup limits the ranked nodes to maxNodesPerCycle and cleans up
-// annotations on nodes that dropped out of the active set since the last
-// reconcile. previouslyLabeledNodes is replaced wholesale on every successful
-// call, bounding its size to maxNodesPerCycle.
-func (c *Controller) boundAndCleanup(ctx context.Context, nodeRanks []NodeRank) []NodeRank {
-	activeRanks := nodeRanks
-	if len(activeRanks) > maxNodesPerCycle {
-		activeRanks = activeRanks[:maxNodesPerCycle]
-	}
-	currentNodes := sets.New[string]()
-	for _, nr := range activeRanks {
-		currentNodes.Insert(nr.Node.Name())
-	}
-	for nodeName := range c.previouslyLabeledNodes {
-		if currentNodes.Has(nodeName) {
-			continue
-		}
-		if err := c.annotationMgr.CleanupNodeAnnotations(ctx, nodeName); err != nil {
-			log.FromContext(ctx).WithValues("node", nodeName).Error(err, "failed to clean up annotations on dropped node")
-		}
-	}
-	c.previouslyLabeledNodes = currentNodes
-	return activeRanks
+	return lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) { return np.Name, np }), nil
 }

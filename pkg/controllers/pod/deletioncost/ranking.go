@@ -45,45 +45,23 @@ type NodeRank struct {
 	HasDoNotDisrupt bool
 }
 
-// RankingEngine implements PodCount-based node ranking with four-tier
-// partitioning. Dependencies are injected once via NewRankingEngine so the
-// per-call API is small. Exported so tests can drive the engine directly.
-type RankingEngine struct {
-	kubeClient client.Client
-	cluster    *state.Cluster
-	clock      clock.Clock
-}
-
-// NewRankingEngine returns a RankingEngine bound to the given dependencies.
-func NewRankingEngine(kubeClient client.Client, cluster *state.Cluster, clk clock.Clock) *RankingEngine {
-	return &RankingEngine{kubeClient: kubeClient, cluster: cluster, clock: clk}
-}
-
-// partitionResult holds the four-way split of nodes produced by partitionNodes.
-type partitionResult struct {
-	disruptedBlocked []*state.StateNode
-	drifted          []*state.StateNode
-	normal           []*state.StateNode
-	doNotDisrupt     []*state.StateNode
-}
-
 // RankNodes ranks nodes using PodCount strategy with four-tier partitioning:
-//   - Group A: Disrupted + PDB-blocked nodes, get math.MinInt32 (do not consume budget).
+//   - Group A: Disrupted+PDB-blocked or non-RS-owned-pod nodes, get math.MinInt32 (do not consume budget).
 //   - Group B: Drifted nodes, sequential ranks deleted first.
 //   - Group C: Normal nodes, sequential ranks deleted second.
 //   - Group D: Do-not-disrupt nodes, ranked at the top so the controller clears their annotations.
 //
 // Per-NodePool disruption budgets bound Groups B and C. Nodes exceeding either
 // budget overflow into Group D.
-func (r *RankingEngine) RankNodes(ctx context.Context, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool) ([]NodeRank, error) {
+func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool) ([]NodeRank, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
 	defer metrics.Measure(rankingDurationSeconds, noLabels)()
 
-	// Pre-fetch pods per node once so partitionNodes and sortByPodCount don't
+	// Pre-fetch pods per node once so partition and sortByPodCount don't
 	// repeat the API call.
-	nodePods, err := r.fetchNodePods(ctx, nodes)
+	nodePods, err := fetchNodePods(ctx, kubeClient, nodes)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods on candidate nodes, %w", err)
 	}
@@ -92,66 +70,90 @@ func (r *RankingEngine) RankNodes(ctx context.Context, nodes []*state.StateNode,
 	// list entirely when no candidate is disrupted.
 	var pdbs []parsedPDB
 	if anyDisrupted(nodes) {
-		pdbs, err = r.fetchPDBs(ctx)
+		pdbs, err = fetchPDBs(ctx, kubeClient)
 		if err != nil {
 			return nil, fmt.Errorf("listing pod disruption budgets, %w", err)
 		}
 	}
 
-	parts := r.partitionNodes(nodes, nodePoolMap, nodePods, pdbs)
+	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(nodes, nodePoolMap, nodePods, pdbs)
 
-	r.sortByPodCount(parts.disruptedBlocked, nodePods)
-	r.sortByPodCount(parts.drifted, nodePods)
-	r.sortByPodCount(parts.normal, nodePods)
-	r.sortByPodCount(parts.doNotDisrupt, nodePods)
+	sortByPodCount(disruptedBlocked, nodePods)
+	sortByPodCount(drifted, nodePods)
+	sortByPodCount(normal, nodePods)
+	sortByPodCount(doNotDisrupt, nodePods)
 
 	// Apply per-NodePool disruption budget limits to Groups B and C. Nodes
 	// that exceed the budget are moved to Group D.
-	drifted, normal, overflow := r.applyBudgetLimits(ctx, parts.drifted, parts.normal, nodePoolMap)
-	parts.drifted = drifted
-	parts.normal = normal
-	parts.doNotDisrupt = append(parts.doNotDisrupt, overflow...)
+	numNodes, disrupting := countNodePoolStats(cluster)
+	driftBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonDrifted)
+	consolidationBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonUnderutilized)
+	driftUsed, consolidationUsed := map[string]int{}, map[string]int{}
+	var boundedDrifted, boundedNormal []*state.StateNode
+	for _, node := range drifted {
+		poolName := node.Labels()[v1.NodePoolLabelKey]
+		if driftUsed[poolName] < driftBudget[poolName] {
+			boundedDrifted = append(boundedDrifted, node)
+			driftUsed[poolName]++
+		} else {
+			doNotDisrupt = append(doNotDisrupt, node)
+		}
+	}
+	for _, node := range normal {
+		poolName := node.Labels()[v1.NodePoolLabelKey]
+		if consolidationUsed[poolName] < consolidationBudget[poolName] {
+			boundedNormal = append(boundedNormal, node)
+			consolidationUsed[poolName]++
+		} else {
+			doNotDisrupt = append(doNotDisrupt, node)
+		}
+	}
+	drifted, normal = boundedDrifted, boundedNormal
 
 	// Group A nodes get math.MinInt32 and do not consume the contiguous rank
 	// space below zero. The remaining groups receive sequential ranks starting
 	// at -(B+C+D) so that drift and normal sort first under
 	// PodDeletionCost-ascending semantics.
-	remaining := len(parts.drifted) + len(parts.normal) + len(parts.doNotDisrupt)
+	remaining := len(drifted) + len(normal) + len(doNotDisrupt)
 	currentRank := -remaining
 	result := make([]NodeRank, 0, len(nodes))
-	for _, node := range parts.disruptedBlocked {
+	for _, node := range disruptedBlocked {
+		// Group A: math.MinInt32 sentinel. We do NOT use a sequential rank
+		// because every Group A node is "delete first, no questions asked";
+		// distinguishing among them by pod count would imply a preference
+		// the kube-scheduler shouldn't be encoding.
 		result = append(result, NodeRank{Node: node, Rank: math.MinInt32})
 	}
-	for _, node := range parts.drifted {
+	for _, node := range drifted {
 		result = append(result, NodeRank{Node: node, Rank: currentRank})
 		currentRank++
 	}
-	for _, node := range parts.normal {
+	for _, node := range normal {
 		result = append(result, NodeRank{Node: node, Rank: currentRank})
 		currentRank++
 	}
-	for _, node := range parts.doNotDisrupt {
+	for _, node := range doNotDisrupt {
 		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: true})
 		currentRank++
 	}
 
-	nodesRankedTotal.Add(float64(len(result)), noLabels)
+	nodesRanked.Set(float64(len(result)), noLabels)
 	log.FromContext(ctx).V(1).WithValues(
 		"totalNodes", len(result),
-		"disruptedBlockedNodes", len(parts.disruptedBlocked),
-		"driftedNodes", len(parts.drifted),
-		"normalNodes", len(parts.normal),
-		"doNotDisruptNodes", len(parts.doNotDisrupt),
+		"disruptedBlockedNodes", len(disruptedBlocked),
+		"driftedNodes", len(drifted),
+		"normalNodes", len(normal),
+		"doNotDisruptNodes", len(doNotDisrupt),
 	).Info("completed node ranking")
 	return result, nil
 }
 
 // fetchNodePods gathers the pod list for each candidate node into a map keyed
 // by node name, so downstream helpers don't repeat the API call.
-func (r *RankingEngine) fetchNodePods(ctx context.Context, nodes []*state.StateNode) (map[string][]*corev1.Pod, error) {
+func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) (map[string][]*corev1.Pod, error) {
 	out := make(map[string][]*corev1.Pod, len(nodes))
 	for _, node := range nodes {
-		pods, err := node.Pods(ctx, r.kubeClient)
+		pods, err := node.Pods(ctx, kubeClient)
 		if err != nil {
 			return nil, fmt.Errorf("listing pods on node %q, %w", node.Name(), err)
 		}
@@ -171,9 +173,9 @@ type parsedPDB struct {
 // fail closed (the PDB is treated as matching every pod in its namespace) so
 // the controller errs on the side of classifying nodes as PDB-blocked rather
 // than ignoring potentially-blocking PDBs.
-func (r *RankingEngine) fetchPDBs(ctx context.Context) ([]parsedPDB, error) {
+func fetchPDBs(ctx context.Context, kubeClient client.Client) ([]parsedPDB, error) {
 	var list policyv1.PodDisruptionBudgetList
-	if err := r.kubeClient.List(ctx, &list); err != nil {
+	if err := kubeClient.List(ctx, &list); err != nil {
 		return nil, err
 	}
 	out := make([]parsedPDB, 0, len(list.Items))
@@ -189,91 +191,63 @@ func (r *RankingEngine) fetchPDBs(ctx context.Context) ([]parsedPDB, error) {
 	return out, nil
 }
 
-// partitionNodes splits nodes into four tiers:
+// partitionNodes splits nodes into four tiers. Order matters: a node that is
+// disrupted+PDB-blocked (Group A semantics) takes precedence over a do-not-disrupt
+// signal because Group A nodes are already on the disruption path; once
+// Karpenter has tainted them, Group A is the right cohort regardless of pod
+// annotations. Within the remaining nodes, do-not-disrupt and consolidation-disabled
+// route to Group D, drifted to Group B, everything else to Group C.
 //
-//	A. disruptedBlocked - karpenter.sh/disrupted taint AND at least one pod blocked by a PDB
-//	B. drifted          - NodeClaim has ConditionTypeDrifted=True (and not in A)
-//	C. normal           - not drifted, no do-not-disrupt pods, consolidation enabled
-//	D. doNotDisrupt     - node-level do-not-disrupt annotation, do-not-disrupt pods,
-//	                     or NodePool with consolidation disabled
-func (r *RankingEngine) partitionNodes(nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs []parsedPDB) partitionResult {
-	var p partitionResult
+// RFC §"Partitioning":
+//   - Group A: disrupted (karpenter.sh/disrupted taint) AND PDB-blocked, OR
+//     hosts a non-RS-owned pod. Both reflect "delete this node first" semantics:
+//     PDB-blocked means consolidation is already stuck on it; non-RS-owned
+//     means the pod has no controller to recreate it, so disrupting that node
+//     is more painful than disrupting a fresh node.
+//   - Group B: drifted (NodeClaim ConditionTypeDrifted=True), not in A.
+//   - Group C: normal — consolidation candidates, not in A/B/D.
+//   - Group D: node-level do-not-disrupt annotation, do-not-disrupt pods, or
+//     NodePool with consolidation disabled (ConsolidateAfter=Never).
+func partitionNodes(nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs []parsedPDB) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
 	for _, node := range nodes {
+		pods := nodePods[node.Name()]
+		// Group A first — a disrupted+blocked node or a node hosting a
+		// non-RS-owned pod is "delete first" regardless of do-not-disrupt
+		// signals on the node itself or its pods. RFC §"Group A" calls for
+		// OR semantics across these two predicates.
+		if (isDisrupted(node) && hasPDBBlockedPods(pods, pdbs)) || hasNonRSOwnedPods(pods) {
+			disruptedBlocked = append(disruptedBlocked, node)
+			continue
+		}
 		if hasNodeDoNotDisrupt(node) {
-			p.doNotDisrupt = append(p.doNotDisrupt, node)
+			doNotDisrupt = append(doNotDisrupt, node)
 			continue
 		}
 		if isConsolidationDisabled(node, nodePoolMap) {
-			p.doNotDisrupt = append(p.doNotDisrupt, node)
+			doNotDisrupt = append(doNotDisrupt, node)
 			continue
 		}
-		pods := nodePods[node.Name()]
 		if hasDoNotDisruptPods(pods) {
-			p.doNotDisrupt = append(p.doNotDisrupt, node)
-			continue
-		}
-		if isDisrupted(node) && hasPDBBlockedPods(pods, pdbs) {
-			p.disruptedBlocked = append(p.disruptedBlocked, node)
+			doNotDisrupt = append(doNotDisrupt, node)
 			continue
 		}
 		if isDrifted(node) {
-			p.drifted = append(p.drifted, node)
+			drifted = append(drifted, node)
 		} else {
-			p.normal = append(p.normal, node)
+			normal = append(normal, node)
 		}
 	}
-	return p
-}
-
-// applyBudgetLimits enforces per-NodePool disruption budgets on Groups B and C.
-// Group B (drifted) nodes are bounded by the drift disruption budget and
-// Group C (normal) nodes are bounded by the consolidation (Underutilized)
-// budget. Nodes that exceed the budget are returned in the overflow slice so
-// the caller can move them to Group D.
-//
-// This deliberately mirrors the approach in
-// pkg/controllers/disruption/helpers.go BuildDisruptionBudgetMapping. A future
-// refactor to share the helper directly is tracked as a follow-up so the
-// disruption controller and the deletion-cost controller stay in lockstep on
-// the budget computation.
-func (r *RankingEngine) applyBudgetLimits(ctx context.Context, drifted, normal []*state.StateNode, nodePoolMap map[string]*v1.NodePool) (boundedDrifted, boundedNormal, overflow []*state.StateNode) {
-	numNodes, disrupting := r.countNodePoolStats()
-	driftBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, r.clock, v1.DisruptionReasonDrifted)
-	consolBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, r.clock, v1.DisruptionReasonUnderutilized)
-
-	driftUsed := map[string]int{}
-	consolUsed := map[string]int{}
-	for _, node := range drifted {
-		poolName := node.Labels()[v1.NodePoolLabelKey]
-		if driftUsed[poolName] < driftBudget[poolName] {
-			boundedDrifted = append(boundedDrifted, node)
-			driftUsed[poolName]++
-		} else {
-			overflow = append(overflow, node)
-		}
-	}
-	for _, node := range normal {
-		poolName := node.Labels()[v1.NodePoolLabelKey]
-		if consolUsed[poolName] < consolBudget[poolName] {
-			boundedNormal = append(boundedNormal, node)
-			consolUsed[poolName]++
-		} else {
-			overflow = append(overflow, node)
-		}
-	}
-	if len(overflow) > 0 {
-		log.FromContext(ctx).V(1).WithValues("overflowNodes", len(overflow)).Info("moved nodes exceeding disruption budget to Group D")
-	}
-	return boundedDrifted, boundedNormal, overflow
+	return disruptedBlocked, drifted, normal, doNotDisrupt
 }
 
 // countNodePoolStats counts initialized, managed nodes per NodePool and how
 // many of those are currently disrupting (NotReady or marked for deletion).
-// Mirrors the filtering rules in BuildDisruptionBudgetMapping.
-func (r *RankingEngine) countNodePoolStats() (numNodes, disrupting map[string]int) {
+// Mirrors the filtering rules in BuildDisruptionBudgetMapping so the deletion-cost
+// controller's per-pool budget arithmetic matches the disruption controller's.
+func countNodePoolStats(cluster *state.Cluster) (numNodes, disrupting map[string]int) {
 	numNodes = map[string]int{}
 	disrupting = map[string]int{}
-	for _, node := range r.cluster.DeepCopyNodes() {
+	for _, node := range cluster.DeepCopyNodes() {
 		if !node.Managed() || !node.Initialized() {
 			continue
 		}
@@ -410,10 +384,40 @@ func hasDoNotDisruptPods(pods []*corev1.Pod) bool {
 	return false
 }
 
+// hasNonRSOwnedPods returns true if any non-system pod on the node is owned by
+// a controller other than ReplicaSet/Job — e.g. StatefulSet, DaemonSet, raw
+// Pod. The RFC's Group A definition includes these because their replacement
+// path is more disruptive than evicting a ReplicaSet pod (StatefulSet pods
+// have ordinal identity and persistent volumes; bare pods cannot be recreated
+// at all). DaemonSet pods are excluded because they're tied to the node and
+// will be replaced anyway when the node is replaced — they don't make the
+// node "expensive to delete".
+func hasNonRSOwnedPods(pods []*corev1.Pod) bool {
+	for _, pod := range pods {
+		if pod.Namespace == "kube-system" {
+			continue
+		}
+		if len(pod.OwnerReferences) == 0 {
+			// Bare pod — no controller will recreate it.
+			return true
+		}
+		for i := range pod.OwnerReferences {
+			ownerKind := pod.OwnerReferences[i].Kind
+			if ownerKind != "ReplicaSet" && ownerKind != "Job" && ownerKind != "DaemonSet" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // sortByPodCount sorts nodes by pod count ascending with a deterministic name
 // tie-break. Nodes whose pod-list lookup is missing from the map sort to the
-// end so a transient lookup failure doesn't skew the top of the ranking.
-func (r *RankingEngine) sortByPodCount(nodes []*state.StateNode, nodePods map[string][]*corev1.Pod) {
+// end (math.MaxInt sentinel) so a transient lookup failure doesn't skew the
+// top of the ranking — the missing-lookup case should be impossible on the
+// happy path because RankNodes pre-populates the map with one entry per
+// candidate node, but the sentinel is correct-by-construction defense.
+func sortByPodCount(nodes []*state.StateNode, nodePods map[string][]*corev1.Pod) {
 	if len(nodes) <= 1 {
 		return
 	}

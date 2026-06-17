@@ -76,6 +76,9 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 			log.FromContext(ctx).Error(err, "failed parsing disruption cost",
 				"annotation", DisruptionCostAnnotation, "value", costStr, "pod", client.ObjectKeyFromObject(p))
 		} else {
+			// 2^27 = max representable pod-deletion-cost (int32 ceiling).
+			// Dividing here normalizes the user value into [0, 1) so it
+			// cannot overpower the QoS/priority bands above it.
 			cost += parsedCost / math.Pow(2, 27.0)
 		}
 	} else if !options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
@@ -85,11 +88,16 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 				log.FromContext(ctx).Error(err, "failed parsing pod deletion cost",
 					"annotation", corev1.PodDeletionCost, "value", podDeletionCostStr, "pod", client.ObjectKeyFromObject(p))
 			} else {
+				// Same 2^27 normalization as above; legacy fall-back for
+				// gate-OFF behavior reads the upstream annotation.
 				cost += podDeletionCost / math.Pow(2, 27.0)
 			}
 		}
 	}
 	if p.Spec.Priority != nil {
+		// 2^25 places priority in a band that exceeds the user-annotation
+		// band (2^27 divisor) but stays under the QoS band, so priority
+		// dominates user steering without overwhelming QoS classification.
 		cost += float64(*p.Spec.Priority) / math.Pow(2, 25)
 	}
 
