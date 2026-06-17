@@ -267,6 +267,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		metrics.NodeClaimsTerminatedTotal.Inc(map[string]string{
 			metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+			metrics.ZoneLabel:         nodeClaim.Labels[corev1.LabelTopologyZone],
 		})
 	}
 	return reconcile.Result{}, nil
