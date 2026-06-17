@@ -121,6 +121,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 
 	metrics.NodesCreatedTotal.Inc(map[string]string{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.ZoneLabel:     nodeClaim.Labels[corev1.LabelTopologyZone],
 	})
 	if err := r.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
 		if errors.IsConflict(err) {
