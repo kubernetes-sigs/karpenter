@@ -100,6 +100,9 @@ type ResourceSlice interface {
 	// ResourceSliceCount returns the total number of slices expected in this pool.
 	// Used to determine pool completeness. Template slices return 1.
 	ResourceSliceCount() int64
+	// SharedCounters returns the counter set definitions declared by this slice.
+	// Returns nil if the slice declares no counter sets.
+	SharedCounters() []resourcev1.CounterSet
 }
 
 // apiServerSlice adapts a resourcev1.ResourceSlice from the API server to the ResourceSlice interface.
@@ -132,9 +135,16 @@ func (s *apiServerSlice) Devices() []cloudprovider.Device {
 			for k, v := range d.Attributes {
 				attrs[k] = v
 			}
+			capacity := make(map[resourcev1.QualifiedName]resourcev1.DeviceCapacity, len(d.Capacity))
+			for k, v := range d.Capacity {
+				capacity[k] = v
+			}
 			s.devices[i] = cloudprovider.Device{
-				Name:       unique.Make(d.Name),
-				Attributes: attrs,
+				Name:                     unique.Make(d.Name),
+				Attributes:               attrs,
+				Capacity:                 capacity,
+				AllowMultipleAllocations: lo.FromPtr(d.AllowMultipleAllocations),
+				ConsumesCounters:         d.ConsumesCounters,
 			}
 		}
 	}
@@ -162,6 +172,10 @@ func (s *apiServerSlice) Generation() int64 {
 
 func (s *apiServerSlice) ResourceSliceCount() int64 {
 	return s.slice.Spec.Pool.ResourceSliceCount
+}
+
+func (s *apiServerSlice) SharedCounters() []resourcev1.CounterSet {
+	return s.slice.Spec.SharedCounters
 }
 
 // templateSlice adapts a cloudprovider.ResourceSliceTemplate to the ResourceSlice interface.
@@ -204,6 +218,10 @@ func (s *templateSlice) Generation() int64 {
 
 func (s *templateSlice) ResourceSliceCount() int64 {
 	return 1
+}
+
+func (s *templateSlice) SharedCounters() []resourcev1.CounterSet {
+	return s.template.SharedCounters
 }
 
 // nodeSelectorsToRequirements extracts scheduling requirements from a NodeSelector.
