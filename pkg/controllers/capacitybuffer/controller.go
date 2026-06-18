@@ -170,6 +170,13 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 	}
 
 	// Compute replicas from all applicable constraints.
+	replicas := computeReplicas(cb, podSpec, candidates)
+	cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
+	cb.Status.Replicas = &replicas
+	return true, nil
+}
+
+func computeReplicas(cb *autoscalingv1alpha1.CapacityBuffer, podSpec *v1.PodSpec, candidates []int32) int32 {
 	if cb.Spec.Replicas != nil {
 		candidates = append(candidates, *cb.Spec.Replicas)
 	}
@@ -178,14 +185,10 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 			candidates = append(candidates, limitReplicas)
 		}
 	}
-	var replicas int32
-	if len(candidates) > 0 {
-		replicas = lo.Min(candidates)
+	if len(candidates) == 0 {
+		return 0
 	}
-
-	cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
-	cb.Status.Replicas = &replicas
-	return true, nil
+	return lo.Min(candidates)
 }
 
 // handleResolveError sets the ReadyForProvisioning condition to False and returns
@@ -201,4 +204,3 @@ func handleResolveError(cb *autoscalingv1alpha1.CapacityBuffer, err error, notFo
 	}
 	return err
 }
-
