@@ -429,6 +429,45 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			Expect(*cb.Status.Replicas).To(Equal(int32(3)))
 		})
 
+		It("should use limits as replica count when only limits is set", func() {
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "limits-only-template",
+					Namespace: "default",
+				},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{{
+							Name:  "app",
+							Image: "pause:latest",
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU: resource.MustParse("1"),
+								},
+							},
+						}},
+					},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-limits-only",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "limits-only-template"},
+					Limits:         autoscalingv1alpha1.Limits{v1.ResourceCPU: resource.MustParse("5")},
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			Expect(cb.Status.Replicas).ToNot(BeNil())
+			// 5 CPU limit / 1 CPU per pod = 5 replicas (limits is the only constraint)
+			Expect(*cb.Status.Replicas).To(Equal(int32(5)))
+		})
+
 		It("should use percentage with minimum of 1 replica", func() {
 			deploy := &appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{

@@ -173,11 +173,15 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 	if cb.Spec.Replicas != nil {
 		candidates = append(candidates, *cb.Spec.Replicas)
 	}
+	if cb.Spec.Limits != nil && podSpec != nil {
+		if limitReplicas, ok := calculateLimitReplicas(v1.ResourceList(cb.Spec.Limits), podSpec); ok {
+			candidates = append(candidates, limitReplicas)
+		}
+	}
 	var replicas int32
 	if len(candidates) > 0 {
 		replicas = lo.Min(candidates)
 	}
-	replicas = applyLimits(replicas, cb.Spec.Limits, podSpec)
 
 	cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
 	cb.Status.Replicas = &replicas
@@ -198,16 +202,3 @@ func handleResolveError(cb *autoscalingv1alpha1.CapacityBuffer, err error, notFo
 	return err
 }
 
-// applyLimits caps the replica count based on resource limits. If limits are not
-// set or don't overlap with pod requests, replicas is returned unchanged.
-func applyLimits(replicas int32, limits autoscalingv1alpha1.Limits, podSpec *v1.PodSpec) int32 {
-	if limits == nil || podSpec == nil {
-		return replicas
-	}
-	if limitReplicas, ok := calculateLimitReplicas(v1.ResourceList(limits), podSpec); ok {
-		if limitReplicas < replicas {
-			return limitReplicas
-		}
-	}
-	return replicas
-}
