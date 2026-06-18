@@ -59,7 +59,6 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -10, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
@@ -95,7 +94,6 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -10, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
@@ -129,7 +127,6 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -20, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
@@ -156,7 +153,6 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -3, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
@@ -186,7 +182,6 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -7, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
@@ -213,7 +208,6 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -1, HasDoNotDisrupt: false}}
 			// Should not error even with no pods
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
@@ -239,7 +233,6 @@ var _ = Describe("Annotation", func() {
 			}
 			Expect(stateNodes).To(HaveLen(2))
 
-			
 			nodeRanks := []deletioncost.NodeRank{
 				{Node: stateNodes[0], Rank: -10, HasDoNotDisrupt: false},
 				{Node: stateNodes[1], Rank: -9, HasDoNotDisrupt: false},
@@ -291,7 +284,6 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: 10, HasDoNotDisrupt: true}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
@@ -318,7 +310,6 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			
 			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: 10, HasDoNotDisrupt: true}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 

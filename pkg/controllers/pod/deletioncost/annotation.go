@@ -55,47 +55,18 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 			errorCount++
 			continue
 		}
-
-		// Group D nodes (do-not-disrupt): clear any existing
-		// pod-deletion-cost annotations the controller previously set,
-		// instead of assigning a rank.
+		var u, s, e int
+		var perr error
 		if nodeRank.HasDoNotDisrupt {
-			for _, pod := range pods {
-				cleared, err := clearDeletionCost(ctx, kubeClient, pod)
-				switch {
-				case err != nil:
-					aggErr = errors.Join(aggErr, err)
-					errorCount++
-				case cleared:
-					updatedCount++
-				default:
-					skippedCount++
-				}
-			}
-			continue
+			u, s, e, perr = clearRanksFromPods(ctx, kubeClient, pods)
+		} else {
+			u, s, e, perr = applyRankToPods(ctx, kubeClient, pods, nodeRank.Rank)
 		}
-
-		for _, pod := range pods {
-			if !needsUpdate(pod, nodeRank.Rank) {
-				skippedCount++
-				continue
-			}
-			if err := patchAnnotation(ctx, kubeClient, pod, strconv.Itoa(nodeRank.Rank)); err != nil {
-				if apierrors.IsNotFound(err) {
-					log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("pod not found, skipping annotation update")
-					skippedCount++
-					continue
-				}
-				if apierrors.IsConflict(err) {
-					log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("conflict updating pod annotation, will retry on next reconcile")
-					skippedCount++
-					continue
-				}
-				aggErr = errors.Join(aggErr, err)
-				errorCount++
-				continue
-			}
-			updatedCount++
+		updatedCount += u
+		skippedCount += s
+		errorCount += e
+		if perr != nil {
+			aggErr = errors.Join(aggErr, perr)
 		}
 	}
 
@@ -111,6 +82,55 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 		).V(1).Info("pod deletion cost annotation update completed")
 	}
 	return aggErr
+}
+
+// applyRankToPods writes pod-deletion-cost=rank to each pod via patchAnnotation,
+// classifying NotFound and Conflict as skipped (logged at V(1)) and aggregating
+// other errors via errors.Join.
+func applyRankToPods(ctx context.Context, kubeClient client.Client, pods []*corev1.Pod, rank int) (updated, skipped, errCount int, err error) {
+	value := strconv.Itoa(rank)
+	for _, pod := range pods {
+		if !needsUpdate(pod, rank) {
+			skipped++
+			continue
+		}
+		if perr := patchAnnotation(ctx, kubeClient, pod, value); perr != nil {
+			if apierrors.IsNotFound(perr) {
+				log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("pod not found, skipping annotation update")
+				skipped++
+				continue
+			}
+			if apierrors.IsConflict(perr) {
+				log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("conflict updating pod annotation, will retry on next reconcile")
+				skipped++
+				continue
+			}
+			err = errors.Join(err, perr)
+			errCount++
+			continue
+		}
+		updated++
+	}
+	return updated, skipped, errCount, err
+}
+
+// clearRanksFromPods removes pod-deletion-cost from each pod via clearDeletionCost,
+// counting cleared patches as updated and aggregating non-NotFound/non-Conflict
+// errors via errors.Join.
+func clearRanksFromPods(ctx context.Context, kubeClient client.Client, pods []*corev1.Pod) (updated, skipped, errCount int, err error) {
+	for _, pod := range pods {
+		cleared, perr := clearDeletionCost(ctx, kubeClient, pod)
+		switch {
+		case perr != nil:
+			err = errors.Join(err, perr)
+			errCount++
+		case cleared:
+			updated++
+		default:
+			skipped++
+		}
+	}
+	return updated, skipped, errCount, err
 }
 
 // clearDeletionCost removes the pod-deletion-cost annotation from a pod when

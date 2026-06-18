@@ -74,7 +74,6 @@ var _ = Describe("Ranking", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -103,7 +102,7 @@ var _ = Describe("Ranking", func() {
 		})
 
 		It("should handle empty node list", func() {
-			
+
 			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, nil, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(BeEmpty())
@@ -123,7 +122,6 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -154,7 +152,6 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -182,7 +179,6 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -224,7 +220,6 @@ var _ = Describe("Ranking", func() {
 			}))
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -309,7 +304,6 @@ var _ = Describe("Ranking", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -349,7 +343,6 @@ var _ = Describe("Ranking", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -414,7 +407,6 @@ var _ = Describe("Ranking", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
@@ -486,7 +478,6 @@ var _ = Describe("Ranking", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)

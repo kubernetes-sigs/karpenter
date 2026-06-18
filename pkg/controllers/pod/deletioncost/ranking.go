@@ -88,27 +88,11 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 	numNodes, disrupting := countNodePoolStats(cluster)
 	driftBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonDrifted)
 	consolidationBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonUnderutilized)
-	driftUsed, consolidationUsed := map[string]int{}, map[string]int{}
-	var boundedDrifted, boundedNormal []*state.StateNode
-	for _, node := range drifted {
-		poolName := node.Labels()[v1.NodePoolLabelKey]
-		if driftUsed[poolName] < driftBudget[poolName] {
-			boundedDrifted = append(boundedDrifted, node)
-			driftUsed[poolName]++
-		} else {
-			doNotDisrupt = append(doNotDisrupt, node)
-		}
-	}
-	for _, node := range normal {
-		poolName := node.Labels()[v1.NodePoolLabelKey]
-		if consolidationUsed[poolName] < consolidationBudget[poolName] {
-			boundedNormal = append(boundedNormal, node)
-			consolidationUsed[poolName]++
-		} else {
-			doNotDisrupt = append(doNotDisrupt, node)
-		}
-	}
-	drifted, normal = boundedDrifted, boundedNormal
+	var driftOverflow, normalOverflow []*state.StateNode
+	drifted, driftOverflow = applyPerNodePoolBudget(drifted, driftBudget)
+	normal, normalOverflow = applyPerNodePoolBudget(normal, consolidationBudget)
+	doNotDisrupt = append(doNotDisrupt, driftOverflow...)
+	doNotDisrupt = append(doNotDisrupt, normalOverflow...)
 
 	// Group A nodes get math.MinInt32 and do not consume the contiguous rank
 	// space below zero. The remaining groups receive sequential ranks starting
@@ -146,6 +130,24 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 		"doNotDisruptNodes", len(doNotDisrupt),
 	).Info("completed node ranking")
 	return result, nil
+}
+
+// applyPerNodePoolBudget walks nodes in input order and admits each into the
+// bounded slice while its NodePool's remaining budget is positive; the rest
+// overflow. Caller-decided what to do with the overflow (the deletion-cost
+// controller routes it to Group D).
+func applyPerNodePoolBudget(nodes []*state.StateNode, budget map[string]int) (bounded, overflow []*state.StateNode) {
+	used := map[string]int{}
+	for _, node := range nodes {
+		poolName := node.Labels()[v1.NodePoolLabelKey]
+		if used[poolName] < budget[poolName] {
+			bounded = append(bounded, node)
+			used[poolName]++
+		} else {
+			overflow = append(overflow, node)
+		}
+	}
+	return bounded, overflow
 }
 
 // fetchNodePods gathers the pod list for each candidate node into a map keyed
