@@ -49,6 +49,14 @@ func NewRequirementWithFlexibility(key string, operator corev1.NodeSelectorOpera
 	if normalized, ok := v1.NormalizedLabels[key]; ok {
 		key = normalized
 	}
+	// Apply value normalization if registered for this (already-normalized) key.
+	if valueMap, ok := v1.NormalizedLabelValues[key]; ok && len(valueMap) > 0 {
+		for i, val := range values {
+			if mapped, exists := valueMap[val]; exists {
+				values[i] = mapped
+			}
+		}
+	}
 
 	// This is a super-common case, so optimize for it an inline everything.
 	if operator == corev1.NodeSelectorOpIn {
