@@ -21,6 +21,7 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [Azure](https://github.com/Azure/karpenter-provider-azure)
 - [AlibabaCloud](https://github.com/cloudpilot-ai/karpenter-provider-alibabacloud)
 - [Bizfly Cloud](https://github.com/bizflycloud/karpenter-provider-bizflycloud)
+- [Clever Cloud](https://github.com/CleverCloud/karpenter-provider-clever-cloud)
 - [Cluster API](https://github.com/kubernetes-sigs/karpenter-provider-cluster-api)
 - [Exoscale](https://github.com/exoscale/karpenter-provider-exoscale/)
 - [GCP](https://github.com/cloudpilot-ai/karpenter-provider-gcp)
