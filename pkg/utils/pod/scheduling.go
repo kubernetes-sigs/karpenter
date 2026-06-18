@@ -17,12 +17,18 @@ limitations under the License.
 package pod
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -183,6 +189,126 @@ func IsOwnedBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
 		}
 	}
 	return false
+}
+
+// SingletonRolloutTarget identifies a workload owner with spec.replicas == 1 that can be drained by
+// triggering a rollout restart (writing `kubectl.kubernetes.io/restartedAt` into its pod template).
+// Callers must skip patching when RolloutInProgress is true — otherwise a second patch creates a
+// third revision that kills the in-flight replacement before it becomes Ready.
+type SingletonRolloutTarget struct {
+	Object            client.Object
+	Kind              string
+	RolloutInProgress bool
+}
+
+// SingletonRolloutTargetForPod returns the workload owner of the pod iff it's an apps/v1
+// StatefulSet with spec.replicas == 1 (direct owner) or an apps/v1 Deployment with spec.replicas
+// == 1 (transitive owner via the pod's ReplicaSet). Returns (nil, nil) when no qualifying owner
+// exists or the owner chain points at missing objects; transient API errors are surfaced so the
+// caller can retry. The replicas==1 gate keeps blast radius small — multi-replica workloads drain
+// fine through eviction + PDB, and bumping their template would roll every pod across the fleet.
+//
+// StatefulSets are included even though they don't surge: a singleton SS behind a PDB that forbids
+// disruption (e.g. minAvailable=1) can't be drained via eviction at all (429 forever). Rollout
+// restart deletes the pod through the pods API, bypassing PDB, at the cost of one pod-lifetime of
+// downtime — the same downtime a successful eviction would have caused. Zero-downtime is only
+// achievable for Deployments, where maxSurge brings up the replacement before deleting the old pod.
+func SingletonRolloutTargetForPod(ctx context.Context, c client.Client, pod *corev1.Pod) (*SingletonRolloutTarget, error) {
+	if target, err := singletonStatefulSetOwner(ctx, c, pod); target != nil || err != nil {
+		return target, err
+	}
+	return singletonDeploymentOwner(ctx, c, pod)
+}
+
+// appsOwnerName returns the name of the first owner with the given Kind and apps/v1
+// APIVersion, or "" if none is present.
+func appsOwnerName(owners []metav1.OwnerReference, kind string) string {
+	for _, o := range owners {
+		if o.Kind == kind && o.APIVersion == "apps/v1" {
+			return o.Name
+		}
+	}
+	return ""
+}
+
+func singletonStatefulSetOwner(ctx context.Context, c client.Client, pod *corev1.Pod) (*SingletonRolloutTarget, error) {
+	name := appsOwnerName(pod.OwnerReferences, "StatefulSet")
+	if name == "" {
+		return nil, nil
+	}
+	ss := &appsv1.StatefulSet{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: name}, ss); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if ss.Spec.Replicas == nil || *ss.Spec.Replicas != 1 {
+		return nil, nil
+	}
+	return &SingletonRolloutTarget{
+		Object:            ss,
+		Kind:              "StatefulSet",
+		RolloutInProgress: statefulSetRolloutInProgress(ss),
+	}, nil
+}
+
+func singletonDeploymentOwner(ctx context.Context, c client.Client, pod *corev1.Pod) (*SingletonRolloutTarget, error) {
+	rsName := appsOwnerName(pod.OwnerReferences, "ReplicaSet")
+	if rsName == "" {
+		return nil, nil
+	}
+	rs := &appsv1.ReplicaSet{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: rsName}, rs); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	depName := appsOwnerName(rs.OwnerReferences, "Deployment")
+	if depName == "" {
+		return nil, nil
+	}
+	dep := &appsv1.Deployment{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: depName}, dep); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 1 {
+		return nil, nil
+	}
+	return &SingletonRolloutTarget{
+		Object:            dep,
+		Kind:              "Deployment",
+		RolloutInProgress: deploymentRolloutInProgress(dep),
+	}, nil
+}
+
+// deploymentRolloutInProgress / statefulSetRolloutInProgress mirror `kubectl rollout status`. Both
+// flag latest-spec-not-observed, updated-pods-not-yet-created, and new-pods-not-yet-ready; they
+// diverge on the surge phase. Deployments surge by default — after the new pod is Ready the old
+// one lingers while the controller tears it down, and UpdatedReplicas already equals Spec.Replicas
+// in that window. Status.Replicas > Status.UpdatedReplicas covers it; missing this check is what
+// caused the deploy-loop on slow-booting Spring Boot workloads. StatefulSets replace in place, so
+// we just need ReadyReplicas to catch up and the revision pair to converge. We don't special-case
+// rollingUpdate.partition (would make a partial rollout look in-progress forever) — partition use
+// on a singleton is vanishingly rare.
+func deploymentRolloutInProgress(dep *appsv1.Deployment) bool {
+	desired := *dep.Spec.Replicas
+	return dep.Generation > dep.Status.ObservedGeneration ||
+		dep.Status.UpdatedReplicas < desired ||
+		dep.Status.Replicas > dep.Status.UpdatedReplicas ||
+		dep.Status.AvailableReplicas < dep.Status.UpdatedReplicas
+}
+
+func statefulSetRolloutInProgress(ss *appsv1.StatefulSet) bool {
+	desired := *ss.Spec.Replicas
+	return ss.Generation > ss.Status.ObservedGeneration ||
+		ss.Status.UpdatedReplicas < desired ||
+		ss.Status.ReadyReplicas < desired ||
+		ss.Status.CurrentRevision != ss.Status.UpdateRevision
 }
 
 // parseDoNotDisrupt parses the do-not-disrupt annotation value as a duration.

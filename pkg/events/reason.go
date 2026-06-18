@@ -39,6 +39,8 @@ const (
 	Disrupted                      = "Disrupted"
 	Evicted                        = "Evicted"
 	FailedDraining                 = "FailedDraining"
+	RolloutRestarted               = "RolloutRestarted"
+	RolloutRestartInProgress       = "RolloutRestartInProgress"
 	TerminationGracePeriodExpiring = "TerminationGracePeriodExpiring"
 	TerminationFailed              = "FailedTermination"
 

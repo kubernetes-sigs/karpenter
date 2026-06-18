@@ -26,6 +26,7 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -48,6 +49,7 @@ import (
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -60,6 +62,10 @@ const (
 	maxReconciles          = 5000
 
 	multiplePodDisruptionBudgetsError = "This pod has more than one PodDisruptionBudget, which the eviction subresource does not support."
+
+	// RolloutRestartAnnotation matches the annotation `kubectl rollout restart` writes onto the workload's pod template;
+	// setting it triggers the Deployment controller to surge a fresh pod and delete the old one.
+	RolloutRestartAnnotation = "kubectl.kubernetes.io/restartedAt"
 )
 
 type NodeDrainError struct {
@@ -167,6 +173,13 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		//controller can reconcile on it
 		return reconcile.Result{}, nil
 	}
+	handled, err := q.tryRolloutRestart(ctx, pod)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if handled {
+		return reconcile.Result{}, nil
+	}
 	// Evict the pod
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		pod,
@@ -218,6 +231,67 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	defer q.Unlock()
 	q.set.Delete(NewQueueKey(pod))
 	return reconcile.Result{}, nil
+}
+
+// tryRolloutRestart drains a pod via rollout restart of its singleton owner when the feature gate
+// is on. Returns (true, nil) when handled (skip eviction), (false, nil) when not applicable, and a
+// non-nil error to surface as a reconcile failure. See pkg/utils/pod/scheduling.go for the
+// Deployment-vs-StatefulSet trade-offs.
+//
+// If the owner already has a rollout in flight, we don't patch — that would create a third revision
+// and kill the in-flight replacement before it becomes Ready. We still return handled=true so the
+// caller doesn't fall through to eviction (which would force-kill the old pod and defeat the
+// surge), and drop the pod from the local queue so the drain controller's next pass re-Adds it
+// and we re-check Status.
+func (q *Queue) tryRolloutRestart(ctx context.Context, pod *corev1.Pod) (bool, error) {
+	if !options.FromContext(ctx).FeatureGates.RolloutRestartDrainStrategy {
+		fmt.Printf("DEBUG tryRolloutRestart: feature gate OFF for pod %s/%s\n", pod.Namespace, pod.Name)
+		return false, nil
+	}
+	target, err := podutils.SingletonRolloutTargetForPod(ctx, q.kubeClient, pod)
+	if err != nil {
+		fmt.Printf("DEBUG tryRolloutRestart: err for pod %s/%s: %v\n", pod.Namespace, pod.Name, err)
+		return false, err
+	}
+	if target == nil {
+		fmt.Printf("DEBUG tryRolloutRestart: target=nil for pod %s/%s (owners=%+v)\n", pod.Namespace, pod.Name, pod.OwnerReferences)
+		return false, nil
+	}
+	if dep, ok := target.Object.(*appsv1.Deployment); ok {
+		fmt.Printf("DEBUG tryRolloutRestart: Deployment %s Gen=%d ObsGen=%d UpdRepl=%d Repl=%d AvlRepl=%d SpecRepl=%d rolloutInProgress=%v\n",
+			dep.Name, dep.Generation, dep.Status.ObservedGeneration, dep.Status.UpdatedReplicas, dep.Status.Replicas, dep.Status.AvailableReplicas, *dep.Spec.Replicas, target.RolloutInProgress)
+	} else {
+		fmt.Printf("DEBUG tryRolloutRestart: target found kind=%s name=%s rolloutInProgress=%v\n", target.Kind, target.Object.GetName(), target.RolloutInProgress)
+	}
+	if target.RolloutInProgress {
+		q.recorder.Publish(terminatorevents.RolloutRestartInProgress(pod, target.Kind, target.Object.GetName()))
+		q.Lock()
+		defer q.Unlock()
+		q.set.Delete(NewQueueKey(pod))
+		return true, nil
+	}
+	if err := q.rolloutRestart(ctx, target); err != nil {
+		return false, err
+	}
+	q.recorder.Publish(terminatorevents.RolloutRestartedPod(pod, target.Kind, target.Object.GetName()))
+	q.Lock()
+	defer q.Unlock()
+	q.set.Delete(NewQueueKey(pod))
+	return true, nil
+}
+
+// rolloutRestart patches a singleton workload with the standard restartedAt annotation, matching
+// `kubectl rollout restart`. Caller must gate on target.RolloutInProgress to avoid clobbering an
+// in-flight rollout.
+func (q *Queue) rolloutRestart(ctx context.Context, target *podutils.SingletonRolloutTarget) error {
+	patch := []byte(fmt.Sprintf(
+		`{"spec":{"template":{"metadata":{"annotations":{%q:%q}}}}}`,
+		RolloutRestartAnnotation, time.Now().UTC().Format(time.RFC3339),
+	))
+	if err := q.kubeClient.Patch(ctx, target.Object, client.RawPatch(types.StrategicMergePatchType, patch)); err != nil {
+		return fmt.Errorf("rollout-restarting %s %s/%s: %w", target.Kind, target.Object.GetNamespace(), target.Object.GetName(), err)
+	}
+	return nil
 }
 
 func evictionReason(ctx context.Context, pod *corev1.Pod, kubeClient client.Client) string {

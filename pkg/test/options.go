@@ -53,11 +53,12 @@ type OptionsFields struct {
 }
 
 type FeatureGates struct {
-	NodeRepair              *bool
-	ReservedCapacity        *bool
-	SpotToSpotConsolidation *bool
-	NodeOverlay             *bool
-	StaticCapacity          *bool
+	NodeRepair                  *bool
+	ReservedCapacity            *bool
+	SpotToSpotConsolidation     *bool
+	NodeOverlay                 *bool
+	StaticCapacity              *bool
+	RolloutRestartDrainStrategy *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -89,11 +90,12 @@ func Options(overrides ...OptionsFields) *options.Options {
 		MinValuesPolicy:                  lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
 		IgnoreDRARequests:                lo.FromPtrOr(opts.IgnoreDRARequests, true),
 		FeatureGates: options.FeatureGates{
-			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
-			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
-			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
-			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
-			StaticCapacity:          lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
+			NodeRepair:                  lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
+			ReservedCapacity:            lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
+			SpotToSpotConsolidation:     lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
+			NodeOverlay:                 lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
+			StaticCapacity:              lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
+			RolloutRestartDrainStrategy: lo.FromPtrOr(opts.FeatureGates.RolloutRestartDrainStrategy, false),
 		},
 	}
 }
