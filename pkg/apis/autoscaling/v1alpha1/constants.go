@@ -30,12 +30,20 @@ const (
 	ProvisioningCondition         = "Provisioning"
 	LimitedByQuotasCondition      = "LimitedByQuotas"
 
+	// Supported scalableRef kinds.
+	KindDeployment  = "Deployment"
+	KindStatefulSet = "StatefulSet"
+	KindReplicaSet  = "ReplicaSet"
+
 	// FakePodAnnotationKey marks a virtual pod constructed from a CapacityBuffer.
 	FakePodAnnotationKey   = "karpenter.sh/capacity-buffer-fake-pod"
 	FakePodAnnotationValue = "true"
 
 	// BufferNameLabel records which CapacityBuffer a virtual pod belongs to.
 	BufferNameLabel = "karpenter.sh/capacity-buffer-name"
+
+	// BufferNamespaceLabel records the namespace of the CapacityBuffer a virtual pod belongs to.
+	BufferNamespaceLabel = "karpenter.sh/capacity-buffer-namespace"
 
 	// VirtualPodPriority is the priority stamped onto virtual buffer pods so that
 	// future preemption / disruption logic can identify them as low-value.

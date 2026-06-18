@@ -23,6 +23,7 @@ package v1alpha1
 
 import (
 	v1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -169,6 +170,18 @@ type CapacityBufferStatus struct {
 	// provisioningStrategy defines how the buffer should be utilized.
 	// +optional
 	ProvisioningStrategy *string `json:"provisioningStrategy,omitempty" protobuf:"bytes,5,opt,name=provisioningStrategy"`
+}
+
+// SetCondition sets or updates a status condition on the CapacityBuffer.
+func (cb *CapacityBuffer) SetCondition(condType string, condStatus metav1.ConditionStatus, reason, message string) {
+	apimeta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+		Type:               condType,
+		Status:             condStatus,
+		ObservedGeneration: cb.Generation,
+		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            message,
+	})
 }
 
 // CapacityBufferList contains a list of CapacityBuffer resources.

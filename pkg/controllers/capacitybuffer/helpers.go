@@ -20,20 +20,19 @@ import (
 	"math"
 
 	v1 "k8s.io/api/core/v1"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // calculateLimitReplicas determines how many buffer pods fit within the given
 // resource budget. For each resource present in both limits and pod requests,
-// it floors(limit/request). Returns the minimum across all matched resources,
-// or -1 if no resources overlap (meaning limits don't constrain anything).
-func calculateLimitReplicas(limits v1.ResourceList, podSpec *v1.PodSpec) int32 {
-	totalRequests := totalPodRequests(podSpec)
+// it floors(limit/request). Returns the minimum across all matched resources.
+// The bool indicates whether any resource overlapped; false means limits don't
+// constrain anything.
+func calculateLimitReplicas(limits v1.ResourceList, podSpec *v1.PodSpec) (int32, bool) {
+	totalRequests := resources.RequestsForSpec(podSpec)
 	if len(totalRequests) == 0 {
-		return -1
+		return 0, false
 	}
 
 	minReplicas := int32(math.MaxInt32)
@@ -52,61 +51,9 @@ func calculateLimitReplicas(limits v1.ResourceList, podSpec *v1.PodSpec) int32 {
 	}
 
 	if !matched {
-		return -1
+		return 0, false
 	}
-	return minReplicas
-}
-
-// totalPodRequests computes effective resource requests for one pod following
-// Kubernetes scheduling semantics (KEP-753 sidecar containers):
-//
-//	reqs = sum(regular containers) + sum(sidecar init containers)
-//	initUse(i) = resources(init[i]) + sum(sidecars started before i)
-//	effective = max(reqs, max(initUse...))
-//
-// Sidecar init containers have restartPolicy=Always and run concurrently with
-// regular containers, so their resources are summed rather than max'd.
-func totalPodRequests(podSpec *v1.PodSpec) v1.ResourceList {
-	reqs := v1.ResourceList{}
-	for _, c := range podSpec.Containers {
-		addResourceList(reqs, c.Resources.Requests)
-	}
-
-	restartableInitReqs := v1.ResourceList{}
-	initContainerReqs := v1.ResourceList{}
-
-	for _, c := range podSpec.InitContainers {
-		if c.RestartPolicy != nil && *c.RestartPolicy == v1.ContainerRestartPolicyAlways {
-			// Sidecar: runs for the lifetime of the pod, sum with regular containers
-			addResourceList(reqs, c.Resources.Requests)
-			addResourceList(restartableInitReqs, c.Resources.Requests)
-		} else {
-			// Regular init: initUse(i) = own resources + all sidecars started before it
-			initUse := v1.ResourceList{}
-			addResourceList(initUse, c.Resources.Requests)
-			addResourceList(initUse, restartableInitReqs)
-			maxResourceList(initContainerReqs, initUse)
-		}
-	}
-
-	maxResourceList(reqs, initContainerReqs)
-	return reqs
-}
-
-func addResourceList(dest v1.ResourceList, src v1.ResourceList) {
-	for name, qty := range src {
-		existing := dest[name]
-		existing.Add(qty)
-		dest[name] = existing
-	}
-}
-
-func maxResourceList(dest v1.ResourceList, src v1.ResourceList) {
-	for name, qty := range src {
-		if existing, ok := dest[name]; !ok || qty.Cmp(existing) > 0 {
-			dest[name] = qty.DeepCopy()
-		}
-	}
+	return minReplicas, true
 }
 
 // calculatePercentageReplicas computes ceil(scalableReplicas * percentage / 100)
@@ -118,15 +65,4 @@ func calculatePercentageReplicas(scalableReplicas int32, percentage int32) int32
 		pctReplicas = 1
 	}
 	return pctReplicas
-}
-
-func setCondition(cb *autoscalingv1alpha1.CapacityBuffer, condType string, condStatus metav1.ConditionStatus, reason, message string) {
-	apimeta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
-		Type:               condType,
-		Status:             condStatus,
-		ObservedGeneration: cb.Generation,
-		LastTransitionTime: metav1.Now(),
-		Reason:             reason,
-		Message:            message,
-	})
 }

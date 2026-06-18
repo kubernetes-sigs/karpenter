@@ -117,6 +117,12 @@ func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
 	}
 }
 
+// RequestsForSpec computes the effective resource requests for a PodSpec using
+// standard Kubernetes scheduling semantics (KEP-753 sidecar-aware).
+func RequestsForSpec(spec *v1.PodSpec) v1.ResourceList {
+	return resourcehelper.PodRequests(&v1.Pod{Spec: *spec}, resourcehelper.PodResourcesOptions{})
+}
+
 // MaxResources returns the maximum quantities for a given list of resources
 func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 	resourceList := v1.ResourceList{}

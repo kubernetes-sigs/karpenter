@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 var _ = Describe("Helpers", func() {
@@ -38,7 +39,7 @@ var _ = Describe("Helpers", func() {
 					},
 				}},
 			}
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("4"),
 			}, podSpec)
 			Expect(result).To(Equal(int32(4)))
@@ -54,7 +55,7 @@ var _ = Describe("Helpers", func() {
 					},
 				}},
 			}
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceMemory: resource.MustParse("2Gi"),
 			}, podSpec)
 			Expect(result).To(Equal(int32(4)))
@@ -72,7 +73,7 @@ var _ = Describe("Helpers", func() {
 				}},
 			}
 			// 8 CPUs / 1 CPU = 8, but 4Gi / 1Gi = 4 → min is 4
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("8"),
 				v1.ResourceMemory: resource.MustParse("4Gi"),
 			}, podSpec)
@@ -91,7 +92,7 @@ var _ = Describe("Helpers", func() {
 				},
 			}
 			// Total pod request = 1 CPU, limit = 3 CPU → 3 replicas
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("3"),
 			}, podSpec)
 			Expect(result).To(Equal(int32(3)))
@@ -112,7 +113,7 @@ var _ = Describe("Helpers", func() {
 			}
 			// Init container needs 4 CPU > regular container 1 CPU → effective = 4 CPU
 			// 8 CPU limit / 4 CPU per pod = 2
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("8"),
 			}, podSpec)
 			Expect(result).To(Equal(int32(2)))
@@ -133,23 +134,23 @@ var _ = Describe("Helpers", func() {
 			}
 			// Container needs 2 CPU > init container 500m → effective = 2 CPU
 			// 6 CPU limit / 2 CPU per pod = 3
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("6"),
 			}, podSpec)
 			Expect(result).To(Equal(int32(3)))
 		})
 
-		It("should return -1 when pod has no resource requests", func() {
+		It("should return false when pod has no resource requests", func() {
 			podSpec := &v1.PodSpec{
 				Containers: []v1.Container{{Name: "app"}},
 			}
-			result := calculateLimitReplicas(v1.ResourceList{
+			_, matched := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("4"),
 			}, podSpec)
-			Expect(result).To(Equal(int32(-1)))
+			Expect(matched).To(BeFalse())
 		})
 
-		It("should return -1 when no limit resources match pod requests", func() {
+		It("should return false when no limit resources match pod requests", func() {
 			podSpec := &v1.PodSpec{
 				Containers: []v1.Container{{
 					Resources: v1.ResourceRequirements{
@@ -157,10 +158,10 @@ var _ = Describe("Helpers", func() {
 					},
 				}},
 			}
-			result := calculateLimitReplicas(v1.ResourceList{
+			_, matched := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceMemory: resource.MustParse("4Gi"),
 			}, podSpec)
-			Expect(result).To(Equal(int32(-1)))
+			Expect(matched).To(BeFalse())
 		})
 
 		It("should floor divide (no rounding up)", func() {
@@ -172,7 +173,7 @@ var _ = Describe("Helpers", func() {
 				}},
 			}
 			// 10 / 3 = 3.33 → floor = 3
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("10"),
 			}, podSpec)
 			Expect(result).To(Equal(int32(3)))
@@ -187,7 +188,7 @@ var _ = Describe("Helpers", func() {
 				}},
 			}
 			// 1000m / 250m = 4
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("1"),
 			}, podSpec)
 			Expect(result).To(Equal(int32(4)))
@@ -202,7 +203,7 @@ var _ = Describe("Helpers", func() {
 				}},
 			}
 			// 1 / 2 = 0
-			result := calculateLimitReplicas(v1.ResourceList{
+			result, _ := calculateLimitReplicas(v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("1"),
 			}, podSpec)
 			Expect(result).To(Equal(int32(0)))
@@ -227,7 +228,7 @@ var _ = Describe("Helpers", func() {
 					}},
 				},
 			}
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			cpu := total[v1.ResourceCPU]
 			Expect(cpu.MilliValue()).To(Equal(int64(1500)))
 			mem := total[v1.ResourceMemory]
@@ -250,7 +251,7 @@ var _ = Describe("Helpers", func() {
 					}},
 				},
 			}
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			cpu := total[v1.ResourceCPU]
 			Expect(cpu.MilliValue()).To(Equal(int64(4000)))
 		})
@@ -259,7 +260,7 @@ var _ = Describe("Helpers", func() {
 			podSpec := &v1.PodSpec{
 				Containers: []v1.Container{{Name: "app"}},
 			}
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			Expect(total).To(BeEmpty())
 		})
 
@@ -274,7 +275,7 @@ var _ = Describe("Helpers", func() {
 					}},
 				},
 			}
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			cpu := total[v1.ResourceCPU]
 			mem := total[v1.ResourceMemory]
 			Expect(cpu.MilliValue()).To(Equal(int64(1000)))
@@ -299,7 +300,7 @@ var _ = Describe("Helpers", func() {
 				},
 			}
 			// Sidecar (500m) + regular (1) = 1500m
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			cpu := total[v1.ResourceCPU]
 			Expect(cpu.MilliValue()).To(Equal(int64(1500)))
 		})
@@ -328,7 +329,7 @@ var _ = Describe("Helpers", func() {
 				},
 			}
 			// Sidecars (500m + 200m) + regular (1) = 1700m
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			cpu := total[v1.ResourceCPU]
 			Expect(cpu.MilliValue()).To(Equal(int64(1700)))
 		})
@@ -359,7 +360,7 @@ var _ = Describe("Helpers", func() {
 			// reqs = regular (1) + sidecar (500m) = 1500m
 			// initUse = regular init (4) + sidecar (500m) = 4500m
 			// effective = max(1500m, 4500m) = 4500m
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			cpu := total[v1.ResourceCPU]
 			Expect(cpu.MilliValue()).To(Equal(int64(4500)))
 		})
@@ -391,7 +392,7 @@ var _ = Describe("Helpers", func() {
 			// reqs = regular (1) + sidecar (500m) = 1500m
 			// initUse = regular init (4) + no preceding sidecars = 4000m
 			// effective = max(1500m, 4000m) = 4000m
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			cpu := total[v1.ResourceCPU]
 			Expect(cpu.MilliValue()).To(Equal(int64(4000)))
 		})
@@ -413,7 +414,7 @@ var _ = Describe("Helpers", func() {
 				},
 			}
 			// Regular init (2) > regular container (1) → effective = 2 CPU
-			total := totalPodRequests(podSpec)
+			total := resources.RequestsForSpec(podSpec)
 			cpu := total[v1.ResourceCPU]
 			Expect(cpu.MilliValue()).To(Equal(int64(2000)))
 		})
@@ -458,10 +459,10 @@ var _ = Describe("Helpers", func() {
 		})
 	})
 
-	Context("setCondition", func() {
+	Context("SetCondition", func() {
 		It("should add a new condition", func() {
 			cb := &autoscalingv1alpha1.CapacityBuffer{}
-			setCondition(cb, "TestCond", metav1.ConditionTrue, "TestReason", "test message")
+			cb.SetCondition("TestCond", metav1.ConditionTrue, "TestReason", "test message")
 
 			Expect(cb.Status.Conditions).To(HaveLen(1))
 			Expect(cb.Status.Conditions[0].Type).To(Equal("TestCond"))
@@ -472,8 +473,8 @@ var _ = Describe("Helpers", func() {
 
 		It("should update an existing condition", func() {
 			cb := &autoscalingv1alpha1.CapacityBuffer{}
-			setCondition(cb, "TestCond", metav1.ConditionFalse, "FirstReason", "first")
-			setCondition(cb, "TestCond", metav1.ConditionTrue, "SecondReason", "second")
+			cb.SetCondition("TestCond", metav1.ConditionFalse, "FirstReason", "first")
+			cb.SetCondition("TestCond", metav1.ConditionTrue, "SecondReason", "second")
 
 			Expect(cb.Status.Conditions).To(HaveLen(1))
 			Expect(cb.Status.Conditions[0].Status).To(Equal(metav1.ConditionTrue))
@@ -483,8 +484,8 @@ var _ = Describe("Helpers", func() {
 
 		It("should support multiple condition types", func() {
 			cb := &autoscalingv1alpha1.CapacityBuffer{}
-			setCondition(cb, "CondA", metav1.ConditionTrue, "A", "a")
-			setCondition(cb, "CondB", metav1.ConditionFalse, "B", "b")
+			cb.SetCondition("CondA", metav1.ConditionTrue, "A", "a")
+			cb.SetCondition("CondB", metav1.ConditionFalse, "B", "b")
 
 			Expect(cb.Status.Conditions).To(HaveLen(2))
 		})
@@ -492,7 +493,7 @@ var _ = Describe("Helpers", func() {
 		It("should set observed generation", func() {
 			cb := &autoscalingv1alpha1.CapacityBuffer{}
 			cb.Generation = 7
-			setCondition(cb, "TestCond", metav1.ConditionTrue, "R", "m")
+			cb.SetCondition("TestCond", metav1.ConditionTrue, "R", "m")
 
 			Expect(cb.Status.Conditions[0].ObservedGeneration).To(Equal(int64(7)))
 		})

@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +31,7 @@ import (
 
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/apps"
 )
 
 // Called from GetPendingPods AFTER the Validate()/filter step so we skip PVC
@@ -52,7 +52,7 @@ func (p *Provisioner) listBuffersReadyForProvisioning(ctx context.Context) ([]*a
 		if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
 			continue
 		}
-		if cb.Status.PodTemplateRef == nil && cb.Spec.ScalableRef == nil {
+		if cb.Spec.PodTemplateRef == nil && cb.Spec.ScalableRef == nil {
 			continue
 		}
 		out = append(out, cb)
@@ -86,59 +86,25 @@ func (p *Provisioner) appendVirtualPods(ctx context.Context, pods []*corev1.Pod)
 	return pods
 }
 
-// resolveVirtualPodSpec fetches the pod spec for a buffer. For podTemplateRef
-// buffers it reads the PodTemplate object; for scalableRef buffers it fetches
-// the workload and extracts spec.template.spec.
+// resolveVirtualPodSpec fetches the pod spec for a buffer using the shared
+// workload resolution utilities. Reads from spec (not status) to avoid stale
+// references when users switch between podTemplateRef and scalableRef.
 func (p *Provisioner) resolveVirtualPodSpec(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (corev1.PodSpec, error) {
-	if cb.Status.PodTemplateRef != nil {
-		pt := &corev1.PodTemplate{}
-		if err := p.kubeClient.Get(ctx, types.NamespacedName{
-			Name:      cb.Status.PodTemplateRef.Name,
-			Namespace: cb.Namespace,
-		}, pt); err != nil {
-			return corev1.PodSpec{}, fmt.Errorf("getting PodTemplate %q: %w", cb.Status.PodTemplateRef.Name, err)
+	switch {
+	case cb.Spec.PodTemplateRef != nil:
+		result, err := apps.ResolvePodTemplateRef(ctx, p.kubeClient, cb.Spec.PodTemplateRef.Name, cb.Namespace)
+		if err != nil {
+			return corev1.PodSpec{}, err
 		}
-		return pt.Template.Spec, nil
-	}
-	if cb.Spec.ScalableRef != nil {
-		return p.resolveScalableRefPodSpec(ctx, cb)
-	}
-	return corev1.PodSpec{}, fmt.Errorf("buffer %q has neither podTemplateRef in status nor scalableRef in spec", cb.Name)
-}
-
-// resolveScalableRefPodSpec fetches the workload referenced by scalableRef using
-// typed Gets and returns its pod spec.
-func (p *Provisioner) resolveScalableRefPodSpec(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (corev1.PodSpec, error) {
-	ref := cb.Spec.ScalableRef
-	key := types.NamespacedName{Name: ref.Name, Namespace: cb.Namespace}
-	group := ref.APIGroup
-	if group == "" {
-		group = "apps"
-	}
-	if group != "apps" {
-		return corev1.PodSpec{}, fmt.Errorf("unsupported scalableRef kind %s/%s", ref.APIGroup, ref.Kind)
-	}
-	switch ref.Kind {
-	case "Deployment":
-		obj := &appsv1.Deployment{}
-		if err := p.kubeClient.Get(ctx, key, obj); err != nil {
-			return corev1.PodSpec{}, fmt.Errorf("getting Deployment %q: %w", ref.Name, err)
+		return result.PodSpec, nil
+	case cb.Spec.ScalableRef != nil:
+		result, err := apps.ResolveScalableRef(ctx, p.kubeClient, cb.Spec.ScalableRef, cb.Namespace)
+		if err != nil {
+			return corev1.PodSpec{}, err
 		}
-		return obj.Spec.Template.Spec, nil
-	case "StatefulSet":
-		obj := &appsv1.StatefulSet{}
-		if err := p.kubeClient.Get(ctx, key, obj); err != nil {
-			return corev1.PodSpec{}, fmt.Errorf("getting StatefulSet %q: %w", ref.Name, err)
-		}
-		return obj.Spec.Template.Spec, nil
-	case "ReplicaSet":
-		obj := &appsv1.ReplicaSet{}
-		if err := p.kubeClient.Get(ctx, key, obj); err != nil {
-			return corev1.PodSpec{}, fmt.Errorf("getting ReplicaSet %q: %w", ref.Name, err)
-		}
-		return obj.Spec.Template.Spec, nil
+		return result.PodSpec, nil
 	default:
-		return corev1.PodSpec{}, fmt.Errorf("unsupported scalableRef kind %s/%s", ref.APIGroup, ref.Kind)
+		return corev1.PodSpec{}, fmt.Errorf("buffer %q has neither podTemplateRef nor scalableRef in spec", cb.Name)
 	}
 }
 
@@ -165,7 +131,8 @@ func buildVirtualPods(cb *autoscalingv1alpha1.CapacityBuffer, spec corev1.PodSpe
 					autoscalingv1alpha1.FakePodAnnotationKey: autoscalingv1alpha1.FakePodAnnotationValue,
 				},
 				Labels: map[string]string{
-					autoscalingv1alpha1.BufferNameLabel: cb.Name,
+					autoscalingv1alpha1.BufferNameLabel:      cb.Name,
+					autoscalingv1alpha1.BufferNamespaceLabel: cb.Namespace,
 				},
 				CreationTimestamp: metav1.NewTime(time.Now()),
 			},
@@ -206,22 +173,45 @@ func sanitizeVirtualPodSpec(spec corev1.PodSpec) corev1.PodSpec {
 	spec.Volumes = keepVolumes
 	if len(droppedVolumeNames) > 0 {
 		for i := range spec.Containers {
-			spec.Containers[i].VolumeMounts = filterMounts(spec.Containers[i].VolumeMounts, droppedVolumeNames)
+			spec.Containers[i].VolumeMounts = lo.Filter(spec.Containers[i].VolumeMounts, func(m corev1.VolumeMount, _ int) bool {
+				_, dropped := droppedVolumeNames[m.Name]
+				return !dropped
+			})
 		}
 		for i := range spec.InitContainers {
-			spec.InitContainers[i].VolumeMounts = filterMounts(spec.InitContainers[i].VolumeMounts, droppedVolumeNames)
+			spec.InitContainers[i].VolumeMounts = lo.Filter(spec.InitContainers[i].VolumeMounts, func(m corev1.VolumeMount, _ int) bool {
+				_, dropped := droppedVolumeNames[m.Name]
+				return !dropped
+			})
 		}
 	}
 	return spec
 }
 
-func filterMounts(mounts []corev1.VolumeMount, drop map[string]struct{}) []corev1.VolumeMount {
-	out := mounts[:0]
-	for _, m := range mounts {
-		if _, dropped := drop[m.Name]; dropped {
-			continue
+// filterVirtualPodErrors returns a copy of the map with virtual buffer pods removed.
+func filterVirtualPodErrors(m map[*corev1.Pod]error) map[*corev1.Pod]error {
+	out := make(map[*corev1.Pod]error, len(m))
+	for pod, err := range m {
+		if !IsVirtualPod(pod) {
+			out[pod] = err
 		}
-		out = append(out, m)
+	}
+	return out
+}
+
+// filterVirtualPodMapping returns a copy of the map with virtual buffer pods removed from each slice.
+func filterVirtualPodMapping(m map[string][]*corev1.Pod) map[string][]*corev1.Pod {
+	out := make(map[string][]*corev1.Pod, len(m))
+	for key, pods := range m {
+		var real []*corev1.Pod
+		for _, pod := range pods {
+			if !IsVirtualPod(pod) {
+				real = append(real, pod)
+			}
+		}
+		if len(real) > 0 {
+			out[key] = real
+		}
 	}
 	return out
 }
@@ -234,19 +224,23 @@ func IsVirtualPod(pod *corev1.Pod) bool {
 	return pod.Annotations[autoscalingv1alpha1.FakePodAnnotationKey] == autoscalingv1alpha1.FakePodAnnotationValue
 }
 
-// bufferNameOf returns the buffer name a virtual pod belongs to, or "" if it
-// isn't a virtual pod.
-func bufferNameOf(pod *corev1.Pod) string {
+// bufferKeyOf returns "namespace/name" for the buffer a virtual pod belongs to,
+// or "" if it isn't a virtual pod.
+func bufferKeyOf(pod *corev1.Pod) string {
 	if !IsVirtualPod(pod) {
 		return ""
 	}
-	return pod.Labels[autoscalingv1alpha1.BufferNameLabel]
+	ns := pod.Labels[autoscalingv1alpha1.BufferNamespaceLabel]
+	name := pod.Labels[autoscalingv1alpha1.BufferNameLabel]
+	if ns == "" || name == "" {
+		return ""
+	}
+	return ns + "/" + name
 }
 
 // bufferProvisioningStatus summarizes, per buffer, which virtual pods scheduled
 // to existing capacity vs. required new NodeClaims vs. failed outright.
 type bufferProvisioningStatus struct {
-	namespace        string
 	existing         int
 	requiresNewClaim int
 	failed           int
@@ -264,23 +258,23 @@ func (p *Provisioner) updateBufferProvisioningStatus(ctx context.Context, result
 	if len(buffers) == 0 {
 		return nil
 	}
-	byName := map[string]*autoscalingv1alpha1.CapacityBuffer{}
+	byKey := map[string]*autoscalingv1alpha1.CapacityBuffer{}
 	for _, cb := range buffers {
-		byName[cb.Name] = cb
+		byKey[cb.Namespace+"/"+cb.Name] = cb
 	}
 
-	summary := classifyBufferPods(results, byName)
+	summary := classifyBufferPods(results, byKey)
 
 	var errs []error
-	for name, cb := range byName {
+	for key, cb := range byKey {
 		stored := cb.DeepCopy()
-		newCondition := computeProvisioningCondition(cb, summary[name])
+		newCondition := computeProvisioningCondition(cb, summary[key])
 		if newCondition == nil {
 			continue
 		}
 		apimeta.SetStatusCondition(&cb.Status.Conditions, *newCondition)
 		if err := p.kubeClient.Status().Patch(ctx, cb, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-			errs = append(errs, fmt.Errorf("patching buffer %q: %w", name, err))
+			errs = append(errs, fmt.Errorf("patching buffer %q: %w", key, err))
 		}
 	}
 	if len(errs) > 0 {
@@ -386,7 +380,7 @@ func bufferPodCountsFromResults(results scheduler.Results) map[string]int {
 }
 
 // classifyBufferPods walks Schedule()'s Results and buckets virtual pods by
-// owning buffer. Real (non-virtual) pods are ignored.
+// owning buffer (keyed by "namespace/name"). Real (non-virtual) pods are ignored.
 func classifyBufferPods(results scheduler.Results, buffers map[string]*autoscalingv1alpha1.CapacityBuffer) map[string]*bufferProvisioningStatus {
 	out := map[string]*bufferProvisioningStatus{}
 
@@ -397,33 +391,33 @@ func classifyBufferPods(results scheduler.Results, buffers map[string]*autoscali
 		countVirtualPods(nc.Pods, buffers, out, func(s *bufferProvisioningStatus) { s.requiresNewClaim++ })
 	}
 	for pod := range results.PodErrors {
-		name := bufferNameOf(pod)
-		if name == "" {
+		key := bufferKeyOf(pod)
+		if key == "" {
 			continue
 		}
-		ensureStatus(name, pod.Namespace, buffers, out).failed++
+		ensureStatus(key, buffers, out).failed++
 	}
 	return out
 }
 
 func countVirtualPods(pods []*corev1.Pod, buffers map[string]*autoscalingv1alpha1.CapacityBuffer, out map[string]*bufferProvisioningStatus, inc func(*bufferProvisioningStatus)) {
 	for _, pod := range pods {
-		name := bufferNameOf(pod)
-		if name == "" {
+		key := bufferKeyOf(pod)
+		if key == "" {
 			continue
 		}
-		inc(ensureStatus(name, pod.Namespace, buffers, out))
+		inc(ensureStatus(key, buffers, out))
 	}
 }
 
-func ensureStatus(name, namespace string, buffers map[string]*autoscalingv1alpha1.CapacityBuffer, out map[string]*bufferProvisioningStatus) *bufferProvisioningStatus {
-	s, ok := out[name]
+func ensureStatus(key string, buffers map[string]*autoscalingv1alpha1.CapacityBuffer, out map[string]*bufferProvisioningStatus) *bufferProvisioningStatus {
+	s, ok := out[key]
 	if !ok {
-		s = &bufferProvisioningStatus{namespace: namespace}
-		if cb, found := buffers[name]; found && cb.Status.Replicas != nil {
+		s = &bufferProvisioningStatus{}
+		if cb, found := buffers[key]; found && cb.Status.Replicas != nil {
 			s.desiredReplicas = int(*cb.Status.Replicas)
 		}
-		out[name] = s
+		out[key] = s
 	}
 	return s
 }

@@ -419,11 +419,15 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 			"duration", time.Since(start),
 		).Info("found provisionable pod(s)")
 	}
-	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
-	p.cluster.MarkPodSchedulingDecisions(ctx, results.PodErrors, results.NodePoolToPodMapping(),
+	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods.
+	// Virtual buffer pods are excluded — they never exist in etcd, so their entries would never be
+	// cleaned up and would leak memory when buffers are deleted or scaled down.
+	p.cluster.MarkPodSchedulingDecisions(ctx,
+		filterVirtualPodErrors(results.PodErrors),
+		filterVirtualPodMapping(results.NodePoolToPodMapping()),
 		// Only passing existing nodes here and not new nodeClaims because
 		// these nodeClaims don't have a name until they are created
-		results.ExistingNodeToPodMapping())
+		filterVirtualPodMapping(results.ExistingNodeToPodMapping()))
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }

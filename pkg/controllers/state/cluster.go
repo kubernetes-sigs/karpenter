@@ -97,14 +97,8 @@ type Cluster struct {
 	// NOT used by consolidation — consolidation naturally accounts for buffer pods
 	// because SimulateScheduling calls GetPendingPods which injects virtual pods
 	// into the pending set. Any replacement must fit both real and virtual pods.
-	//
-	// Future extensions:
-	//   - Metrics: expose per-node buffer pod counts as a Prometheus gauge.
-	//   - Disruption cost weighting: use the count to increase disruption cost so
-	//     consolidation prefers to evict nodes without buffer capacity first.
-	//   - Buffer-aware bin packing: pass counts into the scheduler to prefer
-	//     co-locating buffer pods on fewer nodes for consolidation efficiency.
-	bufferPodCounts sync.Map // provider id (string) -> int
+	bufferPodCountsMu sync.RWMutex
+	bufferPodCounts   map[string]int
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
@@ -120,6 +114,8 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		nodePoolResources:         map[string]corev1.ResourceList{},
 
 		NodePoolState: NewNodePoolState(),
+
+		bufferPodCounts: map[string]int{},
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -309,36 +305,22 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 // is consumed (real pods take the space), virtual pods move to other nodes or
 // new NodeClaims, and this map updates accordingly on the next pass.
 func (c *Cluster) UpdateBufferPodCounts(counts map[string]int) {
-	// Clear all existing entries, then store new ones. sync.Map doesn't have a
-	// bulk-replace, so we range-delete first.
-	c.bufferPodCounts.Range(func(key, _ any) bool {
-		c.bufferPodCounts.Delete(key)
-		return true
-	})
-	for providerID, count := range counts {
-		if count > 0 {
-			c.bufferPodCounts.Store(providerID, count)
-		}
-	}
+	c.bufferPodCountsMu.Lock()
+	defer c.bufferPodCountsMu.Unlock()
+	c.bufferPodCounts = counts
 }
 
 // HasBufferPods returns true if the node with the given providerID has at least
 // one virtual buffer pod placed on it during the last provisioning pass.
 func (c *Cluster) HasBufferPods(providerID string) bool {
-	v, ok := c.bufferPodCounts.Load(providerID)
-	if !ok {
-		return false
-	}
-	return v.(int) > 0
+	return c.BufferPodCount(providerID) > 0
 }
 
 // BufferPodCount returns the number of virtual buffer pods on the node.
 func (c *Cluster) BufferPodCount(providerID string) int {
-	v, ok := c.bufferPodCounts.Load(providerID)
-	if !ok {
-		return 0
-	}
-	return v.(int)
+	c.bufferPodCountsMu.RLock()
+	defer c.bufferPodCountsMu.RUnlock()
+	return c.bufferPodCounts[providerID]
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
@@ -662,6 +644,7 @@ func (c *Cluster) Reset() {
 	c.podAcks = sync.Map{}
 	c.podsSchedulingAttempted = sync.Map{}
 	c.podsSchedulableTimes = sync.Map{}
+	c.bufferPodCounts = map[string]int{}
 }
 
 // sets the cluster to be synced or unsynced for unit testing

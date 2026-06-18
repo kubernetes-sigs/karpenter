@@ -213,6 +213,145 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(ReasonScalableRefNotFound))
 		})
+
+		It("should resolve a StatefulSet", func() {
+			sts := &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-sts",
+					Namespace: "default",
+				},
+				Spec: appsv1.StatefulSetSpec{
+					Replicas: lo.ToPtr(int32(5)),
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "my-sts"}},
+					Template: v1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "my-sts"}},
+						Spec: v1.PodSpec{
+							Containers: []v1.Container{{
+								Name:  "app",
+								Image: "pause:latest",
+								Resources: v1.ResourceRequirements{
+									Requests: v1.ResourceList{
+										v1.ResourceCPU: resource.MustParse("500m"),
+									},
+								},
+							}},
+						},
+					},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer-sts",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "StatefulSet",
+						Name:     "my-sts",
+					},
+					Percentage: lo.ToPtr(int32(20)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, sts, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			cond := findCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cb.Status.Replicas).ToNot(BeNil())
+			// 20% of 5 = 1
+			Expect(*cb.Status.Replicas).To(Equal(int32(1)))
+		})
+
+		It("should return error for unsupported kind", func() {
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer-bad-kind",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "batch",
+						Kind:     "Job",
+						Name:     "my-job",
+					},
+					Percentage: lo.ToPtr(int32(20)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, cb)
+			Expect(ExpectObjectReconcileFailed(ctx, env.Client, cbController, cb)).To(HaveOccurred())
+		})
+
+		It("should return error for unsupported API group", func() {
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer-bad-group",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "batch",
+						Kind:     "Deployment",
+						Name:     "my-deploy",
+					},
+					Percentage: lo.ToPtr(int32(20)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, cb)
+			Expect(ExpectObjectReconcileFailed(ctx, env.Client, cbController, cb)).To(HaveOccurred())
+		})
+
+		It("should default to 1 replica when workload has nil Spec.Replicas", func() {
+			deploy := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "nil-replicas-app",
+					Namespace: "default",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nil-replicas"}},
+					Template: v1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "nil-replicas"}},
+						Spec: v1.PodSpec{
+							Containers: []v1.Container{{
+								Name:  "app",
+								Image: "pause:latest",
+								Resources: v1.ResourceRequirements{
+									Requests: v1.ResourceList{
+										v1.ResourceCPU: resource.MustParse("500m"),
+									},
+								},
+							}},
+						},
+					},
+				},
+			}
+			cb := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer-nil-replicas",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "nil-replicas-app",
+					},
+					Percentage: lo.ToPtr(int32(100)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, deploy, cb)
+			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+
+			cb = ExpectExists(ctx, env.Client, cb)
+			cond := findCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cb.Status.Replicas).ToNot(BeNil())
+			// 100% of 1 (defaulted) = 1
+			Expect(*cb.Status.Replicas).To(Equal(int32(1)))
+		})
 	})
 
 	Context("Replica calculation", func() {

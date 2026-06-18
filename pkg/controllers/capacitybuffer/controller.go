@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
-	appsv1 "k8s.io/api/apps/v1"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -32,12 +32,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/utils/apps"
 )
 
 // ProvisionerTrigger is the minimal surface of the provisioner that the buffer
@@ -68,19 +68,11 @@ func (c *Controller) Name() string {
 
 func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
-	logger := log.FromContext(ctx).WithValues("capacitybuffer", cb.Name, "namespace", cb.Namespace)
-	logger.Info("reconciling capacity buffer")
 
 	stored := cb.DeepCopy()
 
-	// Resolve pod shape and compute replicas. On failure, the condition is set
-	// to False with a descriptive reason—we still patch status so users see why.
-	podSpec, scalableReplicas, resolveErr := c.resolvePodSpec(ctx, cb)
-	if resolveErr == nil {
-		replicas := c.calculateReplicas(cb, podSpec, scalableReplicas)
-		setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
-		cb.Status.Replicas = &replicas
-	}
+	// Resolve pod shape, compute replicas, and update status.
+	resolved, resolveErr := c.resolveAndUpdateStatus(ctx, cb)
 	cb.Status.ProvisioningStrategy = cb.Spec.ProvisioningStrategy
 
 	// Always attempt to patch status so conditions are visible even on errors.
@@ -94,149 +86,19 @@ func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1alpha1.Capa
 		}
 	}
 
+	if resolveErr != nil {
+		return reconcile.Result{}, resolveErr
+	}
+
 	// Notify the provisioner so it can construct virtual pods and update the
 	// Provisioning condition in the next reconciliation. We trigger on every
 	// successful reconcile (not just status changes) so newly-applied buffers
 	// that already have accurate status still cause a provisioning pass.
-	if c.trigger != nil && resolveErr == nil {
+	if c.trigger != nil && resolved {
 		c.trigger.Trigger(cb.UID)
 	}
 
-	if resolveErr != nil {
-		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil //nolint:nilerr // resolution failures are transient; requeue without surfacing as controller error
-	}
 	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
-}
-
-// resolvePodSpec returns the pod spec and, for scalableRef buffers, the
-// workload's current replica count (used for percentage calculations).
-// For podTemplateRef buffers, scalableReplicas is 0.
-func (c *Controller) resolvePodSpec(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (*v1.PodSpec, int32, error) {
-	if cb.Spec.PodTemplateRef != nil {
-		spec, err := c.resolvePodTemplateRef(ctx, cb)
-		return spec, 0, err
-	}
-	if cb.Spec.ScalableRef != nil {
-		return c.resolveScalableRef(ctx, cb)
-	}
-	setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed, "Neither podTemplateRef nor scalableRef is set")
-	return nil, 0, fmt.Errorf("neither podTemplateRef nor scalableRef is set")
-}
-
-func (c *Controller) resolvePodTemplateRef(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (*v1.PodSpec, error) {
-	pt := &v1.PodTemplate{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{
-		Name:      cb.Spec.PodTemplateRef.Name,
-		Namespace: cb.Namespace,
-	}, pt); err != nil {
-		if errors.IsNotFound(err) {
-			setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonPodTemplateNotFound,
-				fmt.Sprintf("PodTemplate %q not found in namespace %q", cb.Spec.PodTemplateRef.Name, cb.Namespace))
-		} else {
-			setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed,
-				fmt.Sprintf("Failed to get PodTemplate: %v", err))
-		}
-		return nil, err
-	}
-
-	cb.Status.PodTemplateRef = &autoscalingv1alpha1.LocalObjectRef{Name: pt.Name}
-	cb.Status.PodTemplateGeneration = &pt.Generation
-	return &pt.Template.Spec, nil
-}
-
-// resolveScalableRef fetches the referenced workload using typed Gets and returns
-// both its pod template spec and current replica count.
-func (c *Controller) resolveScalableRef(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (*v1.PodSpec, int32, error) {
-	ref := cb.Spec.ScalableRef
-	key := types.NamespacedName{Name: ref.Name, Namespace: cb.Namespace}
-
-	podSpec, replicas, err := c.getWorkloadPodSpecAndReplicas(ctx, ref.APIGroup, ref.Kind, key)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonScalableRefNotFound,
-				fmt.Sprintf("%s %q not found in namespace %q", ref.Kind, ref.Name, cb.Namespace))
-		} else {
-			setCondition(cb, autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed,
-				fmt.Sprintf("Failed to get scalable resource: %v", err))
-		}
-		return nil, 0, err
-	}
-	return podSpec, replicas, nil
-}
-
-// getWorkloadPodSpecAndReplicas performs a typed Get for supported workload kinds
-// and returns the pod spec and replica count.
-func (c *Controller) getWorkloadPodSpecAndReplicas(ctx context.Context, apiGroup, kind string, key types.NamespacedName) (*v1.PodSpec, int32, error) {
-	group := apiGroup
-	if group == "" {
-		group = "apps"
-	}
-	if group != "apps" {
-		return nil, 0, fmt.Errorf("unsupported scalableRef kind %s/%s", apiGroup, kind)
-	}
-	switch kind {
-	case "Deployment":
-		obj := &appsv1.Deployment{}
-		if err := c.kubeClient.Get(ctx, key, obj); err != nil {
-			return nil, 0, err
-		}
-		return &obj.Spec.Template.Spec, replicaCount(obj.Spec.Replicas), nil
-	case "StatefulSet":
-		obj := &appsv1.StatefulSet{}
-		if err := c.kubeClient.Get(ctx, key, obj); err != nil {
-			return nil, 0, err
-		}
-		return &obj.Spec.Template.Spec, replicaCount(obj.Spec.Replicas), nil
-	case "ReplicaSet":
-		obj := &appsv1.ReplicaSet{}
-		if err := c.kubeClient.Get(ctx, key, obj); err != nil {
-			return nil, 0, err
-		}
-		return &obj.Spec.Template.Spec, replicaCount(obj.Spec.Replicas), nil
-	default:
-		return nil, 0, fmt.Errorf("unsupported scalableRef kind %s/%s", apiGroup, kind)
-	}
-}
-
-func replicaCount(r *int32) int32 {
-	if r == nil {
-		return 0
-	}
-	return *r
-}
-
-// calculateReplicas gathers all applicable constraints (fixed, percentage, limits)
-// and returns the minimum. scalableReplicas is the workload's current replica count
-// (from resolveScalableRef); it is 0 for podTemplateRef buffers.
-func (c *Controller) calculateReplicas(cb *autoscalingv1alpha1.CapacityBuffer, podSpec *v1.PodSpec, scalableReplicas int32) int32 {
-	var candidates []int32
-
-	if cb.Spec.Replicas != nil {
-		candidates = append(candidates, *cb.Spec.Replicas)
-	}
-
-	if cb.Spec.Percentage != nil && cb.Spec.ScalableRef != nil {
-		candidates = append(candidates, calculatePercentageReplicas(scalableReplicas, *cb.Spec.Percentage))
-	}
-
-	if cb.Spec.Limits != nil && podSpec != nil {
-		limitReplicas := calculateLimitReplicas(v1.ResourceList(cb.Spec.Limits), podSpec)
-		if limitReplicas >= 0 {
-			candidates = append(candidates, limitReplicas)
-		}
-	}
-
-	if len(candidates) == 0 {
-		return 0
-	}
-
-	result := candidates[0]
-	for _, c := range candidates[1:] {
-		if c < result {
-			result = c
-		}
-	}
-	return result
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
@@ -254,10 +116,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
-// podTemplateToBuffers returns reconcile requests for every CapacityBuffer in
-// the PodTemplate's namespace that references it via spec.podTemplateRef.
-// This keeps buffer status in sync with template changes without waiting for
-// the periodic requeue.
 func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object) []reconcile.Request {
 	buffers := &autoscalingv1alpha1.CapacityBufferList{}
 	if err := c.kubeClient.List(ctx, buffers, client.InNamespace(obj.GetNamespace())); err != nil {
@@ -274,4 +132,82 @@ func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object
 		})
 	}
 	return requests
+}
+
+// resolveAndUpdateStatus resolves the buffer's pod spec, computes replicas, and
+// updates status conditions. Returns (true, nil) on success, (false, nil) for
+// customer-induced errors (not found, unsupported kind), or (false, err) for
+// unexpected failures that should be retried.
+func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (bool, error) {
+	var podSpec *v1.PodSpec
+	var candidates []int32
+
+	switch {
+	case cb.Spec.PodTemplateRef != nil:
+		result, err := apps.ResolvePodTemplateRef(ctx, c.kubeClient, cb.Spec.PodTemplateRef.Name, cb.Namespace)
+		if err != nil {
+			return false, handleResolveError(cb, err, ReasonPodTemplateNotFound)
+		}
+		podSpec = &result.PodSpec
+		cb.Status.PodTemplateRef = &autoscalingv1alpha1.LocalObjectRef{Name: result.Name}
+		cb.Status.PodTemplateGeneration = &result.Generation
+
+	case cb.Spec.ScalableRef != nil:
+		result, err := apps.ResolveScalableRef(ctx, c.kubeClient, cb.Spec.ScalableRef, cb.Namespace)
+		if err != nil {
+			return false, handleResolveError(cb, err, ReasonScalableRefNotFound)
+		}
+		podSpec = &result.PodSpec
+		cb.Status.PodTemplateRef = nil
+		cb.Status.PodTemplateGeneration = nil
+		if cb.Spec.Percentage != nil && result.ScalableReplicas > 0 {
+			candidates = append(candidates, calculatePercentageReplicas(result.ScalableReplicas, *cb.Spec.Percentage))
+		}
+
+	default:
+		cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed, "Neither podTemplateRef nor scalableRef is set")
+		return false, nil
+	}
+
+	// Compute replicas from all applicable constraints.
+	if cb.Spec.Replicas != nil {
+		candidates = append(candidates, *cb.Spec.Replicas)
+	}
+	var replicas int32
+	if len(candidates) > 0 {
+		replicas = lo.Min(candidates)
+	}
+	replicas = applyLimits(replicas, cb.Spec.Limits, podSpec)
+
+	cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
+	cb.Status.Replicas = &replicas
+	return true, nil
+}
+
+// handleResolveError sets the ReadyForProvisioning condition to False and returns
+// nil for NotFound (customer error) or the original error for everything else (retry).
+func handleResolveError(cb *autoscalingv1alpha1.CapacityBuffer, err error, notFoundReason string) error {
+	reason := ReasonResolutionFailed
+	if errors.IsNotFound(err) {
+		reason = notFoundReason
+	}
+	cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, reason, err.Error())
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// applyLimits caps the replica count based on resource limits. If limits are not
+// set or don't overlap with pod requests, replicas is returned unchanged.
+func applyLimits(replicas int32, limits autoscalingv1alpha1.Limits, podSpec *v1.PodSpec) int32 {
+	if limits == nil || podSpec == nil {
+		return replicas
+	}
+	if limitReplicas, ok := calculateLimitReplicas(v1.ResourceList(limits), podSpec); ok {
+		if limitReplicas < replicas {
+			return limitReplicas
+		}
+	}
+	return replicas
 }
