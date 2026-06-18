@@ -6,7 +6,7 @@
 
 Karpenter currently treats native DaemonSet pods as node-associated overhead rather than normal workload demand. This proposal introduces `SystemWorkload` as the common model for describing additional pods that should receive similar treatment, and starts with a feature-gated, cluster-scoped CRD as the access mechanism for users and providers to supply that information.
 
-The first iteration is intentionally classification-focused. It does not introduce synthetic pod templates or generic custom-controller template extraction. Karpenter will not infer pre-provisioning overhead for never-observed `SystemWorkload` pods in this version.
+The first iteration is intentionally classification-focused. It does not introduce synthetic pod templates, proportional scaling models, or generic custom-controller template extraction. Karpenter will not infer pre-provisioning overhead for never-observed `SystemWorkload` pods in this version. Optional predictive models such as `scalingModel` for linear or ladder-scaled system workloads are left to a second phase.
 
 ## Motivation
 
@@ -40,7 +40,7 @@ The central requirement is consistency. Karpenter should classify selected daemo
 ## Non-Goals
 
 1. Full DaemonSet parity in the first iteration.
-2. Modeling resource overhead for a system workload before any matching pod has ever existed, unless Karpenter can derive that information from an existing built-in source such as a native DaemonSet.
+2. Modeling resource overhead for a system workload before any matching pod has ever existed, unless Karpenter can derive that information from an existing built-in source such as a native DaemonSet. Optional phase-two models may cover proportional workloads such as node/core-linear or ladder-scaled provider agents.
 3. Generic extraction of pod templates from arbitrary custom controller schemas.
 4. Provider-specific Go hooks in the initial API. Provider extension mechanisms may be considered later if declarative CRs are insufficient.
 5. Replacing native DaemonSet handling.
@@ -53,7 +53,7 @@ A `SystemWorkload` is the model Karpenter uses to classify additional daemon-lik
 
 A `SystemWorkload` tells Karpenter that matching pods should be treated similarly to DaemonSet pods for scheduling and disruption classification. The initial API intentionally does not include a pod template. Karpenter will only use resources from observed matching pods.
 
-The API supports label-based matching, annotation-based matching, and owner-reference matching. Owner-reference matching is important because many daemon-like controllers are controller identity problems rather than label problems: users may not control labels applied by upstream charts or synced pods.
+The API supports label-based matching, annotation-based matching, and owner-reference matching. Owner-reference matching is important because many daemon-like controllers are controller identity problems rather than label problems: users may not control labels applied by upstream charts or synced pods. Owner matching should follow controller owner chains where Karpenter can resolve the intermediate owners, so stable higher-level owners such as Deployments can be matched even when pod direct owners are rollout-specific ReplicaSets.
 
 ### API Design
 
@@ -86,7 +86,22 @@ spec:
     kind: AdvancedDaemonSet
 ```
 
-More selective owner-reference example:
+Deployment owner-chain example:
+
+```yaml
+apiVersion: karpenter.sh/v1alpha1
+kind: SystemWorkload
+metadata:
+  name: gke-konnectivity-agent
+spec:
+  ownerReference:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: konnectivity-agent
+    namespace: kube-system
+```
+
+More selective custom-controller example:
 
 ```yaml
 apiVersion: karpenter.sh/v1alpha1
@@ -124,7 +139,7 @@ Possible validation rules:
 - Empty selectors that match every pod in every namespace should be rejected unless the API explicitly adds an escape hatch later.
 - Invalid selector expressions should be rejected by CRD validation.
 - `ownerReference.apiVersion` and `ownerReference.kind` are required when `ownerReference` is set; `name` and `namespace` are optional narrowers.
-- Owner-reference matching is direct-only in the initial API. If a pod's direct owner is a ReplicaSet, matching a Deployment owner is not attempted. Deployment-style cases should use label or annotation selectors in the first version.
+- Owner-reference matching follows controller owner references from the pod toward higher-level owners when Karpenter can resolve the intermediate objects. This avoids requiring unstable rollout-specific objects such as ReplicaSets in rules. If an intermediate owner cannot be read or resolved, matching falls back to the resolved portion of the chain and should surface a debug log or condition when this prevents a configured rule from matching.
 
 ### Classification Semantics
 
@@ -132,7 +147,7 @@ Karpenter should classify a pod as a system workload if any of the following are
 
 1. The pod is owned by a native DaemonSet.
 2. The pod matches a `SystemWorkload` rule by `namespaceSelector` + `podSelector` and/or `annotationSelector`.
-3. The pod matches a `SystemWorkload` rule by direct owner reference.
+3. The pod matches a `SystemWorkload` rule by owner reference, either directly or through the resolved controller owner chain.
 
 This classification should be centralized so the same result is used by provisioning, disruption, and cluster state. The classifier is a pure OR across sources. If multiple sources match the same pod, the pod is still classified once; overlaps are operationally useful but not semantically conflicting.
 
@@ -142,7 +157,7 @@ Conceptually:
 func IsSystemWorkloadPod(pod *corev1.Pod, systemWorkloads []SystemWorkload) bool {
     return IsOwnedByDaemonSet(pod) ||
         MatchesSystemWorkloadSelector(pod, systemWorkloads) ||
-        MatchesSystemWorkloadOwnerReference(pod, systemWorkloads)
+        MatchesSystemWorkloadOwnerChain(pod, systemWorkloads)
 }
 ```
 
@@ -168,7 +183,7 @@ This keeps lifecycle semantics in Karpenter core while making the classifier ext
 
 ### Implementation Architecture
 
-The classifier cannot live only as a stateless helper in `pkg/utils/pod`, because it depends on `SystemWorkload` objects, namespace labels, and the feature gate. Instead, Karpenter should introduce a small classification component that is constructed from shared informer/cache state and injected into the controllers that need it.
+The classifier cannot live only as a stateless helper in `pkg/utils/pod`, because it depends on `SystemWorkload` objects, namespace labels, owner-chain resolution, and the feature gate. Instead, Karpenter should introduce a small classification component that is constructed from shared informer/cache state and injected into the controllers that need it.
 
 At minimum, the classifier should be used by:
 
@@ -179,7 +194,7 @@ At minimum, the classifier should be used by:
 
 `pod.IsProvisionable()` and `pod.IsReschedulable()` can keep the core pod-lifecycle checks, but the DaemonSet exclusion should move behind the injected classifier at call sites that need `SystemWorkload` awareness.
 
-When a `SystemWorkload` or matched Namespace changes, Karpenter should invalidate affected classification state and reclassify existing pods. For cluster-state accounting, that means removing pods from their previous accounting bucket and adding them to the new one, rather than waiting for pod churn.
+When a `SystemWorkload`, matched Namespace, or resolved owner object changes, Karpenter should invalidate affected classification state and reclassify existing pods. For cluster-state accounting, that means removing pods from their previous accounting bucket and adding them to the new one, rather than waiting for pod churn. Owner-chain traversal should be bounded to controller owners, use cached objects where possible, and document any RBAC or watch requirements for non-core owner types.
 
 ### Provisioning Behavior
 
@@ -192,7 +207,9 @@ There are two observed cases:
 1. Bound matching pods contribute to system workload accounting on their current node.
 2. Pending matching pods do not trigger scale-out alone, but if a provisioning batch is already triggered by normal workload pods, Karpenter may include the matching pending system pods in the scheduling simulation so their actual resource requests, host ports, and scheduling constraints are considered when choosing new capacity.
 
-This opportunistic pending-pod modeling uses the actual admitted pod spec and avoids introducing templates in the first iteration. It still does not provide full DaemonSet parity: Karpenter cannot model a system workload that has not produced a pod yet, and it cannot infer per-node overhead for every future NodeClaim without a template, controller-specific discovery, or provider-supplied model. This limitation should be addressed by a follow-up design if needed.
+This opportunistic pending-pod modeling uses the actual admitted pod spec and avoids introducing templates in the first iteration. It still does not provide full DaemonSet parity: Karpenter cannot model a system workload that has not produced a pod yet, and it cannot infer per-node or cluster-proportional overhead for future NodeClaims without a template, controller-specific discovery, or provider-supplied model.
+
+A second phase may add optional predictive inputs, such as a `scalingModel` for node/core-linear workloads like kube-dns or ladder-scaled provider agents like konnectivity-agent. Those models should feed the same classifier and scheduling paths, but they are intentionally outside this classification-first API so the initial proposal does not require Karpenter to standardize arbitrary autoscaler behavior.
 
 ### Disruption Behavior
 
@@ -266,10 +283,10 @@ Docs should explicitly warn that matching normal application Deployments means t
 `SystemWorkload` should start as `karpenter.sh/v1alpha1` behind a default-off feature gate. Before beta graduation, the project should resolve:
 
 1. final naming for the concept and API kind;
-2. whether selector-only + owner-reference classification is sufficient, or whether pre-provisioning overhead requires templates/template references;
+2. whether selector-only + owner-reference classification is sufficient, or whether pre-provisioning overhead requires templates/template references or optional scaling models;
 3. the public metric names for system workload accounting;
 4. provider default ownership and opt-out expectations;
-5. whether a future version should add owner-chain traversal for higher-level controllers such as Deployment.
+5. the watch, cache, and RBAC expectations for owner-chain traversal, especially for non-built-in controller types.
 
 ## Alternatives Considered
 
@@ -348,7 +365,7 @@ The primary compatibility risk is operator misconfiguration: an overly broad rul
 4. Wire the classifier into provisioning, disruption, PDB/reschedulability helpers, and cluster-state accounting.
 5. Add metrics/logs/status conditions for rule acceptance and pod classification.
 6. Document provider guidance for supplying default `SystemWorkload` rules.
-7. Gather user/provider feedback before considering templates, template references, or duck-typed controller discovery. A provider Go hook may be included earlier if maintainers want a first-class provider integration in addition to CR-backed rules.
+7. Gather user/provider feedback before considering templates, template references, optional scaling models for proportional system workloads, or duck-typed controller discovery. A provider Go hook may be included earlier if maintainers want a first-class provider integration in addition to CR-backed rules.
 
 ## Testing Strategy
 
@@ -356,7 +373,8 @@ Unit tests should cover:
 
 - pending matching pods do not trigger provisioning;
 - bound matching pods are not reschedulable workload pods;
-- owner-reference matching works for configured GVKs;
+- owner-reference matching works for configured GVKs, including controller owner chains such as Pod -> ReplicaSet -> Deployment;
+- unresolved owner-chain intermediates fail safely and produce useful diagnostics;
 - label + namespace selector matching works with Kubernetes-style selectors;
 - observed matching pods contribute to system/daemon resource accounting;
 - broad/invalid selectors are rejected;
@@ -375,27 +393,29 @@ Integration or simulation tests should cover:
 Future versions may add:
 
 1. explicit pod templates or template references for pre-provisioning overhead modeling;
-2. duck-typed discovery of custom controller resources that expose selectors and pod templates;
-3. a provider extension interface that returns `SystemWorkload`-like specs directly into the same classifier, if not included in the initial implementation;
-4. richer status or metrics once real-world debugging needs are understood;
-5. owner-chain traversal if direct owner-reference matching is insufficient.
+2. optional `scalingModel` inputs for cluster-proportional system workloads, including node/core-linear and ladder-based models;
+3. duck-typed discovery of custom controller resources that expose selectors and pod templates;
+4. a provider extension interface that returns `SystemWorkload`-like specs directly into the same classifier, if not included in the initial implementation;
+5. richer status or metrics once real-world debugging needs are understood.
 
 ## Limitations
 
 1. `SystemWorkload` selectors and owner-reference rules alone cannot model overhead for pods that do not exist yet.
 2. If a system workload has never been observed on a node, Karpenter cannot infer its resource requests from this CRD.
-3. Incorrect rules can cause application pods to be ignored by provisioning or disruption simulations. Validation, metrics, logs, and status conditions should help users detect broad or unused rules.
-4. Existing metrics and internal names that reference DaemonSets may become less precise if reused for generalized system workload accounting.
-5. Owner-reference matching is direct-only in the first version, so it will not catch higher-level owners if the pod's direct owner is an intermediate controller such as ReplicaSet. These cases should use selectors unless a future version adds owner-chain traversal.
+3. Classification-only rules do not model cluster-proportional scaling behavior, such as node/core-linear kube-dns replicas or ladder-scaled konnectivity-agent replicas. Those require optional phase-two scaling models or provider-supplied predictive inputs.
+4. Incorrect rules can cause application pods to be ignored by provisioning or disruption simulations. Validation, metrics, logs, and status conditions should help users detect broad or unused rules.
+5. Existing metrics and internal names that reference DaemonSets may become less precise if reused for generalized system workload accounting.
+6. Owner-reference traversal depends on Karpenter being able to resolve intermediate owner objects. Rules may fail to match through an owner chain if an intermediate owner type is not watched, cached, or readable under Karpenter's RBAC.
 
 ## Open Questions
 
 1. Naming: should the concept be called `SystemWorkload`, `NodeAssociatedWorkload`, `InfrastructureWorkload`, `DaemonWorkload`, or something else?
 2. Should matching pods be accounted under existing daemon metrics, or should metrics be renamed/generalized?
-3. Should a future version add explicit pod templates, template references, or duck-typed controller discovery for pre-provisioning overhead modeling?
-4. Should providers eventually have an optional extension interface to supply system workload selectors directly to Karpenter core, or should providers continue to create `SystemWorkload` CRs?
+3. Should a future version add explicit pod templates, template references, duck-typed controller discovery, or optional `scalingModel` inputs for pre-provisioning overhead modeling?
+4. Should providers eventually have an optional extension interface to supply system workload selectors or predictive scaling models directly to Karpenter core, or should providers continue to create `SystemWorkload` CRs?
 5. How should Karpenter protect users from overly broad selectors that accidentally classify application pods as system workloads?
-6. Should a future version add owner-chain traversal for controllers such as ReplicaSet -> Deployment?
+6. How broad should owner-chain traversal be, and which owner types should Karpenter watch or resolve by default?
+7. Which proportional scaling shapes, if any, should be standardized in a phase-two API, such as node/core-linear and ladder-based replica models?
 
 ## References
 
