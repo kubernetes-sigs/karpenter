@@ -19,7 +19,6 @@ package dynamicresources
 import (
 	"context"
 	"fmt"
-	"unique"
 
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -82,7 +81,7 @@ func ValidateClaimRequest(
 	bindingFallback *AttributeBindingFallback,
 ) (*ClaimData, error) {
 	data := &ClaimData{
-		ID: unique.Make(claim.Name),
+		ID: resourceClaimID(claim),
 	}
 
 	// Build constraints.
