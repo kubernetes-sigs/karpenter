@@ -50,6 +50,7 @@ type OptionsFields struct {
 	BatchIdleDuration                *time.Duration
 	IgnoreDRARequests                *bool
 	FeatureGates                     FeatureGates
+	ScaleDownUtilizationThreshold    *float64
 }
 
 type FeatureGates struct {
@@ -95,5 +96,6 @@ func Options(overrides ...OptionsFields) *options.Options {
 			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
 			StaticCapacity:          lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
 		},
+		ScaleDownUtilizationThreshold: lo.FromPtrOr(opts.ScaleDownUtilizationThreshold, 0.75),
 	}
 }

@@ -89,6 +89,7 @@ type Options struct {
 	MinValuesPolicy                  MinValuesPolicy
 	IgnoreDRARequests                bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
 	FeatureGates                     FeatureGates
+	ScaleDownUtilizationThreshold    float64
 }
 
 type FlagSet struct {
@@ -131,6 +132,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, and StaticCapacity.")
+	fs.Float64Var(&o.ScaleDownUtilizationThreshold, "scaledown-utilization-threshold", env.WithDefaultFloat64("SCALE_DOWN_UTILIZATION_THRESHOLD", 0.75), "Nodes with resource utilization above this threshold will not be considered for consolidation disruption. Set to 1.0 to disable. Value must be between 0.0 and 1.0.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -151,6 +153,9 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	}
 	if o.CPURequests <= 0 {
 		o.CPURequests = 1000
+	}
+	if o.ScaleDownUtilizationThreshold < 0 || o.ScaleDownUtilizationThreshold > 1 {
+		return fmt.Errorf("validating cli flags / env vars, SCALE_DOWN_UTILIZATION_THRESHOLD must be between 0.0 and 1.0, got %f", o.ScaleDownUtilizationThreshold)
 	}
 	gates, err := ParseFeatureGates(o.FeatureGates.inputStr)
 	if err != nil {
