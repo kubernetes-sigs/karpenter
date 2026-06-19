@@ -90,6 +90,7 @@ type options struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+	initialPodErrors        map[types.UID]error // scheduling errors to seed before queue construction
 }
 
 type Options = option.Function[options]
@@ -114,6 +115,12 @@ var MinValuesPolicy = func(policy karpopts.MinValuesPolicy) func(*options) {
 	}
 }
 
+var InitialPodErrors = func(podErrors map[types.UID]error) func(*options) {
+	return func(opts *options) {
+		opts.initialPodErrors = podErrors
+	}
+}
+
 func NewScheduler(
 	ctx context.Context,
 	kubeClient client.Client,
@@ -128,7 +135,8 @@ func NewScheduler(
 	volumeReqsByPod map[types.UID][]scheduling.Requirements,
 	opts ...Options,
 ) *Scheduler {
-	minValuesPolicy := option.Resolve(opts...).minValuesPolicy
+	resolvedOptions := option.Resolve(opts...)
+	minValuesPolicy := resolvedOptions.minValuesPolicy
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
@@ -168,6 +176,7 @@ func NewScheduler(
 		daemonHostPortUsage: getDaemonHostPortUsage(ctx, templates, daemonSetPods),
 		cachedPodData:       map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
 		volumeReqsByPod:     volumeReqsByPod,          // Volume requirements per pod
+		initialPodErrors:    resolvedOptions.initialPodErrors,
 		recorder:            recorder,
 		preferences:         &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
@@ -175,10 +184,10 @@ func NewScheduler(
 		}),
 		clock:                   clock,
 		reservationManager:      NewReservationManager(instanceTypes),
-		reservedOfferingMode:    option.Resolve(opts...).reservedOfferingMode,
-		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
+		reservedOfferingMode:    resolvedOptions.reservedOfferingMode,
+		preferencePolicy:        resolvedOptions.preferencePolicy,
 		minValuesPolicy:         minValuesPolicy,
-		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
+		numConcurrentReconciles: lo.Ternary(resolvedOptions.numConcurrentReconciles > 0, resolvedOptions.numConcurrentReconciles, 1),
 	}
 	s.calculateExistingNodeClaims(ctx, stateNodes, daemonSetPods)
 	return s
@@ -200,8 +209,9 @@ type Scheduler struct {
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead          map[*NodeClaimTemplate]corev1.ResourceList
 	daemonHostPortUsage     map[*NodeClaimTemplate]*scheduling.HostPortUsage
-	cachedPodData           map[types.UID]*PodData                  // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
+	cachedPodData           map[types.UID]*PodData                  // cached data for pods to avoid re-computation and memory usage
 	volumeReqsByPod         map[types.UID][]scheduling.Requirements // Volume topology requirement alternatives per pod
+	initialPodErrors        map[types.UID]error                     // scheduling errors known before running the scheduler queue
 	preferences             *Preferences
 	topology                *Topology
 	cluster                 *state.Cluster
@@ -379,6 +389,7 @@ func (r Results) TruncateInstanceTypes(ctx context.Context, maxInstanceTypes int
 	return r
 }
 
+//nolint:gocyclo
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -387,20 +398,25 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	// had 5xA pods and 5xB pods were they have a zonal topology spread, but A can only go in one zone and B in another.
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
 	podErrors := map[*corev1.Pod]error{}
+	schedulablePods := make([]*corev1.Pod, 0, len(pods))
 	// Reset the metric for the controller, so we don't keep old ids around
 	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	PendingPodsByEffectiveZone.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	podCountByZone := make(map[string]int)
 	for _, p := range pods {
+		if err, ok := s.initialPodErrors[p.UID]; ok {
+			podErrors[p] = err
+			continue
+		}
 		s.updateCachedPodData(p)
 		if p.Status.Phase == corev1.PodPending {
 			zone := s.computeEffectiveZoneFromPod(p)
 			podCountByZone[zone]++
 		}
+		schedulablePods = append(schedulablePods, p)
 	}
-
-	q := NewQueue(pods, s.cachedPodData)
+	q := NewQueue(schedulablePods, s.cachedPodData)
 
 	startTime := s.clock.Now()
 	for {

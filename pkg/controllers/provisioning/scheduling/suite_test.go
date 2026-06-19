@@ -3085,6 +3085,69 @@ var _ = Context("Scheduling", func() {
 			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-1"))
 			Expect(node.Labels).To(HaveKeyWithValue(fake.ExoticInstanceLabelKey, "optional"))
 		})
+		It("should mark pods unschedulable when all multi-volume topology alternatives are disjoint", func() {
+			const rackTopologyKey = "topology.custom.csi/rack"
+
+			scA := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta:        metav1.ObjectMeta{Name: "all-pruned-a"},
+				VolumeBindingMode: new(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: rackTopologyKey, Values: []string{"rack-1"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: rackTopologyKey, Values: []string{"rack-2"}}}},
+				},
+			})
+			scB := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta:        metav1.ObjectMeta{Name: "all-pruned-b"},
+				VolumeBindingMode: new(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: rackTopologyKey, Values: []string{"rack-3"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: rackTopologyKey, Values: []string{"rack-4"}}}},
+				},
+			})
+			pvcA := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta:       metav1.ObjectMeta{Name: "all-pruned-pvc-a"},
+				StorageClassName: new(scA.Name),
+			})
+			pvcB := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta:       metav1.ObjectMeta{Name: "all-pruned-pvc-b"},
+				StorageClassName: new(scB.Name),
+			})
+			invalidPod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:             metav1.ObjectMeta{Name: "all-pruned-pod"},
+				PersistentVolumeClaims: []string{pvcA.Name, pvcB.Name},
+			})
+			validPod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Name: "valid-pod"},
+			})
+			decisionMetric, _ := FindMetricWithLabelValues("karpenter_pods_scheduling_decision_duration_seconds", nil)
+			decisionMetricSampleCount := uint64(0)
+			if decisionMetric != nil {
+				decisionMetricSampleCount = lo.FromPtr(decisionMetric.Histogram.SampleCount)
+			}
+
+			cluster.AckPods(invalidPod, validPod)
+			env.Clock.Step(time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, scA, scB, pvcA, pvcB, invalidPod, validPod)
+			results, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(results.PodErrors).To(HaveLen(1))
+			Expect(lo.Map(lo.Keys(results.PodErrors), func(p *corev1.Pod, _ int) string { return p.Name })).To(ConsistOf(invalidPod.Name))
+			Expect(lo.Values(results.PodErrors)[0].Error()).To(ContainSubstring("incompatible volume topology requirements"))
+			Expect(lo.Values(results.PodErrors)[0].Error()).To(ContainSubstring("all 4 combinations are incompatible"))
+			Expect(lo.Values(results.PodErrors)[0].Error()).To(ContainSubstring(fmt.Sprintf("topology keys [%s]", rackTopologyKey)))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(lo.Map(results.NewNodeClaims[0].Pods, func(p *corev1.Pod, _ int) string { return p.Name })).To(ConsistOf(validPod.Name))
+			Expect(cluster.PodSchedulingDecisionTime(client.ObjectKeyFromObject(invalidPod)).IsZero()).To(BeFalse())
+
+			m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", map[string]string{"controller": "provisioner"})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 1))
+			ExpectMetricGaugeValue(scheduling.IgnoredPodCount, 0, nil)
+			decisionMetric, ok = FindMetricWithLabelValues("karpenter_pods_scheduling_decision_duration_seconds", nil)
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(decisionMetric.Histogram.SampleCount)).To(BeNumerically("==", decisionMetricSampleCount+2))
+		})
 		It("should launch nodes for pods with ephemeral volume using the specified storage class name", func() {
 			// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
 			sc := test.StorageClass(test.StorageClassOptions{
