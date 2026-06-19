@@ -5083,6 +5083,67 @@ var _ = Context("Scheduling", func() {
 		})
 	})
 	Describe("NodePool requirements instance filtering", func() {
+		It("should include the NodePool in scheduling errors from nodeclaim templates", func() {
+			nodePool = test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "tainted-nodepool"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{{
+								Key:    "example.com/dedicated",
+								Value:  "spark",
+								Effect: corev1.TaintEffectNoSchedule,
+							}},
+						},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			pod := test.UnschedulablePod()
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.PodErrors).To(HaveLen(1))
+			err := lo.Values(results.PodErrors)[0].Error()
+			Expect(err).To(ContainSubstring("NodePool=tainted-nodepool"))
+			Expect(err).To(ContainSubstring("did not tolerate taint"))
+		})
+		It("should surface resource mismatches before taint errors across NodePools", func() {
+			resourceNodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "resource-nodepool"},
+			})
+			taintedNodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "tainted-nodepool"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{{
+								Key:    "example.com/dedicated",
+								Value:  "spark",
+								Effect: corev1.TaintEffectNoSchedule,
+							}},
+						},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, taintedNodePool, resourceNodePool)
+
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceMemory: resource.MustParse("2Ti"),
+					},
+				},
+			})
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.PodErrors).To(HaveLen(1))
+
+			err := lo.Values(results.PodErrors)[0].Error()
+			Expect(err).To(ContainSubstring("no instance type has enough resources"))
+			Expect(err).To(ContainSubstring("did not tolerate taint"))
+			Expect(err).To(ContainSubstring("NodePool=resource-nodepool"))
+			Expect(err).To(ContainSubstring("NodePool=tainted-nodepool"))
+			Expect(err).To(MatchRegexp(`no instance type has enough resources.*did not tolerate taint`))
+		})
 		It("should return appropriate pod error when no available instance types exist", func() {
 			// First, verify the nodepool is ready and can schedule pods normally
 			ExpectApplied(ctx, env.Client, nodePool)

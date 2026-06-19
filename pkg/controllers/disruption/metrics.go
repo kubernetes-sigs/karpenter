@@ -43,7 +43,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "decision_evaluation_duration_seconds",
-			Help:      "Duration of the disruption decision evaluation process in seconds. Labeled by method and consolidation type.",
+			Help:      "Duration of the disruption decision evaluation process in seconds. Labeled by reason and consolidation type.",
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{metrics.ReasonLabel, ConsolidationTypeLabel},
