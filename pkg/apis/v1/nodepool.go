@@ -93,12 +93,14 @@ type Disruption struct {
 	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
 	//nolint:kubeapilinter
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
-	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified
-	// When replicas is set, ConsolidationPolicy is simply ignored
+	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified.
+	// Valid values: "WhenEmpty", "WhenEmptyOrUnderutilized", "Balanced".
+	// When replicas is set, ConsolidationPolicy is simply ignored.
 	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
-	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized}
+	// +kubebuilder:validation:Enum:=WhenEmpty;WhenEmptyOrUnderutilized;Balanced
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
+	//nolint:kubeapilinter
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,
@@ -159,7 +161,19 @@ type ConsolidationPolicy string
 const (
 	ConsolidationPolicyWhenEmpty                ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenEmptyOrUnderutilized ConsolidationPolicy = "WhenEmptyOrUnderutilized"
+	ConsolidationPolicyBalanced                 ConsolidationPolicy = "Balanced"
 )
+
+// BalancedK is the scoring parameter for the Balanced policy. A move is
+// approved when score >= 1/k = 0.5. k=2 is the smallest value where
+// within-family replaces pass, with 4-step max churn. See
+// designs/balanced-consolidation.md "Why k=2".
+const BalancedK int32 = 2
+
+// IsBalanced returns true for the Balanced consolidation policy.
+func (p ConsolidationPolicy) IsBalanced() bool {
+	return p == ConsolidationPolicyBalanced
+}
 
 // DisruptionReason defines valid reasons for disruption budgets.
 // +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
