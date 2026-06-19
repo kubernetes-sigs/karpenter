@@ -59,6 +59,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	recorder = test.NewEventRecorder()
@@ -216,7 +217,7 @@ var _ = Describe("Eviction/Queue", func() {
 			// Note: DeletionGracePeriodSeconds on the re-fetched pod may be 0 because the API
 			// server recomputes it as floor(DeletionTimestamp-now()); with a 1s grace period it
 			// decays to 0 during the round-trip. The event message is captured at delete time.
-			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
+			Expect(recorder.Calls("Disrupted")).To(Equal(1))
 			evts := recorder.Events()
 			Expect(evts).To(HaveLen(1))
 			Expect(evts[0].Message).To(ContainSubstring("granted 1 seconds of grace-period"))
