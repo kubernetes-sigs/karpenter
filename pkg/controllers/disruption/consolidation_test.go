@@ -4951,6 +4951,128 @@ var _ = Describe("Consolidation", func() {
 			})).To(HaveLen(2))
 		})
 	})
+	Context("Buffer Pods", func() {
+		It("should not empty-consolidate a node with only buffer pods", func() {
+			// Node has no real pods but has buffer pods — should NOT be deleted.
+			// Single/multi consolidation skips it (reschedulablePods==0).
+			// Emptiness would catch it, but HasBufferPods blocks.
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 5,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Node should still exist
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+
+		It("should allow consolidation of a node with real pods and buffer pods to a cheaper instance", func() {
+			// An expensive node with a small real pod + buffer pods. The consolidation
+			// simulation already includes virtual pods in pending (via GetPendingPods).
+			// A cheaper replacement that fits both real + virtual pods is legitimate.
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// Node hosts buffer pods (but also has a real pod making it a consolidation candidate)
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 2,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// The node is on the most expensive instance type with only 1 CPU pod.
+			// Consolidation should propose a cheaper replacement.
+			cmds := queue.GetCommands()
+			Expect(len(cmds)).To(BeNumerically(">=", 1))
+		})
+
+		It("should skip buffer-only nodes in single-node consolidation but protect via emptiness", func() {
+			// Two nodes: node1 has only buffer pods, node2 has a real pod.
+			// node1 should not appear in any consolidation command.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
+
+			// Only node2 gets a real pod
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1], pod)
+			ExpectManualBinding(ctx, env.Client, pod, nodes[1])
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			// node1 has only buffer pods, node2 has real pod + buffer pods
+			cluster.UpdateBufferPodCounts(map[string]int{
+				nodes[0].Spec.ProviderID: 4,
+				nodes[1].Spec.ProviderID: 2,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// node1 (buffer-only) should never be in a consolidation command
+			cmds := queue.GetCommands()
+			for _, cmd := range cmds {
+				for _, c := range cmd.Candidates {
+					Expect(c.Name()).ToNot(Equal(nodes[0].Name),
+						"buffer-only node should not be a consolidation candidate")
+				}
+			}
+			// node1 should still exist (protected by emptiness buffer check)
+			ExpectExists(ctx, env.Client, nodeClaims[0])
+		})
+
+		It("should consolidate a buffer node once buffer pods are cleared", func() {
+			// Node previously had buffer pods, now they're cleared — it becomes
+			// eligible for empty consolidation.
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// First pass: buffer pods present → protected
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 3,
+			})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+
+			// Second pass: buffer deleted → counts cleared
+			cluster.UpdateBufferPodCounts(map[string]int{})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		})
+	})
 	Context("Static NodePool", func() {
 		It("should not consolidate static NodePool nodes", func() {
 			staticNp := test.StaticNodePool(v1.NodePool{
