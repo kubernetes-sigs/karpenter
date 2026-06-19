@@ -96,9 +96,10 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		}
 
 		cmd := Command{
-			Candidates:   []*Candidate{candidate},
-			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
-			Results:      results,
+			Candidates:          []*Candidate{candidate},
+			Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
+			Results:             results,
+			PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
 		}
 		return []Command{cmd}, nil
 
