@@ -14,8 +14,8 @@ bin/
 .idea
 .vscode
 .DS_Store
-.kiro
-.claude
+.kiro*
+.claude*
 
 # Vim swap files
 *.swp

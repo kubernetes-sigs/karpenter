@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -55,6 +56,10 @@ var _ = Describe("ResourceSlice Interface", func() {
 								"gpu.nvidia.com/model":  {StringValue: ptr.To("H100")},
 								"gpu.nvidia.com/memory": {IntValue: ptr.To(int64(80))},
 							},
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.nvidia.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+							AllowMultipleAllocations: ptr.To(true),
 						},
 						{
 							Name: "gpu-1",
@@ -62,6 +67,7 @@ var _ = Describe("ResourceSlice Interface", func() {
 								"gpu.nvidia.com/model":  {StringValue: ptr.To("H100")},
 								"gpu.nvidia.com/memory": {IntValue: ptr.To(int64(80))},
 							},
+							AllowMultipleAllocations: nil,
 						},
 					},
 				},
@@ -81,14 +87,19 @@ var _ = Describe("ResourceSlice Interface", func() {
 			Expect(slice.Potential()).To(BeFalse())
 		})
 
-		It("should convert devices with interned names and attributes", func() {
+		It("should convert devices with interned names, attributes, capacity, and AllowMultipleAllocations", func() {
 			devices := slice.Devices()
 			Expect(devices).To(HaveLen(2))
 			Expect(devices[0].Name).To(Equal(unique.Make("gpu-0")))
 			Expect(devices[0].Attributes).To(HaveLen(2))
 			Expect(devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal(ptr.To("H100")))
 			Expect(devices[0].Attributes["gpu.nvidia.com/memory"].IntValue).To(Equal(ptr.To(int64(80))))
+			Expect(devices[0].Capacity).To(HaveLen(1))
+			Expect(devices[0].Capacity["gpu.nvidia.com/vram"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+			Expect(devices[0].AllowMultipleAllocations).To(BeTrue())
 			Expect(devices[1].Name).To(Equal(unique.Make("gpu-1")))
+			Expect(devices[1].Capacity).To(BeEmpty())
+			Expect(devices[1].AllowMultipleAllocations).To(BeFalse())
 		})
 
 		It("should cache devices on repeated calls", func() {
@@ -140,6 +151,50 @@ var _ = Describe("ResourceSlice Interface", func() {
 			slice = dynamicresources.NewAPIServerSlice(apiSlice)
 			Expect(slice.Devices()).To(BeEmpty())
 		})
+
+		It("should convert devices with ConsumesCounters", func() {
+			apiSlice.Spec.Devices = []resourcev1.Device{
+				{
+					Name: "mig-3g.40gb-0",
+					ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+						{
+							CounterSet: "gpu-slices",
+							Counters: map[string]resourcev1.Counter{
+								"memory":        {Value: resource.MustParse("40Gi")},
+								"compute-units": {Value: resource.MustParse("3")},
+							},
+						},
+					},
+				},
+			}
+			slice = dynamicresources.NewAPIServerSlice(apiSlice)
+			devices := slice.Devices()
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].ConsumesCounters).To(HaveLen(1))
+			Expect(devices[0].ConsumesCounters[0].CounterSet).To(Equal("gpu-slices"))
+			Expect(devices[0].ConsumesCounters[0].Counters).To(HaveLen(2))
+			Expect(devices[0].ConsumesCounters[0].Counters["memory"].Value.Equal(resource.MustParse("40Gi"))).To(BeTrue())
+			Expect(devices[0].ConsumesCounters[0].Counters["compute-units"].Value.Equal(resource.MustParse("3"))).To(BeTrue())
+		})
+
+		It("should return SharedCounters from the API object", func() {
+			apiSlice.Spec.SharedCounters = []resourcev1.CounterSet{
+				{
+					Name: "gpu-slices",
+					Counters: map[string]resourcev1.Counter{
+						"memory":        {Value: resource.MustParse("80Gi")},
+						"compute-units": {Value: resource.MustParse("7")},
+					},
+				},
+			}
+			slice = dynamicresources.NewAPIServerSlice(apiSlice)
+			counters := slice.SharedCounters()
+			Expect(counters).To(HaveLen(1))
+			Expect(counters[0].Name).To(Equal("gpu-slices"))
+			Expect(counters[0].Counters).To(HaveLen(2))
+			Expect(counters[0].Counters["memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+		})
+
 	})
 
 	Describe("TemplateSlice", func() {
@@ -158,6 +213,10 @@ var _ = Describe("ResourceSlice Interface", func() {
 						Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
 							"gpu.nvidia.com/model": {StringValue: ptr.To("A100")},
 						},
+						Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+							"gpu.nvidia.com/memory": {Value: resource.MustParse("80Gi")},
+						},
+						AllowMultipleAllocations: true,
 					},
 				},
 			}
@@ -181,6 +240,9 @@ var _ = Describe("ResourceSlice Interface", func() {
 			Expect(devices).To(HaveLen(1))
 			Expect(devices[0].Name).To(Equal(unique.Make("gpu-0")))
 			Expect(devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal(ptr.To("A100")))
+			Expect(devices[0].Capacity).To(HaveLen(1))
+			Expect(devices[0].Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+			Expect(devices[0].AllowMultipleAllocations).To(BeTrue())
 		})
 
 		It("should return nil NodeSelector", func() {
@@ -189,6 +251,48 @@ var _ = Describe("ResourceSlice Interface", func() {
 
 		It("should return false for AllNodes", func() {
 			Expect(slice.AllNodes()).To(BeFalse())
+		})
+
+		It("should return SharedCounters from the template", func() {
+			template.SharedCounters = []resourcev1.CounterSet{
+				{
+					Name: "gpu-slices",
+					Counters: map[string]resourcev1.Counter{
+						"memory":        {Value: resource.MustParse("80Gi")},
+						"compute-units": {Value: resource.MustParse("7")},
+					},
+				},
+			}
+			slice = dynamicresources.NewTemplateSlice(template)
+			counters := slice.SharedCounters()
+			Expect(counters).To(HaveLen(1))
+			Expect(counters[0].Name).To(Equal("gpu-slices"))
+			Expect(counters[0].Counters).To(HaveLen(2))
+			Expect(counters[0].Counters["memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+		})
+
+		It("should return devices with ConsumesCounters", func() {
+			template.Devices = []cloudprovider.Device{
+				{
+					Name: unique.Make("mig-3g.40gb-0"),
+					ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+						{
+							CounterSet: "gpu-slices",
+							Counters: map[string]resourcev1.Counter{
+								"memory":        {Value: resource.MustParse("40Gi")},
+								"compute-units": {Value: resource.MustParse("3")},
+							},
+						},
+					},
+				},
+			}
+			slice = dynamicresources.NewTemplateSlice(template)
+			devices := slice.Devices()
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].ConsumesCounters).To(HaveLen(1))
+			Expect(devices[0].ConsumesCounters[0].CounterSet).To(Equal("gpu-slices"))
+			Expect(devices[0].ConsumesCounters[0].Counters["memory"].Value.Equal(resource.MustParse("40Gi"))).To(BeTrue())
+			Expect(devices[0].ConsumesCounters[0].Counters["compute-units"].Value.Equal(resource.MustParse("3"))).To(BeTrue())
 		})
 	})
 })
