@@ -806,6 +806,157 @@ var _ = Describe("CapacityBuffer", func() {
 			}).WithTimeout(5 * time.Minute).Should(Succeed())
 		})
 
+		It("should coexist with real pods on the same node", func() {
+			// Deploy a small real pod first
+			dep := test.Deployment(test.DeploymentOptions{
+				Replicas: 1,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "coexist"}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("100m"),
+							corev1.ResourceMemory: resource.MustParse("128Mi"),
+						},
+					},
+				},
+			})
+			env.ExpectCreated(dep)
+			selector := labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, selector, 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+
+			// Now create a buffer — virtual pods should pack onto the same node
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "coexist-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			}
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			// Buffer should become provisioned (virtual pod fits alongside real pod)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			// Real pod should still be healthy
+			env.EventuallyExpectHealthyPodCountWithTimeout(30*time.Second, selector, 1)
+		})
+
+		It("should respect nodeSelector from PodTemplate", func() {
+			// Create a PodTemplate with a nodeSelector
+			selectorTemplate := &corev1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "selector-template",
+					Namespace: "default",
+				},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{
+							Name:  "pause",
+							Image: "registry.k8s.io/pause:3.10",
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("1"),
+									corev1.ResourceMemory: resource.MustParse("512Mi"),
+								},
+							},
+						}},
+						NodeSelector: map[string]string{
+							"kubernetes.io/os": "linux",
+						},
+					},
+				},
+			}
+
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "selector-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "selector-template"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			}
+
+			env.ExpectCreated(selectorTemplate, buffer)
+
+			// Buffer should provision — nodeSelector is preserved and matches NodePool
+			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			// Verify the node has the expected label
+			nodes := env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Expect(nodes[0].Labels["kubernetes.io/os"]).To(Equal("linux"))
+		})
+
+		It("should refill buffer after node expiry", func() {
+			// Use a short expiry
+			nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("1m")
+			env.ExpectUpdated(nodePool)
+
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "expiry-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			// Wait for initial capacity
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			originalName := nodeClaims[0].Name
+
+			// Wait for expiry to replace the node (1m expiry + processing time)
+			Eventually(func(g Gomega) {
+				nc := &v1.NodeClaim{}
+				err := env.Client.Get(env, client.ObjectKey{Name: originalName}, nc)
+				if err == nil {
+					g.Expect(nc.DeletionTimestamp.IsZero()).To(BeFalse())
+				}
+			}).WithTimeout(3 * time.Minute).Should(Succeed())
+
+			// Buffer should refill on new capacity
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+
 		It("should grow buffer replicas when limits are increased", func() {
 			buffer := &autoscalingv1alpha1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{
