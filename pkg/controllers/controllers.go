@@ -101,7 +101,7 @@ func NewControllers(
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue, clusterCost),
 		provisioning.NewPodController(kubeClient, p, cluster),
 		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient, cloudProvider),
