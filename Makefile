@@ -9,6 +9,11 @@ HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.limits.cpu=2 \
 			--set controller.resources.limits.memory=2Gi \
 			--set settings.featureGates.nodeRepair=true \
+			--set settings.featureGates.capacityBuffer=true \
+			--set tolerations[0].key=workload \
+			--set tolerations[0].operator=Equal \
+			--set tolerations[0].value=isolated \
+			--set tolerations[0].effect=NoSchedule \
 			--set settings.featureGates.staticCapacity=true
 
 help: ## Display help

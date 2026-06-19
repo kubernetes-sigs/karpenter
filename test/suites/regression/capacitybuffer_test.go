@@ -1,0 +1,933 @@
+/*
+Copyright The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package integration_test
+
+import (
+	"fmt"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/test"
+)
+
+var _ = Describe("CapacityBuffer", func() {
+	var bufferTemplate *corev1.PodTemplate
+
+	BeforeEach(func() {
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
+
+		bufferTemplate = &corev1.PodTemplate{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "buffer-template",
+				Namespace: "default",
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  "pause",
+						Image: "registry.k8s.io/pause:3.10",
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("1"),
+								corev1.ResourceMemory: resource.MustParse("512Mi"),
+							},
+						},
+					}},
+				},
+			},
+		}
+
+		env.ExpectCreated(nodeClass, nodePool)
+	})
+
+	Context("PodTemplateRef Provisioning", func() {
+		It("should provision capacity when a buffer with podTemplateRef is applied", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ProvisioningStrategy: lo.ToPtr(autoscalingv1alpha1.ActiveProvisioningStrategy),
+					PodTemplateRef:       &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:             lo.ToPtr(int32(3)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(3)))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cond.Reason).To(Equal("FitsExistingCapacity"))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+
+		It("should update buffer status when PodTemplate is updated", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "template-update-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(2)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			// Wait for initial resolution
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cb.Status.PodTemplateGeneration).ToNot(BeNil())
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			// Get current generation
+			cb := &autoscalingv1alpha1.CapacityBuffer{}
+			Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+			originalGen := *cb.Status.PodTemplateGeneration
+
+			// Update the PodTemplate
+			pt := &corev1.PodTemplate{}
+			Expect(env.Client.Get(env, client.ObjectKeyFromObject(bufferTemplate), pt)).To(Succeed())
+			pt.Template.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU] = resource.MustParse("2")
+			env.ExpectUpdated(pt)
+
+			// Generation should update
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				g.Expect(cb.Status.PodTemplateGeneration).ToNot(BeNil())
+				g.Expect(*cb.Status.PodTemplateGeneration).To(BeNumerically(">=", originalGen))
+			}).WithTimeout(60 * time.Second).Should(Succeed())
+		})
+	})
+
+	Context("ScalableRef Provisioning", func() {
+		var scalableDeployment *appsv1.Deployment
+
+		BeforeEach(func() {
+			scalableDeployment = test.Deployment(test.DeploymentOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "scalable-app",
+					Namespace: "default",
+				},
+				Replicas: 10,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "scalable-app"}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("500m"),
+							corev1.ResourceMemory: resource.MustParse("256Mi"),
+						},
+					},
+				},
+			})
+		})
+
+		It("should provision buffer capacity using scalableRef with percentage", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "scalable-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "scalable-app",
+					},
+					Percentage: lo.ToPtr(int32(20)),
+				},
+			}
+
+			env.ExpectCreated(scalableDeployment, buffer)
+
+			// 20% of 10 replicas = 2 buffer chunks
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(2)))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			// Buffer capacity gets provisioned
+			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+
+		It("should provision buffer capacity using scalableRef with fixed replicas", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "scalable-fixed-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "scalable-app",
+					},
+					Replicas: lo.ToPtr(int32(3)),
+				},
+			}
+
+			env.ExpectCreated(scalableDeployment, buffer)
+
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(3)))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+		})
+
+		It("should recover when scalable ref is created after buffer", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "late-scalable-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "scalable-app",
+					},
+					Replicas: lo.ToPtr(int32(2)),
+				},
+			}
+
+			// Create buffer first, without the deployment
+			env.ExpectCreated(buffer)
+
+			// Buffer should initially be not ready
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			// Now create the deployment
+			env.ExpectCreated(scalableDeployment)
+
+			// Buffer should recover and become ready
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(2)))
+			}).WithTimeout(60 * time.Second).Should(Succeed())
+		})
+	})
+
+	Context("Consumer Interaction", func() {
+		It("should allow consumer pods to use existing buffer capacity without new nodes", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "consumer-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(2)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			// Wait for buffer capacity to be fully provisioned
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			// Record NodeClaim count before deploying consumers
+			nodeClaimsBefore := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			countBefore := len(nodeClaimsBefore)
+
+			// Deploy consumers that fit within buffer shape (same resources as buffer pod)
+			dep := test.Deployment(test.DeploymentOptions{
+				Replicas: 1,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "consumer"}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			})
+			env.ExpectCreated(dep)
+
+			selector := labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, selector, 1)
+
+			// Consumer should have used existing buffer capacity — no new NodeClaims
+			// needed immediately. Wait a full provisioner requeue cycle (30s) to confirm
+			// no new capacity was launched for the consumer.
+			Consistently(func(g Gomega) {
+				nodeClaims := &v1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims)).To(Succeed())
+				g.Expect(nodeClaims.Items).To(HaveLen(countBefore))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+		})
+
+		It("should refill buffer capacity after consumption", func() {
+			// Use a large buffer template so one pod fills the node
+			largeBufferTemplate := &corev1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "large-buffer-template",
+					Namespace: "default",
+				},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{
+							Name:  "pause",
+							Image: "registry.k8s.io/pause:3.10",
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("3"),
+									corev1.ResourceMemory: resource.MustParse("512Mi"),
+								},
+							},
+						}},
+					},
+				},
+			}
+
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "refill-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "large-buffer-template"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			}
+
+			env.ExpectCreated(largeBufferTemplate, buffer)
+
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			initialNodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			initialCount := len(initialNodeClaims)
+
+			// Deploy a consumer that needs 3 CPU — same as buffer pod, fills the node
+			dep := test.Deployment(test.DeploymentOptions{
+				Replicas: 1,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "refill-consumer"}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("3"),
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			})
+			env.ExpectCreated(dep)
+			selector := labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, selector, 1)
+
+			// Buffer needs refill — new NodeClaim(s) should be created
+			env.EventuallyExpectCreatedNodeClaimCount(">=", initialCount+1)
+
+			// Buffer should eventually be satisfied again
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+	})
+
+	Context("Disruption", func() {
+		It("should not empty-consolidate nodes hosting buffer pods", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "protected-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(2)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			nodes := env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			// With ConsolidateAfter: 0s, disruption should trigger within seconds if
+			// the node were truly empty. Wait 60s to be confident it's actually protected.
+			env.ConsistentlyExpectNoDisruptions(len(nodes), 60*time.Second)
+		})
+
+		It("should consolidate buffer nodes after buffer is deleted", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "deletable-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(2)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			env.ExpectDeleted(buffer)
+
+			env.EventuallyExpectNotFound(nodeClaims[0])
+		})
+
+		It("should allow drift to replace buffer nodes", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "drift-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(2)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			originalNodeClaimNames := lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string { return nc.Name })
+
+			nodePool.Spec.Template.Annotations = map[string]string{"drift-trigger": "true"}
+			env.ExpectUpdated(nodePool)
+
+			Eventually(func(g Gomega) {
+				for _, name := range originalNodeClaimNames {
+					nc := &v1.NodeClaim{}
+					err := env.Client.Get(env, client.ObjectKey{Name: name}, nc)
+					if err == nil {
+						g.Expect(nc.DeletionTimestamp.IsZero()).To(BeFalse())
+					}
+				}
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+
+		It("should allow consolidation to replace an oversized buffer node", func() {
+			// Force provisioning onto a large instance by constraining to size >= 16
+			nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+				Key:      corev1.LabelInstanceTypeStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"c-16x-amd64-linux", "c-16x-arm64-linux"},
+			})
+			env.ExpectUpdated(nodePool)
+
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "consolidate-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			originalNodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			originalName := originalNodeClaims[0].Name
+
+			// Now relax the instance type constraint so cheaper instances are available
+			nodePool.Spec.Template.Spec.Requirements = lo.Filter(nodePool.Spec.Template.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues, _ int) bool {
+				return r.Key != corev1.LabelInstanceTypeStable
+			})
+			env.ExpectUpdated(nodePool)
+
+			// Consolidation should replace the oversized 16-CPU node with a smaller one.
+			// The buffer virtual pod (1 CPU) fits on a much smaller instance.
+			Eventually(func(g Gomega) {
+				nc := &v1.NodeClaim{}
+				err := env.Client.Get(env, client.ObjectKey{Name: originalName}, nc)
+				if err == nil {
+					g.Expect(nc.DeletionTimestamp.IsZero()).To(BeFalse())
+				}
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			// After consolidation, buffer should still be satisfied on the smaller node
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+	})
+
+	Context("Lifecycle", func() {
+		It("should scale buffer down when replicas are reduced", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "scaledown-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(3)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+			// Scale buffer down to 1
+			cb := &autoscalingv1alpha1.CapacityBuffer{}
+			Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+			cb.Spec.Replicas = lo.ToPtr(int32(1))
+			env.ExpectUpdated(cb)
+
+			// Status should reflect new replica count
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(1)))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+		})
+
+		It("should handle scalableRef percentage update when deployment scales", func() {
+			scalableDeployment := test.Deployment(test.DeploymentOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "growing-app",
+					Namespace: "default",
+				},
+				Replicas: 5,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "growing-app"}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("500m"),
+							corev1.ResourceMemory: resource.MustParse("256Mi"),
+						},
+					},
+				},
+			})
+
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "growing-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1alpha1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "growing-app",
+					},
+					Percentage: lo.ToPtr(int32(20)),
+				},
+			}
+
+			env.ExpectCreated(scalableDeployment, buffer)
+
+			// 20% of 5 = 1
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(1)))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			// Scale the deployment up to 20
+			deploy := &appsv1.Deployment{}
+			Expect(env.Client.Get(env, client.ObjectKeyFromObject(scalableDeployment), deploy)).To(Succeed())
+			deploy.Spec.Replicas = lo.ToPtr(int32(20))
+			env.ExpectUpdated(deploy)
+
+			// Buffer should eventually recalculate: 20% of 20 = 4
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(4)))
+			}).WithTimeout(60 * time.Second).Should(Succeed())
+		})
+	})
+
+	Context("NodePool Limits", func() {
+		It("should not provision buffer capacity beyond NodePool node count limit", func() {
+			nodePool.Spec.Limits = v1.Limits{
+				corev1.ResourceName("nodes"): resource.MustParse("1"),
+			}
+			env.ExpectUpdated(nodePool)
+
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "limited-np-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(10)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			// Buffer requests 10 pods but NodePool limits to 1 node.
+			// Some pods should provision, but node count should not exceed 1.
+			env.EventuallyExpectCreatedNodeClaimCount("==", 1)
+			env.EventuallyExpectInitializedNodeCount("==", 1)
+
+			// Verify node count stays at 1
+			Consistently(func(g Gomega) {
+				nodeClaims := &v1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims)).To(Succeed())
+				g.Expect(nodeClaims.Items).To(HaveLen(1))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+		})
+	})
+
+	Context("Multiple Buffers", func() {
+		It("should provision capacity independently for multiple buffers", func() {
+			bufferTemplateSmall := &corev1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "small-buffer-template",
+					Namespace: "default",
+				},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{
+							Name:  "pause",
+							Image: "registry.k8s.io/pause:3.10",
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("500m"),
+									corev1.ResourceMemory: resource.MustParse("256Mi"),
+								},
+							},
+						}},
+					},
+				},
+			}
+
+			bufferA := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "buffer-a",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(2)),
+				},
+			}
+
+			bufferB := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "buffer-b",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "small-buffer-template"},
+					Replicas:       lo.ToPtr(int32(3)),
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, bufferTemplateSmall, bufferA, bufferB)
+
+			// Both buffers should become ready independently
+			Eventually(func(g Gomega) {
+				cbA := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(bufferA), cbA)).To(Succeed())
+				condA := findBufferCondition(cbA.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(condA).ToNot(BeNil())
+				g.Expect(condA.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(*cbA.Status.Replicas).To(Equal(int32(2)))
+
+				cbB := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(bufferB), cbB)).To(Succeed())
+				condB := findBufferCondition(cbB.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(condB).ToNot(BeNil())
+				g.Expect(condB.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(*cbB.Status.Replicas).To(Equal(int32(3)))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			// Capacity should be provisioned for both
+			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+
+			// Both should eventually report Provisioning=True
+			Eventually(func(g Gomega) {
+				cbA := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(bufferA), cbA)).To(Succeed())
+				condA := findBufferCondition(cbA.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(condA).ToNot(BeNil())
+				g.Expect(condA.Status).To(Equal(metav1.ConditionTrue))
+
+				cbB := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(bufferB), cbB)).To(Succeed())
+				condB := findBufferCondition(cbB.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(condB).ToNot(BeNil())
+				g.Expect(condB.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+	})
+
+	Context("Edge Cases", func() {
+		It("should not leak nodes on rapid buffer create and delete", func() {
+			env.ExpectCreated(bufferTemplate)
+
+			// Create a buffer and wait for it to actually provision a node,
+			// proving the system is working before we test rapid create/delete.
+			seedBuffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "seed-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			}
+			env.ExpectCreated(seedBuffer)
+			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.ExpectDeleted(seedBuffer)
+
+			// Now do rapid create/delete cycles
+			for i := 0; i < 5; i++ {
+				buffer := &autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      fmt.Sprintf("rapid-buffer-%d", i),
+						Namespace: "default",
+					},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+						Replicas:       lo.ToPtr(int32(2)),
+					},
+				}
+				env.ExpectCreated(buffer)
+				time.Sleep(2 * time.Second)
+				env.ExpectDeleted(buffer)
+			}
+
+			// After all rapid create/deletes, no buffers should remain
+			Eventually(func(g Gomega) {
+				buffers := &autoscalingv1alpha1.CapacityBufferList{}
+				g.Expect(env.Client.List(env, buffers, client.InNamespace("default"))).To(Succeed())
+				g.Expect(buffers.Items).To(BeEmpty())
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			// All provisioned nodes should eventually be cleaned up (empty consolidation)
+			Eventually(func(g Gomega) {
+				nodeClaims := &v1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims)).To(Succeed())
+				g.Expect(nodeClaims.Items).To(BeEmpty())
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+
+		It("should grow buffer replicas when limits are increased", func() {
+			buffer := &autoscalingv1alpha1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "growing-limit-buffer",
+					Namespace: "default",
+				},
+				Spec: autoscalingv1alpha1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
+					Limits: autoscalingv1alpha1.Limits{
+						corev1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			}
+
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			// Initial: 2 CPU limit / 1 CPU per pod = 2 replicas
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(2)))
+			}).WithTimeout(30 * time.Second).Should(Succeed())
+
+			// Wait for initial capacity
+			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			env.EventuallyExpectInitializedNodeCount(">=", 1)
+
+			// Increase limits to 5 CPU → should grow to 5 replicas
+			cb := &autoscalingv1alpha1.CapacityBuffer{}
+			Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+			cb.Spec.Limits = autoscalingv1alpha1.Limits{
+				corev1.ResourceCPU: resource.MustParse("5"),
+			}
+			env.ExpectUpdated(cb)
+
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				g.Expect(cb.Status.Replicas).ToNot(BeNil())
+				g.Expect(*cb.Status.Replicas).To(Equal(int32(5)))
+			}).WithTimeout(60 * time.Second).Should(Succeed())
+
+			// Eventually all 5 replicas should be provisioned
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+		})
+	})
+})
+
+func findBufferCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
+	for i := range conditions {
+		if conditions[i].Type == condType {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
