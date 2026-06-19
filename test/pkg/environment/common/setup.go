@@ -73,8 +73,6 @@ var (
 		&admissionregistrationv1.ValidatingAdmissionPolicyBinding{},
 		&autoscalingv1alpha1.CapacityBuffer{},
 		&corev1.PodTemplate{},
-		&autoscalingv1alpha1.CapacityBuffer{},
-		&corev1.PodTemplate{},
 	}
 )
 

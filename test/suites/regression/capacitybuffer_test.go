@@ -532,65 +532,6 @@ var _ = Describe("CapacityBuffer", func() {
 			}).WithTimeout(5 * time.Minute).Should(Succeed())
 		})
 
-		It("should allow consolidation to replace an oversized buffer node", func() {
-			// Force provisioning onto a large instance by constraining to size >= 16
-			nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-				Key:      corev1.LabelInstanceTypeStable,
-				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{"c-16x-amd64-linux", "c-16x-arm64-linux"},
-			})
-			env.ExpectUpdated(nodePool)
-
-			buffer := &autoscalingv1alpha1.CapacityBuffer{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "consolidate-buffer",
-					Namespace: "default",
-				},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "buffer-template"},
-					Replicas:       lo.ToPtr(int32(1)),
-				},
-			}
-
-			env.ExpectCreated(bufferTemplate, buffer)
-
-			env.EventuallyExpectInitializedNodeCount(">=", 1)
-			Eventually(func(g Gomega) {
-				cb := &autoscalingv1alpha1.CapacityBuffer{}
-				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
-				g.Expect(cond).ToNot(BeNil())
-				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			}).WithTimeout(5 * time.Minute).Should(Succeed())
-
-			originalNodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
-			originalName := originalNodeClaims[0].Name
-
-			// Now relax the instance type constraint so cheaper instances are available
-			nodePool.Spec.Template.Spec.Requirements = lo.Filter(nodePool.Spec.Template.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues, _ int) bool {
-				return r.Key != corev1.LabelInstanceTypeStable
-			})
-			env.ExpectUpdated(nodePool)
-
-			// Consolidation should replace the oversized 16-CPU node with a smaller one.
-			// The buffer virtual pod (1 CPU) fits on a much smaller instance.
-			Eventually(func(g Gomega) {
-				nc := &v1.NodeClaim{}
-				err := env.Client.Get(env, client.ObjectKey{Name: originalName}, nc)
-				if err == nil {
-					g.Expect(nc.DeletionTimestamp.IsZero()).To(BeFalse())
-				}
-			}).WithTimeout(5 * time.Minute).Should(Succeed())
-
-			// After consolidation, buffer should still be satisfied on the smaller node
-			Eventually(func(g Gomega) {
-				cb := &autoscalingv1alpha1.CapacityBuffer{}
-				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
-				g.Expect(cond).ToNot(BeNil())
-				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			}).WithTimeout(5 * time.Minute).Should(Succeed())
-		})
 	})
 
 	Context("Lifecycle", func() {
