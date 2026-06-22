@@ -140,7 +140,7 @@ func initializeMetrics() {
 			Name:      "utilization_percent",
 			Help:      "Utilization of allocatable resources by pod requests",
 		},
-		[]string{metrics.ResourceTypeLabel, managed},
+		[]string{metrics.ResourceTypeLabel},
 	)
 }
 
@@ -207,19 +207,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetric {
-	// Partition nodes by whether they are managed by this Karpenter instance (i.e. have a
-	// NodeClaim owned by the configured cloud provider). Emitting utilization with a "managed"
-	// dimension lets dashboards filter out nodes Karpenter doesn't manage, which would otherwise
-	// skew the cluster utilization numbers.
-	managedNodes, unmanagedNodes := lo.FilterReject(nodes, func(n *state.StateNode, _ int) bool {
-		return n.Managed()
-	})
 
-	res := buildUtilizationForNodes(managedNodes, true)
-	return append(res, buildUtilizationForNodes(unmanagedNodes, false)...)
-}
-
-func buildUtilizationForNodes(nodes state.StateNodes, isManaged bool) []*metrics.StoreMetric {
 	// Aggregate resources allocated/utilized for all the nodes and pods inside the nodes
 	allocatableAggregate, utilizedAggregate := corev1.ResourceList{}, corev1.ResourceList{}
 
@@ -248,10 +236,7 @@ func buildUtilizationForNodes(nodes state.StateNodes, isManaged bool) []*metrics
 		res = append(res, &metrics.StoreMetric{
 			GaugeMetric: ClusterUtilization,
 			Value:       utilizationPercentage,
-			Labels: map[string]string{
-				metrics.ResourceTypeLabel: resourceNameToString(resourceName),
-				managed:                   strconv.FormatBool(isManaged),
-			},
+			Labels:      map[string]string{metrics.ResourceTypeLabel: resourceNameToString(resourceName)},
 		})
 	}
 
@@ -259,7 +244,6 @@ func buildUtilizationForNodes(nodes state.StateNodes, isManaged bool) []*metrics
 }
 
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
-	isManaged := strconv.FormatBool(n.Managed())
 	for gaugeMetric, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		SystemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
 		TotalPodRequests:    n.PodRequests(),
@@ -269,35 +253,33 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 		Allocatable:         n.Node.Status.Allocatable,
 	} {
 		for resourceName, quantity := range resourceList {
-			labels := getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName))
-			labels[managed] = isManaged
 			res = append(res, &metrics.StoreMetric{
 				GaugeMetric: gaugeMetric,
 				Value:       lo.Ternary(resourceName == corev1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
-				Labels:      labels,
+				Labels:      getNodeLabelsWithResourceType(n, resourceNameToString(resourceName)),
 			})
 		}
 	}
-	labels := getNodeLabels(n.Node)
-	labels[managed] = isManaged
 	return append(res,
 		&metrics.StoreMetric{
 			GaugeMetric: Lifetime,
 			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
-			Labels:      labels,
+			Labels:      getNodeLabels(n),
 		})
 }
 
-func getNodeLabelsWithResourceType(node *corev1.Node, resourceTypeName string) prometheus.Labels {
-	metricLabels := getNodeLabels(node)
+func getNodeLabelsWithResourceType(n *state.StateNode, resourceTypeName string) prometheus.Labels {
+	metricLabels := getNodeLabels(n)
 	metricLabels[metrics.ResourceTypeLabel] = resourceTypeName
 	return metricLabels
 }
 
-func getNodeLabels(node *corev1.Node) prometheus.Labels {
+func getNodeLabels(n *state.StateNode) prometheus.Labels {
+	node := n.Node
 	metricLabels := map[string]string{}
 	metricLabels[nodeName] = node.Name
 	metricLabels[nodePhase] = string(node.Status.Phase)
+	metricLabels[managed] = strconv.FormatBool(n.Managed())
 
 	// Populate well known labels
 	for wellKnownLabel, label := range getWellKnownLabels() {

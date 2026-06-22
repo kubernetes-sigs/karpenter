@@ -141,39 +141,11 @@ var _ = Describe("Node Metrics", func() {
 		Expect(metric.GetGauge().GetValue()).To(BeNumerically(">=", 0))
 
 		for resourceName := range resources {
-			// A plain node with no NodeClaim is not managed by Karpenter, so its utilization
-			// is reported under the managed="false" series.
 			metric, found := FindMetricWithLabelValues("karpenter_cluster_utilization_percent", map[string]string{
 				metrics.ResourceTypeLabel: resourceName.String(),
-				"managed":                 "false",
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
-		}
-	})
-	It("should report cluster utilization with the managed dimension set for Karpenter-managed nodes", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{
-			Status: v1.NodeClaimStatus{
-				ProviderID:  test.RandomProviderID(),
-				Allocatable: resources,
-			},
-		})
-		managedNode := test.Node(test.NodeOptions{
-			ProviderID:  nodeClaim.Status.ProviderID,
-			Allocatable: resources,
-		})
-
-		ExpectApplied(ctx, env.Client, managedNode, nodeClaim)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{managedNode}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, metricsStateController)
-
-		for resourceName := range resources {
-			metric, found := FindMetricWithLabelValues("karpenter_cluster_utilization_percent", map[string]string{
-				metrics.ResourceTypeLabel: resourceName.String(),
-				"managed":                 "true",
-			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetGauge().GetValue()).To(BeNumerically(">=", 0))
 		}
 	})
 	It("should remove the node metric gauge when the node is deleted", func() {
