@@ -18,6 +18,7 @@ package deletioncost_test
 
 import (
 	"fmt"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -59,12 +60,13 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -10, HasDoNotDisrupt: false}}
+			const rank = -10
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: rank, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations).To(HaveKeyWithValue(corev1.PodDeletionCost, "-10"))
+			Expect(updatedPod.Annotations).To(HaveKeyWithValue(corev1.PodDeletionCost, strconv.Itoa(rank)))
 		})
 
 		It("should overwrite customer-set pod-deletion-cost values", func() {
@@ -94,12 +96,13 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -10, HasDoNotDisrupt: false}}
+			const rank = -10
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: rank, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal("-10"))
+			Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal(strconv.Itoa(rank)))
 		})
 
 		It("should update existing pod-deletion-cost values to the new rank", func() {
@@ -127,12 +130,13 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -20, HasDoNotDisrupt: false}}
+			const rank = -20
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: rank, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal("-20"))
+			Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal(strconv.Itoa(rank)))
 		})
 
 		It("should handle pods without any annotations", func() {
@@ -153,12 +157,13 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -3, HasDoNotDisrupt: false}}
+			const rank = -3
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: rank, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal("-3"))
+			Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal(strconv.Itoa(rank)))
 		})
 
 		It("should update multiple pods on the same node with the same rank", func() {
@@ -182,13 +187,14 @@ var _ = Describe("Annotation", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: -7, HasDoNotDisrupt: false}}
+			const rank = -7
+			nodeRanks := []deletioncost.NodeRank{{Node: stateNodes[0], Rank: rank, HasDoNotDisrupt: false}}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 
 			for _, pod := range pods {
 				updatedPod := &corev1.Pod{}
 				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-				Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal("-7"))
+				Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal(strconv.Itoa(rank)))
 			}
 		})
 
