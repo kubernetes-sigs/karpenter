@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 )
 
 // RankNodes ranks nodes using PodCount strategy with four-tier partitioning:
@@ -75,8 +75,10 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 	sortByPodCount(doNotDisrupt, nodePods)
 
 	// Apply per-NodePool disruption budget limits to Groups B and C. Nodes
-	// that exceed the budget are moved to Group D.
-	numNodes, disrupting := countNodePoolStats(cluster)
+	// that exceed the budget are moved to Group D. NodePoolStats is the
+	// shared helper that disruption.BuildDisruptionBudgetMapping also uses,
+	// so the two controllers count the same nodes against the same budget.
+	numNodes, disrupting := disruption.NodePoolStats(cluster)
 	driftBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonDrifted)
 	consolidationBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonUnderutilized)
 	var driftOverflow, normalOverflow []*state.StateNode
@@ -224,31 +226,6 @@ func partitionNodes(nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePoo
 		}
 	}
 	return disruptedBlocked, drifted, normal, doNotDisrupt
-}
-
-// countNodePoolStats counts initialized, managed nodes per NodePool and how
-// many of those are currently disrupting (NotReady or marked for deletion).
-// Mirrors the filtering rules in BuildDisruptionBudgetMapping so the deletion-cost
-// controller's per-pool budget arithmetic matches the disruption controller's.
-func countNodePoolStats(cluster *state.Cluster) (numNodes, disrupting map[string]int) {
-	numNodes = map[string]int{}
-	disrupting = map[string]int{}
-	for _, node := range cluster.DeepCopyNodes() {
-		if !node.Managed() || !node.Initialized() {
-			continue
-		}
-		if node.NodeClaim != nil && node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
-			continue
-		}
-		poolName := node.Labels()[v1.NodePoolLabelKey]
-		numNodes[poolName]++
-		if node.Node != nil {
-			if cond := nodeutils.GetCondition(node.Node, corev1.NodeReady); cond.Status != corev1.ConditionTrue || node.MarkedForDeletion() {
-				disrupting[poolName]++
-			}
-		}
-	}
-	return numNodes, disrupting
 }
 
 // buildBudgetForReason computes the per-NodePool budget for a disruption
