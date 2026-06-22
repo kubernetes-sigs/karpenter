@@ -36,15 +36,6 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 )
 
-// NodeRank pairs a state node with the rank value the controller plans to
-// write to its pods. HasDoNotDisrupt indicates Group D, where the controller
-// clears the annotation rather than writing rank.
-type NodeRank struct {
-	Node            *state.StateNode
-	Rank            int
-	HasDoNotDisrupt bool
-}
-
 // RankNodes ranks nodes using PodCount strategy with four-tier partitioning:
 //   - Group A: Disrupted+PDB-blocked or non-RS-owned-pod nodes, get math.MinInt32 (do not consume budget).
 //   - Group B: Drifted nodes, sequential ranks deleted first.
@@ -162,13 +153,6 @@ func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state
 		out[node.Name()] = pods
 	}
 	return out, nil
-}
-
-// parsedPDB pairs a PDB with its pre-parsed selector. We pre-parse once per
-// reconcile so the per-pod inner loop in hasPDBBlockedPods is allocation-free.
-type parsedPDB struct {
-	pdb      *policyv1.PodDisruptionBudget
-	selector labels.Selector
 }
 
 // fetchPDBs lists every PDB and pre-parses its selector. Malformed selectors
