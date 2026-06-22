@@ -139,9 +139,6 @@ func clearRanksFromPods(ctx context.Context, kubeClient client.Client, pods []*c
 // treated as no-ops (logged at V(1)) since the pod is gone or another writer
 // raced us; we'll converge on the next reconcile.
 func clearDeletionCost(ctx context.Context, kubeClient client.Client, pod *corev1.Pod) (bool, error) {
-	if pod.Annotations == nil {
-		return false, nil
-	}
 	if _, ok := pod.Annotations[corev1.PodDeletionCost]; !ok {
 		return false, nil
 	}
@@ -164,11 +161,9 @@ func clearDeletionCost(ctx context.Context, kubeClient client.Client, pod *corev
 
 // needsUpdate reports whether the pod's pod-deletion-cost annotation already
 // matches the desired rank. Avoids unnecessary API writes when the value is
-// already correct.
+// already correct. Relies on Go's nil-safe map read: indexing a nil map
+// returns the zero value plus ok=false, so no separate nil-check is needed.
 func needsUpdate(pod *corev1.Pod, rank int) bool {
-	if pod.Annotations == nil {
-		return true
-	}
 	current, ok := pod.Annotations[corev1.PodDeletionCost]
 	if !ok {
 		return true
