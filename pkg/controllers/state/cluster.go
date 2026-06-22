@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -621,6 +622,33 @@ func (c *Cluster) NodePoolResourcesFor(nodePoolName string) corev1.ResourceList 
 	defer c.mu.RUnlock()
 
 	return maps.Clone(c.nodePoolResources[nodePoolName])
+}
+
+func (c *Cluster) NodePoolNodeClaimConditionsFor(nodePoolName string) []v1.NodeClaimConditions {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	conditions := map[string]int64{}
+	for _, node := range c.nodes {
+		if node.NodeClaim != nil && node.NodeClaim.Labels[v1.NodePoolLabelKey] == nodePoolName {
+			for _, condition := range node.NodeClaim.Status.Conditions {
+				if condition.IsTrue() {
+					conditions[condition.Type]++
+				}
+			}
+		}
+	}
+	nodeClaimConditions := make([]v1.NodeClaimConditions, 0, len(conditions))
+	for conditionType, count := range conditions {
+		nodeClaimConditions = append(nodeClaimConditions, v1.NodeClaimConditions{
+			ConditionType: &conditionType,
+			Count:         &count,
+		})
+	}
+	sort.Slice(nodeClaimConditions, func(i, j int) bool {
+		return *nodeClaimConditions[i].ConditionType < *nodeClaimConditions[j].ConditionType
+	})
+	return nodeClaimConditions
 }
 
 // Reset the cluster state for unit testing
