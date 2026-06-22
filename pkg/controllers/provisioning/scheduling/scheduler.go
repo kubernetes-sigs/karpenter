@@ -48,6 +48,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+
+	"sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -91,6 +93,7 @@ type options struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+	enforceConsolidateAfter bool
 }
 
 type Options = option.Function[options]
@@ -113,6 +116,10 @@ var MinValuesPolicy = func(policy karpopts.MinValuesPolicy) func(*options) {
 	return func(opts *options) {
 		opts.minValuesPolicy = policy
 	}
+}
+
+var IsConsolidationSimulation = func(opts *options) {
+	opts.enforceConsolidateAfter = true
 }
 
 func NewScheduler(
@@ -181,7 +188,24 @@ func NewScheduler(
 		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
 	}
-	s.calculateExistingNodeClaims(ctx, stateNodes, daemonSetPods)
+
+	npByName := lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) {
+		return np.Name, np
+	})
+
+	nodeToNodePool := lo.SliceToMap(stateNodes, func(n *state.StateNode) (string, *v1.NodePool) {
+		return n.Name(), npByName[n.Labels()[v1.NodePoolLabelKey]]
+	})
+	// Build a set of node names that are marked for deletion so we can exempt their pods
+	// from the consolidateAfter destination check
+	deletingNodeNames := sets.New[string]()
+	for n := range cluster.Nodes() {
+		if n.MarkedForDeletion() {
+			deletingNodeNames.Insert(n.Name())
+		}
+	}
+	s.deletingNodeNames = deletingNodeNames
+	s.calculateExistingNodeClaims(ctx, stateNodes, daemonSetPods, nodeToNodePool, option.Resolve(opts...).enforceConsolidateAfter)
 	return s
 }
 
@@ -214,6 +238,7 @@ type Scheduler struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+	deletingNodeNames       sets.Set[string]
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -547,7 +572,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	return err
 }
 
-func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) error {
+func (s *Scheduler) addToExistingNode(ctx context.Context, p *corev1.Pod) error {
 	idx := math.MaxInt
 	var mu sync.Mutex
 
@@ -555,12 +580,17 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 	var requirements scheduling.Requirements
 
 	// determine the volumes that will be mounted if the pod schedules
-	volumes, err := scheduling.GetVolumes(ctx, s.kubeClient, pod)
+	volumes, err := scheduling.GetVolumes(ctx, s.kubeClient, p)
 	if err != nil {
 		return err
 	}
 	parallelizeUntil(s.numConcurrentReconciles, len(s.existingNodes), func(i int) bool {
-		r, err := s.existingNodes[i].CanAdd(pod, s.cachedPodData[pod.UID], volumes)
+		if s.existingNodes[i].isUnderConsolidateAfter && (!pod.IsPending(p) && !s.deletingNodeNames.Has(p.Spec.NodeName)) {
+			// We shouldn't try to schedule candidate pods onto nodes that are under consolidate after.
+			// Pending pods and pods from deleting nodes are exempt.
+			return true
+		}
+		r, err := s.existingNodes[i].CanAdd(p, s.cachedPodData[p.UID], volumes)
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
@@ -578,7 +608,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 	})
 	// If we set the existingNode to something valid, this means that we successfully scheduled to one of these nodes
 	if existingNode != nil {
-		existingNode.Add(pod, s.cachedPodData[pod.UID], requirements, volumes)
+		existingNode.Add(p, s.cachedPodData[p.UID], requirements, volumes)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to existing nodes")
@@ -713,12 +743,13 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	return multierr.Combine(errs...)
 }
 
-func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod) {
+func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod, nodePoolMap map[string]*v1.NodePool, enforceConsolidateAfter bool) {
 	// create our existing nodes
 	for _, node := range stateNodes {
 		taints := node.Taints()
 		daemons := s.getCompatibleDaemonPods(ctx, node, taints, daemonSetPods)
-		s.existingNodes = append(s.existingNodes, NewExistingNode(node, s.topology, taints, resources.RequestsForPods(daemons...)))
+		isUnderConsolidateAfter := enforceConsolidateAfter && disruption.IsUnderConsolidateAfter(nodePoolMap[node.Name()], node.NodeClaim, s.clock)
+		s.existingNodes = append(s.existingNodes, NewExistingNode(node, s.topology, taints, resources.RequestsForPods(daemons...), isUnderConsolidateAfter))
 		s.updateRemainingResources(node)
 	}
 	s.sortExistingNodes()
