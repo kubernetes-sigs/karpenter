@@ -36,6 +36,13 @@ const (
 	// DisruptionCostAnnotation is the user-facing Karpenter annotation for expressing
 	// the cost of evicting a pod during consolidation. Customers set this on workloads
 	// to influence which pods Karpenter prefers to evict during consolidation.
+	//
+	// This is a new public annotation introduced alongside the PodDeletionCostManagement
+	// feature. No prior Karpenter release defined an annotation at this key in the
+	// karpenter.sh API group, so workloads upgrading from earlier versions are
+	// unaffected by default. Operators who choose this key for other purposes on a
+	// workload will have their value parsed as a consolidation cost; see the
+	// deletioncost README "Migration" section for the audit step.
 	DisruptionCostAnnotation = apis.Group + "/disruption-cost"
 )
 

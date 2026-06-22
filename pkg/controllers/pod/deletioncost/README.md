@@ -133,8 +133,85 @@ Each reconcile cycle annotates at most **50 nodes**. When nodes drop out of the
 top-50 set, their pod annotations are cleaned up automatically on the next
 cycle.
 
+## Metric cardinality and worst-case emit rate
+
+Metrics exported by this controller are bounded and small:
+
+- `nodes_ranked` gauge, no labels.
+- `reconcile_skipped_total` counter, no labels.
+- `pods_updated_total` counter with one label `result` taking three values
+  (`updated`, `skipped_unchanged`, `error`) — cardinality 3.
+- `ranking_duration_seconds` and `annotation_duration_seconds` histograms,
+  no labels.
+
+Worst-case emit rate on `pods_updated_total`:
+
+```
+(maxNodesPerCycle nodes per reconcile) * (avg pods per node) / reconcileInterval * (3 result-label values)
+= 50 * 30 / 60s * 3
+~= 75 increments per second
+```
+
+For a cluster with 30 pods per node the steady-state emit rate is well within
+single-digit overhead. There is no per-pod metric, so cardinality does not
+grow with cluster size.
+
+## Feature-gate rationale
+
+The `PodDeletionCostManagement` gate is provisional and is the only opt-in.
+We did not add a NodePool-level API field for three reasons:
+
+- The behavior is cluster-wide (the controller writes the same annotation on
+  every managed pod regardless of NodePool), so a NodePool field would not
+  express the operator's intent.
+- Graduating from gate to default-on requires the soak window described in
+  Graduation Criteria. An API field would be permanent; the gate is not.
+- Customers who want to disable on a single NodePool can use
+  `consolidateAfter: Never`, which already routes every node on that pool to
+  Group D so the controller clears the annotation.
+
+If the feature graduates to default-on the gate will be removed, not promoted
+to an API field.
+
+## Per-pool budget scoping
+
+The per-NodePool disruption budget computed here is enforced **per NodePool**,
+not across the cluster. Operators who run multiple NodePools as a logical-or
+fall-through pool (e.g. one Spot pool plus one On-Demand pool serving the same
+workload) will see the annotation budget applied independently to each pool.
+This matches the existing semantics of `disruption.BuildDisruptionBudgetMapping`,
+so consolidation and deletion-cost ranking stay in sync, but operators with
+that topology should expect both pools to be ranked simultaneously rather than
+one drained-then-the-other.
+
+## Migration: `karpenter.sh/disruption-cost`
+
+`karpenter.sh/disruption-cost` is a new public annotation key introduced by
+this PR (see `pkg/utils/disruption/disruption.go`). It did not exist in any
+prior Karpenter release. Customers who have not previously set an annotation
+of that exact key are unaffected. Customers who happen to have set it for
+other purposes will see their value parsed as a consolidation cost on upgrade;
+operators are expected to audit cluster YAML for the key before enabling the
+gate.
+
+The gate-OFF read path (`EvictionCost`) reads the new annotation first and
+falls back to `controller.kubernetes.io/pod-deletion-cost` if absent. That
+fallback preserves the prior consolidation behavior. The gate-ON read path
+skips the fallback entirely so the controller's writes do not feed back into
+the consolidation scorer.
+
 ## Testing
 
 ```bash
 go test ./pkg/controllers/pod/deletioncost/...
 ```
+
+The test suite mixes direct-call unit tests against `RankNodes` and
+`UpdatePodDeletionCosts` (`ranking_test.go`, `annotation_test.go`) with
+end-to-end tests that drive the outermost `Controller.Reconcile`
+(`controller_test.go`). The direct-call tests cover the four-tier
+partitioning algorithm, the per-pool budget arithmetic, and the patch
+classification logic; the reconcile-level tests cover the gate-check,
+state-change short-circuit, and 50-node cap. New behavior changes must add at
+least one reconcile-level test so the integration path is exercised, not just
+the algorithm.
