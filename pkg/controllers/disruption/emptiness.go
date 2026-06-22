@@ -48,6 +48,16 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.NodePool.Name))...)
 		return false
 	}
+	// A node hosting virtual buffer pods is not empty — the provisioner placed
+	// buffer capacity here intentionally. Deleting it would trigger immediate
+	// re-provisioning (pointless churn). This is the only disruption path that
+	// checks HasBufferPods; single/multi-node consolidation naturally accounts
+	// for buffer pods via SimulateScheduling (which calls GetPendingPods, injecting
+	// virtual pods into the pending set — any replacement must fit them too).
+	if e.cluster.HasBufferPods(c.ProviderID()) {
+		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("Node %q has buffer pods", c.Node.Name))...)
+		return false
+	}
 	// return true if there are no pods and the nodeclaim is consolidatable
 	return len(c.reschedulablePods) == 0 && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }

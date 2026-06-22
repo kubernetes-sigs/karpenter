@@ -30,11 +30,11 @@ func MemoryOverheadMB() float64 {
 	return envFloat64("KARPENTER_MEMORY_OVERHEAD_MB", 0)
 }
 
-// CPUOverheadNanos returns the additional CPU overhead (in nanoseconds) to add
+// CPUOverheadCores returns the additional CPU overhead (in cores) to add
 // to Karpenter controller CPU thresholds. This is read from the
-// KARPENTER_CPU_OVERHEAD_NANOS environment variable and defaults to 0.
-func CPUOverheadNanos() float64 {
-	return envFloat64("KARPENTER_CPU_OVERHEAD_NANOS", 0)
+// KARPENTER_CPU_OVERHEAD_CORES environment variable and defaults to 0.
+func CPUOverheadCores() float64 {
+	return envFloat64("KARPENTER_CPU_OVERHEAD_CORES", 0)
 }
 
 func envFloat64(key string, defaultVal float64) float64 {

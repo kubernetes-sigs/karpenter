@@ -372,6 +372,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 
 		metrics.NodesTerminatedTotal.Inc(map[string]string{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
+			metrics.ZoneLabel:     n.Labels[corev1.LabelTopologyZone],
 		})
 
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
