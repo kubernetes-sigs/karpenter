@@ -211,8 +211,14 @@ func (at *AllocationTracker) commitTemplateCounters(nodeClaimID NodeClaimID, con
 		return
 	}
 	remainingCounterSetsByIT := at.templateRemainingCounters[nodeClaimID]
+	if remainingCounterSetsByIT == nil {
+		return
+	}
 	for itID, counterSetsByPool := range consumptionByIT {
 		remainingCounterSetsByPool := remainingCounterSetsByIT[itID]
+		if remainingCounterSetsByPool == nil {
+			continue
+		}
 		for poolKey, counterSets := range counterSetsByPool {
 			remainingCounterSets := remainingCounterSetsByPool[poolKey]
 			for counterSetName, counters := range counterSets {

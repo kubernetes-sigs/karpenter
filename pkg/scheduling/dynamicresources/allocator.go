@@ -652,6 +652,9 @@ func (a *allocator) numSlots(rd *RequestData) int {
 func (a *allocator) dfsExactCount(claimIdx, reqIdx, slotIdx int, cd *ClaimData, rd *RequestData) bool {
 	// In-cluster devices from pools (reflects current pool state after any requirement tightening).
 	for _, pool := range a.pools {
+		if pool.Incomplete {
+			continue
+		}
 		for _, d := range pool.Devices {
 			if a.tryDevice(claimIdx, reqIdx, slotIdx, cd, rd, d) {
 				return true

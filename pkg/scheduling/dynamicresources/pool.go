@@ -157,6 +157,11 @@ func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
 			p.Devices = append(p.Devices, newDeviceWithID(pool.Key, d, topoReqs))
 		}
 	}
+	// Invalid pools must be preserved even if they have no devices or slices, because
+	// All-mode validation needs to see them to return an error.
+	if p.Invalid {
+		return p
+	}
 	if len(p.Slices) == 0 && len(p.Devices) == 0 && len(p.NonTargetingDevices) == 0 {
 		return nil
 	}
@@ -353,7 +358,18 @@ func (b *poolBuilder) build(key PoolKey, requirements scheduling.Requirements) *
 	pool.Invalid = pool.Invalid || !validateDeviceCounterConsumption(counterSets, pool.Slices)
 	pool.Invalid = pool.Invalid || !validateDeviceCounterConsumption(counterSets, nonTargetingDeviceSlices)
 
-	if len(pool.Slices) == 0 && len(pool.NonTargetingDevices) == 0 {
+	if pool.Invalid {
+		for _, d := range pool.Devices {
+			if len(d.Device.ConsumesCounters) > 0 {
+				pool.NonTargetingDevices = append(pool.NonTargetingDevices, d)
+			}
+		}
+		pool.Devices = nil
+		pool.Slices = nil
+		return pool
+	}
+
+	if len(pool.Slices) == 0 && len(pool.Devices) == 0 && len(pool.NonTargetingDevices) == 0 {
 		return nil
 	}
 

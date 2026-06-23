@@ -646,8 +646,7 @@ var _ = Describe("Pool Gathering", func() {
 				pools := dynamicresources.GatherPools(slices, reqs)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeTrue())
-				// Should only contain gen 2 devices
-				Expect(pools[0].Devices).To(HaveLen(2))
+				Expect(pools[0].Devices).To(BeEmpty())
 			})
 
 			It("should return new generation as valid when previous generation was incomplete", func() {
@@ -1909,6 +1908,31 @@ var _ = Describe("Pool Gathering", func() {
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].Incomplete).To(BeTrue())
 				Expect(filtered[0].Invalid).To(BeTrue())
+			})
+
+			It("should preserve invalid pool through filtering even when all slices become incompatible", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withZoneSelector("us-west-2a"),
+						withAPIDevices("gpu-0", "gpu-0"), // duplicate -> invalid
+					),
+				}
+				broad := scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
+				)
+				pools := dynamicresources.GatherPools(slices, broad)
+				Expect(pools).To(HaveLen(1))
+				Expect(pools[0].Invalid).To(BeTrue())
+
+				// Tighten requirements to a different zone — the slice no longer matches.
+				// The invalid pool must still be preserved so All-mode can detect and error on it.
+				tightened := scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
+				)
+				filtered := dynamicresources.FilterPools(pools, tightened)
+				Expect(filtered).To(HaveLen(1))
+				Expect(filtered[0].Invalid).To(BeTrue())
+				Expect(filtered[0].Devices).To(BeEmpty())
 			})
 
 			It("should not mutate the original pool's NonTargetingDevices when filtering multiple times", func() {
