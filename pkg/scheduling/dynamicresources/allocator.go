@@ -534,8 +534,11 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 
 		if a.dfs(0, 0, 0) {
 			survivingITs = append(survivingITs, itID)
-			counterConsumptionByIT[itID] = copyCounterMap(a.allocatingCounters)
-			templateCounterConsumptionByIT[itID] = copyCounterMap(a.templateAllocatingCounters)
+			counterConsumptionByIT[itID] = a.allocatingCounters
+			templateCounterConsumptionByIT[itID] = a.templateAllocatingCounters
+			// Definsive nils to prevents future regressions where allocatingCounters / templateAllocatingCounters is re-used
+			a.allocatingCounters = nil
+			a.templateAllocatingCounters = nil
 
 			deviceIDsByIT[itID] = make([]DeviceID, len(a.allocatedDevicesMetadata))
 			itReqs := scheduling.NewRequirements()
@@ -912,13 +915,13 @@ func (a *allocator) checkCounters(device cloudprovider.Device, poolKey PoolKey, 
 			if !ok {
 				return false
 			}
-			available := remainingCounter.Value.DeepCopy()
+			allocatingVal := int64(0)
 			if allocatingCounters != nil {
-				if allocatingCounter, ok := allocatingCounters[counterName]; ok {
-					available.Sub(allocatingCounter.Value)
+				if ac, ok := allocatingCounters[counterName]; ok {
+					allocatingVal = ac.Value.Value()
 				}
 			}
-			if available.Cmp(counter.Value) < 0 {
+			if remainingCounter.Value.Value()-allocatingVal < counter.Value.Value() {
 				return false
 			}
 		}
@@ -1054,17 +1057,6 @@ func (a *allocator) allModeCountersFeasible(rd *RequestData) bool {
 		}
 	}
 	return true
-}
-
-func copyCounterMap(src map[PoolKey]map[string]map[string]resourcev1.Counter) map[PoolKey]map[string]map[string]resourcev1.Counter {
-	if len(src) == 0 {
-		return nil
-	}
-	cp := make(map[PoolKey]map[string]map[string]resourcev1.Counter, len(src))
-	for poolKey, counterSets := range src {
-		cp[poolKey] = copyCounterSets(counterSets)
-	}
-	return cp
 }
 
 func copyCounterSets(src map[string]map[string]resourcev1.Counter) map[string]map[string]resourcev1.Counter {
