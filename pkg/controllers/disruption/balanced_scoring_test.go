@@ -39,13 +39,15 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-// makeOffering creates an Offering with the given price and empty requirements
-// so it is compatible with any label set.
+// makeOffering creates an Offering with the given price, zone, and capacity type.
 func makeOffering(price float64) *cloudprovider.Offering {
 	return &cloudprovider.Offering{
-		Requirements: scheduling.NewRequirements(),
-		Price:        price,
-		Available:    true,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1"),
+			scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+		),
+		Price:     price,
+		Available: true,
 	}
 }
 
@@ -65,7 +67,9 @@ func makeCandidate(nodeName string, np *v1.NodePool, it *cloudprovider.InstanceT
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Labels: map[string]string{
-				v1.NodePoolLabelKey: np.Name,
+				v1.NodePoolLabelKey:      np.Name,
+				corev1.LabelTopologyZone: "test-zone-1",
+				v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 			},
 		},
 	}
@@ -146,8 +150,8 @@ func makeShouldDisruptCandidate(np *v1.NodePool, policy v1.ConsolidationPolicy) 
 
 	labels := map[string]string{
 		corev1.LabelInstanceTypeStable: "m7i.xlarge",
-		v1.CapacityTypeLabelKey:        "on-demand",
-		corev1.LabelTopologyZone:       "us-east-1a",
+		v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+		corev1.LabelTopologyZone:       "test-zone-1",
 		v1.NodeRegisteredLabelKey:      "true",
 	}
 

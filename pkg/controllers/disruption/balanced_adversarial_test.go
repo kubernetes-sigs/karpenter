@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -38,9 +39,12 @@ var _ = Describe("Adversarial", func() {
 		nanIT := &cloudprovider.InstanceType{
 			Name: "nan-instance",
 			Offerings: cloudprovider.Offerings{&cloudprovider.Offering{
-				Requirements: scheduling.NewRequirements(),
-				Price:        math.NaN(),
-				Available:    true,
+				Requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1"),
+					scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+				),
+				Price:     math.NaN(),
+				Available: true,
 			}},
 		}
 
@@ -136,14 +140,20 @@ var _ = Describe("Adversarial", func() {
 			Name: "source-type",
 			Offerings: cloudprovider.Offerings{
 				&cloudprovider.Offering{
-					Requirements: scheduling.NewRequirements(),
-					Price:        1.00,
-					Available:    false, // ICE'd -- can't launch new, but running nodes still cost this
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1"),
+						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+					),
+					Price:     1.00,
+					Available: false, // ICE'd -- can't launch new, but running nodes still cost this
 				},
 				&cloudprovider.Offering{
-					Requirements: scheduling.NewRequirements(),
-					Price:        5.00,
-					Available:    true,
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-2"),
+						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+					),
+					Price:     5.00,
+					Available: true,
 				},
 			},
 		}
