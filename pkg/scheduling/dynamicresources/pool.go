@@ -125,6 +125,8 @@ func FilterPools(pools []*Pool, requirements scheduling.Requirements) []*Pool {
 // filterPool returns a copy of the pool containing only slices (and their devices) that match
 // the requirements. Devices with ConsumesCounters on non-matching slices are moved to
 // NonTargetingDevices. Returns nil if no slices match and no NonTargetingDevices exist.
+//
+//nolint:gocyclo
 func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
 	p := &Pool{
 		Key:                 pool.Key,
