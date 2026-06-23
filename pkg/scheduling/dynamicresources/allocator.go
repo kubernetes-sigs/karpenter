@@ -658,7 +658,11 @@ func (a *allocator) dfsExactCount(claimIdx, reqIdx, slotIdx int, cd *ClaimData, 
 		if pool.Incomplete {
 			continue
 		}
+		exhausted := a.poolCountersExhausted(pool)
 		for _, d := range pool.Devices {
+			if exhausted && len(d.Device.ConsumesCounters) > 0 {
+				continue
+			}
 			if a.tryDevice(claimIdx, reqIdx, slotIdx, cd, rd, d) {
 				return true
 			}
@@ -887,6 +891,39 @@ func computeTemplateTotals(slices []ResourceSlice) map[PoolKey]map[string]map[st
 		}
 	}
 	return totalsByPool
+}
+
+// poolCountersExhausted returns true if any counter in the pool has been fully consumed
+// by DFS-local tentative allocations, meaning no additional counter-consuming device from
+// this pool can succeed.
+func (a *allocator) poolCountersExhausted(pool *Pool) bool {
+	if len(pool.CounterSets) == 0 {
+		return false
+	}
+	remaining := a.allocationTracker.RemainingCounters[pool.Key]
+	if remaining == nil {
+		return false
+	}
+	allocating := a.allocatingCounters[pool.Key]
+	if allocating == nil {
+		return false
+	}
+	for counterSetName, counterSet := range allocating {
+		counterSetRemaining, ok := remaining[counterSetName]
+		if !ok {
+			continue
+		}
+		for counterName, allocCounter := range counterSet {
+			remCounter, ok := counterSetRemaining[counterName]
+			if !ok {
+				continue
+			}
+			if remCounter.Value.Value()-allocCounter.Value.Value() <= 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // checkCounters verifies that shared counters have sufficient remaining budget for the device.
