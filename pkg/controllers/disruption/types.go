@@ -40,7 +40,6 @@ import (
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -111,21 +110,18 @@ func (r ScoreResult) Score() float64 {
 func (r ScoreResult) Threshold() float64 { return 1.0 / float64(r.K) }
 func (r ScoreResult) Approved() bool     { return r.Score() >= r.Threshold() }
 
-// resolveNodePrice returns the actual price of a running node. A node's zone
-// and capacity-type labels constrain Compatible() to a single offering on
-// standard clouds; Cheapest() is a safe accessor for that single match.
-// Returns 0 when the instance type is nil or no compatible offering exists
-// (typically a deprecated instance type).
+// resolveNodePrice returns the actual price of a running node by looking up the
+// offering that matches the node's zone and capacity-type labels.
+// Returns 0 when the instance type is nil or no matching offering exists.
 func resolveNodePrice(node *state.StateNode, instanceType *cloudprovider.InstanceType) float64 {
 	if instanceType == nil {
 		return 0
 	}
-	reqs := scheduling.NewLabelRequirements(node.Labels())
-	offerings := instanceType.Offerings.Compatible(reqs)
-	if len(offerings) == 0 {
+	labels := node.Labels()
+	price, ok := instanceType.OfferingPrice(labels[corev1.LabelTopologyZone], labels[v1.CapacityTypeLabelKey])
+	if !ok {
 		return 0
 	}
-	price := offerings.Cheapest().Price
 	if math.IsNaN(price) {
 		return 0
 	}

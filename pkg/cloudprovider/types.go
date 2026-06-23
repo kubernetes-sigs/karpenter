@@ -293,6 +293,17 @@ func (i *InstanceType) computeAllocatable(capacityOverride corev1.ResourceList, 
 	return allocatable
 }
 
+// OfferingPrice returns the price for the offering matching the given zone and
+// capacity type. Returns 0, false if no matching offering exists.
+func (i *InstanceType) OfferingPrice(zone, capacityType string) (float64, bool) {
+	for _, o := range i.Offerings {
+		if o.Zone() == zone && o.CapacityType() == capacityType {
+			return o.Price, true
+		}
+	}
+	return 0, false
+}
+
 func (i *InstanceType) IsPricingOverlayApplied() bool {
 	return lo.ContainsBy(i.Offerings, func(of *Offering) bool {
 		return of.IsPriceOverlaid()

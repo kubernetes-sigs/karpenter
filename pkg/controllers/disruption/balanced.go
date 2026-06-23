@@ -106,8 +106,8 @@ func computeNodePoolTotals(_ context.Context, allCandidates []*Candidate, allNod
 // Caller guarantees totals come from computeNodePoolTotals, so
 // TotalDisruptionCost >= PerNodeBaseDisruptionCost for any pool with candidates.
 func ScoreMove(savings float64, disruptionCost float64, totals NodePoolTotals, k int32) ScoreResult {
-	// Zero nodepool cost: nothing to consolidate
-	if totals.TotalCost <= 0 {
+	// Zero totals: nothing to normalize against
+	if totals.TotalCost <= 0 || totals.TotalDisruptionCost <= 0 {
 		return ScoreResult{K: k}
 	}
 
