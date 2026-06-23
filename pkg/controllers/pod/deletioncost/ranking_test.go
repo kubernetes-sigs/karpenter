@@ -18,6 +18,7 @@ package deletioncost_test
 
 import (
 	"math"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -35,6 +36,30 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
+// expectPodRank reads pod via the live client and returns the integer value of
+// its pod-deletion-cost annotation. Fails the spec if the annotation is missing
+// or non-integer; use expectPodAnnotationCleared for the Group D case.
+func expectPodRank(pod *corev1.Pod) int {
+	GinkgoHelper()
+	updated := &corev1.Pod{}
+	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+	raw, ok := updated.Annotations[corev1.PodDeletionCost]
+	Expect(ok).To(BeTrue(), "pod %s missing pod-deletion-cost annotation", pod.Name)
+	val, err := strconv.Atoi(raw)
+	Expect(err).ToNot(HaveOccurred(), "pod %s has non-integer pod-deletion-cost %q", pod.Name, raw)
+	return val
+}
+
+// expectPodAnnotationCleared asserts the pod has no pod-deletion-cost
+// annotation (Group D semantics: the controller clears the value).
+func expectPodAnnotationCleared(pod *corev1.Pod) {
+	GinkgoHelper()
+	updated := &corev1.Pod{}
+	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+	Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),
+		"pod %s should not carry pod-deletion-cost (Group D clears it)", pod.Name)
+}
+
 var _ = Describe("Ranking", func() {
 	var nodePool *v1.NodePool
 
@@ -50,6 +75,10 @@ var _ = Describe("Ranking", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 	})
 
+	// Migrated happy-path tests drive through Controller.Reconcile and assert
+	// on the observable pod-deletion-cost annotation. Direct-helper tests for
+	// partition edge cases remain in this file for the cases where the
+	// observable annotation does not distinguish the classification.
 	Context("Two-tier partitioning", func() {
 		It("should sort normal nodes before do-not-disrupt nodes", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
@@ -60,45 +89,29 @@ var _ = Describe("Ranking", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			// Put a do-not-disrupt pod on node 1
+			// Put a do-not-disrupt pod on node 1; normal pods on nodes 0 and 2.
 			dndPod := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"},
 				},
 				NodeName: nodes[1].Name,
 			})
-			// Normal pods on nodes 0 and 2
 			pod0 := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
 			pod2 := rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name})
 			ExpectApplied(ctx, env.Client, dndPod, pod0, pod2)
-
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(ranks).To(HaveLen(3))
 
-			// All non-DND nodes should have lower ranks than DND nodes
-			var normalRanks, dndRanks []int
-			for _, r := range ranks {
-				if r.HasDoNotDisrupt {
-					dndRanks = append(dndRanks, r.Rank)
-				} else {
-					normalRanks = append(normalRanks, r.Rank)
-				}
-			}
-			Expect(normalRanks).To(HaveLen(2))
-			Expect(dndRanks).To(HaveLen(1))
-			for _, nr := range normalRanks {
-				for _, dr := range dndRanks {
-					Expect(nr).To(BeNumerically("<", dr))
-				}
-			}
+			// Group C nodes (normal) get strictly-negative ranks; Group D
+			// nodes have their annotation cleared. The Group C/D ordering is
+			// observable as "annotated vs not-annotated" at the public API
+			// boundary.
+			Expect(expectPodRank(pod0)).To(BeNumerically("<", 0))
+			Expect(expectPodRank(pod2)).To(BeNumerically("<", 0))
+			expectPodAnnotationCleared(dndPod)
 		})
 
 		It("should handle empty node list", func() {
@@ -117,21 +130,20 @@ var _ = Describe("Ranking", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			for _, n := range nodes {
-				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: n.Name}))
+			pods := make([]*corev1.Pod, len(nodes))
+			for i, n := range nodes {
+				pods[i] = rsOwnedPod(test.PodOptions{NodeName: n.Name})
+				ExpectApplied(ctx, env.Client, pods[i])
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(ranks).To(HaveLen(3))
-			for _, r := range ranks {
-				Expect(r.HasDoNotDisrupt).To(BeFalse())
+
+			// Every pod gets a negative rank; none are cleared.
+			for _, p := range pods {
+				Expect(expectPodRank(p)).To(BeNumerically("<", 0))
 			}
 		})
 
@@ -144,24 +156,24 @@ var _ = Describe("Ranking", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			for _, n := range nodes {
-				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
+			pods := make([]*corev1.Pod, len(nodes))
+			for i, n := range nodes {
+				pods[i] = rsOwnedPod(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
 					NodeName:   n.Name,
-				}))
+				})
+				ExpectApplied(ctx, env.Client, pods[i])
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(ranks).To(HaveLen(2))
-			for _, r := range ranks {
-				Expect(r.HasDoNotDisrupt).To(BeTrue())
+
+			// Every pod is on a Group D node; every pod has its
+			// pod-deletion-cost annotation cleared.
+			for _, p := range pods {
+				expectPodAnnotationCleared(p)
 			}
 		})
 
@@ -174,27 +186,27 @@ var _ = Describe("Ranking", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			for _, n := range nodes {
-				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: n.Name}))
+			pods := make([]*corev1.Pod, len(nodes))
+			for i, n := range nodes {
+				pods[i] = rsOwnedPod(test.PodOptions{NodeName: n.Name})
+				ExpectApplied(ctx, env.Client, pods[i])
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Ranks should be sequential starting from -len(nodes)
-			baseRank := -len(stateNodes)
-			rankValues := map[int]bool{}
-			for _, r := range ranks {
-				rankValues[r.Rank] = true
+			// All three pods are in Group C; ranks should be contiguous
+			// across -len(nodes), -len(nodes)+1, -len(nodes)+2. Order across
+			// pods depends on the pod-count tie-break so verify the rank set.
+			ranks := map[int]bool{}
+			for _, p := range pods {
+				ranks[expectPodRank(p)] = true
 			}
-			for i := 0; i < len(ranks); i++ {
-				Expect(rankValues).To(HaveKey(baseRank + i))
+			base := -len(nodes)
+			for i := 0; i < len(nodes); i++ {
+				Expect(ranks).To(HaveKey(base+i), "expected contiguous rank %d in observed set %v", base+i, ranks)
 			}
 		})
 
@@ -207,48 +219,28 @@ var _ = Describe("Ranking", func() {
 			for i := range nodeClaims {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			// Nodes 0,2 normal; nodes 1,3 DND
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name}))
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
+			// Nodes 0,2 normal; nodes 1,3 DND.
+			pod0 := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			pod1 := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
 				NodeName:   nodes[1].Name,
-			}))
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name}))
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
+			})
+			pod2 := rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name})
+			pod3 := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
 				NodeName:   nodes[3].Name,
-			}))
+			})
+			ExpectApplied(ctx, env.Client, pod0, pod1, pod2, pod3)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(ranks).To(HaveLen(4))
 
-			var normalCount, dndCount int
-			baseRank := -len(stateNodes)
-			maxNormalRank := baseRank - 1
-			minDNDRank := baseRank + 100
-			for _, r := range ranks {
-				if r.HasDoNotDisrupt {
-					dndCount++
-					if r.Rank < minDNDRank {
-						minDNDRank = r.Rank
-					}
-				} else {
-					normalCount++
-					if r.Rank > maxNormalRank {
-						maxNormalRank = r.Rank
-					}
-				}
-			}
-			Expect(normalCount).To(Equal(2))
-			Expect(dndCount).To(Equal(2))
-			Expect(maxNormalRank).To(BeNumerically("<", minDNDRank))
+			Expect(expectPodRank(pod0)).To(BeNumerically("<", 0))
+			Expect(expectPodRank(pod2)).To(BeNumerically("<", 0))
+			expectPodAnnotationCleared(pod1)
+			expectPodAnnotationCleared(pod3)
 		})
 	})
 
