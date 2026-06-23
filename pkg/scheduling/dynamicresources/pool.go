@@ -145,19 +145,16 @@ func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
 			continue
 		}
 		p.Slices = append(p.Slices, s)
-		topoReqs := sliceTopologyRequirements(s)
+		sliceTopoReqs := sliceTopologyRequirements(s)
 		for _, d := range s.Devices() {
-			deviceTopoReqs := topoReqs
-			if s.PerDeviceNodeSelection() {
-				deviceTopoReqs = deviceTopologyRequirements(d)
-				if deviceTopoReqs != nil && !requirements.IsCompatible(*deviceTopoReqs, scheduling.AllowUndefinedWellKnownLabels) {
-					if len(d.ConsumesCounters) > 0 {
-						p.NonTargetingDevices = append(p.NonTargetingDevices, newDeviceWithID(pool.Key, d, nil))
-					}
-					continue
+			topoReqs, targets := classifyDevice(d, sliceTopoReqs, s.PerDeviceNodeSelection(), requirements)
+			if !targets {
+				if len(d.ConsumesCounters) > 0 {
+					p.NonTargetingDevices = append(p.NonTargetingDevices, newDeviceWithID(pool.Key, d, nil))
 				}
+				continue
 			}
-			p.Devices = append(p.Devices, newDeviceWithID(pool.Key, d, deviceTopoReqs))
+			p.Devices = append(p.Devices, newDeviceWithID(pool.Key, d, topoReqs))
 		}
 	}
 	if len(p.Slices) == 0 && len(p.Devices) == 0 && len(p.NonTargetingDevices) == 0 {
@@ -204,6 +201,21 @@ func sliceTopologyRequirements(s ResourceSlice) *scheduling.Requirements {
 		reqs.Add(termReqs.Values()...)
 	}
 	return &reqs
+}
+
+// classifyDevice determines a device's effective topology requirements and whether it
+// targets the given node requirements. When targets is false, the device is incompatible
+// due to per-device node selection constraints.
+func classifyDevice(d cloudprovider.Device, sliceTopoReqs *scheduling.Requirements, perDevice bool, requirements scheduling.Requirements) (topoReqs *scheduling.Requirements, targets bool) {
+	topoReqs = sliceTopoReqs
+	if !perDevice {
+		return topoReqs, true
+	}
+	topoReqs = deviceTopologyRequirements(d)
+	if topoReqs != nil && !requirements.IsCompatible(*topoReqs, scheduling.AllowUndefinedWellKnownLabels) {
+		return nil, false
+	}
+	return topoReqs, true
 }
 
 // deviceTopologyRequirements returns the topology requirements for a device that uses
@@ -286,6 +298,8 @@ func (b *poolBuilder) addSlice(s ResourceSlice, matched bool) {
 // matching the upstream behavior where completeness is a global pool property.
 // Only slices whose node selectors matched contribute devices. Returns nil if no
 // slices matched (the pool has no devices visible to this node).
+//
+//nolint:gocyclo
 func (b *poolBuilder) build(key PoolKey, requirements scheduling.Requirements) *Pool {
 	pool := &Pool{
 		Key: key,
@@ -306,35 +320,30 @@ func (b *poolBuilder) build(key PoolKey, requirements scheduling.Requirements) *
 			continue
 		}
 
-		var topoReqs *scheduling.Requirements
-		if e.matched {
-			topoReqs = sliceTopologyRequirements(e.slice)
-			pool.Slices = append(pool.Slices, e.slice)
-		} else {
+		if !e.matched {
 			nonTargetingDeviceSlices = append(nonTargetingDeviceSlices, e.slice)
+			for _, d := range e.slice.Devices() {
+				if len(d.ConsumesCounters) > 0 {
+					pool.NonTargetingDevices = append(pool.NonTargetingDevices, newDeviceWithID(key, d, nil))
+				}
+			}
+			continue
 		}
 
+		pool.Slices = append(pool.Slices, e.slice)
+		sliceTopoReqs := sliceTopologyRequirements(e.slice)
 		for _, d := range e.slice.Devices() {
-			if e.matched {
-				pool.Invalid = pool.Invalid || seenDeviceNames.Has(d.Name)
-				seenDeviceNames.Insert(d.Name)
+			pool.Invalid = pool.Invalid || seenDeviceNames.Has(d.Name)
+			seenDeviceNames.Insert(d.Name)
 
-				deviceTopoReqs := topoReqs
-				if e.slice.PerDeviceNodeSelection() {
-					deviceTopoReqs = deviceTopologyRequirements(d)
-					if deviceTopoReqs != nil && !requirements.IsCompatible(*deviceTopoReqs, scheduling.AllowUndefinedWellKnownLabels) {
-						if len(d.ConsumesCounters) > 0 {
-							pool.NonTargetingDevices = append(pool.NonTargetingDevices, newDeviceWithID(key, d, nil))
-						}
-						continue
-					}
+			topoReqs, targets := classifyDevice(d, sliceTopoReqs, e.slice.PerDeviceNodeSelection(), requirements)
+			if !targets {
+				if len(d.ConsumesCounters) > 0 {
+					pool.NonTargetingDevices = append(pool.NonTargetingDevices, newDeviceWithID(key, d, nil))
 				}
-				pool.Devices = append(pool.Devices, newDeviceWithID(key, d, deviceTopoReqs))
-			} else if len(d.ConsumesCounters) > 0 {
-				// Non-matching device slice — retain devices with ConsumesCounters
-				// for counter deduction (not allocation candidates)
-				pool.NonTargetingDevices = append(pool.NonTargetingDevices, newDeviceWithID(key, d, nil))
+				continue
 			}
+			pool.Devices = append(pool.Devices, newDeviceWithID(key, d, topoReqs))
 		}
 	}
 

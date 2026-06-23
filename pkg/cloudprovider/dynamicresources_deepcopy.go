@@ -81,6 +81,7 @@ func (in *ResourceSliceTemplate) DeepCopy() *ResourceSliceTemplate {
 	return out
 }
 
+// nolint:gocyclo
 func (in *Device) DeepCopyInto(out *Device) {
 	*out = *in
 	if in.Attributes != nil {

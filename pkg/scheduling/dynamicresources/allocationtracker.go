@@ -241,14 +241,8 @@ func subtractDeltaFromRemaining(remaining map[PoolKey]map[string]map[string]reso
 			}
 			for counterName, newCounter := range newCounters {
 				delta := newCounter.Value.DeepCopy()
-				if oldCounterMax != nil {
-					if oldCounterSets, ok := oldCounterMax[poolKey]; ok {
-						if oldCounters, ok := oldCounterSets[counterSetName]; ok {
-							if oldCounter, ok := oldCounters[counterName]; ok {
-								delta.Sub(oldCounter.Value)
-							}
-						}
-					}
+				if old, ok := getCounter(oldCounterMax, poolKey, counterSetName, counterName); ok {
+					delta.Sub(old.Value)
 				}
 				if delta.Sign() > 0 {
 					remainingCounter, ok := counterSetRemaining[counterName]
@@ -347,14 +341,8 @@ func addDeltaToRemaining(remaining map[PoolKey]map[string]map[string]resourcev1.
 			}
 			for counterName, oldCounter := range oldCounters {
 				delta := oldCounter.Value.DeepCopy()
-				if newCounterMax != nil {
-					if newCounterSets, ok := newCounterMax[poolKey]; ok {
-						if newCounters, ok := newCounterSets[counterSetName]; ok {
-							if newCounter, ok := newCounters[counterName]; ok {
-								delta.Sub(newCounter.Value)
-							}
-						}
-					}
+				if new, ok := getCounter(newCounterMax, poolKey, counterSetName, counterName); ok {
+					delta.Sub(new.Value)
 				}
 				if delta.Sign() > 0 {
 					remainingCounter := counterSetRemaining[counterName]
@@ -512,4 +500,20 @@ func pessimisticCounterMax(counterConsumptionByIT map[InstanceTypeID]map[PoolKey
 		}
 	}
 	return counterMaxByPool
+}
+
+func getCounter(m map[PoolKey]map[string]map[string]resourcev1.Counter, pool PoolKey, set, name string) (resourcev1.Counter, bool) {
+	if m == nil {
+		return resourcev1.Counter{}, false
+	}
+	sets, ok := m[pool]
+	if !ok {
+		return resourcev1.Counter{}, false
+	}
+	counters, ok := sets[set]
+	if !ok {
+		return resourcev1.Counter{}, false
+	}
+	c, ok := counters[name]
+	return c, ok
 }

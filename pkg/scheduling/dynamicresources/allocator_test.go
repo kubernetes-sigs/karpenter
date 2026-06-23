@@ -140,6 +140,7 @@ func makeTemplateWithAttrs(driver, pool string, specs ...apiDeviceSpec) *cloudpr
 	}
 }
 
+// nolint:unparam
 func makeTemplateWithCounters(driver, pool string, counterSets []resourcev1.CounterSet, devices ...cloudprovider.Device) *cloudprovider.ResourceSliceTemplate {
 	return &cloudprovider.ResourceSliceTemplate{
 		Driver:         unique.Make(driver),
