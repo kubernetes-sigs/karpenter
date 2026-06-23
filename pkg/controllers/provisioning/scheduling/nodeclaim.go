@@ -484,5 +484,10 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 }
 
 func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList) bool {
-	return resources.Fits(requests, instanceType.Allocatable())
+	for _, allocatable := range instanceType.Allocatables() {
+		if resources.Fits(requests, allocatable) {
+			return true
+		}
+	}
+	return false
 }

@@ -138,6 +138,7 @@ type InstanceType struct {
 	Overhead               *InstanceTypeOverhead
 	once                   sync.Once
 	allocatable            corev1.ResourceList
+	allocatables           []corev1.ResourceList
 	capacityOverlayApplied bool
 }
 
@@ -201,23 +202,57 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 // precompute is used to ensure we only compute the allocatable resources onces as its called many times
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
-	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
+	i.allocatable = i.computeAllocatable(nil, nil)
 
-	// Adjust allocatable memory to account for hugepage reservations. Hugepages are a
-	// special memory resource that is reserved directly from the system, reducing the
-	// amount of memory available for general application use. Since hugepages are a
-	// Kubernetes well-known resource, we implement first-class accounting for their
-	// allocation impact.
-	for name, quantity := range i.Capacity {
+	// Build distinct allocatables from offerings with CapacityOverride/OverheadOverride.
+	// Group offerings by their (CapacityOverride, OverheadOverride) tuple, compute one allocatable per group.
+	i.allocatables = []corev1.ResourceList{i.allocatable}
+	type overrideKey struct {
+		capacity string
+		overhead string
+	}
+	seen := map[overrideKey]bool{{}: true} // base (nil, nil) already added
+	for _, o := range i.Offerings {
+		if len(o.CapacityOverride) == 0 && o.OverheadOverride == nil {
+			continue
+		}
+		key := overrideKey{
+			capacity: fmt.Sprintf("%v", o.CapacityOverride),
+			overhead: fmt.Sprintf("%v", o.OverheadOverride),
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		i.allocatables = append(i.allocatables, i.computeAllocatable(o.CapacityOverride, o.OverheadOverride))
+	}
+}
+
+// computeAllocatable computes the allocatable resources for a given capacity/overhead override.
+// If both are nil, it computes the base allocatable.
+func (i *InstanceType) computeAllocatable(capacityOverride corev1.ResourceList, overheadOverride *InstanceTypeOverhead) corev1.ResourceList {
+	capacity := i.Capacity
+	if len(capacityOverride) > 0 {
+		capacity = resources.Merge(i.Capacity, capacityOverride)
+	}
+	overhead := i.Overhead.Total()
+	if overheadOverride != nil {
+		overhead = resources.Merge(overhead, overheadOverride.Total())
+	}
+	allocatable := resources.Subtract(capacity, overhead)
+
+	// Adjust allocatable memory to account for hugepage reservations.
+	for name, quantity := range capacity {
 		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
-			current := i.allocatable.Memory()
+			current := allocatable.Memory()
 			current.Sub(quantity)
 			if current.Sign() == -1 {
 				current.Set(0)
 			}
-			i.allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
+			allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
 		}
 	}
+	return allocatable
 }
 
 func (i *InstanceType) IsPricingOverlayApplied() bool {
@@ -233,6 +268,14 @@ func (i *InstanceType) ApplyCapacityOverlay(updatedCapacity corev1.ResourceList)
 
 func (i *InstanceType) IsCapacityOverlayApplied() bool {
 	return i.capacityOverlayApplied
+}
+
+// Allocatables returns all distinct allocatable resource sets for this instance type.
+// Each entry corresponds to a unique (CapacityOverride, OverheadOverride) combination from the offerings.
+// The first entry is always the base allocatable (no overrides).
+func (i *InstanceType) Allocatables() []corev1.ResourceList {
+	i.once.Do(i.precompute)
+	return i.allocatables
 }
 
 func (i *InstanceType) Allocatable() corev1.ResourceList {
@@ -379,6 +422,15 @@ type Offering struct {
 	Price               float64
 	Available           bool
 	ReservationCapacity int
+
+	// CapacityOverride specifies resource overrides for this offering's capacity.
+	// Values are merged with the instance type's base capacity — new keys are added,
+	// existing keys are replaced. If nil, the offering uses the base capacity as-is.
+	CapacityOverride corev1.ResourceList
+	// OverheadOverride specifies overhead overrides for this offering.
+	// Values are merged with the instance type's base overhead — new keys are added,
+	// existing keys are replaced. If nil, the offering uses the base overhead as-is.
+	OverheadOverride *InstanceTypeOverhead
 
 	priceOverlayApplied bool
 }
