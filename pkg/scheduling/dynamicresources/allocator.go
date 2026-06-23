@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
 	"k8s.io/klog/v2"
@@ -61,8 +62,8 @@ type Allocator struct {
 // ResourceClaimAllocationMetadataForClaim returns a copy of the allocator's internal ResourceClaim allocation metadata.
 // A nil result will be returned if the claim hasn't been allocated by the allocator, i.e. both unallocated claims and
 // claims allocated in-cluster will return nil.
-func (a *Allocator) ResourceClaimAllocationMetadataForClaim(claimName string) *ResourceClaimAllocationMetadata {
-	meta, ok := a.claimAllocationMetadata[unique.Make(claimName)]
+func (a *Allocator) ResourceClaimAllocationMetadataForClaim(key types.NamespacedName) *ResourceClaimAllocationMetadata {
+	meta, ok := a.claimAllocationMetadata[unique.Make(key)]
 	if !ok {
 		return nil
 	}
@@ -184,7 +185,7 @@ func (a *allocation) Commit(ctx context.Context) {
 			"allocated devices",
 			"nodeClaimID", a.nodeClaimID.Value(),
 			"devicesByResourceClaim", lo.MapEntries(a.claimMetadata, func(claimID ResourceClaimID, meta *ResourceClaimAllocationMetadata) (string, map[string][]string) {
-				return claimID.Value(), lo.MapEntries(meta.Devices, func(it InstanceTypeID, ids []DeviceID) (string, []string) {
+				return claimID.Value().String(), lo.MapEntries(meta.Devices, func(it InstanceTypeID, ids []DeviceID) (string, []string) {
 					return it.Value(), lo.Map(ids, func(id DeviceID, _ int) string { return id.String() })
 				})
 			}),
@@ -371,7 +372,7 @@ func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.Res
 		}
 
 		// In-memory allocated: a prior pod already allocated this claim in this loop.
-		if meta, ok := a.claimAllocationMetadata[unique.Make(claim.Name)]; ok {
+		if meta, ok := a.claimAllocationMetadata[resourceClaimID(claim)]; ok {
 			// Template-allocated claims are node-local to the original NodeClaim.
 			if meta.UsedTemplateDevices {
 				if meta.NodeClaimID != nodeClaim.ID() {

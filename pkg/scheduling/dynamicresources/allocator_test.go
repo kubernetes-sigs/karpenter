@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 
@@ -310,6 +311,32 @@ var _ = Describe("Allocator", func() {
 			result, err := alloc.Allocate(ctx, nc, claims)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).ToNot(BeNil())
+		})
+
+		It("should distinguish claims with the same name in different namespaces", func() {
+			// ResourceClaims are namespaced, so two claims sharing a name across namespaces must be
+			// tracked independently rather than colliding on a name-only key.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			nc := makeNodeClaim("it-1")
+			claimNS1 := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			claimNS1.Namespace = "ns-1"
+			claimNS2 := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			claimNS2.Namespace = "ns-2"
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claimNS1, claimNS2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			// Commit must not panic on a duplicate key — the namespaced keys are distinct.
+			result.Allocation.Commit(ctx)
+
+			meta1 := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "ns-1", Name: "c1"})
+			meta2 := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "ns-2", Name: "c1"})
+			Expect(meta1).ToNot(BeNil())
+			Expect(meta2).ToNot(BeNil())
+			// Each namespace's claim received its own device allocation.
+			Expect(meta1.Devices[unique.Make("it-1")]).To(HaveLen(1))
+			Expect(meta2.Devices[unique.Make("it-1")]).To(HaveLen(1))
+			Expect(meta1.Devices[unique.Make("it-1")][0]).ToNot(Equal(meta2.Devices[unique.Make("it-1")][0]))
 		})
 
 		It("should skip already-allocated devices", func() {
@@ -1102,7 +1129,7 @@ var _ = Describe("Allocator", func() {
 			expectedZone := result.Requirements.Get(corev1.LabelTopologyZone).Values()[0]
 
 			result.Allocation.Commit(ctx)
-			meta := alloc.ResourceClaimAllocationMetadataForClaim("c1")
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
 			Expect(meta).ToNot(BeNil())
 			Expect(meta.Devices).To(HaveKey(unique.Make("it-1")))
 			Expect(meta.Devices[unique.Make("it-1")]).To(HaveLen(1))
@@ -2067,7 +2094,7 @@ var _ = Describe("Allocator", func() {
 			Expect(result.InstanceTypes).To(HaveLen(2))
 			result.Allocation.Commit(ctx)
 
-			meta := alloc.ResourceClaimAllocationMetadataForClaim("c1")
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
 			Expect(meta).ToNot(BeNil())
 			// Both ITs contributed zone-A from the in-cluster device.
 			Expect(meta.TotalRequirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
@@ -2108,7 +2135,7 @@ var _ = Describe("Allocator", func() {
 			Expect(err).ToNot(HaveOccurred())
 			result.Allocation.Commit(ctx)
 
-			meta := alloc.ResourceClaimAllocationMetadataForClaim("c1")
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
 			Expect(meta).ToNot(BeNil())
 			Expect(meta.TotalRequirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
 
@@ -2146,7 +2173,7 @@ var _ = Describe("Allocator", func() {
 			Expect(result.InstanceTypes).To(HaveLen(3))
 			result.Allocation.Commit(ctx)
 
-			meta := alloc.ResourceClaimAllocationMetadataForClaim("c1")
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
 			Expect(meta).ToNot(BeNil())
 			Expect(meta.TotalRequirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("us-west-2a"))
 
@@ -2536,7 +2563,7 @@ var _ = Describe("Allocator", func() {
 			Expect(result.InstanceTypes).To(HaveLen(2))
 			result.Allocation.Commit(ctx)
 
-			meta := alloc.ResourceClaimAllocationMetadataForClaim("c1")
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
 			Expect(meta).ToNot(BeNil())
 			// Both ITs should have independent entries.
 			Expect(meta.ContributedRequirements).To(HaveKey(unique.Make("it-a")))
@@ -2565,7 +2592,7 @@ var _ = Describe("Allocator", func() {
 			Expect(err).ToNot(HaveOccurred())
 			result.Allocation.Commit(ctx)
 
-			meta := alloc.ResourceClaimAllocationMetadataForClaim("c1")
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
 			Expect(meta).ToNot(BeNil())
 			// AllNodes device has no topology → TotalRequirements should be empty.
 			Expect(meta.TotalRequirements).To(BeEmpty())
@@ -2627,8 +2654,8 @@ var _ = Describe("Allocator", func() {
 			Expect(err).ToNot(HaveOccurred())
 			result.Allocation.Commit(ctx)
 
-			metaC1 := alloc.ResourceClaimAllocationMetadataForClaim("c1")
-			metaC2 := alloc.ResourceClaimAllocationMetadataForClaim("c2")
+			metaC1 := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			metaC2 := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c2"})
 			Expect(metaC1).ToNot(BeNil())
 			Expect(metaC2).ToNot(BeNil())
 
@@ -3047,7 +3074,7 @@ var _ = Describe("Allocator", func() {
 			Expect(err).ToNot(HaveOccurred())
 			result1.Allocation.Commit(ctx)
 
-			claim1Meta := alloc.ResourceClaimAllocationMetadataForClaim("zonal-claim")
+			claim1Meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "zonal-claim"})
 			Expect(claim1Meta).ToNot(BeNil())
 			Expect(claim1Meta.TotalRequirements).ToNot(BeEmpty())
 			Expect(claim1Meta.TotalRequirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
@@ -3079,7 +3106,7 @@ var _ = Describe("Allocator", func() {
 			Expect(result2.Requirements.Get(corev1.LabelTopologyZone).Values()).To(HaveLen(1))
 			Expect(result2.Requirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf(expectedZone))
 
-			claim2Meta := alloc.ResourceClaimAllocationMetadataForClaim("new-claim")
+			claim2Meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "new-claim"})
 			Expect(claim2Meta).ToNot(BeNil())
 			Expect(claim2Meta.Devices).To(HaveKey(unique.Make("it-1")))
 			claim2Devices := claim2Meta.Devices[unique.Make("it-1")]
