@@ -5217,7 +5217,7 @@ var _ = Context("Scheduling", func() {
 	Describe("Dynamic Resource Allocation (DRA)", func() {
 		DescribeTable("should handle DRA pods correctly",
 			func(testCase string, podOptions test.PodOptions, expectNodeClaims bool, expectDRAError bool) {
-				nodePool := test.NodePool()
+				nodePool = test.NodePool()
 				ExpectApplied(ctx, env.Client, nodePool)
 
 				// Create the test pod with specified options
@@ -5356,7 +5356,7 @@ var _ = Context("Scheduling", func() {
 		)
 
 		It("should handle DaemonSet pods with DRA requirements based on IgnoreDRARequests flag value", func() {
-			nodePool := test.NodePool()
+			nodePool = test.NodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// DRA daemon pod with larger CPU requirements
