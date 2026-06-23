@@ -19,6 +19,7 @@ package cloudprovider
 import (
 	"unique"
 
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 )
 
@@ -70,6 +71,15 @@ type Device struct {
 	// ConsumesCounters declares which sharedCounters this device consumes from
 	// on allocation.
 	ConsumesCounters []resourcev1.DeviceCounterConsumption
+	// NodeName identifies the node where the device is available.
+	// Only set when the slice uses PerDeviceNodeSelection.
+	NodeName *string
+	// NodeSelector defines the nodes where the device is available.
+	// Only set when the slice uses PerDeviceNodeSelection.
+	NodeSelector *corev1.NodeSelector
+	// AllNodes indicates that all nodes have access to the device.
+	// Only set when the slice uses PerDeviceNodeSelection.
+	AllNodes *bool
 }
 
 // AttributeBinding declares that a set of devices on an instance type will share a common

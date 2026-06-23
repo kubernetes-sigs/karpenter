@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
@@ -151,6 +152,57 @@ var _ = Describe("DynamicResources", func() {
 			// Mutating ConsumesCounters on the copy should not affect the original
 			tmpl.Devices[0].ConsumesCounters[0].Counters["memory"] = resourcev1.Counter{Value: resource.MustParse("5Gi")}
 			Expect(original.ResourceSliceTemplates[0].Devices[0].ConsumesCounters[0].Counters["memory"].Value.Equal(resource.MustParse("40Gi"))).To(BeTrue())
+		})
+
+		It("should deep copy PerDeviceNodeSelection fields", func() {
+			original := cloudprovider.DynamicResources{
+				ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{
+					{
+						Driver: unique.Make("gpu.nvidia.com"),
+						Pool:   cloudprovider.ResourcePool{Name: unique.Make("multi-host")},
+						Devices: []cloudprovider.Device{
+							{
+								Name:     unique.Make("tpu-0"),
+								NodeName: ptr.To("node-1"),
+							},
+							{
+								Name: unique.Make("tpu-1"),
+								NodeSelector: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{MatchExpressions: []corev1.NodeSelectorRequirement{
+											{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a", "us-west-2b"}},
+										}},
+									},
+								},
+							},
+							{
+								Name:     unique.Make("tpu-2"),
+								AllNodes: ptr.To(true),
+							},
+						},
+					},
+				},
+			}
+
+			copied := original.DeepCopy()
+
+			// Verify structural correctness
+			Expect(copied.ResourceSliceTemplates[0].Devices).To(HaveLen(3))
+			Expect(*copied.ResourceSliceTemplates[0].Devices[0].NodeName).To(Equal("node-1"))
+			Expect(copied.ResourceSliceTemplates[0].Devices[1].NodeSelector.NodeSelectorTerms).To(HaveLen(1))
+			Expect(*copied.ResourceSliceTemplates[0].Devices[2].AllNodes).To(BeTrue())
+
+			// Mutating NodeName on the copy should not affect the original
+			*copied.ResourceSliceTemplates[0].Devices[0].NodeName = "node-99"
+			Expect(*original.ResourceSliceTemplates[0].Devices[0].NodeName).To(Equal("node-1"))
+
+			// Mutating NodeSelector on the copy should not affect the original
+			copied.ResourceSliceTemplates[0].Devices[1].NodeSelector.NodeSelectorTerms[0].MatchExpressions[0].Values = []string{"eu-west-1a"}
+			Expect(original.ResourceSliceTemplates[0].Devices[1].NodeSelector.NodeSelectorTerms[0].MatchExpressions[0].Values).To(ConsistOf("us-west-2a", "us-west-2b"))
+
+			// Mutating AllNodes on the copy should not affect the original
+			*copied.ResourceSliceTemplates[0].Devices[2].AllNodes = false
+			Expect(*original.ResourceSliceTemplates[0].Devices[2].AllNodes).To(BeTrue())
 		})
 	})
 })

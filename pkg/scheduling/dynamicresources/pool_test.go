@@ -131,6 +131,18 @@ func withDevicesConsumingCounters(devices ...resourcev1.Device) func(*resourcev1
 	}
 }
 
+func withPerDeviceNodeSelection() func(*resourcev1.ResourceSlice) {
+	return func(s *resourcev1.ResourceSlice) {
+		s.Spec.PerDeviceNodeSelection = ptr.To(true)
+	}
+}
+
+func withPerDeviceDevices(devices ...resourcev1.Device) func(*resourcev1.ResourceSlice) {
+	return func(s *resourcev1.ResourceSlice) {
+		s.Spec.Devices = append(s.Spec.Devices, devices...)
+	}
+}
+
 func counterSet(name string, counters map[string]resource.Quantity) resourcev1.CounterSet {
 	cs := resourcev1.CounterSet{
 		Name:     name,
@@ -1241,6 +1253,313 @@ var _ = Describe("Pool Gathering", func() {
 				Expect(pools[0].NonTargetingDevices).To(HaveLen(1))
 				Expect(pools[0].NonTargetingDevices[0].ID.Device).To(Equal(unique.Make("gpu-0")))
 				Expect(pools[0].CounterSets).To(HaveKey("budget"))
+			})
+		})
+
+		Context("PerDeviceNodeSelection", func() {
+			It("should include the slice but exclude topology-incompatible devices", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withPerDeviceDevices(
+							resourcev1.Device{
+								Name: "gpu-0",
+								NodeSelector: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{MatchExpressions: []corev1.NodeSelectorRequirement{
+											{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"eu-west-1a"}},
+										}},
+									},
+								},
+							},
+							resourcev1.Device{
+								Name: "gpu-1",
+								NodeSelector: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{MatchExpressions: []corev1.NodeSelectorRequirement{
+											{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+										}},
+									},
+								},
+							},
+						),
+						withGeneration(1, 1),
+					),
+				}
+				pools := dynamicresources.GatherPools(slices, reqs)
+				Expect(pools).To(HaveLen(1))
+				Expect(pools[0].Slices).To(HaveLen(1))
+				// gpu-0 (eu-west-1a) is incompatible with reqs (us-west-2a/2b) → excluded
+				// gpu-1 (us-west-2a) is compatible → included
+				Expect(pools[0].Devices).To(HaveLen(1))
+				Expect(pools[0].Devices[0].ID.Device.Value()).To(Equal("gpu-1"))
+			})
+
+			It("should set TopologyRequirements from NodeSelector expressions for a device with NodeSelector", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withPerDeviceDevices(resourcev1.Device{
+							Name: "gpu-0",
+							NodeSelector: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{
+									{MatchExpressions: []corev1.NodeSelectorRequirement{
+										{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+									}},
+								},
+							},
+						}),
+						withGeneration(1, 1),
+					),
+				}
+				pools := dynamicresources.GatherPools(slices, reqs)
+				Expect(pools).To(HaveLen(1))
+				Expect(pools[0].Devices).To(HaveLen(1))
+				Expect(pools[0].Devices[0].TopologyRequirements).ToNot(BeNil())
+				Expect(pools[0].Devices[0].TopologyRequirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
+				Expect(pools[0].Devices[0].TopologyRequirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("us-west-2a"))
+			})
+
+			It("should set nil TopologyRequirements for a device with AllNodes=true", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withPerDeviceDevices(resourcev1.Device{
+							Name:     "gpu-0",
+							AllNodes: ptr.To(true),
+						}),
+						withGeneration(1, 1),
+					),
+				}
+				pools := dynamicresources.GatherPools(slices, reqs)
+				Expect(pools).To(HaveLen(1))
+				Expect(pools[0].Devices).To(HaveLen(1))
+				Expect(pools[0].Devices[0].TopologyRequirements).To(BeNil())
+			})
+
+			It("should set nil TopologyRequirements for a device with no node affinity fields", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withPerDeviceDevices(resourcev1.Device{
+							Name: "gpu-0",
+						}),
+						withGeneration(1, 1),
+					),
+				}
+				pools := dynamicresources.GatherPools(slices, reqs)
+				Expect(pools).To(HaveLen(1))
+				Expect(pools[0].Devices).To(HaveLen(1))
+				Expect(pools[0].Devices[0].TopologyRequirements).To(BeNil())
+			})
+
+			It("should filter per-device and assign different TopologyRequirements to compatible devices", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withPerDeviceDevices(
+							resourcev1.Device{
+								Name: "gpu-0",
+								NodeSelector: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{MatchExpressions: []corev1.NodeSelectorRequirement{
+											{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"eu-west-1a"}},
+										}},
+									},
+								},
+							},
+							resourcev1.Device{
+								Name: "gpu-1",
+								NodeSelector: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{MatchExpressions: []corev1.NodeSelectorRequirement{
+											{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2b"}},
+										}},
+									},
+								},
+							},
+							resourcev1.Device{
+								Name:     "gpu-2",
+								AllNodes: ptr.To(true),
+							},
+							resourcev1.Device{
+								Name: "gpu-3",
+							},
+						),
+						withGeneration(1, 1),
+					),
+				}
+				pools := dynamicresources.GatherPools(slices, reqs)
+				Expect(pools).To(HaveLen(1))
+				// gpu-0 (eu-west-1a) excluded — incompatible with reqs (us-west-2a/2b)
+				// gpu-1 (us-west-2b) included — compatible
+				// gpu-2 (AllNodes) included — nil topology, always compatible
+				// gpu-3 (none) included — nil topology, always compatible
+				Expect(pools[0].Devices).To(HaveLen(3))
+
+				byDevice := map[string]dynamicresources.DeviceWithID{}
+				for _, d := range pools[0].Devices {
+					byDevice[d.ID.Device.Value()] = d
+				}
+
+				Expect(byDevice["gpu-1"].TopologyRequirements).ToNot(BeNil())
+				Expect(byDevice["gpu-1"].TopologyRequirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
+				Expect(byDevice["gpu-1"].TopologyRequirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("us-west-2b"))
+
+				Expect(byDevice["gpu-2"].TopologyRequirements).To(BeNil())
+				Expect(byDevice["gpu-3"].TopologyRequirements).To(BeNil())
+			})
+
+			It("should combine PerDeviceNodeSelection slice with a normal NodeSelector slice in the same pool", func() {
+				broad := scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
+				)
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withZoneSelector("us-west-2a"),
+						withAPIDevices("gpu-0"),
+						withGeneration(1, 2),
+					),
+					makeAPISlice("s2", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withPerDeviceDevices(resourcev1.Device{
+							Name: "gpu-1",
+							NodeSelector: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{
+									{MatchExpressions: []corev1.NodeSelectorRequirement{
+										{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2b"}},
+									}},
+								},
+							},
+						}),
+						withGeneration(1, 2),
+					),
+				}
+				pools := dynamicresources.GatherPools(slices, broad)
+				Expect(pools).To(HaveLen(1))
+				Expect(pools[0].Slices).To(HaveLen(2))
+				Expect(pools[0].Devices).To(HaveLen(2))
+
+				byDevice := map[string]dynamicresources.DeviceWithID{}
+				for _, d := range pools[0].Devices {
+					byDevice[d.ID.Device.Value()] = d
+				}
+
+				Expect(byDevice["gpu-0"].TopologyRequirements).ToNot(BeNil())
+				Expect(byDevice["gpu-0"].TopologyRequirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
+				Expect(byDevice["gpu-0"].TopologyRequirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("us-west-2a"))
+
+				Expect(byDevice["gpu-1"].TopologyRequirements).ToNot(BeNil())
+				Expect(byDevice["gpu-1"].TopologyRequirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
+				Expect(byDevice["gpu-1"].TopologyRequirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("us-west-2b"))
+			})
+
+			It("should move incompatible counter-consuming devices to NonTargetingDevices on filter", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withSharedCounters(counterSet("budget", map[string]resource.Quantity{"slices": resource.MustParse("4")})),
+						withGeneration(1, 2),
+					),
+					makeAPISlice("s2", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withPerDeviceDevices(
+							resourcev1.Device{
+								Name: "gpu-0",
+								NodeSelector: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{MatchExpressions: []corev1.NodeSelectorRequirement{
+											{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+										}},
+									},
+								},
+								ConsumesCounters: []resourcev1.DeviceCounterConsumption{{
+									CounterSet: "budget",
+									Counters:   map[string]resourcev1.Counter{"slices": {Value: resource.MustParse("1")}},
+								}},
+							},
+							resourcev1.Device{
+								Name: "gpu-1",
+								NodeSelector: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{MatchExpressions: []corev1.NodeSelectorRequirement{
+											{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2b"}},
+										}},
+									},
+								},
+								ConsumesCounters: []resourcev1.DeviceCounterConsumption{{
+									CounterSet: "budget",
+									Counters:   map[string]resourcev1.Counter{"slices": {Value: resource.MustParse("1")}},
+								}},
+							},
+						),
+						withGeneration(1, 2),
+					),
+				}
+				broad := scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
+				)
+				pools := dynamicresources.GatherPools(slices, broad)
+				Expect(pools).To(HaveLen(1))
+				Expect(pools[0].Devices).To(HaveLen(2))
+
+				// Tighten to us-west-2a only — gpu-1 (us-west-2b) becomes incompatible
+				// but has ConsumesCounters, so it moves to NonTargetingDevices.
+				tightened := scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+				)
+				filtered := dynamicresources.FilterPools(pools, tightened)
+				Expect(filtered).To(HaveLen(1))
+				Expect(filtered[0].Slices).To(HaveLen(1))
+				Expect(filtered[0].Devices).To(HaveLen(1))
+				Expect(filtered[0].Devices[0].ID.Device.Value()).To(Equal("gpu-0"))
+				Expect(filtered[0].NonTargetingDevices).To(HaveLen(1))
+				Expect(filtered[0].NonTargetingDevices[0].ID.Device.Value()).To(Equal("gpu-1"))
+			})
+
+			It("should preserve per-device TopologyRequirements through FilterPools", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a",
+						withPerDeviceNodeSelection(),
+						withPerDeviceDevices(
+							resourcev1.Device{
+								Name: "gpu-0",
+								NodeSelector: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{MatchExpressions: []corev1.NodeSelectorRequirement{
+											{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+										}},
+									},
+								},
+							},
+							resourcev1.Device{
+								Name:     "gpu-1",
+								AllNodes: ptr.To(true),
+							},
+						),
+						withGeneration(1, 1),
+					),
+				}
+				pools := dynamicresources.GatherPools(slices, reqs)
+				Expect(pools).To(HaveLen(1))
+
+				tightened := scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+				)
+				filtered := dynamicresources.FilterPools(pools, tightened)
+				Expect(filtered).To(HaveLen(1))
+				Expect(filtered[0].Devices).To(HaveLen(2))
+
+				byDevice := map[string]dynamicresources.DeviceWithID{}
+				for _, d := range filtered[0].Devices {
+					byDevice[d.ID.Device.Value()] = d
+				}
+
+				Expect(byDevice["gpu-0"].TopologyRequirements).ToNot(BeNil())
+				Expect(byDevice["gpu-0"].TopologyRequirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
+				Expect(byDevice["gpu-0"].TopologyRequirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("us-west-2a"))
+
+				Expect(byDevice["gpu-1"].TopologyRequirements).To(BeNil())
 			})
 		})
 	})
