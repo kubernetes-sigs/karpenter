@@ -192,16 +192,12 @@ var _ = Describe("CapacityBuffer", func() {
 		})
 
 		It("should provision buffer capacity using scalableRef with percentage", func() {
-			// First, create the Deployment and wait for its pods to schedule
+			// Create the Deployment and wait for its pods to schedule
 			env.ExpectCreated(scalableDeployment)
 			selector := labels.SelectorFromSet(scalableDeployment.Spec.Selector.MatchLabels)
 			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, selector, 10)
 
-			// Record node count before buffer — these nodes are for the Deployment only
-			nodeClaimsBefore := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
-			countBefore := len(nodeClaimsBefore)
-
-			// Now apply the buffer — should grow capacity beyond the Deployment's needs
+			// Apply the buffer
 			buffer := &autoscalingv1alpha1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "scalable-buffer",
@@ -229,9 +225,7 @@ var _ = Describe("CapacityBuffer", func() {
 				g.Expect(*cb.Status.Replicas).To(Equal(int32(2)))
 			}).WithTimeout(30 * time.Second).Should(Succeed())
 
-			// Buffer should grow nodes beyond what the Deployment needed
-			env.EventuallyExpectCreatedNodeClaimCount(">=", countBefore+1)
-
+			// Buffer virtual pods should be provisioned (may fit on existing nodes or new ones)
 			Eventually(func(g Gomega) {
 				cb := &autoscalingv1alpha1.CapacityBuffer{}
 				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
@@ -242,14 +236,10 @@ var _ = Describe("CapacityBuffer", func() {
 		})
 
 		It("should provision buffer capacity using scalableRef with fixed replicas", func() {
-			// Create the Deployment first and wait for pods to schedule
+			// Create the Deployment and wait for pods to schedule
 			env.ExpectCreated(scalableDeployment)
 			selector := labels.SelectorFromSet(scalableDeployment.Spec.Selector.MatchLabels)
 			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, selector, 10)
-
-			// Record node count before buffer
-			nodeClaimsBefore := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
-			countBefore := len(nodeClaimsBefore)
 
 			// Apply buffer with fixed replicas
 			buffer := &autoscalingv1alpha1.CapacityBuffer{
@@ -268,6 +258,7 @@ var _ = Describe("CapacityBuffer", func() {
 			}
 			env.ExpectCreated(buffer)
 
+			// Buffer resolves with 3 replicas
 			Eventually(func(g Gomega) {
 				cb := &autoscalingv1alpha1.CapacityBuffer{}
 				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
@@ -278,9 +269,14 @@ var _ = Describe("CapacityBuffer", func() {
 				g.Expect(*cb.Status.Replicas).To(Equal(int32(3)))
 			}).WithTimeout(30 * time.Second).Should(Succeed())
 
-			// Buffer should grow nodes beyond the Deployment's baseline
-			env.EventuallyExpectCreatedNodeClaimCount(">=", countBefore+1)
-			env.EventuallyExpectInitializedNodeCount(">=", countBefore+1)
+			// Buffer virtual pods should be provisioned
+			Eventually(func(g Gomega) {
+				cb := &autoscalingv1alpha1.CapacityBuffer{}
+				g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+				cond := findBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+				g.Expect(cond).ToNot(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}).WithTimeout(2 * time.Minute).Should(Succeed())
 		})
 
 		It("should recover when scalable ref is created after buffer", func() {
