@@ -79,20 +79,26 @@ func withAPIDevices(names ...string) func(*resourcev1.ResourceSlice) {
 }
 
 type apiDeviceSpec struct {
-	name  string
-	attrs map[resourcev1.QualifiedName]resourcev1.DeviceAttribute
+	name             string
+	attrs            map[resourcev1.QualifiedName]resourcev1.DeviceAttribute
+	consumesCounters []resourcev1.DeviceCounterConsumption
 }
 
 func deviceWithAttrs(name string, attrs map[resourcev1.QualifiedName]resourcev1.DeviceAttribute) apiDeviceSpec {
 	return apiDeviceSpec{name: name, attrs: attrs}
 }
 
+func deviceWithAttrsAndCounters(name string, attrs map[resourcev1.QualifiedName]resourcev1.DeviceAttribute, consumesCounters []resourcev1.DeviceCounterConsumption) apiDeviceSpec {
+	return apiDeviceSpec{name: name, attrs: attrs, consumesCounters: consumesCounters}
+}
+
 func withAPIDevicesWithAttrs(specs ...apiDeviceSpec) func(*resourcev1.ResourceSlice) {
 	return func(s *resourcev1.ResourceSlice) {
 		for _, spec := range specs {
 			s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
-				Name:       spec.name,
-				Attributes: spec.attrs,
+				Name:             spec.name,
+				Attributes:       spec.attrs,
+				ConsumesCounters: spec.consumesCounters,
 			})
 		}
 	}
@@ -319,8 +325,13 @@ var _ = Describe("Pool Gathering", func() {
 				Expect(pools[0].Invalid).To(BeFalse())
 			})
 
-			It("should mark pool invalid when counter set names are duplicated across slices", func() {
-				slices := []dynamicresources.ResourceSlice{
+			DescribeTable("should mark pool invalid when counter set names are duplicated",
+				func(slices []dynamicresources.ResourceSlice) {
+					pools := dynamicresources.GatherPools(slices, reqs)
+					Expect(pools).To(HaveLen(1))
+					Expect(pools[0].Invalid).To(BeTrue())
+				},
+				Entry("across slices", []dynamicresources.ResourceSlice{
 					makeAPISlice("counter-slice-1", "gpu.example.com", "pool-a",
 						withSharedCounters(counterSet("budget", map[string]resource.Quantity{
 							"memory": resource.MustParse("40Gi"),
@@ -338,14 +349,8 @@ var _ = Describe("Pool Gathering", func() {
 						withAPIDevices("gpu-0"),
 						withGeneration(1, 3),
 					),
-				}
-				pools := dynamicresources.GatherPools(slices, reqs)
-				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeTrue())
-			})
-
-			It("should mark pool invalid when a single slice has duplicate counter set names", func() {
-				slices := []dynamicresources.ResourceSlice{
+				}),
+				Entry("within a single slice", []dynamicresources.ResourceSlice{
 					makeAPISlice("counter-slice", "gpu.example.com", "pool-a",
 						withSharedCounters(
 							counterSet("budget", map[string]resource.Quantity{
@@ -362,14 +367,16 @@ var _ = Describe("Pool Gathering", func() {
 						withAPIDevices("gpu-0"),
 						withGeneration(1, 2),
 					),
-				}
-				pools := dynamicresources.GatherPools(slices, reqs)
-				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeTrue())
-			})
+				}),
+			)
 
-			It("should mark pool invalid when device references non-existent counter set", func() {
-				slices := []dynamicresources.ResourceSlice{
+			DescribeTable("should mark pool invalid when counter references are invalid",
+				func(slices []dynamicresources.ResourceSlice) {
+					pools := dynamicresources.GatherPools(slices, reqs)
+					Expect(pools).To(HaveLen(1))
+					Expect(pools[0].Invalid).To(BeTrue())
+				},
+				Entry("device references non-existent counter set", []dynamicresources.ResourceSlice{
 					makeAPISlice("counter-slice", "gpu.example.com", "pool-a",
 						withSharedCounters(counterSet("budget", map[string]resource.Quantity{
 							"memory": resource.MustParse("80Gi"),
@@ -385,14 +392,8 @@ var _ = Describe("Pool Gathering", func() {
 						),
 						withGeneration(1, 2),
 					),
-				}
-				pools := dynamicresources.GatherPools(slices, reqs)
-				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeTrue())
-			})
-
-			It("should mark pool invalid when device references non-existent counter within set", func() {
-				slices := []dynamicresources.ResourceSlice{
+				}),
+				Entry("device references non-existent counter within set", []dynamicresources.ResourceSlice{
 					makeAPISlice("counter-slice", "gpu.example.com", "pool-a",
 						withSharedCounters(counterSet("budget", map[string]resource.Quantity{
 							"memory": resource.MustParse("80Gi"),
@@ -408,38 +409,8 @@ var _ = Describe("Pool Gathering", func() {
 						),
 						withGeneration(1, 2),
 					),
-				}
-				pools := dynamicresources.GatherPools(slices, reqs)
-				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeTrue())
-			})
-
-			It("should not mark pool invalid when device counter references are valid", func() {
-				slices := []dynamicresources.ResourceSlice{
-					makeAPISlice("counter-slice", "gpu.example.com", "pool-a",
-						withSharedCounters(counterSet("budget", map[string]resource.Quantity{
-							"memory": resource.MustParse("80Gi"),
-							"flops":  resource.MustParse("1000"),
-						})),
-						withGeneration(1, 2),
-					),
-					makeAPISlice("device-slice", "gpu.example.com", "pool-a",
-						withAllNodes(),
-						withDevicesConsumingCounters(
-							deviceConsumingCounter("gpu-0", "budget", map[string]resource.Quantity{
-								"memory": resource.MustParse("40Gi"),
-							}),
-						),
-						withGeneration(1, 2),
-					),
-				}
-				pools := dynamicresources.GatherPools(slices, reqs)
-				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeFalse())
-			})
-
-			It("should mark pool invalid when non-targeting device references non-existent counter set", func() {
-				slices := []dynamicresources.ResourceSlice{
+				}),
+				Entry("non-targeting device references non-existent counter set", []dynamicresources.ResourceSlice{
 					makeAPISlice("counter-slice", "gpu.example.com", "pool-a",
 						withSharedCounters(counterSet("budget", map[string]resource.Quantity{
 							"memory": resource.MustParse("80Gi"),
@@ -464,14 +435,8 @@ var _ = Describe("Pool Gathering", func() {
 						),
 						withGeneration(1, 3),
 					),
-				}
-				pools := dynamicresources.GatherPools(slices, reqs)
-				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeTrue())
-			})
-
-			It("should mark pool invalid when non-targeting device references non-existent counter within set", func() {
-				slices := []dynamicresources.ResourceSlice{
+				}),
+				Entry("non-targeting device references non-existent counter within set", []dynamicresources.ResourceSlice{
 					makeAPISlice("counter-slice", "gpu.example.com", "pool-a",
 						withSharedCounters(counterSet("budget", map[string]resource.Quantity{
 							"memory": resource.MustParse("80Gi"),
@@ -496,14 +461,8 @@ var _ = Describe("Pool Gathering", func() {
 						),
 						withGeneration(1, 3),
 					),
-				}
-				pools := dynamicresources.GatherPools(slices, reqs)
-				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeTrue())
-			})
-
-			It("should mark pool invalid when device declares ConsumesCounters but pool has no counter sets", func() {
-				slices := []dynamicresources.ResourceSlice{
+				}),
+				Entry("device declares ConsumesCounters but pool has no counter sets", []dynamicresources.ResourceSlice{
 					makeAPISlice("device-slice", "gpu.example.com", "pool-a",
 						withAllNodes(),
 						withDevicesConsumingCounters(
@@ -513,14 +472,8 @@ var _ = Describe("Pool Gathering", func() {
 						),
 						withGeneration(1, 1),
 					),
-				}
-				pools := dynamicresources.GatherPools(slices, reqs)
-				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeTrue())
-			})
-
-			It("should mark pool invalid when device references counter that exists in a different counter set", func() {
-				slices := []dynamicresources.ResourceSlice{
+				}),
+				Entry("device references counter that exists in a different counter set", []dynamicresources.ResourceSlice{
 					makeAPISlice("counter-slice", "gpu.example.com", "pool-a",
 						withSharedCounters(
 							counterSet("memory-budget", map[string]resource.Quantity{
@@ -541,10 +494,31 @@ var _ = Describe("Pool Gathering", func() {
 						),
 						withGeneration(1, 2),
 					),
+				}),
+			)
+
+			It("should not mark pool invalid when device counter references are valid", func() {
+				slices := []dynamicresources.ResourceSlice{
+					makeAPISlice("counter-slice", "gpu.example.com", "pool-a",
+						withSharedCounters(counterSet("budget", map[string]resource.Quantity{
+							"memory": resource.MustParse("80Gi"),
+							"flops":  resource.MustParse("1000"),
+						})),
+						withGeneration(1, 2),
+					),
+					makeAPISlice("device-slice", "gpu.example.com", "pool-a",
+						withAllNodes(),
+						withDevicesConsumingCounters(
+							deviceConsumingCounter("gpu-0", "budget", map[string]resource.Quantity{
+								"memory": resource.MustParse("40Gi"),
+							}),
+						),
+						withGeneration(1, 2),
+					),
 				}
 				pools := dynamicresources.GatherPools(slices, reqs)
 				Expect(pools).To(HaveLen(1))
-				Expect(pools[0].Invalid).To(BeTrue())
+				Expect(pools[0].Invalid).To(BeFalse())
 			})
 		})
 

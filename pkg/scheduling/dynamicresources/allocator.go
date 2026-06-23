@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
@@ -126,6 +127,13 @@ type ResourceClaimAllocationMetadata struct {
 	Devices map[InstanceTypeID][]DeviceID
 }
 
+type AllocatedDeviceState struct {
+	// ExclusiveDevices contains devices that are exclusively allocated (one claim owns them).
+	ExclusiveDevices sets.Set[cloudprovider.DeviceID]
+	// ConsumedCapacity maps multi-allocatable devices to their aggregated consumed capacity.
+	ConsumedCapacity map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+}
+
 // NewAllocator constructs an Allocator for a single scheduling loop.
 // allocatedDevices contains the set of in-cluster devices that are already allocated;
 // these are converted internally to the scheduling DeviceID type.
@@ -177,6 +185,12 @@ type allocation struct {
 	// filteredPools represents the set of pools that will be available from the NodeClaim if this allocation is committed.
 	// This reduces the number of pools we need to filter during subsequent allocations for the NodeClaim.
 	filteredPools []*Pool
+	// counterConsumptionByIT holds per-IT in-cluster counter deductions from this allocation.
+	// Stored in the tracker on Commit() to enable precise release when instance types are pruned.
+	counterConsumptionByIT map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter
+	// templateCounterConsumptionByIT holds per-IT template counter deductions from this allocation.
+	// Subtracted from the tracker's remaining budget on Commit(); the entry is deleted on Release.
+	templateCounterConsumptionByIT map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter
 }
 
 func (a *allocation) Commit(ctx context.Context) {
@@ -313,15 +327,17 @@ func (a *Allocator) Allocate(
 
 	// Create child allocator.
 	child := &allocator{
-		Allocator:            a,
-		ctx:                  ctx,
-		nodeClaim:            nodeClaim,
-		pools:                pools,
-		templateDevicesByIT:  templateDevicesByIT,
-		celCache:             dracel.NewCache(0, dracel.Features{}),
-		allocatedDevices:     sets.New[DeviceID](),
-		deviceMatchesRequest: make(map[matchKey]bool),
-		requirements:         classifyRes.requirements,
+		Allocator:                  a,
+		ctx:                        ctx,
+		nodeClaim:                  nodeClaim,
+		pools:                      pools,
+		templateDevicesByIT:        templateDevicesByIT,
+		celCache:                   dracel.NewCache(0, dracel.Features{EnableConsumableCapacity: true}),
+		allocatedDevices:           sets.New[DeviceID](),
+		allocatingCounters:         make(map[PoolKey]map[string]map[string]resourcev1.Counter),
+		templateAllocatingCounters: make(map[PoolKey]map[string]map[string]resourcev1.Counter),
+		deviceMatchesRequest:       make(map[matchKey]bool),
+		requirements:               classifyRes.requirements,
 	}
 
 	// Validate unallocated claims and build ClaimData. Binding fallback is nil here — it is
@@ -422,6 +438,18 @@ type allocator struct {
 	// the claim index.
 	allocatedDevicesMetadata []deviceAllocationMetadata
 
+	// allocatingCounters tracks counter deductions for in-cluster devices tentatively allocated in the
+	// current DFS. Reset per-IT via restoreState(). Map: poolKey → counterSetName → counterName → consumed counter.
+	allocatingCounters map[PoolKey]map[string]map[string]resourcev1.Counter
+	// templateAllocatingCounters tracks counter deductions for template devices tentatively allocated
+	// in the current DFS. Separated from allocatingCounters to prevent cross-contamination when a
+	// template pool and an in-cluster pool share the same PoolKey (same driver+pool name).
+	templateAllocatingCounters map[PoolKey]map[string]map[string]resourcev1.Counter
+	// templateRemainingCounters holds the remaining counter budgets for template pools.
+	// Initialized per-IT from ResourceSliceTemplate.SharedCounters. Template counters are local to the
+	// current IT (not shared across NodeClaims), so they live on the child allocator rather than the tracker.
+	templateRemainingCounters map[PoolKey]map[string]map[string]resourcev1.Counter
+
 	// requirements are the topology requirements that are incrementally built up by the DFS. Each time an in-cluster
 	// device with topology requirements is allocated, those requirements are added to these requirements. These are
 	// restored during backtracking from the snapshots.
@@ -461,6 +489,10 @@ type deviceAllocationMetadata struct {
 func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult, error) {
 	var survivingITs []InstanceTypeID
 	deviceIDsByIT := make(map[InstanceTypeID][]DeviceID)
+	// counterConsumptionByIT tracks in-cluster counter deductions per-IT for pessimistic commit.
+	counterConsumptionByIT := make(map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter)
+	// templateCounterConsumptionByIT tracks template counter deductions per-IT for cross-pod tracking.
+	templateCounterConsumptionByIT := make(map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter)
 
 	// Snapshot initial state for restoration between IT attempts.
 	initialPools := a.pools
@@ -484,6 +516,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 		}
 
 		// Restore to initial state.
+		a.itID = itID
 		a.restoreState(initialPools)
 
 		// Set binding fallback for this IT on all constraints.
@@ -492,10 +525,10 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			NodePool:       a.nodeClaim.NodePoolID().Value(),
 			InstanceTypeID: itID,
 		})
-
-		a.itID = itID
 		if a.dfs(0, 0, 0) {
 			survivingITs = append(survivingITs, itID)
+			counterConsumptionByIT[itID] = copyCounterMap(a.allocatingCounters)
+			templateCounterConsumptionByIT[itID] = copyCounterMap(a.templateAllocatingCounters)
 
 			deviceIDsByIT[itID] = make([]DeviceID, len(a.allocatedDevicesMetadata))
 			itReqs := scheduling.NewRequirements()
@@ -554,11 +587,13 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 		InstanceTypes: survivingITs,
 		Requirements:  nodeClaimRequirements,
 		Allocation: &allocation{
-			allocator:     a.Allocator,
-			nodeClaimID:   a.nodeClaim.ID(),
-			deviceIDsByIT: deviceIDsByIT,
-			filteredPools: FilterPools(initialPools, a.requirements),
-			claimMetadata: claimAllocMetaByRC,
+			allocator:                      a.Allocator,
+			nodeClaimID:                    a.nodeClaim.ID(),
+			deviceIDsByIT:                  deviceIDsByIT,
+			filteredPools:                  FilterPools(initialPools, a.requirements),
+			claimMetadata:                  claimAllocMetaByRC,
+			counterConsumptionByIT:         counterConsumptionByIT,
+			templateCounterConsumptionByIT: templateCounterConsumptionByIT,
 		},
 	}, nil
 }
@@ -663,6 +698,27 @@ func (a *allocator) tryDevice(
 		return false
 	}
 
+	// 1c. Counter verification — check shared counter budgets.
+	if len(dw.ConsumesCounters) > 0 {
+		poolKey := PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}
+		var remainingCounterSets map[string]map[string]resourcev1.Counter
+		if deviceID.Template {
+			if a.templateRemainingCounters != nil {
+				remainingCounterSets = a.templateRemainingCounters[poolKey]
+			}
+		} else {
+			pool, _ := lo.Find(a.pools, func(p *Pool) bool { return p.Key == poolKey })
+			if pool == nil {
+				return false
+			}
+			a.allocationTracker.InitRemainingCounters(pool)
+			remainingCounterSets = a.allocationTracker.RemainingCounters[poolKey]
+		}
+		if !a.checkCounters(dw.Device, poolKey, remainingCounterSets, deviceID.Template) {
+			return false
+		}
+	}
+
 	// 2. Selector match?
 	mk := matchKey{DeviceID: deviceID, ClaimIndex: claimIdx, RequestIndex: reqIdx}
 	matched, cached := a.deviceMatchesRequest[mk]
@@ -715,14 +771,16 @@ func (a *allocator) tryDevice(
 		claimIndex:   claimIdx,
 		deviceWithID: dw,
 	})
+	a.deductAllocatingCounters(dw.Device, PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}, deviceID.Template)
 
 	// Recurse.
 	if a.dfs(claimIdx, reqIdx, slotIdx+1) {
 		return true
 	}
 
-	// Backtrack — undo in reverse order of application: allocation, then requirements/pools,
+	// Backtrack — undo in reverse order of application: counters, allocation, then requirements/pools,
 	// then constraints.
+	a.restoreAllocatingCounters(dw.Device, PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}, deviceID.Template)
 	a.allocatedDevicesMetadata = a.allocatedDevicesMetadata[:len(a.allocatedDevicesMetadata)-1]
 	a.allocatedDevices.Delete(deviceID)
 
@@ -745,6 +803,9 @@ func (a *allocator) restoreState(pools []*Pool) {
 	a.allocatedDevicesMetadata = nil
 	a.pools = pools
 	a.allocatedDevices = sets.New[DeviceID]()
+	a.allocatingCounters = make(map[PoolKey]map[string]map[string]resourcev1.Counter)
+	a.templateAllocatingCounters = make(map[PoolKey]map[string]map[string]resourcev1.Counter)
+	a.templateRemainingCounters = a.buildTemplateCounters()
 	a.snapshots = nil
 	for _, cd := range a.claimData {
 		for _, c := range cd.Constraints {
@@ -753,6 +814,166 @@ func (a *allocator) restoreState(pools []*Pool) {
 	}
 	// NOTE: Requirements are not reset since instance type requirements are accumulated to ensure the result is
 	// representable by a NodeClaim.
+}
+
+// buildTemplateCounters returns the remaining counter budgets for the current IT's template pool.
+// On first access for a (NodeClaim, IT) pair, it computes the total from SharedCounters and
+// initializes the tracker. Subsequent calls return the tracker's reference directly.
+func (a *allocator) buildTemplateCounters() map[PoolKey]map[string]map[string]resourcev1.Counter {
+	if remaining := a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), a.itID); remaining != nil {
+		return remaining
+	}
+	slices, ok := a.nodeClaim.ResourceSlices()[a.itID]
+	if !ok {
+		return nil
+	}
+	totals := computeTemplateTotals(slices)
+	if totals == nil {
+		return nil
+	}
+	a.allocationTracker.InitTemplateRemainingCounters(a.nodeClaim.ID(), a.itID, totals)
+	return a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), a.itID)
+}
+
+// computeTemplateTotals extracts the total SharedCounters budget from template slices.
+func computeTemplateTotals(slices []ResourceSlice) map[PoolKey]map[string]map[string]resourcev1.Counter {
+	var totalsByPool map[PoolKey]map[string]map[string]resourcev1.Counter
+	for _, s := range slices {
+		sharedCounters := s.SharedCounters()
+		if len(sharedCounters) == 0 {
+			continue
+		}
+		poolKey := PoolKey{Driver: s.Driver(), Pool: s.Pool().Name}
+		if totalsByPool == nil {
+			totalsByPool = make(map[PoolKey]map[string]map[string]resourcev1.Counter)
+		}
+		counterSets, ok := totalsByPool[poolKey]
+		if !ok {
+			counterSets = make(map[string]map[string]resourcev1.Counter)
+			totalsByPool[poolKey] = counterSets
+		}
+		for _, cs := range sharedCounters {
+			counterSet, ok := counterSets[cs.Name]
+			if !ok {
+				counterSet = make(map[string]resourcev1.Counter, len(cs.Counters))
+				counterSets[cs.Name] = counterSet
+			}
+			for counterName, counter := range cs.Counters {
+				counterSet[counterName] = resourcev1.Counter{Value: counter.Value.DeepCopy()}
+			}
+		}
+	}
+	return totalsByPool
+}
+
+// checkCounters verifies that shared counters have sufficient remaining budget for the device.
+// remainingCounterSets is the base budget (from AllocationTracker for in-cluster pools, or
+// templateRemainingCounters for template pools). The DFS-local allocatingCounters are subtracted
+// to account for tentative allocations in the current search.
+func (a *allocator) checkCounters(device cloudprovider.Device, poolKey PoolKey, remainingCounterSets map[string]map[string]resourcev1.Counter, template bool) bool {
+	if len(device.ConsumesCounters) == 0 {
+		return true
+	}
+	if remainingCounterSets == nil {
+		return false
+	}
+	allocatingCounterSets := lo.Ternary(template, a.templateAllocatingCounters[poolKey], a.allocatingCounters[poolKey])
+	for _, consumption := range device.ConsumesCounters {
+		counterSetRemaining, ok := remainingCounterSets[consumption.CounterSet]
+		if !ok {
+			return false
+		}
+		var allocatingCounters map[string]resourcev1.Counter
+		if allocatingCounterSets != nil {
+			allocatingCounters = allocatingCounterSets[consumption.CounterSet]
+		}
+		for counterName, counter := range consumption.Counters {
+			remainingCounter, ok := counterSetRemaining[counterName]
+			if !ok {
+				return false
+			}
+			available := remainingCounter.Value.DeepCopy()
+			if allocatingCounters != nil {
+				if allocatingCounter, ok := allocatingCounters[counterName]; ok {
+					available.Sub(allocatingCounter.Value)
+				}
+			}
+			if available.Cmp(counter.Value) < 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// deductAllocatingCounters adds a device's counter consumption to the DFS-local allocating state.
+func (a *allocator) deductAllocatingCounters(device cloudprovider.Device, poolKey PoolKey, template bool) {
+	if len(device.ConsumesCounters) == 0 {
+		return
+	}
+	counterMap := lo.Ternary(template, a.templateAllocatingCounters, a.allocatingCounters)
+	allocatingCounterSets, ok := counterMap[poolKey]
+	if !ok {
+		allocatingCounterSets = make(map[string]map[string]resourcev1.Counter)
+		counterMap[poolKey] = allocatingCounterSets
+	}
+	for _, consumption := range device.ConsumesCounters {
+		allocatingCounters, ok := allocatingCounterSets[consumption.CounterSet]
+		if !ok {
+			allocatingCounters = make(map[string]resourcev1.Counter)
+			allocatingCounterSets[consumption.CounterSet] = allocatingCounters
+		}
+		for counterName, counter := range consumption.Counters {
+			allocatingCounter := allocatingCounters[counterName]
+			allocatingCounter.Value.Add(counter.Value)
+			allocatingCounters[counterName] = allocatingCounter
+		}
+	}
+}
+
+// restoreAllocatingCounters reverses a device's counter consumption from the DFS-local allocating state.
+func (a *allocator) restoreAllocatingCounters(device cloudprovider.Device, poolKey PoolKey, template bool) {
+	if len(device.ConsumesCounters) == 0 {
+		return
+	}
+	counterMap := lo.Ternary(template, a.templateAllocatingCounters, a.allocatingCounters)
+	allocatingCounterSets, ok := counterMap[poolKey]
+	if !ok {
+		return
+	}
+	for _, consumption := range device.ConsumesCounters {
+		allocatingCounters, ok := allocatingCounterSets[consumption.CounterSet]
+		if !ok {
+			continue
+		}
+		for counterName, counter := range consumption.Counters {
+			allocatingCounter, ok := allocatingCounters[counterName]
+			if !ok {
+				continue
+			}
+			allocatingCounter.Value.Sub(counter.Value)
+			allocatingCounters[counterName] = allocatingCounter
+		}
+	}
+}
+
+func copyCounterMap(src map[PoolKey]map[string]map[string]resourcev1.Counter) map[PoolKey]map[string]map[string]resourcev1.Counter {
+	if len(src) == 0 {
+		return nil
+	}
+	cp := make(map[PoolKey]map[string]map[string]resourcev1.Counter, len(src))
+	for poolKey, counterSets := range src {
+		cpCounterSets := make(map[string]map[string]resourcev1.Counter, len(counterSets))
+		for counterSetName, counters := range counterSets {
+			cpCounters := make(map[string]resourcev1.Counter, len(counters))
+			for counterName, counter := range counters {
+				cpCounters[counterName] = resourcev1.Counter{Value: counter.Value.DeepCopy()}
+			}
+			cpCounterSets[counterSetName] = cpCounters
+		}
+		cp[poolKey] = cpCounterSets
+	}
+	return cp
 }
 
 // copyRequirements creates a shallow copy of a Requirements map.

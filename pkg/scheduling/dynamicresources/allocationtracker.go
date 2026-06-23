@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/samber/lo"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -47,6 +48,22 @@ type AllocationTracker struct {
 	InflightClusterAllocationsByNodeClaim map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]
 
 	InflightTemplateAllocations map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]
+
+	// RemainingCounters tracks the remaining counter budgets per pool. Initialized lazily per pool
+	// (total - preallocated consumption), then decremented on Commit and incremented on Release.
+	// Map: poolKey → counterSetName → counterName → remaining counter.
+	RemainingCounters map[PoolKey]map[string]map[string]resourcev1.Counter
+	// countersByNodeClaimIT stores per-NodeClaim per-IT counter consumption for precise release
+	// when instance types are pruned.
+	// Map: nodeClaimID → instanceTypeID → poolKey → counterSetName → counterName → consumed counter.
+	countersByNodeClaimIT map[NodeClaimID]map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter
+
+	// templateRemainingCounters tracks the remaining template counter budgets per (NodeClaim, IT, Pool).
+	// Initialized lazily with the full SharedCounters budget on first access, then decremented on Commit.
+	// Separate from RemainingCounters because template and in-cluster pools can share the same PoolKey,
+	// template counters are per-IT (no pessimistic-max), and they don't affect global RemainingCounters.
+	// Map: nodeClaimID → instanceTypeID → poolKey → counterSetName → counterName → remaining counter.
+	templateRemainingCounters map[NodeClaimID]map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter
 }
 
 func NewAllocationTracker(preallocatedDevices ...cloudprovider.DeviceID) *AllocationTracker {
@@ -61,6 +78,9 @@ func NewAllocationTracker(preallocatedDevices ...cloudprovider.DeviceID) *Alloca
 		InflightClusterAllocations:            make(map[DeviceID]*InflightAllocationMetadata),
 		InflightClusterAllocationsByNodeClaim: make(map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]),
 		InflightTemplateAllocations:           make(map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]),
+		RemainingCounters:                     make(map[PoolKey]map[string]map[string]resourcev1.Counter),
+		countersByNodeClaimIT:                 make(map[NodeClaimID]map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter),
+		templateRemainingCounters:             make(map[NodeClaimID]map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter),
 	}
 }
 
@@ -103,6 +123,8 @@ func (at *AllocationTracker) Commit(alloc *allocation) {
 			}
 		}
 	}
+	at.commitCounters(alloc.nodeClaimID, alloc.counterConsumptionByIT)
+	at.commitTemplateCounters(alloc.nodeClaimID, alloc.templateCounterConsumptionByIT)
 }
 
 func (at *AllocationTracker) insertAllocation(
@@ -127,6 +149,120 @@ func (at *AllocationTracker) insertAllocation(
 	itAllocs.Insert(deviceID)
 }
 
+// commitCounters stores per-IT counter consumption and decrements remaining counters by the
+// delta between the new accumulated pessimistic max and the old one.
+func (at *AllocationTracker) commitCounters(nodeClaimID NodeClaimID, newCounterConsumptionByIT map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter) {
+	if len(newCounterConsumptionByIT) == 0 {
+		return
+	}
+	storedCounterSetsByIT, ok := at.countersByNodeClaimIT[nodeClaimID]
+	if !ok {
+		storedCounterSetsByIT = make(map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter)
+		at.countersByNodeClaimIT[nodeClaimID] = storedCounterSetsByIT
+	}
+
+	// Compute old pessimistic max before merging new consumption.
+	var oldCounterMax map[PoolKey]map[string]map[string]resourcev1.Counter
+	if len(storedCounterSetsByIT) > 0 {
+		oldCounterMax = pessimisticCounterMax(storedCounterSetsByIT)
+	}
+
+	// Merge new consumption into stored state.
+	for it, counterSetsByPool := range newCounterConsumptionByIT {
+		storedCounterSetsByPool, ok := storedCounterSetsByIT[it]
+		if !ok {
+			storedCounterSetsByIT[it] = counterSetsByPool
+			continue
+		}
+
+		for poolKey, counterSets := range counterSetsByPool {
+			storedCounterSets, ok := storedCounterSetsByPool[poolKey]
+			if !ok {
+				storedCounterSetsByPool[poolKey] = counterSets
+				continue
+			}
+			for counterSetName, counters := range counterSets {
+				storedCounterSet, ok := storedCounterSets[counterSetName]
+				if !ok {
+					storedCounterSets[counterSetName] = counters
+					continue
+				}
+				for counterName, counter := range counters {
+					storedCounter := storedCounterSet[counterName]
+					storedCounter.Value.Add(counter.Value)
+					storedCounterSet[counterName] = storedCounter
+				}
+			}
+		}
+	}
+
+	// Compute new pessimistic max after merging.
+	newCounterMax := pessimisticCounterMax(storedCounterSetsByIT)
+
+	// Subtract only the delta (newMax - oldMax) from remaining counters.
+	subtractDeltaFromRemaining(at.RemainingCounters, oldCounterMax, newCounterMax)
+}
+
+// commitTemplateCounters subtracts per-IT template counter consumption directly from the
+// pre-initialized remaining budgets. Template counters don't need pessimistic-max treatment —
+// each IT has its own independent budget.
+func (at *AllocationTracker) commitTemplateCounters(nodeClaimID NodeClaimID, consumptionByIT map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter) {
+	if len(consumptionByIT) == 0 {
+		return
+	}
+	remainingCounterSetsByIT := at.templateRemainingCounters[nodeClaimID]
+	for itID, counterSetsByPool := range consumptionByIT {
+		remainingCounterSetsByPool := remainingCounterSetsByIT[itID]
+		for poolKey, counterSets := range counterSetsByPool {
+			remainingCounterSets := remainingCounterSetsByPool[poolKey]
+			for counterSetName, counters := range counterSets {
+				remainingCounterSet := remainingCounterSets[counterSetName]
+				for counterName, counter := range counters {
+					remainingCounter := remainingCounterSet[counterName]
+					remainingCounter.Value.Sub(counter.Value)
+					remainingCounterSet[counterName] = remainingCounter
+				}
+			}
+		}
+	}
+}
+
+// subtractDeltaFromRemaining subtracts (newCounterMax - oldCounterMax) from remaining counters.
+func subtractDeltaFromRemaining(remaining map[PoolKey]map[string]map[string]resourcev1.Counter, oldCounterMax, newCounterMax map[PoolKey]map[string]map[string]resourcev1.Counter) {
+	for poolKey, newCounterSets := range newCounterMax {
+		poolRemaining, ok := remaining[poolKey]
+		if !ok {
+			continue
+		}
+		for counterSetName, newCounters := range newCounterSets {
+			counterSetRemaining, ok := poolRemaining[counterSetName]
+			if !ok {
+				continue
+			}
+			for counterName, newCounter := range newCounters {
+				delta := newCounter.Value.DeepCopy()
+				if oldCounterMax != nil {
+					if oldCounterSets, ok := oldCounterMax[poolKey]; ok {
+						if oldCounters, ok := oldCounterSets[counterSetName]; ok {
+							if oldCounter, ok := oldCounters[counterName]; ok {
+								delta.Sub(oldCounter.Value)
+							}
+						}
+					}
+				}
+				if delta.Sign() > 0 {
+					remainingCounter, ok := counterSetRemaining[counterName]
+					if !ok {
+						continue
+					}
+					remainingCounter.Value.Sub(delta)
+					counterSetRemaining[counterName] = remainingCounter
+				}
+			}
+		}
+	}
+}
+
 func (at *AllocationTracker) ReleaseInstanceTypes(ctx context.Context, nodeClaim NodeClaimID, instanceTypes ...InstanceTypeID) {
 	released := make(map[InstanceTypeID]sets.Set[DeviceID])
 	for _, instanceType := range instanceTypes {
@@ -148,11 +284,85 @@ func (at *AllocationTracker) ReleaseInstanceTypes(ctx context.Context, nodeClaim
 		}
 		delete(at.InflightTemplateAllocations[nodeClaim], instanceType)
 	}
+	at.releaseCounters(nodeClaim, instanceTypes)
+	at.releaseTemplateCounters(nodeClaim, instanceTypes)
 
 	if len(released) != 0 && log.FromContext(ctx).V(1).Enabled() {
 		log.FromContext(ctx).V(1).Info("releasing allocations", "nodeClaimID", nodeClaim.Value(), "devicesByInstanceType", lo.MapEntries(released, func(it InstanceTypeID, ids sets.Set[DeviceID]) (string, []string) {
 			return it.Value(), lo.Map(ids.UnsortedList(), func(id DeviceID, _ int) string { return id.String() })
 		}))
+	}
+}
+
+// releaseCounters adjusts remaining counters when instance types are pruned. Recomputes the
+// pessimistic max from remaining ITs and adds back the delta.
+func (at *AllocationTracker) releaseCounters(nodeClaimID NodeClaimID, releasedITs []InstanceTypeID) {
+	storedCounterSetsByIT, ok := at.countersByNodeClaimIT[nodeClaimID]
+	if !ok {
+		return
+	}
+
+	oldCounterMax := pessimisticCounterMax(storedCounterSetsByIT)
+
+	for _, itID := range releasedITs {
+		delete(storedCounterSetsByIT, itID)
+	}
+
+	var newCounterMax map[PoolKey]map[string]map[string]resourcev1.Counter
+	if len(storedCounterSetsByIT) > 0 {
+		newCounterMax = pessimisticCounterMax(storedCounterSetsByIT)
+	}
+	addDeltaToRemaining(at.RemainingCounters, oldCounterMax, newCounterMax)
+
+	if len(storedCounterSetsByIT) == 0 {
+		delete(at.countersByNodeClaimIT, nodeClaimID)
+	}
+}
+
+// releaseTemplateCounters removes template counter state for pruned instance types.
+func (at *AllocationTracker) releaseTemplateCounters(nodeClaimID NodeClaimID, releasedITs []InstanceTypeID) {
+	remainingCounterSetsByIT, ok := at.templateRemainingCounters[nodeClaimID]
+	if !ok {
+		return
+	}
+	for _, itID := range releasedITs {
+		delete(remainingCounterSetsByIT, itID)
+	}
+	if len(remainingCounterSetsByIT) == 0 {
+		delete(at.templateRemainingCounters, nodeClaimID)
+	}
+}
+
+// addDeltaToRemaining adds (oldCounterMax - newCounterMax) back to remaining counters.
+func addDeltaToRemaining(remaining map[PoolKey]map[string]map[string]resourcev1.Counter, oldCounterMax, newCounterMax map[PoolKey]map[string]map[string]resourcev1.Counter) {
+	for poolKey, oldCounterSets := range oldCounterMax {
+		poolRemaining, ok := remaining[poolKey]
+		if !ok {
+			continue
+		}
+		for counterSetName, oldCounters := range oldCounterSets {
+			counterSetRemaining, ok := poolRemaining[counterSetName]
+			if !ok {
+				continue
+			}
+			for counterName, oldCounter := range oldCounters {
+				delta := oldCounter.Value.DeepCopy()
+				if newCounterMax != nil {
+					if newCounterSets, ok := newCounterMax[poolKey]; ok {
+						if newCounters, ok := newCounterSets[counterSetName]; ok {
+							if newCounter, ok := newCounters[counterName]; ok {
+								delta.Sub(newCounter.Value)
+							}
+						}
+					}
+				}
+				if delta.Sign() > 0 {
+					remainingCounter := counterSetRemaining[counterName]
+					remainingCounter.Value.Add(delta)
+					counterSetRemaining[counterName] = remainingCounter
+				}
+			}
+		}
 	}
 }
 
@@ -193,4 +403,113 @@ func (at *AllocationTracker) IsAllocated(deviceID DeviceID, nodeClaim NodeClaim,
 	}
 	// The device is neither marked as allocating in the cluster nor in the allocator's state, it's not allocated
 	return false
+}
+
+// InitRemainingCounters initializes the remaining counter budget for a pool. Called lazily on first
+// access for each pool during allocation. The initial value is the pool's total counter budget
+// minus consumption from preallocated devices.
+func (at *AllocationTracker) InitRemainingCounters(pool *Pool) {
+	if _, ok := at.RemainingCounters[pool.Key]; ok {
+		return
+	}
+	if len(pool.CounterSets) == 0 {
+		return
+	}
+	remainingCounterSets := make(map[string]map[string]resourcev1.Counter, len(pool.CounterSets))
+	for counterSetName, counters := range pool.CounterSets {
+		remainingCounterSets[counterSetName] = make(map[string]resourcev1.Counter, len(counters))
+		for counterName, counter := range counters {
+			remainingCounterSets[counterSetName][counterName] = resourcev1.Counter{Value: counter.Value.DeepCopy()}
+		}
+	}
+	// Deduct consumption from preallocated devices.
+	for i := range pool.Devices {
+		if !at.PreallocatedDevices.Has(pool.Devices[i].ID) {
+			continue
+		}
+		deductFromCounters(remainingCounterSets, pool.Devices[i].Device)
+	}
+	for i := range pool.NonTargetingDevices {
+		if !at.PreallocatedDevices.Has(pool.NonTargetingDevices[i].ID) {
+			continue
+		}
+		deductFromCounters(remainingCounterSets, pool.NonTargetingDevices[i].Device)
+	}
+	at.RemainingCounters[pool.Key] = remainingCounterSets
+}
+
+// deductFromCounters subtracts a device's counter consumption from counter budgets.
+func deductFromCounters(remainingCounterSets map[string]map[string]resourcev1.Counter, device cloudprovider.Device) {
+	for _, consumption := range device.ConsumesCounters {
+		counterSetRemaining, ok := remainingCounterSets[consumption.CounterSet]
+		if !ok {
+			continue
+		}
+		for counterName, counter := range consumption.Counters {
+			remainingCounter, ok := counterSetRemaining[counterName]
+			if !ok {
+				continue
+			}
+			remainingCounter.Value.Sub(counter.Value)
+			counterSetRemaining[counterName] = remainingCounter
+		}
+	}
+}
+
+// InitTemplateRemainingCounters lazily initializes the remaining counter budget for a
+// (NodeClaim, IT) pair. The caller provides the total budget (computed from SharedCounters on
+// the template slices). Subsequent calls for the same (NC, IT) are no-ops.
+func (at *AllocationTracker) InitTemplateRemainingCounters(
+	nodeClaimID NodeClaimID,
+	itID InstanceTypeID,
+	totals map[PoolKey]map[string]map[string]resourcev1.Counter,
+) {
+	remainingCounterSetsByIT, ok := at.templateRemainingCounters[nodeClaimID]
+	if !ok {
+		remainingCounterSetsByIT = make(map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter)
+		at.templateRemainingCounters[nodeClaimID] = remainingCounterSetsByIT
+	}
+	if _, ok := remainingCounterSetsByIT[itID]; ok {
+		return
+	}
+	remainingCounterSetsByIT[itID] = totals
+}
+
+// TemplateRemainingForIT returns the remaining template counter budget for the given
+// (NodeClaim, IT) pair. Returns nil if not yet initialized.
+func (at *AllocationTracker) TemplateRemainingForIT(nodeClaimID NodeClaimID, itID InstanceTypeID) map[PoolKey]map[string]map[string]resourcev1.Counter {
+	remainingCounterSetsByIT, ok := at.templateRemainingCounters[nodeClaimID]
+	if !ok {
+		return nil
+	}
+	return remainingCounterSetsByIT[itID]
+}
+
+// pessimisticCounterMax computes the maximum counter value per pool/counterSet/counter across all ITs.
+// returns map: poolKey → counterSetName → counterName → remaining counter.
+func pessimisticCounterMax(counterConsumptionByIT map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter) map[PoolKey]map[string]map[string]resourcev1.Counter {
+	counterMaxByPool := make(map[PoolKey]map[string]map[string]resourcev1.Counter)
+	for _, counterSetsByPool := range counterConsumptionByIT {
+		for poolKey, counterSets := range counterSetsByPool {
+			maxCounterSets, ok := counterMaxByPool[poolKey]
+			if !ok {
+				maxCounterSets = make(map[string]map[string]resourcev1.Counter)
+				counterMaxByPool[poolKey] = maxCounterSets
+			}
+			for counterSetName, counters := range counterSets {
+				maxCounters, ok := maxCounterSets[counterSetName]
+				if !ok {
+					maxCounters = make(map[string]resourcev1.Counter)
+					maxCounterSets[counterSetName] = maxCounters
+				}
+				for counterName, counter := range counters {
+					maxCounter, ok := maxCounters[counterName]
+					if !ok || counter.Value.Cmp(maxCounter.Value) > 0 {
+						maxCounters[counterName] = resourcev1.Counter{Value: counter.Value.DeepCopy()}
+					}
+				}
+			}
+		}
+	}
+	return counterMaxByPool
 }
