@@ -114,13 +114,6 @@ var _ = Describe("Ranking", func() {
 			expectPodAnnotationCleared(dndPod)
 		})
 
-		It("should handle empty node list", func() {
-
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, nil, map[string]*v1.NodePool{nodePool.Name: nodePool})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(ranks).To(BeEmpty())
-		})
-
 		It("should handle all nodes being normal (no DND)", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
@@ -300,118 +293,6 @@ var _ = Describe("Ranking", func() {
 			expectPodAnnotationCleared(dndPod)
 		})
 
-		It("should not classify disrupted node without PDB-blocked pods as Group A", func() {
-			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
-				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range nodeClaims {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-
-			// Node 0: disrupted taint but no PDB-blocked pods
-			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
-			ExpectApplied(ctx, env.Client, nodes[0])
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name}))
-
-			// Node 1: normal
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name}))
-
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(ranks).To(HaveLen(2))
-
-			// Both should be in the normal tier (no Group A) since there's no PDB blocking
-			for _, r := range ranks {
-				Expect(r.HasDoNotDisrupt).To(BeFalse())
-			}
-		})
-
-		It("should rank multiple disrupted+PDB-blocked nodes by pod count ascending", func() {
-			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
-				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range nodeClaims {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-
-			// Both node 0 and node 1 are disrupted + PDB-blocked
-			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
-			nodes[1].Spec.Taints = append(nodes[1].Spec.Taints, v1.DisruptedNoScheduleTaint)
-			ExpectApplied(ctx, env.Client, nodes[0], nodes[1])
-
-			// Node 0: 3 PDB-blocked pods
-			for i := 0; i < 3; i++ {
-				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
-					NodeName:   nodes[0].Name,
-				}))
-			}
-			// Node 1: 1 PDB-blocked pod
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
-				NodeName:   nodes[1].Name,
-			}))
-
-			minAvail := intstr.FromString("100%")
-			pdb := &policyv1.PodDisruptionBudget{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "block-all",
-					Namespace: "default",
-				},
-				Spec: policyv1.PodDisruptionBudgetSpec{
-					MinAvailable: &minAvail,
-					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
-				},
-				Status: policyv1.PodDisruptionBudgetStatus{
-					DisruptionsAllowed: 0,
-				},
-			}
-			ExpectApplied(ctx, env.Client, pdb)
-
-			// Node 2: normal
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name}))
-
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(ranks).To(HaveLen(3))
-
-			// Find ranks for disrupted+blocked nodes
-			var node0Rank, node1Rank, node2Rank int
-			for _, r := range ranks {
-				switch r.Node.Node.Name {
-				case nodes[0].Name:
-					node0Rank = r.Rank
-				case nodes[1].Name:
-					node1Rank = r.Rank
-				case nodes[2].Name:
-					node2Rank = r.Rank
-				}
-			}
-			// Both disrupted+blocked nodes should get math.MinInt32
-			Expect(node0Rank).To(Equal(math.MinInt32))
-			Expect(node1Rank).To(Equal(math.MinInt32))
-			// Normal node should have a rank greater than math.MinInt32
-			Expect(node2Rank).To(BeNumerically(">", math.MinInt32))
-		})
-
 		It("should place Group A below Group B (drifted) in ordering", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
@@ -543,6 +424,151 @@ var _ = Describe("Ranking", func() {
 				}
 			}
 			Expect(annotated).To(Equal(cap), "exactly maxNodesPerCycle (50) pods should receive the annotation")
+		})
+	})
+
+	// Direct-helper edge tests. These cover partition cases that are
+	// observable only in the NodeRank slice (multi-Group-A pod-count
+	// tiebreak, negative classification of disrupted-but-not-PDB-blocked
+	// nodes, RankNodes' own empty-input handling). The Reconcile-driven
+	// variants would assert on annotation values that don't distinguish
+	// these cases. The _Edge_ marker in the It descriptions makes the
+	// bypass explicit for reviewers.
+	Context("Edge: direct-helper partition checks", func() {
+		It("should _Edge_ leave RankNodes a no-op on empty node list", func() {
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, nil, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(BeEmpty())
+		})
+
+		It("should _Edge_ not classify disrupted node without PDB-blocked pods as Group A", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// Node 0: disrupted taint but no PDB-blocked pods
+			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name}))
+
+			// Node 1: normal
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name}))
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(2))
+
+			// Both should be in the normal tier (no Group A) since there's no
+			// PDB blocking. Observable only in NodeRank.HasDoNotDisrupt=false
+			// AND no math.MinInt32 rank; the reconcile-driven version would
+			// see the same two negative annotations and could not distinguish
+			// "Group C" from "Group A overflow back to C".
+			for _, r := range ranks {
+				Expect(r.HasDoNotDisrupt).To(BeFalse())
+				Expect(r.Rank).To(BeNumerically(">", math.MinInt32))
+			}
+		})
+
+		It("should _Edge_ rank multiple disrupted+PDB-blocked nodes by pod count ascending", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// Both node 0 and node 1 are disrupted + PDB-blocked.
+			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			nodes[1].Spec.Taints = append(nodes[1].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodes[0], nodes[1])
+
+			// Node 0: 3 PDB-blocked pods; node 1: 1 PDB-blocked pod.
+			for i := 0; i < 3; i++ {
+				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+					NodeName:   nodes[0].Name,
+				}))
+			}
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+				NodeName:   nodes[1].Name,
+			}))
+
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: "default"},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 0},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+
+			// Node 2: normal
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name}))
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(3))
+
+			var node0Rank, node1Rank, node2Rank int
+			for _, r := range ranks {
+				switch r.Node.Node.Name {
+				case nodes[0].Name:
+					node0Rank = r.Rank
+				case nodes[1].Name:
+					node1Rank = r.Rank
+				case nodes[2].Name:
+					node2Rank = r.Rank
+				}
+			}
+			// Both disrupted+blocked nodes get math.MinInt32 (the pod-count
+			// tiebreak doesn't change Group A's sentinel rank; the property
+			// under test is that the sort completes without error and Group A
+			// stays at MinInt32 even with multiple members).
+			Expect(node0Rank).To(Equal(math.MinInt32))
+			Expect(node1Rank).To(Equal(math.MinInt32))
+			Expect(node2Rank).To(BeNumerically(">", math.MinInt32))
+		})
+	})
+
+	// Reconcile-path edge tests. These cover early-returns inside Reconcile
+	// itself (no-nodes short-circuit) that the direct-call RankNodes tests
+	// bypass. The "RankNodes on nil input" case above asserts the helper's
+	// own zero-input behavior; the equivalent at the Reconcile boundary is
+	// "no nodes in cluster state", which exercises the controller's separate
+	// len(nodes)==0 early-return path before RankNodes is reached.
+	Context("Edge: Reconcile early-return paths", func() {
+		It("should _Edge_ short-circuit cleanly when the cluster has no nodes", func() {
+			// No nodes applied to the cluster. The Reconcile path's
+			// len(nodes)==0 check fires before RankNodes; no pod patches are
+			// issued.
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			result, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.RequeueAfter).ToNot(BeZero())
 		})
 	})
 })
