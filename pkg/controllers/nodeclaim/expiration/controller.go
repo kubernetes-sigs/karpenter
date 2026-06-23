@@ -18,6 +18,7 @@ package expiration
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -34,6 +35,9 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -43,14 +47,18 @@ type Controller struct {
 	clock         clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	cluster       *state.Cluster
+	recorder      events.Recorder
 }
 
 // NewController constructs a nodeclaim disruption controller
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, recorder events.Recorder) *Controller {
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
+		cluster:       cluster,
+		recorder:      recorder,
 	}
 }
 
@@ -76,6 +84,22 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	if c.clock.Now().Before(expirationTime) {
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(c.clock.Now())}, nil
+	}
+	// 2b. The NodeClaim is expired, but only disrupt it if the owning NodePool has disruption budget
+	// available right now. Upstream Karpenter v1 deletes expired NodeClaims without consulting
+	// NodePool disruption budgets (kubernetes-sigs/karpenter#1750) — the subsequent node drain still
+	// honors PDBs, but nothing rate-limits how many nodes expire at once. This gate restores the
+	// v0.37 "soft expiration" behavior so expiry-driven node rotation respects availability targets.
+	// Scoped to the Drifted reason because there is no Expired DisruptionReason; a budget with no
+	// `reasons` (the common case) applies to all reasons regardless.
+	budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, v1.DisruptionReasonDrifted)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("building disruption budget mapping, %w", err)
+	}
+	if budgets[nodeClaim.Labels[v1.NodePoolLabelKey]] <= 0 {
+		log.FromContext(ctx).V(1).Info("deferring expiration: nodepool disruption budget exhausted")
+		// Requeue so the NodeClaim is expired as soon as budget frees up.
+		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {

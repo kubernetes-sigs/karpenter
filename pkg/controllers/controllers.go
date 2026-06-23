@@ -105,7 +105,7 @@ func NewControllers(
 		provisioning.NewPodController(kubeClient, p, cluster),
 		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient, cloudProvider),
-		expiration.NewController(clock, kubeClient, cloudProvider),
+		expiration.NewController(clock, kubeClient, cloudProvider, cluster, recorder),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),

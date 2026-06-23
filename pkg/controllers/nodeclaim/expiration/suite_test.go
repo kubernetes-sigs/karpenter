@@ -30,8 +30,11 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -42,6 +45,10 @@ var ctx context.Context
 var expirationController *expiration.Controller
 var env *test.Environment
 var cp *fake.CloudProvider
+var cluster *state.Cluster
+var clusterCost *cost.ClusterCost
+var nodeStateController *informer.NodeController
+var nodeClaimStateController *informer.NodeClaimController
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -53,7 +60,11 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
-	expirationController = expiration.NewController(env.Clock, env.Client, cp)
+	cluster = state.NewCluster(env.Clock, env.Client, cp)
+	clusterCost = cost.NewClusterCost(ctx, cp, env.Client)
+	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cp, cluster, clusterCost)
+	expirationController = expiration.NewController(env.Clock, env.Client, cp, cluster, test.NewEventRecorder())
 })
 
 var _ = AfterSuite(func() {
@@ -87,7 +98,8 @@ var _ = Describe("Expiration", func() {
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			// step forward to make the node expired
 			env.Clock.Step(60 * time.Second)
@@ -102,7 +114,8 @@ var _ = Describe("Expiration", func() {
 		})
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
 			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeSpot
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			// step forward to make the node expired
 			env.Clock.Step(60 * time.Second)
@@ -126,14 +139,15 @@ var _ = Describe("Expiration", func() {
 					Name:  "default",
 				}
 			}
-			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			// step forward to make the node expired
 			env.Clock.Step(60 * time.Second)
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 			if isNodeClaimManaged {
-				// with forceful termination, when we see a nodeclaim meets the conditions for expiration
-				// we should remove it
+				// when we see a managed nodeclaim that meets the conditions for expiration and the
+				// owning NodePool has disruption budget available, we should remove it
 				ExpectNotFound(ctx, env.Client, nodeClaim)
 			} else {
 				ExpectExists(ctx, env.Client, nodeClaim)
@@ -157,11 +171,11 @@ var _ = Describe("Expiration", func() {
 	})
 	It("should delete NodeClaims if the nodeClaim is expired but the node isn't", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		// step forward to make the node expired
 		env.Clock.Step(60 * time.Second)
-		ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but nodeClaim will be
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 		ExpectNotFound(ctx, env.Client, nodeClaim)
@@ -177,7 +191,8 @@ var _ = Describe("Expiration", func() {
 	})
 	It("shouldn't expire the same NodeClaim multiple times", func() {
 		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "test-finalizer")
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		// step forward to make the node expired
 		env.Clock.Step(60 * time.Second)
@@ -191,6 +206,54 @@ var _ = Describe("Expiration", func() {
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 			metrics.ReasonLabel:   metrics.ExpiredReason,
 			metrics.NodePoolLabel: nodePool.Name,
+		})
+	})
+	Context("Disruption Budgets", func() {
+		It("should not expire a NodeClaim when the NodePool disruption budget disallows it", func() {
+			// A budget of "0" leaves no room to disrupt, so the expired NodeClaim must be deferred
+			// rather than forcefully deleted (kubernetes-sigs/karpenter#1750).
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// step forward to make the node expired
+			env.Clock.Step(60 * time.Second)
+			result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			// The NodeClaim is expired but the budget is exhausted, so it should be requeued, not deleted.
+			ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(result.RequeueAfter).To(BeNumerically(">", time.Duration(0)))
+		})
+		It("should expire a NodeClaim once the NodePool disruption budget allows it", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// step forward to make the node expired
+			env.Clock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel:   metrics.ExpiredReason,
+				metrics.NodePoolLabel: nodePool.Name,
+			})
+		})
+		It("should not be blocked by a budget scoped to a different disruption reason", func() {
+			// Expiration is gated by the Drifted reason, so a budget scoped only to Empty must not
+			// block it. The expired NodeClaim should still be removed.
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0", Reasons: []v1.DisruptionReason{v1.DisruptionReasonEmpty}}}
+			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// step forward to make the node expired
+			env.Clock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
 		})
 	})
 })
