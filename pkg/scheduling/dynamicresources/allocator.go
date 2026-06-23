@@ -660,7 +660,7 @@ func (a *allocator) dfsExactCount(claimIdx, reqIdx, slotIdx int, cd *ClaimData, 
 		}
 		exhausted := a.poolCountersExhausted(pool)
 		for _, d := range pool.Devices {
-			if exhausted && len(d.Device.ConsumesCounters) > 0 {
+			if exhausted && len(d.ConsumesCounters) > 0 {
 				continue
 			}
 			if a.tryDevice(claimIdx, reqIdx, slotIdx, cd, rd, d) {
@@ -1049,7 +1049,7 @@ func (a *allocator) allModeCountersFeasible(rd *RequestData) bool {
 	}
 
 	for _, d := range devices {
-		if len(d.Device.ConsumesCounters) == 0 {
+		if len(d.ConsumesCounters) == 0 {
 			continue
 		}
 		poolKey := PoolKey{Driver: d.ID.Driver, Pool: d.ID.Pool}
@@ -1076,7 +1076,7 @@ func (a *allocator) allModeCountersFeasible(rd *RequestData) bool {
 			shadow[poolKey] = copyCounterSets(remaining)
 		}
 		poolShadow := shadow[poolKey]
-		for _, consumption := range d.Device.ConsumesCounters {
+		for _, consumption := range d.ConsumesCounters {
 			counterSetsShadow, ok := poolShadow[consumption.CounterSet]
 			if !ok {
 				return false

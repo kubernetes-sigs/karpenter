@@ -856,6 +856,56 @@ var _ = Describe("Allocator", func() {
 		)
 	})
 
+	Describe("SharedCounters — zero capacity edge cases", func() {
+		It("should reject allocation when counter has zero capacity", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("slots", map[string]resource.Quantity{
+						"gpu": resource.MustParse("0"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "slots", map[string]resource.Quantity{"gpu": resource.MustParse("1")}),
+						deviceConsumingCounter("gpu-1", "slots", map[string]resource.Quantity{"gpu": resource.MustParse("1")}),
+					),
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should succeed when both counter capacity and device consumption are zero", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("slots", map[string]resource.Quantity{
+						"gpu": resource.MustParse("0"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "slots", map[string]resource.Quantity{"gpu": resource.MustParse("0")}),
+					),
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+	})
+
 	Describe("SharedCounters — release and pessimistic max", func() {
 		It("should restore counter budget when an instance type is released", func() {
 			inClusterSlices := []dynamicresources.ResourceSlice{
@@ -5025,6 +5075,182 @@ var _ = Describe("Allocator", func() {
 			Expect(result).ToNot(BeNil())
 			Expect(result.Requirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
 			Expect(result.Requirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("us-west-2a"))
+		})
+
+		It("should handle conflicting topology across multiple requests in the same claim", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a",
+					withPerDeviceNodeSelection(),
+					withPerDeviceDevices(
+						resourcev1.Device{
+							Name: "dev-a",
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+								}},
+							}},
+						},
+						resourcev1.Device{
+							Name: "dev-b",
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2b"}},
+								}},
+							}},
+						},
+						resourcev1.Device{
+							Name: "dev-c",
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+								}},
+							}},
+						},
+					),
+					withGeneration(1, 1),
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			nc := &fakeNodeClaim{
+				id:         unique.Make("test-nc"),
+				nodePoolID: unique.Make("test-np"),
+				requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
+				),
+				instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-1")},
+				resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
+			}
+			// Two requests in same claim, each needing 1 device.
+			// Request 1 picks dev-a (zone-a), tightens to us-west-2a.
+			// Request 2 must find a zone-a device (dev-b is incompatible), picks dev-c.
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1), exactRequest("req-2", "gpu", 1))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.Requirements.Has(corev1.LabelTopologyZone)).To(BeTrue())
+			Expect(result.Requirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("us-west-2a"))
+		})
+
+		It("should fail when conflicting topology across multiple requests cannot be resolved", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a",
+					withPerDeviceNodeSelection(),
+					withPerDeviceDevices(
+						resourcev1.Device{
+							Name: "dev-a",
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+								}},
+							}},
+						},
+						resourcev1.Device{
+							Name: "dev-b",
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2b"}},
+								}},
+							}},
+						},
+					),
+					withGeneration(1, 1),
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			nc := &fakeNodeClaim{
+				id:         unique.Make("test-nc"),
+				nodePoolID: unique.Make("test-np"),
+				requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
+				),
+				instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-1")},
+				resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
+			}
+			// Two requests, each needing 1 device. Only 2 devices in different zones.
+			// No matter which device request 1 picks, request 2 gets an incompatible zone.
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1), exactRequest("req-2", "gpu", 1))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should deduct NonTargetingDevices counter consumption from SharedCounters budget", func() {
+			// Pool with PerDeviceNodeSelection + SharedCounters (80Gi budget).
+			// Device B is preallocated on another node in zone-b.
+			// B's 40Gi should be deducted from the budget, leaving only 40Gi for zone-a devices.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withPerDeviceNodeSelection(),
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("80Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a",
+					withPerDeviceNodeSelection(),
+					withPerDeviceDevices(
+						resourcev1.Device{
+							Name: "gpu-a",
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+								}},
+							}},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}},
+							},
+						},
+						resourcev1.Device{
+							Name: "gpu-b",
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2b"}},
+								}},
+							}},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}},
+							},
+						},
+						resourcev1.Device{
+							Name: "gpu-c",
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+								}},
+							}},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}},
+							},
+						},
+					),
+					withGeneration(1, 2),
+				),
+			}
+			// gpu-b is preallocated (allocated on another node in zone-b)
+			allocated := sets.New[cloudprovider.DeviceID](
+				deviceID("gpu.example.com", "pool-a", "gpu-b").DeviceID,
+			)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
+			nc := &fakeNodeClaim{
+				id:         unique.Make("test-nc"),
+				nodePoolID: unique.Make("test-np"),
+				requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+				),
+				instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-1")},
+				resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
+			}
+
+			// Requesting 2 devices should FAIL: gpu-b is NonTargeting (zone-b) but preallocated,
+			// its 40Gi is deducted. Only 40Gi remains, insufficient for 2×40Gi.
+			claim2 := makeClaim("c-fail", exactRequest("req-1", "gpu", 2))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).To(HaveOccurred())
+
+			// Requesting 1 device should SUCCEED: 40Gi remaining >= 1×40Gi.
+			claim1 := makeClaim("c-ok", exactRequest("req-1", "gpu", 1))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
 		})
 	})
 })

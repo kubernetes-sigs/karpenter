@@ -362,7 +362,7 @@ func (b *poolBuilder) build(key PoolKey, requirements scheduling.Requirements) *
 
 	if pool.Invalid {
 		for _, d := range pool.Devices {
-			if len(d.Device.ConsumesCounters) > 0 {
+			if len(d.ConsumesCounters) > 0 {
 				pool.NonTargetingDevices = append(pool.NonTargetingDevices, d)
 			}
 		}
