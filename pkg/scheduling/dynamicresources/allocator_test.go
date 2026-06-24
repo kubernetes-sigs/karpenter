@@ -215,6 +215,7 @@ func exactRequestWithSelector(name, className string, count int64, expr string) 
 	}
 }
 
+//nolint:unparam
 func exactRequestWithCapacity(name, className string, count int64, capacityRequests map[resourcev1.QualifiedName]resource.Quantity) resourcev1.DeviceRequest {
 	return resourcev1.DeviceRequest{
 		Name: name,

@@ -97,6 +97,8 @@ func (a *allocator) restoreAllocatingCapacity(consumed map[resourcev1.QualifiedN
 
 // commitCapacity stores per-IT capacity consumption and increments InflightConsumedCapacity by
 // the delta between the new pessimistic max and the old one.
+//
+//nolint:gocyclo
 func (at *AllocationTracker) commitCapacity(nodeClaimID NodeClaimID, newCapacityByIT map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity) {
 	if len(newCapacityByIT) == 0 {
 		return
@@ -187,6 +189,8 @@ func (at *AllocationTracker) commitTemplateCapacity(nodeClaimID NodeClaimID, con
 
 // releaseCapacity adjusts InflightConsumedCapacity when instance types are pruned. Recomputes
 // the pessimistic max from remaining ITs and subtracts the delta.
+//
+//nolint:gocyclo
 func (at *AllocationTracker) releaseCapacity(nodeClaimID NodeClaimID, releasedITs []InstanceTypeID) {
 	storedConsumedCapacityByIT, ok := at.consumedCapacityByNodeClaimIT[nodeClaimID]
 	if !ok {
