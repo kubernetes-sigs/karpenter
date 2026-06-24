@@ -131,7 +131,30 @@ Given these concerns, we’re punting zonal spreading to a future enhancement. F
 We plan to explore spread option to offer users a more flexible and declarative way to express zone-spreading behavior, similar to podTopologySpreadConstraints.
 
 
-## Example 
+## Deprovisioning Priority Control
+
+When scaling down a static NodePool, users can control which specific nodes are removed by annotating NodeClaims with `karpenter.sh/deprovisioning-priority`. This is useful for scenarios where certain nodes should be removed before others, such as:
+
+- Removing nodes that were manually cordoned or drained
+- Targeting nodes with known issues or degraded performance
+- Implementing custom scaling strategies
+
+### Usage Example
+
+```bash
+# Annotate specific NodeClaims you want removed first (higher priority = removed first)
+kubectl annotate nodeclaim <nodeclaim-name> karpenter.sh/deprovisioning-priority=100
+
+# Scale down the NodePool - annotated nodes will be deprovisioned first
+kubectl scale nodepool <nodepool-name> --replicas=2
+```
+
+The priority annotation works within the existing selection hierarchy:
+1. Do-not-disrupt pods are always protected regardless of priority
+2. Among nodes that can be safely disrupted, higher priority values are removed first
+3. If priorities are equal, disruption cost (rescheduling cost × lifetime remaining) is used as a tiebreaker
+
+## Example
 I want a Static NodePool that:
 - Always keeps exactly 12 running nodes under normal operation.
 - Can temporarily scale up to a maximum of 20 nodes, but never exceed that.
@@ -192,9 +215,16 @@ We will be creating Static Capacity by adding 2 new controllers under a feature 
 - **Instance Selection**: Scale-up controller will be creating NodeClaims and Instance selection will happen during CloudProvider call. During which we Will find the cheapest instance possible based on requirements
 - **Consolidation**: Static NodePools will not be consolidated to maintain predictable capacity
 
-#### Deprovisioning Controller  
+#### Deprovisioning Controller
 - **Purpose**: Scale down replicas when desired count is reduced
-- **Node Selection**: Will prioritize empty nodes for termination. Incase of non-empty nodes we will pick at random. In future iterations, we will add intelligent algorithms for selecting which nodes to scale down
+- **Node Selection**: Prioritizes nodes for termination in the following order:
+  1. Unresolved NodeClaims (no ProviderID yet) - sorted by priority annotation
+  2. Empty nodes (no pods or only DaemonSet pods) - sorted by priority annotation
+  3. Non-empty nodes - sorted by:
+     - Do-not-disrupt status (nodes without do-not-disrupt pods first)
+     - Priority annotation (higher values deprovisioned first)
+     - Disruption cost (rescheduling cost × lifetime remaining)
+- **Priority Annotation**: Users can control which specific nodes are deprovisioned first by setting the `karpenter.sh/deprovisioning-priority` annotation on NodeClaims. Higher numeric values are deprovisioned first. Nodes without this annotation have a default priority of 0.
 - **Termination Behavior**: Will gracefully terminate nodes to meet desired size respecting PodDisruptionBudgets or terminationGracePeriod
 
 ### Scheduling Integration
