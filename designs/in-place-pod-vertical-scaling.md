@@ -64,7 +64,7 @@ After the boost period completes and VPA resizes down, the node may appear under
 
 ### Initial and Recreate Modes
 
-In Initial and Recreate modes, VPA's recommendation evolves over time. When Karpenter evicts a pod, the replacement receives VPA's current recommendation, which may differ from the evicted pod's spec. Karpenter has no way to predict this value today.
+In Initial and Recreate modes, VPA's admission webhook sets pod requests to the current recommendation at creation time. Since recommendations evolve continuously, when Karpenter evicts a pod the replacement may receive different resource requests than the evicted pod had. Karpenter has no way to predict this value today.
 
 ## Goals
 
@@ -104,43 +104,11 @@ Today Karpenter computes pod resource usage with `UseStatusResources=false`, so 
 | Resize UP infeasible | 6 | 2 | 6 | Conservative (treats as needing 6) |
 | Field not set (resize never occurred) | 4 | nil | 4 | Falls back to spec, backward compatible |
 
-### Part 2: Predict Post-Eviction Resource Requests via Dry-Run
+### Part 2: Predict Post-Eviction Resource Requests via VPA Recommendation
 
 Part 1 fixes resource accounting during active resize. Part 2 ensures consolidation decisions account for how pods will look after recreation.
 
-When Karpenter consolidates a node, it evicts pods that are then recreated by their controllers. If a mutating webhook (e.g., VPA's admission controller) changes the pod's resource requests on creation, the recreated pod may require more resources than the original. Without prediction, Karpenter might move pods to a node that can't fit them post-recreation, causing unnecessary pending pods.
-
-**Mechanism:**
-
-A prediction cache runs dry-run pod creates (`POST /api/v1/namespaces/{ns}/pods?dryRun=All`) to determine what a pod's resources would be after recreation. This goes through the full API server admission chain (all mutating webhooks) without persisting anything.
-
-**Opt-in via annotation:**
-
-Pods (or their templates) must be annotated with `autoscaling.k8s.io/volatile-requests: "true"` to signal that their requests may change on recreation. This annotation is set by the vertical pod autoscaler (or any autoscaler that uses a mutating webhook to adjust resources at pod creation). Karpenter only runs dry-runs for annotated pods, avoiding unnecessary API calls for workloads whose requests are static.
-
-**Flow:**
-
-1. A background controller lists pods with the `volatile-requests` annotation, groups them by owner (one representative per ReplicaSet), strips runtime fields, and submits dry-run creates. Pods without an owner are skipped, they won't be recreated after eviction.
-2. The predicted `Ceiling()` result is cached, keyed by `(namespace, owner-uid)`.
-3. During consolidation simulation, annotated pods use their cached predicted resources instead of current `Ceiling(pod)`. Non-annotated pods use current resources as today.
-4. Before eviction, Karpenter re-runs a fresh dry-run for annotated pods in the consolidation plan. If the result differs from what the simulation assumed (e.g., VPA recommendation changed), the plan is aborted and re-evaluated on the next cycle.
-5. The cache refreshes periodically (e.g., every 60s). On startup, consolidation is gated until the first pass completes (consistent with how other caches like instance types and cluster state gate disruption decisions). If no annotated pods exist, this completes immediately.
-
-**Pros:**
-
-- Autoscaler-agnostic: works with any mutating webhook (VPA, custom controllers, sidecar injectors, etc.)
-- No coupling to specific CRDs or autoscaler implementations
-
-**Cons:**
-
-- Requires `create pods` RBAC cluster-wide. RBAC does not distinguish dry-run from real creates.
-- During active rollouts (Deployment or StatefulSet), the recreated pod may use a newer template than what was dry-run'd. This can cause one incorrect consolidation where the pod doesn't fit on the target node. The pod goes pending until Karpenter provisions a new node. The cache self-corrects on the next refresh once the recreated pod is running with the new template.
-
-## Alternatives Considered
-
-### 1. Read VPA Objects Directly
-
-Read `VerticalPodAutoscaler.status.recommendation` and use the recommendation as the predicted post-eviction size.
+When Karpenter consolidates a node, it evicts pods that are then recreated by their controllers. If a mutating webhook (e.g., VPA's admission controller) changes the pod's resource requests on creation, the recreated pod may require more or less resources than the original. Without prediction, Karpenter might move pods to a node that can't fit them post-recreation, causing unnecessary pending pods.
 
 **Mechanism:**
 
@@ -181,6 +149,36 @@ VPA's `status.recommendation.target` is the steady-state recommendation. Startup
 - Couples Karpenter to VPA's CRD schema
 - Only works for VPA, other resource-mutating webhooks are not covered
 - Replicates webhook logic: `controlledResources`, `updateMode`, startup boost computation, container name matching and merging
+
+
+## Alternatives Considered
+
+### 1. Dry-Run Pod Creates
+
+A prediction cache runs dry-run pod creates dry-run pod creates (`POST /api/v1/namespaces/{ns}/pods?dryRun=All`) to determine what a pod's resources would be after recreation. This goes through the full API server admission chain (all mutating webhooks) without persisting anything.
+
+**Opt-in via annotation:**
+
+Pods (or their templates) must be annotated with `autoscaling.k8s.io/volatile-requests: "true"` to signal that their requests may change on recreation. This annotation is set by the vertical pod autoscaler (or any autoscaler that uses a mutating webhook to adjust resources at pod creation). Karpenter only runs dry-runs for annotated pods, avoiding unnecessary API calls for workloads whose requests are static.
+
+**Flow:**
+
+1. A background controller lists pods with the `volatile-requests` annotation, groups them by owner (one representative per ReplicaSet), strips runtime fields, and submits dry-run creates. Pods without an owner are skipped, they won't be recreated after eviction.
+2. The predicted `Ceiling()` result is cached, keyed by `(namespace, owner-uid)`.
+3. During consolidation simulation, annotated pods use their cached predicted resources instead of current `Ceiling(pod)`. Non-annotated pods use current resources as today.
+4. During consolidation validation, Karpenter re-runs a fresh dry-run for annotated pods in the plan. If the result differs from what the simulation assumed, the decision is rejected.
+5. The cache refreshes periodically (e.g., every 60s). On startup, consolidation is gated until the first pass completes (consistent with how other caches like instance types and cluster state gate disruption decisions). If no annotated pods exist, this completes immediately.
+
+**Pros:**
+
+- Autoscaler-agnostic: works with any mutating webhook (VPA, custom controllers, sidecar injectors, etc.)
+- No coupling to specific CRDs or autoscaler implementations
+
+**Cons:**
+
+- Requires `create pods` RBAC cluster-wide. RBAC does not distinguish dry-run from real creates.
+- During active rollouts (Deployment or StatefulSet), the recreated pod may use a newer template than what was dry-run'd. This can cause one incorrect consolidation where the pod doesn't fit on the target node. The pod goes pending until Karpenter provisions a new node. The cache self-corrects on the next refresh once the recreated pod is running with the new template.
+
 
 ### 2. Annotation Carrying the Prediction
 
