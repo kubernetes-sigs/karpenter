@@ -21,10 +21,9 @@ import (
 
 	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
 // AllocationTracker is an opaque object used to track the allocation status of individual devices. It can be mutated
@@ -37,6 +36,11 @@ type AllocationTracker struct {
 	// after set during Allocator construction.
 	PreallocatedDevices sets.Set[DeviceID]
 
+	// PreallocatedConsumedCapacity holds the aggregated consumed capacity for multi-allocatable devices
+	// from existing cluster allocations. Multi-allocatable devices appear here instead of PreallocatedDevices.
+	// Immutable after construction. Map: deviceID → dimensionName → consumed quantity.
+	PreallocatedConsumedCapacity map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+
 	// InflightClusterAllocations contains the allocation metadata by device for a given device ID. Note that entries in
 	// this structure are not immutable - as instance types are released by NodeClaims, devices also have the potential to
 	// be released and removed from the map.
@@ -48,6 +52,21 @@ type AllocationTracker struct {
 	InflightClusterAllocationsByNodeClaim map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]
 
 	InflightTemplateAllocations map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]
+
+	// InflightConsumedCapacity tracks consumed capacity committed by earlier pods in this scheduling loop
+	// for multi-allocatable devices. Updated via commitCapacity/releaseCapacity using the same pessimistic-max
+	// pattern as SharedCounters but keyed per-device rather than per-pool.
+	// Map: deviceID → dimensionName → consumed quantity.
+	InflightConsumedCapacity map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+	// consumedCapacityByNodeClaimIT stores per-NodeClaim per-IT capacity consumption for precise release.
+	// Map: nodeClaimID → instanceTypeID → deviceID → dimensionName → consumed quantity.
+	consumedCapacityByNodeClaimIT map[NodeClaimID]map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+
+	// templateConsumedCapacity tracks consumed capacity for multi-allocatable template devices
+	// per (NodeClaim, IT). Each IT has its own independent device set (no pessimistic-max needed).
+	// Sparse — only devices with actual cross-pod consumption get entries. Incremented on Commit.
+	// Map: nodeClaimID → instanceTypeID → deviceID → dimensionName → consumed quantity.
+	templateConsumedCapacity map[NodeClaimID]map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity
 
 	// RemainingCounters tracks the remaining counter budgets per pool. Initialized lazily per pool
 	// (total - preallocated consumption), then decremented on Commit and incremented on Release.
@@ -66,21 +85,29 @@ type AllocationTracker struct {
 	templateRemainingCounters map[NodeClaimID]map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter
 }
 
-func NewAllocationTracker(preallocatedDevices ...cloudprovider.DeviceID) *AllocationTracker {
-	converted := make(sets.Set[DeviceID], len(preallocatedDevices))
-	for i := range preallocatedDevices {
-		converted.Insert(DeviceID{
-			DeviceID: preallocatedDevices[i],
+func NewAllocationTracker(allocatedState AllocatedDeviceState) *AllocationTracker {
+	preallocatedDevices := make(sets.Set[DeviceID], len(allocatedState.ExclusiveDevices))
+	for id := range allocatedState.ExclusiveDevices {
+		preallocatedDevices.Insert(DeviceID{
+			DeviceID: id,
 		})
 	}
+	preallocatedCapacity := make(map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity, len(allocatedState.ConsumedCapacity))
+	for id, capacity := range allocatedState.ConsumedCapacity {
+		preallocatedCapacity[DeviceID{DeviceID: id}] = capacity
+	}
 	return &AllocationTracker{
-		PreallocatedDevices:                   converted,
+		PreallocatedDevices:                   preallocatedDevices,
+		PreallocatedConsumedCapacity:          preallocatedCapacity,
 		InflightClusterAllocations:            make(map[DeviceID]*InflightAllocationMetadata),
 		InflightClusterAllocationsByNodeClaim: make(map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]),
 		InflightTemplateAllocations:           make(map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]),
+		InflightConsumedCapacity:              make(map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity),
+		consumedCapacityByNodeClaimIT:         make(map[NodeClaimID]map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity),
 		RemainingCounters:                     make(map[PoolKey]map[string]map[string]resourcev1.Counter),
 		countersByNodeClaimIT:                 make(map[NodeClaimID]map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter),
 		templateRemainingCounters:             make(map[NodeClaimID]map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter),
+		templateConsumedCapacity:              make(map[NodeClaimID]map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity),
 	}
 }
 
@@ -99,8 +126,21 @@ func (at *AllocationTracker) Commit(alloc *allocation) {
 	for it, deviceIDs := range alloc.deviceIDsByIT {
 		for _, id := range deviceIDs {
 			if id.Template {
+				// Template multi-alloc devices are tracked via templateConsumedCapacity, not
+				// binary allocation.
+				if itCapacity, ok := alloc.templateCapacityConsumptionByIT[it]; ok {
+					if _, hasCapacity := itCapacity[id]; hasCapacity {
+						continue
+					}
+				}
 				at.insertAllocation(at.InflightTemplateAllocations, id, alloc.nodeClaimID, it)
 				continue
+			}
+			// Multi-allocatable devices are tracked via capacity, not binary allocation.
+			if itCapacity, ok := alloc.capacityConsumptionByIT[it]; ok {
+				if _, hasCapacity := itCapacity[id]; hasCapacity {
+					continue
+				}
 			}
 			at.insertAllocation(at.InflightClusterAllocationsByNodeClaim, id, alloc.nodeClaimID, it)
 
@@ -125,6 +165,8 @@ func (at *AllocationTracker) Commit(alloc *allocation) {
 	}
 	at.commitCounters(alloc.nodeClaimID, alloc.counterConsumptionByIT)
 	at.commitTemplateCounters(alloc.nodeClaimID, alloc.templateCounterConsumptionByIT)
+	at.commitCapacity(alloc.nodeClaimID, alloc.capacityConsumptionByIT)
+	at.commitTemplateCapacity(alloc.nodeClaimID, alloc.templateCapacityConsumptionByIT)
 }
 
 func (at *AllocationTracker) insertAllocation(
@@ -172,6 +214,8 @@ func (at *AllocationTracker) ReleaseInstanceTypes(ctx context.Context, nodeClaim
 	}
 	at.releaseCounters(nodeClaim, instanceTypes)
 	at.releaseTemplateCounters(nodeClaim, instanceTypes)
+	at.releaseCapacity(nodeClaim, instanceTypes)
+	at.releaseTemplateCapacity(nodeClaim, instanceTypes)
 
 	if len(released) != 0 && log.FromContext(ctx).V(1).Enabled() {
 		log.FromContext(ctx).V(1).Info("releasing allocations", "nodeClaimID", nodeClaim.Value(), "devicesByInstanceType", lo.MapEntries(released, func(it InstanceTypeID, ids sets.Set[DeviceID]) (string, []string) {
@@ -195,6 +239,15 @@ func (at *AllocationTracker) IsAllocated(deviceID DeviceID, nodeClaim NodeClaim,
 		if instanceTypeAllocs.Has(deviceID) {
 			return true
 		}
+		return false
+	}
+
+	// Multi-allocatable devices are never "fully allocated" from a binary standpoint.
+	// The capacity check in tryDevice determines whether the device can accept the new allocation.
+	if _, isMultiAlloc := at.InflightConsumedCapacity[deviceID]; isMultiAlloc {
+		return false
+	}
+	if _, isMultiAlloc := at.PreallocatedConsumedCapacity[deviceID]; isMultiAlloc {
 		return false
 	}
 

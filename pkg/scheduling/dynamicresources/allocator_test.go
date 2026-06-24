@@ -17,6 +17,7 @@ limitations under the License.
 package dynamicresources_test
 
 import (
+	"fmt"
 	"unique"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -214,6 +215,19 @@ func exactRequestWithSelector(name, className string, count int64, expr string) 
 	}
 }
 
+func exactRequestWithCapacity(name, className string, count int64, capacityRequests map[resourcev1.QualifiedName]resource.Quantity) resourcev1.DeviceRequest {
+	return resourcev1.DeviceRequest{
+		Name: name,
+		Exactly: &resourcev1.ExactDeviceRequest{
+			DeviceClassName: className,
+			Count:           count,
+			Capacity: &resourcev1.CapacityRequirements{
+				Requests: capacityRequests,
+			},
+		},
+	}
+}
+
 func makeAllocatedClaim(name string, nodeSelector *corev1.NodeSelector) *resourcev1.ResourceClaim {
 	return &resourcev1.ResourceClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
@@ -256,7 +270,7 @@ var _ = Describe("Allocator", func() {
 	Describe("Empty claims", func() {
 		It("should return immediately with no claims", func() {
 			nc := makeNodeClaim("it-1")
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			result, err := alloc.Allocate(ctx, nc, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.InstanceTypes).To(HaveLen(1))
@@ -274,7 +288,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should allocate a single device", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 
@@ -286,7 +300,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should allocate multiple devices for a single request", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 3))
 
@@ -296,7 +310,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should fail when not enough devices are available", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 5))
 
@@ -305,7 +319,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should handle multiple requests in a single claim", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1",
 				exactRequest("req-1", "gpu", 2),
@@ -318,7 +332,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should fail when multiple requests exceed total devices", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1",
 				exactRequest("req-1", "gpu", 3),
@@ -330,7 +344,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should handle multiple claims", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claims := []*resourcev1.ResourceClaim{
 				makeClaim("c1", exactRequest("req-1", "gpu", 2)),
@@ -345,7 +359,7 @@ var _ = Describe("Allocator", func() {
 		It("should distinguish claims with the same name in different namespaces", func() {
 			// ResourceClaims are namespaced, so two claims sharing a name across namespaces must be
 			// tracked independently rather than colliding on a name-only key.
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claimNS1 := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 			claimNS1.Namespace = "ns-1"
@@ -374,7 +388,7 @@ var _ = Describe("Allocator", func() {
 				deviceID("gpu.example.com", "pool-a", "gpu-1").DeviceID,
 				deviceID("gpu.example.com", "pool-a", "gpu-2").DeviceID,
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: allocated}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 
@@ -387,7 +401,7 @@ var _ = Describe("Allocator", func() {
 				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID,
 				deviceID("gpu.example.com", "pool-a", "gpu-1").DeviceID,
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: allocated}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 
@@ -431,7 +445,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should only allocate devices matching the selector", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "h100", 2))
 
@@ -441,7 +455,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should fail when not enough devices match the selector", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "h100", 3))
 
@@ -450,7 +464,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should filter with request-level selectors", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1",
 				exactRequestWithSelector("req-1", "gpu", 1, `device.attributes["gpu.example.com"].model == "A100"`),
@@ -488,7 +502,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should satisfy MatchAttribute constraints", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaimWithConstraints("c1",
 				[]resourcev1.DeviceConstraint{
@@ -503,7 +517,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should backtrack to satisfy constraints", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			// Request 3 devices that must share a NUMA node — only 2 per NUMA, so this should fail.
 			claim := makeClaimWithConstraints("c1",
@@ -520,7 +534,7 @@ var _ = Describe("Allocator", func() {
 		It("should satisfy constraints with backtracking across requests", func() {
 			// 2 devices on node-0, 2 on node-1. Two requests of 2 each.
 			// Each constraint is scoped to one request, so req-1 gets node-0 pair and req-2 gets node-1 pair (or vice versa).
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaimWithConstraints("c1",
 				[]resourcev1.DeviceConstraint{
@@ -554,7 +568,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should allocate from templates when in-cluster devices are insufficient", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
@@ -567,7 +581,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should prefer in-cluster devices over templates", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
@@ -597,7 +611,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 
@@ -623,7 +637,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			// 3 devices × 40Gi > 80Gi budget — only 2 can be allocated.
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 3))
@@ -652,7 +666,7 @@ var _ = Describe("Allocator", func() {
 			allocated := sets.New[cloudprovider.DeviceID](
 				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID,
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: allocated}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			// gpu-1 needs 40Gi, and only 40Gi remains (80Gi - 40Gi from gpu-0). Should succeed.
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
@@ -679,7 +693,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Pod 1: allocate 2 devices (uses 80Gi of budget).
 			nc1 := makeNodeClaimWithID("nc-1", "it-1")
@@ -731,7 +745,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// 2 devices: 80Gi memory (ok) + 100 flops (ok).
@@ -775,7 +789,7 @@ var _ = Describe("Allocator", func() {
 			allocated := sets.New[cloudprovider.DeviceID](
 				deviceID("gpu.example.com", "pool-a", "gpu-offnode").DeviceID,
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: allocated}, nil, env.Client)
 
 			// NodeClaim is in us-west-2a — the s-offnode slice (eu-west-1a) becomes non-targeting.
 			nc := &fakeNodeClaim{
@@ -814,7 +828,7 @@ var _ = Describe("Allocator", func() {
 						),
 					),
 				}
-				alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 				return makeNodeClaim("it-1")
 			}),
 			Entry("in-cluster device references non-existent counter name", func() dynamicresources.NodeClaim {
@@ -832,11 +846,11 @@ var _ = Describe("Allocator", func() {
 						),
 					),
 				}
-				alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 				return makeNodeClaim("it-1")
 			}),
 			Entry("template device references non-existent counter set", func() dynamicresources.NodeClaim {
-				alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+				alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 				return makeNodeClaimWithTemplates(makeTemplateWithCounters("gpu.example.com", "pool-a",
 					[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
 						"memory": resource.MustParse("80Gi"),
@@ -845,7 +859,7 @@ var _ = Describe("Allocator", func() {
 				))
 			}),
 			Entry("template device references non-existent counter name", func() dynamicresources.NodeClaim {
-				alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+				alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 				return makeNodeClaimWithTemplates(makeTemplateWithCounters("gpu.example.com", "pool-a",
 					[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
 						"memory": resource.MustParse("80Gi"),
@@ -873,7 +887,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 
@@ -896,7 +910,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 
@@ -924,7 +938,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A allocates 2 devices (80Gi) and commits.
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
@@ -965,7 +979,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A with 2 ITs: DFS order means IT-A gets gpu-0 (40Gi), IT-B also gets gpu-0 (40Gi).
 			// Pessimistic max = 40Gi (same device, same consumption for both ITs).
@@ -1031,7 +1045,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// 2 devices: 80Gi memory (ok), 4 compute-units (ok) — both budgets exactly met.
@@ -1072,7 +1086,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			// Request 2 devices with MatchAttribute on numa — DFS must backtrack past gpu-2 (node-1)
 			// and allocate gpu-0 + gpu-1 (both node-0), with counters correctly restored.
@@ -1104,7 +1118,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// All mode: 2 devices × 40Gi = 80Gi > 60Gi budget. Should fail.
@@ -1130,7 +1144,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A with 2 ITs: both ITs allocate 2 devices (80Gi each). Pessimistic max = 80Gi.
 			// Remaining: 120 - 80 = 40Gi.
@@ -1181,7 +1195,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A with 2 ITs: it-a requests 1 device (40Gi), it-b requests 2 devices (80Gi).
 			// Pessimistic max = max(40, 80) = 80Gi. Remaining: 120 - 80 = 40Gi.
@@ -1268,7 +1282,7 @@ var _ = Describe("Allocator", func() {
 				},
 			}
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Commit 1: claim needs 1 gpu + 1 nic. it-1 gets both (gpu-0=60Gi + nic-0).
 			// it-2 fails (no nic device). Only it-1 survives.
@@ -1323,7 +1337,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Pod 1 on NC-A: allocates 1 device (40Gi). Committed: 40Gi.
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
@@ -1363,7 +1377,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A with 2 ITs both allocate 2 devices (80Gi each). Pessimistic max = 80Gi.
 			// Remaining: 120 - 80 = 40Gi.
@@ -1408,7 +1422,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A with 2 ITs. Both allocate via DFS order — same devices, same consumption.
 			// Commit 1 device for pod 1, then 2 devices for pod 2.
@@ -1457,7 +1471,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			itID := unique.Make("it-1")
 			nc := &fakeNodeClaim{
@@ -1529,7 +1543,7 @@ var _ = Describe("Allocator", func() {
 				},
 			)
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-1: allocate 1 gpu (pool-a: 50Gi) + 1 nic (pool-b: 50G).
 			nc1 := makeNodeClaimWithID("nc-1", "it-a")
@@ -1590,7 +1604,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC with two ITs. Claim: 1 gpu with tier=high (only gpu-0 matches — consumes both counter sets).
 			// IT-A picks gpu-0 (consumes memory-budget:40Gi + compute-budget:50).
@@ -1662,7 +1676,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC with it-a and it-b. Claim: 1 device with tier=full.
 			// Both ITs pick dev-full → consume memory:50Gi + bandwidth:100G.
@@ -1730,7 +1744,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A (it-a, it-b): 1 device kind=mem → both ITs pick dev-mem-0 (memory:40Gi).
 			ncA := makeNodeClaimWithID("nc-a", "it-a", "it-b")
@@ -1794,7 +1808,7 @@ var _ = Describe("Allocator", func() {
 					},
 				},
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
 
@@ -1850,7 +1864,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
 
@@ -1915,7 +1929,7 @@ var _ = Describe("Allocator", func() {
 					},
 				},
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A allocates from both pools, commits, then releases.
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
@@ -1940,7 +1954,7 @@ var _ = Describe("Allocator", func() {
 
 	Describe("SharedCounters — templates", func() {
 		It("should allocate template devices when counter budget is sufficient", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithCounters("gpu.example.com", "pool-a",
 					[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
@@ -1959,7 +1973,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should reject template allocation when counter budget is exhausted", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithCounters("gpu.example.com", "pool-a",
 					[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
@@ -1978,7 +1992,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should evaluate template counters independently per instance type", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			// it-large has 160Gi budget (fits 4 devices), it-small has 80Gi budget (fits only 2).
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-large": {makeTemplateWithCounters("gpu.example.com", "pool-a",
@@ -2010,7 +2024,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should not share template counter budgets across pods", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			tmpl := makeTemplateWithCounters("gpu.example.com", "pool-a",
 				[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
 					"memory": resource.MustParse("80Gi"),
@@ -2036,7 +2050,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should accumulate template counter consumption across multiple pods on the same NC/IT", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			// 4 devices × 40Gi each, but only 80Gi budget — max 2 devices allocatable per NC/IT.
 			tmpl := makeTemplateWithCounters("gpu.example.com", "pool-a",
 				[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
@@ -2062,7 +2076,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should allow template counter allocation on a different NC after exhausting budget on the first", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			tmpl := makeTemplateWithCounters("gpu.example.com", "pool-a",
 				[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
 					"memory": resource.MustParse("80Gi"),
@@ -2088,7 +2102,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should release template counter budget when instance type is pruned", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			tmpl := makeTemplateWithCounters("gpu.example.com", "pool-a",
 				[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
 					"memory": resource.MustParse("80Gi"),
@@ -2117,7 +2131,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should track template counter deductions within a single claim with multiple requests", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithCounters("gpu.example.com", "pool-a",
 					[]resourcev1.CounterSet{counterSet("gpu-slices", map[string]resource.Quantity{
@@ -2139,7 +2153,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should handle multiple template slices for the same pool key", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			// Two template slices for same driver/pool, each contributing part of the counter budget.
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithCounters("gpu.example.com", "pool-a",
@@ -2165,7 +2179,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should handle multiple counter sets per template slice", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithCounters("gpu.example.com", "pool-a",
 					[]resourcev1.CounterSet{
@@ -2199,7 +2213,7 @@ var _ = Describe("Allocator", func() {
 			// Template device has ConsumesCounters but the template slice has NO SharedCounters.
 			// buildTemplateCounters() returns nil → templateRemainingCounters is nil →
 			// checkCounters receives nil remainingCounterSets → returns false.
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Template with devices that consume counters but NO SharedCounters declared.
 			nc := makeNodeClaimWithTemplates(&cloudprovider.ResourceSliceTemplate{
@@ -2224,7 +2238,7 @@ var _ = Describe("Allocator", func() {
 			// templateRemainingCounters), pool-B's device has ConsumesCounters but pool-B's
 			// slice has no SharedCounters. When pool-B device is evaluated,
 			// templateRemainingCounters is non-nil (from pool-A) but has no entry for pool-B.
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			itID := unique.Make("it-1")
 			nc := &fakeNodeClaim{
@@ -2270,7 +2284,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// it-large has 2 template devices, it-small has 0.
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
@@ -2293,7 +2307,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-a": {makeTemplate("gpu.example.com", "pool-b", "tgpu-0")},
@@ -2308,7 +2322,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should fail when no instance type can satisfy", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-a": {makeTemplate("gpu.example.com", "pool-b", "tgpu-0")},
 				"it-b": {makeTemplate("gpu.example.com", "pool-c", "tgpu-0")},
@@ -2324,7 +2338,7 @@ var _ = Describe("Allocator", func() {
 		It("should not leak constraint state between instance type iterations", func() {
 			// IT-A has template devices with numa=node-0, IT-B has template devices with numa=node-1.
 			// Both should independently satisfy a MatchAttribute constraint on numa.
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-a": {makeTemplateWithAttrs("gpu.example.com", "pool-a",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
@@ -2378,7 +2392,7 @@ var _ = Describe("Allocator", func() {
 				},
 			})
 
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), bindings, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, bindings, env.Client)
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-a": {makeTemplate("gpu.example.com", "pool-a", "tgpu-0", "tgpu-1")},
 				"it-b": {makeTemplateWithAttrs("gpu.example.com", "pool-b",
@@ -2407,7 +2421,7 @@ var _ = Describe("Allocator", func() {
 			// IT-A has devices with conflicting NUMA values (can't satisfy constraint).
 			// IT-B has devices with matching NUMA values (can satisfy).
 			// Verifies that failed DFS backtracking leaves clean state.
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-a": {makeTemplateWithAttrs("gpu.example.com", "pool-a",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
@@ -2448,7 +2462,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// First allocation: 2 devices.
@@ -2468,7 +2482,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
@@ -2490,7 +2504,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", allRequest("req-1", "gpu"))
 
@@ -2504,7 +2518,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
@@ -2518,7 +2532,7 @@ var _ = Describe("Allocator", func() {
 		It("should include different template device counts per instance type", func() {
 			// it-large has 3 template devices, it-small has 1.
 			// All-mode should succeed for both, but they allocate different total counts.
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-large": {makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1", "tgpu-2")},
 				"it-small": {makeTemplate("gpu.example.com", "pool-c", "tgpu-0")},
@@ -2538,7 +2552,7 @@ var _ = Describe("Allocator", func() {
 			allocated := sets.New[cloudprovider.DeviceID](
 				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID,
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: allocated}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", allRequest("req-1", "gpu"))
 
@@ -2583,7 +2597,7 @@ var _ = Describe("Allocator", func() {
 				},
 			)
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1",
 				allRequest("all-compute", "compute"),
@@ -2609,7 +2623,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaimWithConstraints("c1",
 				[]resourcev1.DeviceConstraint{
@@ -2635,7 +2649,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should block devices allocated by a different NodeClaim", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A allocates 2 devices and commits.
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
@@ -2658,7 +2672,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should allow the same device on the same NodeClaim for a different instance type", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A with IT-A allocates 2 devices.
 			ncA := makeNodeClaimWithID("nc-a", "it-a")
@@ -2677,7 +2691,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should block the same device on the same NodeClaim and same instance type from a prior pod", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Pod 1 allocates 2 devices for NC-A/IT-A and commits.
 			ncA := makeNodeClaimWithID("nc-a", "it-a")
@@ -2698,7 +2712,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should handle multi-IT NodeClaim device contention across NodeClaims", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A has two ITs and allocates 2 devices per IT.
 			ncA := &fakeNodeClaim{
@@ -2733,7 +2747,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should free devices for other NodeClaims after releasing the only instance type", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A allocates and commits.
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
@@ -2758,7 +2772,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should free devices only when the last instance type referencing them is released", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A with two ITs allocates and commits.
 			ncA := &fakeNodeClaim{
@@ -2791,7 +2805,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should be a no-op when releasing an instance type that was never committed", func() {
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Release a non-existent NC/IT — should not panic.
 			alloc.ReleaseInstanceType(ctx, unique.Make("nc-nonexistent"), unique.Make("it-nonexistent"))
@@ -2820,7 +2834,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -2846,7 +2860,7 @@ var _ = Describe("Allocator", func() {
 			Expect(meta).ToNot(BeNil())
 			Expect(meta.Devices).To(HaveKey(unique.Make("it-1")))
 			Expect(meta.Devices[unique.Make("it-1")]).To(HaveLen(1))
-			Expect(meta.Devices[unique.Make("it-1")][0].Pool.Value()).To(ContainSubstring(expectedZone))
+			Expect(meta.Devices[unique.Make("it-1")][0].DeviceID.Pool.Value()).To(ContainSubstring(expectedZone))
 		})
 
 		It("should narrow pools when a zonal device tightens requirements", func() {
@@ -2864,7 +2878,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -2898,7 +2912,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -2924,7 +2938,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -2948,7 +2962,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// Allocate but don't commit.
@@ -2969,7 +2983,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
 			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 2))
@@ -2988,7 +3002,7 @@ var _ = Describe("Allocator", func() {
 
 	Describe("Template device tracking after commit", func() {
 		It("should block template devices for the same NC/IT after commit", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
@@ -3006,7 +3020,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should allow template devices for a different IT on the same NC after commit", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// NC-A with IT-A has 2 template devices.
 			ncAITA := makeNodeClaimWithTemplatesAndID("nc-a", "it-a",
@@ -3047,7 +3061,7 @@ var _ = Describe("Allocator", func() {
 				),
 			}
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithAttrs("gpu.example.com", "pool-b",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
@@ -3090,7 +3104,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaimWithConstraints("c1",
 				[]resourcev1.DeviceConstraint{
@@ -3127,7 +3141,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaimWithConstraints("c1",
 				[]resourcev1.DeviceConstraint{
@@ -3163,7 +3177,7 @@ var _ = Describe("Allocator", func() {
 				},
 			})
 
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), bindings, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, bindings, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1", "tgpu-2"),
 			)
@@ -3200,7 +3214,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// Two claims competing: claim 1 wants 2, claim 2 wants 2. Only 3 available.
@@ -3217,7 +3231,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2", "gpu-3")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			claims := []*resourcev1.ResourceClaim{
@@ -3251,7 +3265,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			claims := []*resourcev1.ResourceClaim{
@@ -3283,7 +3297,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s2", "gpu.example.com", "pool-b", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 
@@ -3299,7 +3313,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s2", "gpu.example.com", "pool-b", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("dev-0")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 
@@ -3342,7 +3356,7 @@ var _ = Describe("Allocator", func() {
 				},
 			)
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// Class requires H100, request requires memory > 60. Only gpu-0 matches both.
@@ -3368,7 +3382,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-b", "tgpu-0", "tgpu-1"),
 			)
@@ -3380,7 +3394,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should fail with zero instance types", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:             unique.Make("test-nc"),
 				nodePoolID:     unique.Make("test-np"),
@@ -3397,7 +3411,7 @@ var _ = Describe("Allocator", func() {
 
 	Describe("In-cluster allocated claim handling", func() {
 		It("should pass through claims with no nodeSelector", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeAllocatedClaim("c1", nil)
 
@@ -3407,7 +3421,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should propagate topology requirements from the allocation nodeSelector", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -3433,7 +3447,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should fail when the allocation nodeSelector is incompatible with NodeClaim requirements", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -3472,7 +3486,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -3504,7 +3518,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			claims := []*resourcev1.ResourceClaim{
@@ -3517,7 +3531,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should return early when all claims are already allocated", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			claims := []*resourcev1.ResourceClaim{
@@ -3530,7 +3544,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should fail when two in-cluster allocated claims have incompatible zones", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -3564,7 +3578,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should succeed when two in-cluster allocated claims have compatible zones", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -3607,7 +3621,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			ncA := &fakeNodeClaim{
 				id:         unique.Make("nc-a"),
@@ -3718,7 +3732,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices2, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices2, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			nc2 := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
@@ -3756,7 +3770,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
@@ -3789,7 +3803,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
@@ -3831,7 +3845,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
@@ -3868,7 +3882,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
@@ -3901,7 +3915,7 @@ var _ = Describe("Allocator", func() {
 
 	Describe("Validation errors through Allocate()", func() {
 		It("should return error when DeviceClass does not exist", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
@@ -3914,7 +3928,7 @@ var _ = Describe("Allocator", func() {
 
 		It("should return error for unsupported selector type", func() {
 			// Use a request-level non-CEL selector (API server validates class selectors).
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
@@ -3945,7 +3959,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should return error for FirstAvailable request", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
@@ -3967,7 +3981,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should return error for unsupported constraint type", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
@@ -4035,7 +4049,7 @@ var _ = Describe("Allocator", func() {
 				),
 			}
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), bindings, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, bindings, env.Client)
 			// Template device WITHOUT the numa attribute (will use binding fallback path).
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithAttrs("gpu.example.com", "pool-tmpl",
@@ -4079,7 +4093,7 @@ var _ = Describe("Allocator", func() {
 				},
 			})
 
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), bindings, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, bindings, env.Client)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithAttrs("gpu.example.com", "pool-tmpl",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{}),
@@ -4115,7 +4129,7 @@ var _ = Describe("Allocator", func() {
 				),
 			}
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			claim := makeClaimWithConstraints("c1",
@@ -4174,7 +4188,7 @@ var _ = Describe("Allocator", func() {
 				},
 			)
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// All "compute" devices + 1 "extra" device, all sharing NUMA constraint.
@@ -4231,7 +4245,7 @@ var _ = Describe("Allocator", func() {
 				},
 			)
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			claim := makeClaimWithConstraints("c1",
@@ -4258,7 +4272,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
@@ -4297,7 +4311,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 
@@ -4346,7 +4360,7 @@ var _ = Describe("Allocator", func() {
 					},
 				},
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
@@ -4393,7 +4407,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s2", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 2), withAPIDevices("gpu-0", "gpu-2")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", allRequest("req-1", "gpu"))
 
@@ -4408,7 +4422,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 2), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", allRequest("req-1", "gpu"))
 
@@ -4438,7 +4452,7 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			claim := makeClaimWithConstraints("c1",
@@ -4470,7 +4484,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s3", "gpu.example.com", "pool-c", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-2")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", allRequest("req-1", "gpu"))
 
@@ -4495,7 +4509,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -4518,7 +4532,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 
 			// Pod 1: allocate and commit.
@@ -4540,7 +4554,7 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Pod 1 on NC-A.
 			ncA := makeNodeClaimWithID("nc-a", "it-1")
@@ -4557,7 +4571,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should fail when a template-allocated claim is referenced from a different NodeClaim", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Pod 1 on NC-A with template devices.
 			ncA := makeNodeClaimWithTemplatesAndID("nc-a", "it-1",
@@ -4578,7 +4592,7 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should succeed when a template-allocated claim is referenced from the same NodeClaim", func() {
-			alloc = dynamicresources.NewAllocator(nil, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			// Pod 1 on NC-A with template devices.
 			ncA := makeNodeClaimWithTemplatesAndID("nc-a", "it-1",
@@ -4615,7 +4629,7 @@ var _ = Describe("Allocator", func() {
 				},
 			)
 
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			ncA := makeNodeClaimWithTemplatesAndID("nc-a", "it-1",
 				makeTemplate("fpga.example.com", "pool-fpga", "fpga-0"),
 			)
@@ -4657,7 +4671,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			ncA := &fakeNodeClaim{
 				id:         unique.Make("nc-a"),
 				nodePoolID: unique.Make("test-np"),
@@ -4697,7 +4711,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			ncA := &fakeNodeClaim{
 				id:         unique.Make("nc-a"),
 				nodePoolID: unique.Make("test-np"),
@@ -4771,7 +4785,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			ncA := &fakeNodeClaim{
 				id:         unique.Make("nc-a"),
 				nodePoolID: unique.Make("test-np"),
@@ -4824,7 +4838,7 @@ var _ = Describe("Allocator", func() {
 			Expect(claim2Meta.Devices).To(HaveKey(unique.Make("it-1")))
 			claim2Devices := claim2Meta.Devices[unique.Make("it-1")]
 			Expect(claim2Devices).To(HaveLen(1))
-			Expect(claim2Devices[0].Pool.Value()).To(ContainSubstring(expectedZone))
+			Expect(claim2Devices[0].DeviceID.Pool.Value()).To(ContainSubstring(expectedZone))
 		})
 
 		It("should fail when two in-memory allocated claims have incompatible zones", func() {
@@ -4841,7 +4855,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 
 			broadReqs := scheduling.NewRequirements(
 				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
@@ -4899,7 +4913,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -4936,7 +4950,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -4964,7 +4978,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := makeNodeClaim("it-1")
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 
@@ -5003,7 +5017,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -5055,7 +5069,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -5110,7 +5124,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -5156,7 +5170,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 				),
 			}
-			alloc = dynamicresources.NewAllocator(inClusterSlices, sets.New[cloudprovider.DeviceID](), nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -5229,7 +5243,7 @@ var _ = Describe("Allocator", func() {
 			allocated := sets.New[cloudprovider.DeviceID](
 				deviceID("gpu.example.com", "pool-a", "gpu-b").DeviceID,
 			)
-			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: allocated}, nil, env.Client)
 			nc := &fakeNodeClaim{
 				id:         unique.Make("test-nc"),
 				nodePoolID: unique.Make("test-np"),
@@ -5249,6 +5263,1389 @@ var _ = Describe("Allocator", func() {
 			// Requesting 1 device should SUCCEED: 40Gi remaining >= 1×40Gi.
 			claim1 := makeClaim("c-ok", exactRequest("req-1", "gpu", 1))
 			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+	})
+
+	Describe("Consumable capacity — DFS capacity-gated allocation", func() {
+		It("should allocate a multi-alloc device with capacity and record ConsumedCapacity in metadata", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("16Gi"),
+			}))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			Expect(meta.Devices).To(HaveKey(unique.Make("it-1")))
+			allocResults := meta.Devices[unique.Make("it-1")]
+			Expect(allocResults).To(HaveLen(1))
+			Expect(allocResults[0].DeviceID.Device.Value()).To(Equal("gpu-0"))
+			Expect(allocResults[0].ConsumedCapacity).To(HaveKeyWithValue(
+				resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("16Gi"),
+			))
+		})
+
+		It("should block allocation when multi-alloc device capacity is exhausted", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {
+						"gpu.example.com/vram": resource.MustParse("70Gi"),
+					},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("16Gi"),
+			}))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should deduct capacity within a single DFS when multiple slots request the same multi-alloc device", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("32Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1",
+				exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("16Gi"),
+				}),
+				exactRequestWithCapacity("req-2", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("16Gi"),
+				}),
+			)
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			allocResults := meta.Devices[unique.Make("it-1")]
+			Expect(allocResults).To(HaveLen(2))
+			Expect(allocResults[0].DeviceID.Device.Value()).To(Equal("gpu-0"))
+			Expect(allocResults[1].DeviceID.Device.Value()).To(Equal("gpu-0"))
+			Expect(allocResults[0].ConsumedCapacity).To(HaveKeyWithValue(
+				resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("16Gi"),
+			))
+			Expect(allocResults[1].ConsumedCapacity).To(HaveKeyWithValue(
+				resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("16Gi"),
+			))
+		})
+
+		It("should fail when intra-DFS capacity deduction exceeds device capacity", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("24Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1",
+				exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("16Gi"),
+				}),
+				exactRequestWithCapacity("req-2", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("16Gi"),
+				}),
+			)
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should restore capacity on backtrack and find alternative devices", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices,
+							resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
+								},
+							},
+							resourcev1.Device{
+								Name:                     "gpu-1",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
+								},
+							},
+						)
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+					deviceID("gpu.example.com", "pool-a", "gpu-1").DeviceID: {},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1",
+				exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("20Gi"),
+				}),
+				exactRequestWithCapacity("req-2", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("20Gi"),
+				}),
+			)
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			allocResults := meta.Devices[unique.Make("it-1")]
+			Expect(allocResults).To(HaveLen(2))
+		})
+
+		It("should have nil ConsumedCapacity for exclusive (non-multi-alloc) devices", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0")),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			allocResults := meta.Devices[unique.Make("it-1")]
+			Expect(allocResults).To(HaveLen(1))
+			Expect(allocResults[0].DeviceID.Device.Value()).To(Equal("gpu-0"))
+			Expect(allocResults[0].ConsumedCapacity).To(BeNil())
+		})
+
+		It("should accumulate capacity across sequential Allocate+Commit calls for the same multi-alloc device", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("48Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client)
+
+			// First allocation: 16Gi
+			nc1 := makeNodeClaimWithID("nc-1", "it-1")
+			claim1 := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("16Gi"),
+			}))
+			r1, err := alloc.Allocate(ctx, nc1, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			r1.Allocation.Commit(ctx)
+
+			// Second allocation: 16Gi (remaining: 16Gi)
+			nc2 := makeNodeClaimWithID("nc-2", "it-1")
+			claim2 := makeClaim("c2", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("16Gi"),
+			}))
+			r2, err := alloc.Allocate(ctx, nc2, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			r2.Allocation.Commit(ctx)
+
+			// Third allocation: 16Gi (remaining: 0Gi)
+			nc3 := makeNodeClaimWithID("nc-3", "it-1")
+			claim3 := makeClaim("c3", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("16Gi"),
+			}))
+			r3, err := alloc.Allocate(ctx, nc3, []*resourcev1.ResourceClaim{claim3})
+			Expect(err).ToNot(HaveOccurred())
+			r3.Allocation.Commit(ctx)
+
+			// Fourth allocation should fail (capacity exhausted)
+			nc4 := makeNodeClaimWithID("nc-4", "it-1")
+			claim4 := makeClaim("c4", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("1Gi"),
+			}))
+			_, err = alloc.Allocate(ctx, nc4, []*resourcev1.ResourceClaim{claim4})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should consume full device capacity when no explicit capacity request is made on a multi-alloc device", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			r1, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			r1.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			allocResults := meta.Devices[unique.Make("it-1")]
+			Expect(allocResults).To(HaveLen(1))
+			Expect(allocResults[0].ConsumedCapacity).To(HaveKeyWithValue(
+				resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("80Gi"),
+			))
+
+			// Second allocation should fail (full capacity consumed)
+			nc2 := makeNodeClaimWithID("nc-2", "it-1")
+			_, err = alloc.Allocate(ctx, nc2, []*resourcev1.ResourceClaim{makeClaim("c2", exactRequest("req-1", "gpu", 1))})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should track capacity independently across ITs", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaimWithID("nc-a", "it-a", "it-b")
+			claim := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("16Gi"),
+			}))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.InstanceTypes).To(HaveLen(2))
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			for _, itName := range []string{"it-a", "it-b"} {
+				itResults := meta.Devices[unique.Make(itName)]
+				Expect(itResults).To(HaveLen(1))
+				Expect(itResults[0].ConsumedCapacity).To(HaveKeyWithValue(
+					resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("16Gi"),
+				))
+			}
+		})
+
+		It("should skip a device when request references a non-existent capacity dimension", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices,
+							resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+								},
+							},
+							resourcev1.Device{
+								Name:                     "gpu-1",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/bandwidth": {Value: resource.MustParse("100Gi")},
+								},
+							},
+						)
+					},
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+					deviceID("gpu.example.com", "pool-a", "gpu-1").DeviceID: {},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/bandwidth": resource.MustParse("50Gi"),
+			}))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			allocResults := meta.Devices[unique.Make("it-1")]
+			Expect(allocResults).To(HaveLen(1))
+			Expect(allocResults[0].DeviceID.Device.Value()).To(Equal("gpu-1"))
+		})
+
+		It("should allow cross-NodeClaim sharing of a fresh multi-alloc device via inflight capacity tracking", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+						})
+					},
+				),
+			}
+			// NOT seeding ConsumedCapacity — fresh device discovered during allocation.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client)
+
+			// NC-A allocates 16Gi
+			ncA := makeNodeClaimWithID("nc-a", "it-1")
+			claim1 := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("16Gi"),
+			}))
+			r1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			r1.Allocation.Commit(ctx)
+
+			// NC-B can still allocate the same device
+			ncB := makeNodeClaimWithID("nc-b", "it-1")
+			claim2 := makeClaim("c2", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("16Gi"),
+			}))
+			r2, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			r2.Allocation.Commit(ctx)
+
+			// Exceeding remaining capacity (80 - 16 - 16 = 48 remaining) should fail
+			ncC := makeNodeClaimWithID("nc-c", "it-1")
+			claim3 := makeClaim("c3", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("49Gi"),
+			}))
+			_, err = alloc.Allocate(ctx, ncC, []*resourcev1.ResourceClaim{claim3})
+			Expect(err).To(HaveOccurred())
+
+			// Exactly 48Gi should succeed
+			ncD := makeNodeClaimWithID("nc-d", "it-1")
+			claim4 := makeClaim("c4", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("48Gi"),
+			}))
+			r4, err := alloc.Allocate(ctx, ncD, []*resourcev1.ResourceClaim{claim4})
+			Expect(err).ToNot(HaveOccurred())
+			r4.Allocation.Commit(ctx)
+		})
+
+		It("should handle template multi-alloc devices with capacity constraints", func() {
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client)
+
+			nc := makeNodeClaimWithTemplatesAndID("nc-a", "it-1",
+				&cloudprovider.ResourceSliceTemplate{
+					Driver: unique.Make("gpu.example.com"),
+					Pool:   cloudprovider.ResourcePool{Name: unique.Make("pool-tmpl")},
+					Devices: []cloudprovider.Device{
+						{
+							Name:                     unique.Make("tgpu-0"),
+							AllowMultipleAllocations: true,
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
+							},
+						},
+					},
+				},
+			)
+
+			// First pod: 20Gi
+			claim1 := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("20Gi"),
+			}))
+			r1, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			r1.Allocation.Commit(ctx)
+
+			// Second pod: 20Gi (remaining: 0)
+			claim2 := makeClaim("c2", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("20Gi"),
+			}))
+			r2, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			r2.Allocation.Commit(ctx)
+
+			// Third pod should fail (no capacity left)
+			claim3 := makeClaim("c3", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+				"gpu.example.com/vram": resource.MustParse("1Gi"),
+			}))
+			_, err = alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim3})
+			Expect(err).To(HaveOccurred())
+		})
+
+		Context("RequestPolicy integration", func() {
+			It("should use RequestPolicy.Default when no capacity request is specified", func() {
+				inClusterSlices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+						withGeneration(1, 1),
+						func(s *resourcev1.ResourceSlice) {
+							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {
+										Value: resource.MustParse("80Gi"),
+										RequestPolicy: &resourcev1.CapacityRequestPolicy{
+											Default: ptr.To(resource.MustParse("8Gi")),
+										},
+									},
+								},
+							})
+						},
+					),
+				}
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+					ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+					ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+						deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+					},
+				}, nil, env.Client)
+
+				// Allocate 10 times (10 * 8Gi = 80Gi = full capacity)
+				for i := range 10 {
+					nc := makeNodeClaimWithID(fmt.Sprintf("nc-%d", i), "it-1")
+					claim := makeClaim(fmt.Sprintf("c%d", i), exactRequest("req-1", "gpu", 1))
+					r, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+					Expect(err).ToNot(HaveOccurred(), "allocation %d should succeed", i)
+					r.Allocation.Commit(ctx)
+				}
+
+				// 11th allocation should fail
+				nc11 := makeNodeClaimWithID("nc-10", "it-1")
+				_, err := alloc.Allocate(ctx, nc11, []*resourcev1.ResourceClaim{makeClaim("c10", exactRequest("req-1", "gpu", 1))})
+				Expect(err).To(HaveOccurred())
+
+				// Verify first allocation recorded 8Gi consumed
+				meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c0"})
+				Expect(meta).ToNot(BeNil())
+				allocResults := meta.Devices[unique.Make("it-1")]
+				Expect(allocResults).To(HaveLen(1))
+				Expect(allocResults[0].ConsumedCapacity).To(HaveKeyWithValue(
+					resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("8Gi"),
+				))
+			})
+
+			It("should round up to the next ValidValue when request does not match exactly", func() {
+				inClusterSlices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+						withGeneration(1, 1),
+						func(s *resourcev1.ResourceSlice) {
+							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {
+										Value: resource.MustParse("80Gi"),
+										RequestPolicy: &resourcev1.CapacityRequestPolicy{
+											Default:     ptr.To(resource.MustParse("4Gi")),
+											ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
+										},
+									},
+								},
+							})
+						},
+					),
+				}
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+					ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+					ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+						deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+					},
+				}, nil, env.Client)
+
+				nc := makeNodeClaim("it-1")
+				claim := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("5Gi"),
+				}))
+				result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+				Expect(err).ToNot(HaveOccurred())
+				result.Allocation.Commit(ctx)
+
+				meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+				Expect(meta).ToNot(BeNil())
+				allocResults := meta.Devices[unique.Make("it-1")]
+				Expect(allocResults).To(HaveLen(1))
+				Expect(allocResults[0].ConsumedCapacity).To(HaveKeyWithValue(
+					resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("8Gi"),
+				))
+			})
+
+			It("should fail when request exceeds all ValidValues", func() {
+				inClusterSlices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+						withGeneration(1, 1),
+						func(s *resourcev1.ResourceSlice) {
+							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {
+										Value: resource.MustParse("80Gi"),
+										RequestPolicy: &resourcev1.CapacityRequestPolicy{
+											Default:     ptr.To(resource.MustParse("4Gi")),
+											ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
+										},
+									},
+								},
+							})
+						},
+					),
+				}
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+					ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+					ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+						deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+					},
+				}, nil, env.Client)
+
+				nc := makeNodeClaim("it-1")
+				claim := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("20Gi"),
+				}))
+				_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should round up to nearest step-aligned value with ValidRange policy", func() {
+				inClusterSlices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+						withGeneration(1, 1),
+						func(s *resourcev1.ResourceSlice) {
+							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {
+										Value: resource.MustParse("80Gi"),
+										RequestPolicy: &resourcev1.CapacityRequestPolicy{
+											Default: ptr.To(resource.MustParse("4Gi")),
+											ValidRange: &resourcev1.CapacityRequestPolicyRange{
+												Min:  ptr.To(resource.MustParse("4Gi")),
+												Step: ptr.To(resource.MustParse("4Gi")),
+											},
+										},
+									},
+								},
+							})
+						},
+					),
+				}
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+					ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+					ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+						deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+					},
+				}, nil, env.Client)
+
+				nc := makeNodeClaim("it-1")
+				// Request 5Gi — should round up to 8Gi (Min=4Gi + 1*Step=4Gi)
+				claim := makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("5Gi"),
+				}))
+				result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+				Expect(err).ToNot(HaveOccurred())
+				result.Allocation.Commit(ctx)
+
+				meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+				Expect(meta).ToNot(BeNil())
+				allocResults := meta.Devices[unique.Make("it-1")]
+				Expect(allocResults).To(HaveLen(1))
+				Expect(allocResults[0].ConsumedCapacity).To(HaveKeyWithValue(
+					resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("8Gi"),
+				))
+
+				// 80Gi - 8Gi = 72Gi remaining. Request 76Gi (rounds to 76Gi, step-aligned) should fail.
+				nc2 := makeNodeClaimWithID("nc-2", "it-1")
+				claim2 := makeClaim("c2", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("76Gi"),
+				}))
+				_, err = alloc.Allocate(ctx, nc2, []*resourcev1.ResourceClaim{claim2})
+				Expect(err).To(HaveOccurred())
+
+				// 72Gi should succeed
+				nc3 := makeNodeClaimWithID("nc-3", "it-1")
+				claim3 := makeClaim("c3", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("72Gi"),
+				}))
+				r3, err := alloc.Allocate(ctx, nc3, []*resourcev1.ResourceClaim{claim3})
+				Expect(err).ToNot(HaveOccurred())
+				r3.Allocation.Commit(ctx)
+			})
+
+			It("should account for rounded-up ValidValues capacity in intra-DFS deduction", func() {
+				inClusterSlices := []dynamicresources.ResourceSlice{
+					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+						withGeneration(1, 1),
+						func(s *resourcev1.ResourceSlice) {
+							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {
+										Value: resource.MustParse("16Gi"),
+										RequestPolicy: &resourcev1.CapacityRequestPolicy{
+											Default:     ptr.To(resource.MustParse("4Gi")),
+											ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
+										},
+									},
+								},
+							})
+						},
+					),
+				}
+				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+					ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+					ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+						deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+					},
+				}, nil, env.Client)
+
+				nc := makeNodeClaim("it-1")
+				// Two requests each asking 5Gi (rounds to 8Gi each) — 16Gi total, exact fit
+				claim := makeClaim("c1",
+					exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+						"gpu.example.com/vram": resource.MustParse("5Gi"),
+					}),
+					exactRequestWithCapacity("req-2", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+						"gpu.example.com/vram": resource.MustParse("5Gi"),
+					}),
+				)
+				result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+				Expect(err).ToNot(HaveOccurred())
+				result.Allocation.Commit(ctx)
+
+				meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+				Expect(meta).ToNot(BeNil())
+				allocResults := meta.Devices[unique.Make("it-1")]
+				Expect(allocResults).To(HaveLen(2))
+				Expect(allocResults[0].ConsumedCapacity).To(HaveKeyWithValue(
+					resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("8Gi"),
+				))
+				Expect(allocResults[1].ConsumedCapacity).To(HaveKeyWithValue(
+					resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("8Gi"),
+				))
+
+				// No more capacity — even default (4Gi) should fail
+				nc2 := makeNodeClaimWithID("nc-2", "it-1")
+				_, err = alloc.Allocate(ctx, nc2, []*resourcev1.ResourceClaim{makeClaim("c2", exactRequest("req-1", "gpu", 1))})
+				Expect(err).To(HaveOccurred())
+			})
+		})
+	})
+
+	Describe("Consumable capacity — state and verification", func() {
+		It("should bypass IsAllocated for multi-allocatable devices and allow cross-NodeClaim sharing", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+						})
+					},
+				),
+			}
+			// Device is tracked in ConsumedCapacity (multi-allocatable), not ExclusiveDevices.
+			consumedCapacity := map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {
+					"gpu.example.com/vram": resource.MustParse("30Gi"),
+				},
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: consumedCapacity,
+			}, nil, env.Client)
+
+			// NC-A allocates the multi-alloc device.
+			ncA := makeNodeClaimWithID("nc-a", "it-1")
+			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			r1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r1).ToNot(BeNil())
+			r1.Allocation.Commit(ctx)
+
+			// NC-B can also allocate the same device (not blocked by IsAllocated).
+			ncB := makeNodeClaimWithID("nc-b", "it-1")
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			r2, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r2).ToNot(BeNil())
+		})
+
+		It("should block exclusive devices even when ConsumedCapacity tracks other devices", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices,
+							resourcev1.Device{Name: "gpu-exclusive"},
+							resourcev1.Device{
+								Name:                     "gpu-shared",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {Value: resource.MustParse("10Gi")},
+								},
+							},
+						)
+					},
+				),
+			}
+			// gpu-exclusive is exclusively allocated; gpu-shared is multi-alloc with capacity fully consumed.
+			consumedCapacity := map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+				deviceID("gpu.example.com", "pool-a", "gpu-shared").DeviceID: {
+					"gpu.example.com/vram": resource.MustParse("10Gi"),
+				},
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New(deviceID("gpu.example.com", "pool-a", "gpu-exclusive").DeviceID),
+				ConsumedCapacity: consumedCapacity,
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			// Request 1 device: gpu-exclusive is blocked, gpu-shared has no remaining capacity.
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should commit inflight consumed capacity with pessimistic-max across ITs", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+						})
+					},
+				),
+			}
+			consumedCapacity := map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {
+					"gpu.example.com/vram": resource.MustParse("0"),
+				},
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: consumedCapacity,
+			}, nil, env.Client)
+
+			// NC-A with 2 ITs both allocate gpu-0.
+			ncA := makeNodeClaimWithID("nc-a", "it-a", "it-b")
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			r1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r1.InstanceTypes).To(HaveLen(2))
+			r1.Allocation.Commit(ctx)
+
+			// NC-B can still allocate the device (multi-alloc bypass).
+			ncB := makeNodeClaimWithID("nc-b", "it-c")
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			r2, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r2).ToNot(BeNil())
+		})
+
+		It("should release inflight consumed capacity when all ITs are released", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+						})
+					},
+				),
+			}
+			consumedCapacity := map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {
+					"gpu.example.com/vram": resource.MustParse("0"),
+				},
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: consumedCapacity,
+			}, nil, env.Client)
+
+			// NC-A with 2 ITs.
+			ncA := makeNodeClaimWithID("nc-a", "it-a", "it-b")
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			r1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			r1.Allocation.Commit(ctx)
+
+			// Release it-a only: multi-alloc device capacity is still held by it-b (pessimistic max).
+			alloc.ReleaseInstanceType(ctx, unique.Make("nc-a"), unique.Make("it-a"))
+
+			// Release it-b: all capacity should be refunded.
+			alloc.ReleaseInstanceType(ctx, unique.Make("nc-a"), unique.Make("it-b"))
+
+			// Subsequent allocation should still work (device remains available for multi-alloc).
+			ncB := makeNodeClaimWithID("nc-b", "it-c")
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			r2, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r2).ToNot(BeNil())
+		})
+
+		It("should track template consumed capacity per-IT independently", func() {
+			// Template devices with AllowMultipleAllocations are tracked per-(NC, IT).
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client)
+
+			nc := makeNodeClaimWithTemplatesAndID("nc-a", "it-1",
+				&cloudprovider.ResourceSliceTemplate{
+					Driver: unique.Make("gpu.example.com"),
+					Pool:   cloudprovider.ResourcePool{Name: unique.Make("pool-tmpl")},
+					Devices: []cloudprovider.Device{
+						{Name: unique.Make("tgpu-0")},
+						{Name: unique.Make("tgpu-1")},
+					},
+				},
+			)
+
+			// First pod allocates 1 template device.
+			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			r1, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			r1.Allocation.Commit(ctx)
+
+			// Second pod allocates another template device (same NC/IT).
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			r2, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			r2.Allocation.Commit(ctx)
+
+			// Third allocation should fail (only 2 template devices available).
+			claim3 := makeClaim("c3", exactRequest("req-1", "gpu", 1))
+			_, err = alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim3})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should release template capacity when IT is released", func() {
+			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client)
+
+			nc := makeNodeClaimWithTemplatesAndID("nc-a", "it-1",
+				&cloudprovider.ResourceSliceTemplate{
+					Driver: unique.Make("gpu.example.com"),
+					Pool:   cloudprovider.ResourcePool{Name: unique.Make("pool-tmpl")},
+					Devices: []cloudprovider.Device{
+						{Name: unique.Make("tgpu-0")},
+					},
+				},
+			)
+
+			// Allocate the only template device.
+			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			r1, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			r1.Allocation.Commit(ctx)
+
+			// Second allocation fails (device used).
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			_, err = alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).To(HaveOccurred())
+
+			// Release the IT.
+			alloc.ReleaseInstanceType(ctx, unique.Make("nc-a"), unique.Make("it-1"))
+
+			// Rebuild NC (simulates re-scheduling after release).
+			nc2 := makeNodeClaimWithTemplatesAndID("nc-a", "it-1",
+				&cloudprovider.ResourceSliceTemplate{
+					Driver: unique.Make("gpu.example.com"),
+					Pool:   cloudprovider.ResourcePool{Name: unique.Make("pool-tmpl")},
+					Devices: []cloudprovider.Device{
+						{Name: unique.Make("tgpu-0")},
+					},
+				},
+			)
+			claim3 := makeClaim("c3", exactRequest("req-1", "gpu", 1))
+			r3, err := alloc.Allocate(ctx, nc2, []*resourcev1.ResourceClaim{claim3})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r3).ToNot(BeNil())
+		})
+
+		It("should accumulate inflight capacity across multiple Allocate+Commit calls", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+						})
+					},
+				),
+			}
+			consumedCapacity := map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {
+					"gpu.example.com/vram": resource.MustParse("0"),
+				},
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: consumedCapacity,
+			}, nil, env.Client)
+
+			// Multiple pods commit against the same multi-alloc device.
+			for i := range 5 {
+				nc := makeNodeClaimWithID("nc-a", "it-1")
+				claim := makeClaim("c"+string(rune('1'+i)), exactRequest("req-1", "gpu", 1))
+				result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+				Expect(err).ToNot(HaveOccurred())
+				result.Allocation.Commit(ctx)
+			}
+		})
+
+		It("should not mix multi-alloc and exclusive tracking for the same device", func() {
+			// A device in ConsumedCapacity should bypass IsAllocated even after inflight commits.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices,
+							resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+							},
+						)
+					},
+				),
+			}
+			consumedCapacity := map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {
+					"gpu.example.com/vram": resource.MustParse("20Gi"),
+				},
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: consumedCapacity,
+			}, nil, env.Client)
+
+			// NC-A commits.
+			ncA := makeNodeClaimWithID("nc-a", "it-1")
+			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			r1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			r1.Allocation.Commit(ctx)
+
+			// NC-B on a different node can still use it.
+			ncB := makeNodeClaimWithID("nc-b", "it-2")
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			r2, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			r2.Allocation.Commit(ctx)
+
+			// NC-C can still use it too.
+			ncC := makeNodeClaimWithID("nc-c", "it-3")
+			claim3 := makeClaim("c3", exactRequest("req-1", "gpu", 1))
+			r3, err := alloc.Allocate(ctx, ncC, []*resourcev1.ResourceClaim{claim3})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r3).ToNot(BeNil())
+		})
+
+		It("should partially refund capacity when released IT had higher consumption than survivors", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices,
+							resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+							},
+							resourcev1.Device{
+								Name:                     "gpu-1",
+								AllowMultipleAllocations: ptr.To(true),
+							},
+						)
+					},
+				),
+			}
+			consumedCapacity := map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {
+					"gpu.example.com/vram": resource.MustParse("0"),
+				},
+				deviceID("gpu.example.com", "pool-a", "gpu-1").DeviceID: {
+					"gpu.example.com/vram": resource.MustParse("0"),
+				},
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: consumedCapacity,
+			}, nil, env.Client)
+
+			// NC-A with 2 ITs. Both get gpu-0 (count=1). Then second pod: both also get gpu-1.
+			ncA := makeNodeClaimWithID("nc-a", "it-a", "it-b")
+			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			r1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r1.InstanceTypes).To(HaveLen(2))
+			r1.Allocation.Commit(ctx)
+
+			// Release it-a: pessimistic max stays the same (it-b still has same consumption).
+			alloc.ReleaseInstanceType(ctx, unique.Make("nc-a"), unique.Make("it-a"))
+
+			// Release it-b: full refund.
+			alloc.ReleaseInstanceType(ctx, unique.Make("nc-a"), unique.Make("it-b"))
+
+			// NC-B can still allocate (devices remain multi-alloc accessible).
+			ncB := makeNodeClaimWithID("nc-b", "it-c")
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			r2, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r2).ToNot(BeNil())
+		})
+	})
+
+	Describe("Consumable capacity + SharedCounters interaction", func() {
+		It("should deduct counters for preallocated multi-alloc devices", func() {
+			// A device with BOTH AllowMultipleAllocations and ConsumesCounters.
+			// The device is preallocated (via ConsumedCapacity, not ExclusiveDevices).
+			// Its counter consumption must still be deducted from the pool budget.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("80Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						resourcev1.Device{
+							Name:                     "mig-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
+							},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}},
+							},
+						},
+						resourcev1.Device{
+							Name:                     "mig-1",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
+							},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}},
+							},
+						},
+					),
+				),
+			}
+			// mig-0 is preallocated as a multi-alloc device (tracked via ConsumedCapacity).
+			// Its 40Gi counter consumption must be deducted, leaving 40Gi for mig-1.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "mig-0").DeviceID: {
+						"gpu.example.com/vram": resource.MustParse("10Gi"),
+					},
+				},
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			// Request 2 devices: mig-0 still has capacity (10Gi/20Gi used) and mig-1 is fresh.
+			// But budget is only 40Gi remaining (80Gi - 40Gi from mig-0's counter), so both
+			// mig-0 (40Gi) + mig-1 (40Gi) = 80Gi > 40Gi remaining → should fail.
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+
+			// Request 1 device: only 40Gi counter budget needed → should succeed.
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should deduct counters for preallocated multi-alloc NonTargetingDevices", func() {
+			// Same scenario but with PerDeviceNodeSelection: the multi-alloc device is on
+			// a different node (NonTargeting). Its counter consumption must still be deducted.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withPerDeviceNodeSelection(),
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("80Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a",
+					withPerDeviceNodeSelection(),
+					withPerDeviceDevices(
+						resourcev1.Device{
+							Name:                     "mig-a",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
+							},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}},
+							},
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+								}},
+							}},
+						},
+						resourcev1.Device{
+							Name:                     "mig-b",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
+							},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}},
+							},
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2b"}},
+								}},
+							}},
+						},
+						resourcev1.Device{
+							Name:                     "mig-c",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
+							},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}},
+							},
+							NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a"}},
+								}},
+							}},
+						},
+					),
+					withGeneration(1, 2),
+				),
+			}
+			// mig-b is on zone-b (NonTargeting for our zone-a NodeClaim) and is preallocated
+			// as multi-alloc. Its 40Gi counter must be deducted from the 80Gi budget.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "mig-b").DeviceID: {
+						"gpu.example.com/vram": resource.MustParse("5Gi"),
+					},
+				},
+			}, nil, env.Client)
+
+			nc := &fakeNodeClaim{
+				id:         unique.Make("test-nc"),
+				nodePoolID: unique.Make("test-np"),
+				requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+				),
+				instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-1")},
+				resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
+			}
+
+			// zone-a has mig-a and mig-c (2 devices × 40Gi = 80Gi needed).
+			// Budget: 80Gi - 40Gi (from NonTargeting mig-b) = 40Gi remaining.
+			// Requesting 2 devices should FAIL.
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+
+			// Requesting 1 device should SUCCEED (40Gi needed, 40Gi available).
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should track both capacity and counters independently for multi-alloc devices", func() {
+			// A multi-alloc device with both capacity AND counters.
+			// Capacity allows multiple allocations but counters limit total pool usage.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"sm-count": resource.MustParse("40"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						resourcev1.Device{
+							Name:                     "gpu-shared",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/bandwidth": {Value: resource.MustParse("100Gi")},
+							},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"sm-count": {Value: resource.MustParse("20")}}},
+							},
+						},
+						resourcev1.Device{
+							Name:                     "gpu-shared-2",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/bandwidth": {Value: resource.MustParse("100Gi")},
+							},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"sm-count": {Value: resource.MustParse("20")}}},
+							},
+						},
+						resourcev1.Device{
+							Name:                     "gpu-shared-3",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/bandwidth": {Value: resource.MustParse("100Gi")},
+							},
+							ConsumesCounters: []resourcev1.DeviceCounterConsumption{
+								{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"sm-count": {Value: resource.MustParse("20")}}},
+							},
+						},
+					),
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client)
+
+			nc := makeNodeClaim("it-1")
+			// Each device consumes 20 SMs. Budget is 40. So at most 2 devices can be allocated.
+			// All 3 have plenty of bandwidth capacity, but counters limit to 2.
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 3))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+
+			// 2 should succeed (2 × 20 = 40 = budget).
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 2))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim2})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).ToNot(BeNil())
 		})
