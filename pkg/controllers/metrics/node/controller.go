@@ -18,6 +18,7 @@ package node
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,7 @@ import (
 const (
 	nodeName  = "node_name"
 	nodePhase = "phase"
+	managed   = "managed"
 )
 
 var (
@@ -156,6 +158,7 @@ func nodeLabelNames() []string {
 		sets.New(lo.Values(getWellKnownLabels())...).UnsortedList(),
 		nodeName,
 		nodePhase,
+		managed,
 	)
 }
 
@@ -253,7 +256,7 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 			res = append(res, &metrics.StoreMetric{
 				GaugeMetric: gaugeMetric,
 				Value:       lo.Ternary(resourceName == corev1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
-				Labels:      getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName)),
+				Labels:      getNodeLabelsWithResourceType(n, resourceNameToString(resourceName)),
 			})
 		}
 	}
@@ -261,20 +264,22 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 		&metrics.StoreMetric{
 			GaugeMetric: Lifetime,
 			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
-			Labels:      getNodeLabels(n.Node),
+			Labels:      getNodeLabels(n),
 		})
 }
 
-func getNodeLabelsWithResourceType(node *corev1.Node, resourceTypeName string) prometheus.Labels {
-	metricLabels := getNodeLabels(node)
+func getNodeLabelsWithResourceType(n *state.StateNode, resourceTypeName string) prometheus.Labels {
+	metricLabels := getNodeLabels(n)
 	metricLabels[metrics.ResourceTypeLabel] = resourceTypeName
 	return metricLabels
 }
 
-func getNodeLabels(node *corev1.Node) prometheus.Labels {
+func getNodeLabels(n *state.StateNode) prometheus.Labels {
+	node := n.Node
 	metricLabels := map[string]string{}
 	metricLabels[nodeName] = node.Name
 	metricLabels[nodePhase] = string(node.Status.Phase)
+	metricLabels[managed] = strconv.FormatBool(n.Managed())
 
 	// Populate well known labels
 	for wellKnownLabel, label := range getWellKnownLabels() {
