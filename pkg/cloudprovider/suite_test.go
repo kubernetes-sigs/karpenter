@@ -123,11 +123,11 @@ var _ = Describe("Instance Type", func() {
 				{Available: true},
 			},
 		}
-		allocatables := it.Allocatables()
-		Expect(allocatables).To(HaveLen(1))
-		Expect(allocatables[0].Cpu().MilliValue()).To(BeNumerically("==", 3900))
+		groups := it.AllocatableOfferingsList()
+		Expect(groups).To(HaveLen(1))
+		Expect(groups[0].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
 		expectedMem := resource.MustParse("15Gi")
-		Expect(allocatables[0].Memory().Value()).To(BeNumerically("==", expectedMem.Value()))
+		Expect(groups[0].Allocatable.Memory().Value()).To(BeNumerically("==", expectedMem.Value()))
 	})
 	It("should compute multiple allocatables when offerings have overrides", func() {
 		extendedResource := v1.ResourceName("test.com/extended-slots")
@@ -162,21 +162,23 @@ var _ = Describe("Instance Type", func() {
 				},
 			},
 		}
-		allocatables := it.Allocatables()
-		Expect(allocatables).To(HaveLen(2))
+		groups := it.AllocatableOfferingsList()
+		Expect(groups).To(HaveLen(2))
 
 		// Base allocatable: no extended resource, full memory
-		Expect(allocatables[0].Cpu().MilliValue()).To(BeNumerically("==", 3900))
+		Expect(groups[0].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
 		expectedBaseMem := resource.MustParse("15Gi")
-		Expect(allocatables[0].Memory().Value()).To(BeNumerically("==", expectedBaseMem.Value()))
-		Expect(allocatables[0][extendedResource]).To(BeZero())
+		Expect(groups[0].Allocatable.Memory().Value()).To(BeNumerically("==", expectedBaseMem.Value()))
+		Expect(groups[0].Allocatable[extendedResource]).To(BeZero())
+		Expect(groups[0].Offerings).To(HaveLen(2)) // two base offerings
 
 		// Override allocatable: has extended resource, reduced memory due to additional overhead
-		Expect(allocatables[1].Cpu().MilliValue()).To(BeNumerically("==", 3900))
+		Expect(groups[1].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
 		expectedOverrideMem := resource.MustParse("12Gi")
-		Expect(allocatables[1].Memory().Value()).To(BeNumerically("==", expectedOverrideMem.Value()))
-		slotQty := allocatables[1][extendedResource]
+		Expect(groups[1].Allocatable.Memory().Value()).To(BeNumerically("==", expectedOverrideMem.Value()))
+		slotQty := groups[1].Allocatable[extendedResource]
 		Expect(slotQty.Value()).To(BeNumerically("==", 12))
+		Expect(groups[1].Offerings).To(HaveLen(2)) // two override offerings
 	})
 	Context("AdjustedPrice", func() {
 		DescribeTable("should adjust price based overlay values",

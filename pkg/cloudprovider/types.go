@@ -137,8 +137,7 @@ type InstanceType struct {
 	// of Kubernetes.
 	Overhead               *InstanceTypeOverhead
 	once                   sync.Once
-	allocatable            corev1.ResourceList
-	allocatables           []corev1.ResourceList
+	allocatableOfferings   []AllocatableOfferings
 	capacityOverlayApplied bool
 }
 
@@ -190,41 +189,72 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 		*out = new(InstanceTypeOverhead)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.allocatable != nil {
-		in, out := &in.allocatable, &out.allocatable
-		*out = make(corev1.ResourceList, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val.DeepCopy()
-		}
-	}
 }
 
-// precompute is used to ensure we only compute the allocatable resources onces as its called many times
+// AllocatableOfferings pairs an allocatable resource set with the offerings that produce it.
+type AllocatableOfferings struct {
+	Allocatable corev1.ResourceList
+	Offerings   Offerings
+}
+
+// precompute is used to ensure we only compute the allocatable resources once as it's called many times
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
-	i.allocatable = i.computeAllocatable(nil, nil)
+	// Fast path: most instance types have no override offerings.
+	// Skip map/order/fmt.Sprintf machinery when not needed.
+	hasOverrides := false
+	for _, o := range i.Offerings {
+		if len(o.CapacityOverride) > 0 || o.OverheadOverride != nil {
+			hasOverrides = true
+			break
+		}
+	}
+	if !hasOverrides {
+		i.allocatableOfferings = []AllocatableOfferings{
+			{Allocatable: i.computeAllocatable(nil, nil), Offerings: i.Offerings},
+		}
+		return
+	}
 
-	// Build distinct allocatables from offerings with CapacityOverride/OverheadOverride.
-	// Group offerings by their (CapacityOverride, OverheadOverride) tuple, compute one allocatable per group.
-	i.allocatables = []corev1.ResourceList{i.allocatable}
+	// Group offerings by their (CapacityOverride, OverheadOverride) tuple.
+	// The first group is always the base (no overrides).
 	type overrideKey struct {
 		capacity string
 		overhead string
 	}
-	seen := map[overrideKey]bool{{}: true} // base (nil, nil) already added
+	groups := map[overrideKey]*AllocatableOfferings{}
+	baseKey := overrideKey{}
+	groups[baseKey] = &AllocatableOfferings{}
+	order := []overrideKey{baseKey}
+
 	for _, o := range i.Offerings {
 		if len(o.CapacityOverride) == 0 && o.OverheadOverride == nil {
+			groups[baseKey].Offerings = append(groups[baseKey].Offerings, o)
 			continue
 		}
 		key := overrideKey{
 			capacity: fmt.Sprintf("%v", o.CapacityOverride),
 			overhead: fmt.Sprintf("%v", o.OverheadOverride),
 		}
-		if seen[key] {
-			continue
+		if _, exists := groups[key]; !exists {
+			groups[key] = &AllocatableOfferings{}
+			order = append(order, key)
 		}
-		seen[key] = true
-		i.allocatables = append(i.allocatables, i.computeAllocatable(o.CapacityOverride, o.OverheadOverride))
+		groups[key].Offerings = append(groups[key].Offerings, o)
+	}
+
+	// Build allocatable for each group
+	i.allocatableOfferings = make([]AllocatableOfferings, 0, len(order))
+	for idx, key := range order {
+		group := groups[key]
+		if idx == 0 {
+			group.Allocatable = i.computeAllocatable(nil, nil)
+		} else {
+			// Use the first offering in the group to get the override values
+			o := group.Offerings[0]
+			group.Allocatable = i.computeAllocatable(o.CapacityOverride, o.OverheadOverride)
+		}
+		i.allocatableOfferings = append(i.allocatableOfferings, *group)
 	}
 }
 
@@ -270,17 +300,18 @@ func (i *InstanceType) IsCapacityOverlayApplied() bool {
 	return i.capacityOverlayApplied
 }
 
-// Allocatables returns all distinct allocatable resource sets for this instance type.
-// Each entry corresponds to a unique (CapacityOverride, OverheadOverride) combination from the offerings.
+// AllocatableOfferingsList returns all allocatable groups for this instance type.
+// Each group pairs an allocatable resource set with the offerings that produce it.
 // The first entry is always the base allocatable (no overrides).
-func (i *InstanceType) Allocatables() []corev1.ResourceList {
+func (i *InstanceType) AllocatableOfferingsList() []AllocatableOfferings {
 	i.once.Do(i.precompute)
-	return i.allocatables
+	return i.allocatableOfferings
 }
 
+// Allocatable returns the base allocatable resources (no offering overrides applied).
 func (i *InstanceType) Allocatable() corev1.ResourceList {
 	i.once.Do(i.precompute)
-	return i.allocatable
+	return i.allocatableOfferings[0].Allocatable
 }
 
 func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {

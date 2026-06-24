@@ -432,17 +432,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// the tradeoff to not short-circuiting on the filtering is that we can report much better error messages
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
-		itFits := fits(it, totalRequests)
-
-		// By using this iterative approach vs. the Available() function it prevents allocations
-		// which have to be garbage collected and slow down Karpenter's scheduling algorithm
-		itHasOffering := false
-		for _, of := range it.Offerings {
-			if of.Available && requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-				itHasOffering = true
-				break
-			}
-		}
+		itFits, itHasOffering := fits(it, totalRequests, requirements)
 
 		// track if any single instance type met a single criteria
 		err.requirementsMet = err.requirementsMet || itCompat
@@ -483,11 +473,18 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 	return instanceType.Requirements.Intersects(requirements) == nil
 }
 
-func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList) bool {
-	for _, allocatable := range instanceType.Allocatables() {
-		if resources.Fits(requests, allocatable) {
-			return true
+func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList, requirements scheduling.Requirements) (itFits bool, hasOffering bool) {
+	for _, group := range instanceType.AllocatableOfferingsList() {
+		resourceFit := resources.Fits(requests, group.Allocatable)
+		for _, of := range group.Offerings {
+			if of.Available && requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+				hasOffering = true
+				if resourceFit {
+					return true, true
+				}
+				break
+			}
 		}
 	}
-	return false
+	return false, hasOffering
 }
