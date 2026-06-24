@@ -223,13 +223,15 @@ func (at *AllocationTracker) InitRemainingCounters(pool *Pool) {
 	}
 	// Deduct consumption from preallocated devices.
 	for i := range pool.Devices {
-		if !at.PreallocatedDevices.Has(pool.Devices[i].ID) {
+		if !at.PreallocatedDevices.Has(pool.Devices[i].ID) &&
+			!lo.HasKey(at.PreallocatedConsumedCapacity, pool.Devices[i].ID) {
 			continue
 		}
 		deductFromCounters(remainingCounterSets, pool.Devices[i].Device)
 	}
 	for i := range pool.NonTargetingDevices {
-		if !at.PreallocatedDevices.Has(pool.NonTargetingDevices[i].ID) {
+		if !at.PreallocatedDevices.Has(pool.NonTargetingDevices[i].ID) &&
+			!lo.HasKey(at.PreallocatedConsumedCapacity, pool.NonTargetingDevices[i].ID) {
 			continue
 		}
 		deductFromCounters(remainingCounterSets, pool.NonTargetingDevices[i].Device)
