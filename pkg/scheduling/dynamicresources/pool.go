@@ -257,6 +257,8 @@ func (b *poolBuilder) addSlice(s ResourceSlice, matched bool) {
 // matching the upstream behavior where completeness is a global pool property.
 // Only slices whose node selectors matched contribute devices. Returns nil if no
 // slices matched (the pool has no devices visible to this node).
+//
+//nolint:gocyclo
 func (b *poolBuilder) build(key PoolKey) *Pool {
 	pool := &Pool{
 		Key: key,

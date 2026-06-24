@@ -242,15 +242,6 @@ func (at *AllocationTracker) IsAllocated(deviceID DeviceID, nodeClaim NodeClaim,
 		return false
 	}
 
-	// Multi-allocatable devices are never "fully allocated" from a binary standpoint.
-	// The capacity check in tryDevice determines whether the device can accept the new allocation.
-	if _, isMultiAlloc := at.InflightConsumedCapacity[deviceID]; isMultiAlloc {
-		return false
-	}
-	if _, isMultiAlloc := at.PreallocatedConsumedCapacity[deviceID]; isMultiAlloc {
-		return false
-	}
-
 	// The device is already marked as allocated on the cluster
 	if at.PreallocatedDevices.Has(deviceID) {
 		return true
