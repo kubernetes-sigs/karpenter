@@ -1128,6 +1128,32 @@ var _ = Describe("Allocator", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
+		It("should succeed with all-mode counters on first pod when budget is sufficient", func() {
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("80Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("30Gi")}),
+						deviceConsumingCounter("gpu-1", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("30Gi")}),
+					),
+				),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
+			nc := makeNodeClaim("it-1")
+
+			// All-mode: total counter consumption = 30+30 = 60Gi ≤ 80Gi budget. Should succeed.
+			claim := makeClaim("c1", allRequest("req-1", "gpu"))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
 		It("should partially refund counter budget when one IT is released from a multi-IT NC", func() {
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s-counters", "gpu.example.com", "pool-a",

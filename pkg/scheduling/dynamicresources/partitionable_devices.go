@@ -508,8 +508,10 @@ func (a *allocator) allModeCountersFeasible(rd *RequestData) bool {
 			} else {
 				remaining = a.allocationTracker.RemainingCounters[poolKey]
 			}
+			// This is uninitialized before first DFS; defer to checkCounters which
+			// initializes the remaining counters.
 			if remaining == nil {
-				return false
+				return true
 			}
 			shadow[poolKey] = copyCounterSets(remaining)
 		}
