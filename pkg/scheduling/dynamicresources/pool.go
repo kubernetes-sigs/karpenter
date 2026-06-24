@@ -100,7 +100,7 @@ func GatherPools(
 
 	pools := make([]*Pool, 0, len(builders))
 	for key, b := range builders {
-		if p := b.build(key, requirements); p != nil {
+		if p := b.build(key); p != nil {
 			pools = append(pools, p)
 		}
 	}
@@ -125,8 +125,6 @@ func FilterPools(pools []*Pool, requirements scheduling.Requirements) []*Pool {
 // filterPool returns a copy of the pool containing only slices (and their devices) that match
 // the requirements. Devices with ConsumesCounters on non-matching slices are moved to
 // NonTargetingDevices. Returns nil if no slices match and no NonTargetingDevices exist.
-//
-//nolint:gocyclo
 func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
 	p := &Pool{
 		Key:                 pool.Key,
@@ -149,14 +147,7 @@ func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
 		p.Slices = append(p.Slices, s)
 		sliceTopoReqs := sliceTopologyRequirements(s)
 		for _, d := range s.Devices() {
-			topoReqs, targets := classifyDevice(d, sliceTopoReqs, s.PerDeviceNodeSelection(), requirements)
-			if !targets {
-				if len(d.ConsumesCounters) > 0 {
-					p.NonTargetingDevices = append(p.NonTargetingDevices, newDeviceWithID(pool.Key, d, nil))
-				}
-				continue
-			}
-			p.Devices = append(p.Devices, newDeviceWithID(pool.Key, d, topoReqs))
+			p.Devices = append(p.Devices, newDeviceWithID(pool.Key, d, sliceTopoReqs))
 		}
 	}
 	// Invalid pools must be preserved even if they have no devices or slices, because
@@ -183,9 +174,6 @@ func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requireme
 	if s.SharedCounters() != nil {
 		return true
 	}
-	if s.PerDeviceNodeSelection() {
-		return true
-	}
 	if ns := s.NodeSelector(); ns != nil {
 		return nodeSelectorsMatch(ns, requirements)
 	}
@@ -193,9 +181,9 @@ func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requireme
 }
 
 // sliceTopologyRequirements returns the topology requirements implied by a slice's NodeSelector,
-// or nil if the slice uses AllNodes or PerDeviceNodeSelection (no slice-level topology constraint).
+// or nil if the slice uses AllNodes (no slice-level topology constraint).
 func sliceTopologyRequirements(s ResourceSlice) *scheduling.Requirements {
-	if s.AllNodes() || s.PerDeviceNodeSelection() {
+	if s.AllNodes() {
 		return nil
 	}
 	ns := s.NodeSelector()
@@ -208,42 +196,6 @@ func sliceTopologyRequirements(s ResourceSlice) *scheduling.Requirements {
 		reqs.Add(termReqs.Values()...)
 	}
 	return &reqs
-}
-
-// classifyDevice determines a device's effective topology requirements and whether it
-// targets the given node requirements. When targets is false, the device is incompatible
-// due to per-device node selection constraints.
-func classifyDevice(d cloudprovider.Device, sliceTopoReqs *scheduling.Requirements, perDevice bool, requirements scheduling.Requirements) (topoReqs *scheduling.Requirements, targets bool) {
-	topoReqs = sliceTopoReqs
-	if !perDevice {
-		return topoReqs, true
-	}
-	topoReqs = deviceTopologyRequirements(d)
-	if topoReqs != nil && !requirements.IsCompatible(*topoReqs, scheduling.AllowUndefinedWellKnownLabels) {
-		return nil, false
-	}
-	return topoReqs, true
-}
-
-// deviceTopologyRequirements returns the topology requirements for a device that uses
-// per-device node selection. Returns nil if the device has AllNodes or no node affinity set.
-func deviceTopologyRequirements(d cloudprovider.Device) *scheduling.Requirements {
-	if d.AllNodes != nil && *d.AllNodes {
-		return nil
-	}
-	if d.NodeName != nil {
-		reqs := scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, *d.NodeName))
-		return &reqs
-	}
-	if d.NodeSelector != nil {
-		reqs := scheduling.NewRequirements()
-		for _, term := range d.NodeSelector.NodeSelectorTerms {
-			termReqs := scheduling.NewNodeSelectorRequirements(term.MatchExpressions...)
-			reqs.Add(termReqs.Values()...)
-		}
-		return &reqs
-	}
-	return nil
 }
 
 // nodeSelectorsMatch checks if any term in the NodeSelector is compatible with the requirements.
@@ -305,9 +257,7 @@ func (b *poolBuilder) addSlice(s ResourceSlice, matched bool) {
 // matching the upstream behavior where completeness is a global pool property.
 // Only slices whose node selectors matched contribute devices. Returns nil if no
 // slices matched (the pool has no devices visible to this node).
-//
-//nolint:gocyclo
-func (b *poolBuilder) build(key PoolKey, requirements scheduling.Requirements) *Pool {
+func (b *poolBuilder) build(key PoolKey) *Pool {
 	pool := &Pool{
 		Key: key,
 	}
@@ -342,15 +292,7 @@ func (b *poolBuilder) build(key PoolKey, requirements scheduling.Requirements) *
 		for _, d := range e.slice.Devices() {
 			pool.Invalid = pool.Invalid || seenDeviceNames.Has(d.Name)
 			seenDeviceNames.Insert(d.Name)
-
-			topoReqs, targets := classifyDevice(d, sliceTopoReqs, e.slice.PerDeviceNodeSelection(), requirements)
-			if !targets {
-				if len(d.ConsumesCounters) > 0 {
-					pool.NonTargetingDevices = append(pool.NonTargetingDevices, newDeviceWithID(key, d, nil))
-				}
-				continue
-			}
-			pool.Devices = append(pool.Devices, newDeviceWithID(key, d, topoReqs))
+			pool.Devices = append(pool.Devices, newDeviceWithID(key, d, sliceTopoReqs))
 		}
 	}
 
