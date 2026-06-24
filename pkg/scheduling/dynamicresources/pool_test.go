@@ -131,7 +131,6 @@ func withDevicesConsumingCounters(devices ...resourcev1.Device) func(*resourcev1
 	}
 }
 
-
 func counterSet(name string, counters map[string]resource.Quantity) resourcev1.CounterSet {
 	cs := resourcev1.CounterSet{
 		Name:     name,
