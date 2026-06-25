@@ -608,3 +608,22 @@ When the scheduling loop completes and NodeClaims are finalized:
 1. Collect the set of DRA driver names from all ResourceClaims of pods scheduled to the NodeClaim.
 2. Set the `karpenter.sh/dra-drivers` annotation on the NodeClaim (per the lifecycle doc).
 3. The finalized NodeClaim carries both the standard resource requests and the DRA driver annotation for the initialization controller to gate on.
+
+### NodeClaim Initialization Gating
+
+**File**: `pkg/controllers/nodeclaim/lifecycle/initialization.go`
+
+A node's DRA devices are only usable once its DRA drivers have published their `ResourceSlice` pools to the API server. To avoid marking a node ready before its allocated devices can actually bind, the initialization controller gates the `Initialized` status condition on driver publication.
+
+The gate runs in `Initialization.Reconcile()` immediately after the extended-resource registration check (`RequestedResourcesRegistered`) and before the node is labeled initialized. Its semantics:
+
+- **Expected drivers** come from the NodeClaim's `karpenter.sh/dra-drivers` annotation (the comma-separated set populated at finalization, above).
+- **Publication criterion**: a driver is satisfied once it has published **at least one complete pool** among the node's `ResourceSlice`s. A pool is complete when the number of observed slices at the pool's highest generation equals the slices' declared `ResourceSliceCount`. This mirrors the allocator's pool-completeness notion (`Pool.Incomplete`, see [Pool Gathering](#pool-gathering)) but is reimplemented standalone in the lifecycle controller so it does not take on the scheduling package's dependencies.
+- **Node-local slices**: only slices local to the node are considered — those pinned via `spec.nodeName` or carrying a `Kind=Node` owner reference naming the node. Cluster-wide (`AllNodes`) slices are not node-owned and do not contribute to the gate.
+- If any expected driver lacks a complete pool, the controller sets `Initialized` to `Unknown` with reason `DRADriverPoolsNotPublished` and requeues. Once every expected driver has a complete pool, initialization proceeds.
+
+**No-op fallback**: a NodeClaim with no `karpenter.sh/dra-drivers` annotation (non-DRA nodes) skips the gate entirely. The whole check is additionally guarded on DRA being enabled (`--ignore-dra-requests=false`), so DRA-disabled clusters never list `ResourceSlice`s.
+
+**Re-reconciliation**: the lifecycle controller watches `ResourceSlice` objects — but only when DRA is enabled — mapping a slice to the NodeClaim(s) backing the node the slice is local to (via `spec.nodeName`/Node owner reference → provider ID). This drives prompt re-evaluation as drivers publish their pools.
+
+**RBAC**: operating the gate requires the Karpenter controller to have `get;list;watch` on `resource.k8s.io` `resourceslices`. Distributions enabling DRA must grant this (the provisioning path already lists slices; this adds the `watch` verb).
