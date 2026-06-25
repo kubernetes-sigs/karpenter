@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -66,6 +67,40 @@ func gpuAndNICInstanceType(name string) *cloudprovider.InstanceType {
 			fake.ResourceSliceTemplate(nicDriver, name+"-nic-pool", fake.Devices(name+"-nic-0")...),
 		),
 	)
+}
+
+// capacityMemory is the capacity dimension used by the consumable-capacity tests.
+const capacityMemory resourcev1.QualifiedName = gpuDriver + "/memory"
+
+// capacity builds a single-dimension (memory) capacity request map for the given quantity.
+func capacity(amount string) map[resourcev1.QualifiedName]resource.Quantity {
+	return map[resourcev1.QualifiedName]resource.Quantity{capacityMemory: resource.MustParse(amount)}
+}
+
+// capacityGPUInstanceType builds a fake instance type publishing one multi-allocatable GPU template device with the
+// given total memory capacity (no RequestPolicy — capacity consumption is unconstrained).
+func capacityGPUInstanceType(name, totalMemory string) *cloudprovider.InstanceType {
+	return fake.NewInstanceType(name, fake.WithResourceSliceTemplates(
+		fake.ResourceSliceTemplate(gpuDriver, name+"-pool",
+			fake.DeviceWith(name+"-gpu-0",
+				fake.WithMultipleAllocations(),
+				fake.WithCapacity(capacityMemory, resource.MustParse(totalMemory)),
+			),
+		),
+	))
+}
+
+// capacityPolicyGPUInstanceType is capacityGPUInstanceType with a RequestPolicy constraining how the memory capacity
+// may be consumed.
+func capacityPolicyGPUInstanceType(name, totalMemory string, policy *resourcev1.CapacityRequestPolicy) *cloudprovider.InstanceType {
+	return fake.NewInstanceType(name, fake.WithResourceSliceTemplates(
+		fake.ResourceSliceTemplate(gpuDriver, name+"-pool",
+			fake.DeviceWith(name+"-gpu-0",
+				fake.WithMultipleAllocations(),
+				fake.WithCapacityPolicy(capacityMemory, resource.MustParse(totalMemory), policy),
+			),
+		),
+	))
 }
 
 // draPod builds an unschedulable pod referencing the named ResourceClaim from its container.
@@ -167,6 +202,55 @@ func allocatedClusterWideClaim(name, pool, driver, device string, consumers ...r
 						Driver:  driver,
 						Pool:    pool,
 						Device:  device,
+					}},
+				},
+			},
+			ReservedFor: consumers,
+		},
+	})
+}
+
+// sharedCapacitySlice builds a published, cluster-wide (AllNodes) ResourceSlice whose single device is
+// multi-allocatable and publishes the given total memory capacity. Used to seed an in-cluster shared device for the
+// consumable-capacity reclaim test.
+func sharedCapacitySlice(name, driver, device, totalMemory string) *resourcev1.ResourceSlice {
+	return test.ResourceSlice(resourcev1.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: resourcev1.ResourceSliceSpec{
+			Driver:   driver,
+			AllNodes: lo.ToPtr(true),
+			Pool:     resourcev1.ResourcePool{Name: name, Generation: 1, ResourceSliceCount: 1},
+			Devices: []resourcev1.Device{{
+				Name:                     device,
+				AllowMultipleAllocations: lo.ToPtr(true),
+				Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+					capacityMemory: {Value: resource.MustParse(totalMemory)},
+				},
+			}},
+		},
+	})
+}
+
+// allocatedSharedClaim builds a ResourceClaim already allocated to a shared (multi-allocatable) cluster-wide device,
+// consuming the given capacity and reserved for the given consumers. This seeds the deviceallocation controller so the
+// allocator sees the device's consumed capacity (and, via per-claim contributions, which pods hold which share).
+func allocatedSharedClaim(name, pool, driver, device string, consumed map[resourcev1.QualifiedName]resource.Quantity, consumers ...resourcev1.ResourceClaimConsumerReference) *resourcev1.ResourceClaim {
+	return test.ResourceClaim(resourcev1.ResourceClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: resourcev1.ResourceClaimSpec{
+			Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
+				test.ExactDeviceRequestWithCapacity("req", "gpu", 1, consumed),
+			}},
+		},
+		Status: resourcev1.ResourceClaimStatus{
+			Allocation: &resourcev1.AllocationResult{
+				Devices: resourcev1.DeviceAllocationResult{
+					Results: []resourcev1.DeviceRequestAllocationResult{{
+						Request:          "req",
+						Driver:           driver,
+						Pool:             pool,
+						Device:           device,
+						ConsumedCapacity: consumed,
 					}},
 				},
 			},
@@ -930,6 +1014,207 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			ExpectScheduled(ctx, env.Client, podB)
 			devicesB := ExpectResourceClaimAllocated(ctx, env.Client, "default", "claim-b", gpuDriver)
 			Expect(devicesB).To(HaveLen(1), "the initialized node's published device is allocated exactly once")
+		})
+	})
+
+	Context("Consumable capacity (P)", func() {
+		BeforeEach(func() {
+			if env.Version.Minor() < 36 {
+				Skip("Consumable capacity requires K8s versions >= 1.36.x (DRAConsumableCapacity feature gate)")
+			}
+		})
+
+		It("should provision a node and allocate a capacity slice of a multi-allocatable device (P1)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityGPUInstanceType("gpu-it", "16Gi")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaim(resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-claim", Namespace: "default"},
+				Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
+					test.ExactDeviceRequestWithCapacity("req", "gpu", 1, capacity("4Gi")),
+				}}},
+			}))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			ExpectScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
+		})
+
+		It("should pack multiple pods onto one multi-allocatable device via capacity (P2)", func() {
+			// A single multi-allocatable device with 16Gi; three pods each consume 4Gi (12Gi <= 16Gi), so all three
+			// share the one device on a single NodeClaim — the core consumable-capacity packing win.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityGPUInstanceType("gpu-it", "16Gi")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			pods := lo.Times(3, func(i int) *corev1.Pod {
+				name := fmt.Sprintf("cap-claim-%d", i)
+				ExpectApplied(ctx, env.Client, test.ResourceClaim(resourcev1.ResourceClaim{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+					Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
+						test.ExactDeviceRequestWithCapacity("req", "gpu", 1, capacity("4Gi")),
+					}}},
+				}))
+				return draPod("gpu", name)
+			})
+			provisionDRA(pods...)
+
+			nodeNames := sets.New[string]()
+			for _, pod := range pods {
+				nodeNames.Insert(ExpectScheduled(ctx, env.Client, pod).Name)
+			}
+			Expect(nodeNames.Len()).To(Equal(1), "all three capacity slices fit on one shared device on one node")
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		})
+
+		It("should create a second NodeClaim when device capacity is exhausted (P3)", func() {
+			// 16Gi device per node. Three 4Gi pods fit (12Gi); a fourth 8Gi pod (20Gi total) cannot share, forcing a
+			// second node.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityGPUInstanceType("gpu-it", "16Gi")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			var pods []*corev1.Pod
+			for i, amount := range []string{"4Gi", "4Gi", "4Gi", "8Gi"} {
+				name := fmt.Sprintf("cap-claim-%d", i)
+				ExpectApplied(ctx, env.Client, test.ResourceClaim(resourcev1.ResourceClaim{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+					Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
+						test.ExactDeviceRequestWithCapacity("req", "gpu", 1, capacity(amount)),
+					}}},
+				}))
+				pods = append(pods, draPod("gpu", name))
+			}
+			provisionDRA(pods...)
+
+			nodeNames := sets.New[string]()
+			for _, pod := range pods {
+				nodeNames.Insert(ExpectScheduled(ctx, env.Client, pod).Name)
+			}
+			Expect(nodeNames.Len()).To(Equal(2), "20Gi of requests cannot fit on a single 16Gi device")
+		})
+
+		It("should reclaim a deleting pod's capacity share of a shared device (P4)", func() {
+			// A cluster-wide multi-allocatable device with 16Gi, partially consumed: a live pod holds 4Gi and a pod on a
+			// deleting node holds 10Gi. Only 2Gi is nominally free, but the deleting pod's 10Gi must be reclaimed, so a
+			// new 10Gi claim fits on the existing device (exercises B2 partial subtraction end to end).
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("plain-it")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, sharedCapacitySlice("shared-gpu-pool", gpuDriver, "shared-gpu-0", "16Gi"))
+
+			// A live pod holds 4Gi of the shared device — this share must NOT be reclaimed.
+			livePod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Name: "live-pod"}})
+			ExpectApplied(ctx, env.Client, livePod)
+			ExpectApplied(ctx, env.Client, allocatedSharedClaim("live-claim", "shared-gpu-pool", gpuDriver, "shared-gpu-0", capacity("4Gi"), podConsumer(livePod)))
+
+			// A pod on a deleting node holds 10Gi — its share must be reclaimed when the node is deleted.
+			deletingNode := existingNode("plain-it", true, corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourcePods: resource.MustParse("10"),
+			})
+			deletingPod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Name: "deleting-pod"}})
+			ExpectApplied(ctx, env.Client, deletingPod)
+			ExpectManualBinding(ctx, env.Client, deletingPod, deletingNode)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(deletingNode))
+			ExpectApplied(ctx, env.Client, allocatedSharedClaim("deleting-claim", "shared-gpu-pool", gpuDriver, "shared-gpu-0", capacity("10Gi"), podConsumer(deletingPod)))
+
+			// Mark the node for deletion so its pod's 10Gi share is freed.
+			Expect(env.Client.Delete(ctx, deletingNode)).To(Succeed())
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(deletingNode))
+
+			// A new 10Gi claim only fits if the deleting pod's share was reclaimed (16 - 4 live = 12Gi available).
+			ExpectApplied(ctx, env.Client, test.ResourceClaim(resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "new-claim", Namespace: "default"},
+				Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
+					test.ExactDeviceRequestWithCapacity("req", "gpu", 1, capacity("10Gi")),
+				}}},
+			}))
+			pod := draPod("gpu", "new-claim")
+			provisionDRA(pod)
+
+			// plain-it provides no template GPUs, so the cluster-wide shared device is the only thing that can satisfy the
+			// 10Gi claim — and only if the deleting pod's 10Gi share was reclaimed (16 - 4 live = 12Gi available). The
+			// allocation to shared-gpu-0 is the proof of partial reclaim; the pod runs on a fresh node that the AllNodes
+			// device attaches to.
+			ExpectScheduled(ctx, env.Client, pod)
+			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "new-claim", gpuDriver)
+			Expect(devices).To(ConsistOf("shared-gpu-pool/shared-gpu-0"))
+		})
+
+		It("should fail to schedule when a single request exceeds total device capacity (P6)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityGPUInstanceType("gpu-it", "16Gi")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaim(resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-claim", Namespace: "default"},
+				Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
+					test.ExactDeviceRequestWithCapacity("req", "gpu", 1, capacity("32Gi")),
+				}}},
+			}))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		})
+
+		It("should fail to schedule when a requested capacity dimension is not offered (P8)", func() {
+			// The device offers only "memory" capacity; a request for "bandwidth" can't be satisfied by any device.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityGPUInstanceType("gpu-it", "16Gi")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaim(resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-claim", Namespace: "default"},
+				Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
+					test.ExactDeviceRequestWithCapacity("req", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+						capacityMemory: resource.MustParse("4Gi"),
+						"bandwidth":    resource.MustParse("10"),
+					}),
+				}}},
+			}))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		})
+
+		It("should reject a request that violates a ValidValues RequestPolicy (P9)", func() {
+			// Device capacity restricted to {4Gi,8Gi,16Gi}; a 32Gi request exceeds all valid values and is rejected.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityPolicyGPUInstanceType("gpu-it", "16Gi",
+				&resourcev1.CapacityRequestPolicy{
+					Default:     lo.ToPtr(resource.MustParse("4Gi")),
+					ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
+				})}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaim(resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-claim", Namespace: "default"},
+				Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
+					test.ExactDeviceRequestWithCapacity("req", "gpu", 1, capacity("32Gi")),
+				}}},
+			}))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		})
+
+		It("should apply RequestPolicy.Default for an unspecified dimension, enabling packing (P10)", func() {
+			// Device has 16Gi with a Default consumption of 4Gi. Three pods that request the device WITHOUT naming the
+			// capacity dimension each consume the 4Gi default (not the whole device), so all three pack onto one device.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityPolicyGPUInstanceType("gpu-it", "16Gi",
+				&resourcev1.CapacityRequestPolicy{Default: lo.ToPtr(resource.MustParse("4Gi"))})}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			pods := lo.Times(3, func(i int) *corev1.Pod {
+				name := fmt.Sprintf("default-claim-%d", i)
+				// No capacity request — the device's RequestPolicy.Default (4Gi) governs consumption.
+				ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests(name, test.ExactDeviceRequest("req", "gpu", 1)))
+				return draPod("gpu", name)
+			})
+			provisionDRA(pods...)
+
+			nodeNames := sets.New[string]()
+			for _, pod := range pods {
+				nodeNames.Insert(ExpectScheduled(ctx, env.Client, pod).Name)
+			}
+			Expect(nodeNames.Len()).To(Equal(1), "default 4Gi consumption lets three pods share one 16Gi device")
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 		})
 	})
 })

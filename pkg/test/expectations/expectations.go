@@ -476,11 +476,18 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 		for i, t := range templates {
 			devices := make([]resourcev1.Device, len(t.Devices))
 			for j, d := range t.Devices {
-				devices[j] = resourcev1.Device{
-					Name:       d.Name.Value(),
-					Attributes: d.Attributes,
-					Capacity:   d.Capacity,
+				device := resourcev1.Device{
+					Name:             d.Name.Value(),
+					Attributes:       d.Attributes,
+					Capacity:         d.Capacity,
+					ConsumesCounters: d.ConsumesCounters,
 				}
+				// Only set AllowMultipleAllocations when true; leaving it nil for exclusive devices preserves the
+				// pre-capacity publish behavior (and a capacity RequestPolicy requires it to be true).
+				if d.AllowMultipleAllocations {
+					device.AllowMultipleAllocations = lo.ToPtr(true)
+				}
+				devices[j] = device
 			}
 
 			sliceName := fmt.Sprintf("%s-%s", node.Name, strings.ReplaceAll(strings.ReplaceAll(driver, ".", "-"), "/", "-"))
