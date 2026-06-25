@@ -227,6 +227,94 @@ func Devices(names ...string) []cloudprovider.Device {
 	})
 }
 
+// DeviceOption mutates a cloudprovider.Device, used by DeviceWith to compose capacity, multi-allocation,
+// and counter-consumption shapes onto a DRA template device.
+type DeviceOption = option.Function[cloudprovider.Device]
+
+// DeviceWith builds a cloud provider DRA device with the given name and applies the provided options. It is the
+// capacity/counter-aware analog of Device, used to construct consumable-capacity and partitionable template devices.
+func DeviceWith(name string, opts ...DeviceOption) cloudprovider.Device {
+	d := cloudprovider.Device{Name: unique.Make(name)}
+	for _, opt := range opts {
+		opt(&d)
+	}
+	return d
+}
+
+// WithDeviceAttributes sets the device's selector/constraint attributes.
+func WithDeviceAttributes(attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute) DeviceOption {
+	return func(d *cloudprovider.Device) { d.Attributes = attributes }
+}
+
+// WithMultipleAllocations marks the device as multi-allocatable, allowing it to be allocated to multiple requests
+// (the precondition for consumable-capacity sharing).
+func WithMultipleAllocations() DeviceOption {
+	return func(d *cloudprovider.Device) { d.AllowMultipleAllocations = true }
+}
+
+// WithCapacity adds a capacity dimension to the device. The value is the device's fixed total for that dimension;
+// RequestPolicy (if any) is attached separately so callers can express unconstrained capacity simply.
+func WithCapacity(name resourcev1.QualifiedName, value resource.Quantity) DeviceOption {
+	return func(d *cloudprovider.Device) {
+		if d.Capacity == nil {
+			d.Capacity = map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{}
+		}
+		cap := d.Capacity[name]
+		cap.Value = value
+		d.Capacity[name] = cap
+	}
+}
+
+// WithCapacityPolicy adds a capacity dimension with a RequestPolicy (Default / ValidValues / ValidRange) constraining
+// how much of the dimension a single request may consume. The device must be multi-allocatable for a policy to apply.
+func WithCapacityPolicy(name resourcev1.QualifiedName, value resource.Quantity, policy *resourcev1.CapacityRequestPolicy) DeviceOption {
+	return func(d *cloudprovider.Device) {
+		if d.Capacity == nil {
+			d.Capacity = map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{}
+		}
+		d.Capacity[name] = resourcev1.DeviceCapacity{Value: value, RequestPolicy: policy}
+	}
+}
+
+// WithConsumesCounters declares the shared counters this device draws from on allocation (the partitionable-device
+// path). Each consumption references a counter set by name and the per-counter amounts it consumes.
+func WithConsumesCounters(consumes ...resourcev1.DeviceCounterConsumption) DeviceOption {
+	return func(d *cloudprovider.Device) { d.ConsumesCounters = consumes }
+}
+
+// ResourceSliceTemplateWithCounters builds a ResourceSliceTemplate that declares shared counter sets and no devices.
+// A ResourceSlice may carry either devices or shared counters, never both, so a partitionable pool pairs this
+// counter-set template with a separate device template (built via ResourceSliceTemplate) under the same pool.
+func ResourceSliceTemplateWithCounters(driver, pool string, counterSets ...resourcev1.CounterSet) cloudprovider.ResourceSliceTemplate {
+	return cloudprovider.ResourceSliceTemplate{
+		Driver:         unique.Make(driver),
+		Pool:           cloudprovider.ResourcePool{Name: unique.Make(pool)},
+		SharedCounters: counterSets,
+	}
+}
+
+// CounterSet builds a shared counter set with the given name and per-counter quantities. It is a convenience for
+// constructing the SharedCounters of a partitionable pool.
+func CounterSet(name string, counters map[string]resource.Quantity) resourcev1.CounterSet {
+	return resourcev1.CounterSet{
+		Name: name,
+		Counters: lo.MapValues(counters, func(q resource.Quantity, _ string) resourcev1.Counter {
+			return resourcev1.Counter{Value: q}
+		}),
+	}
+}
+
+// CounterConsumption builds a DeviceCounterConsumption referencing a counter set by name and the per-counter amounts
+// consumed from it, for use with WithConsumesCounters.
+func CounterConsumption(counterSet string, counters map[string]resource.Quantity) resourcev1.DeviceCounterConsumption {
+	return resourcev1.DeviceCounterConsumption{
+		CounterSet: counterSet,
+		Counters: lo.MapValues(counters, func(q resource.Quantity, _ string) resourcev1.Counter {
+			return resourcev1.Counter{Value: q}
+		}),
+	}
+}
+
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
 func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 	var instanceTypes []*cloudprovider.InstanceType
