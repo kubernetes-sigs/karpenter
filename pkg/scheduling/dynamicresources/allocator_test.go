@@ -39,6 +39,7 @@ import (
 // fakeNodeClaim implements the NodeClaim interface for testing.
 type fakeNodeClaim struct {
 	id             dynamicresources.NodeClaimID
+	nodeName       string
 	nodePoolID     dynamicresources.NodePoolID
 	requirements   scheduling.Requirements
 	instanceTypes  []dynamicresources.InstanceTypeID
@@ -46,6 +47,7 @@ type fakeNodeClaim struct {
 }
 
 func (f *fakeNodeClaim) ID() dynamicresources.NodeClaimID                 { return f.id }
+func (f *fakeNodeClaim) NodeName() string                                 { return f.nodeName }
 func (f *fakeNodeClaim) NodePoolID() dynamicresources.NodePoolID          { return f.nodePoolID }
 func (f *fakeNodeClaim) Requirements() scheduling.Requirements            { return f.requirements }
 func (f *fakeNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID { return f.instanceTypes }
@@ -409,6 +411,49 @@ var _ = Describe("Allocator", func() {
 			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).ToNot(BeNil())
+		})
+	})
+
+	Describe("Node-name-pinned in-cluster devices", func() {
+		var inClusterSlices []dynamicresources.ResourceSlice
+
+		BeforeEach(func() {
+			// A published slice pinned to node-a via spec.nodeName (the common kubelet/DRA-driver form).
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withNodeName("node-a"),
+					withGeneration(1, 1), withAPIDevices("gpu-0")),
+			}
+		})
+
+		It("should allocate a node-name-pinned device for the existing node it belongs to", func() {
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
+			nc := makeNodeClaim("it-1")
+			nc.nodeName = "node-a"
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.Allocation).ToNot(BeNil())
+		})
+
+		It("should not allocate a node-name-pinned device for a different existing node", func() {
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
+			nc := makeNodeClaim("it-1")
+			nc.nodeName = "node-b"
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should not allocate a node-name-pinned device for an in-flight NodeClaim", func() {
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client)
+			nc := makeNodeClaim("it-1") // no node name — in-flight
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
 		})
 	})
 

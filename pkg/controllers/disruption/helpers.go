@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -100,10 +101,12 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
 	opts = append(opts, schedulerOpts...)
+	deletingPodUIDs := sets.New(lo.Map(deletingNodePods, func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
 	scheduler, err := provisioner.NewScheduler(
 		log.IntoContext(ctx, operatorlogging.NopLogger),
 		pods,
 		stateNodes,
+		deletingPodUIDs,
 		opts...,
 	)
 	if err != nil {

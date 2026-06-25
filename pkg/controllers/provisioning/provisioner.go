@@ -35,6 +35,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -47,12 +48,14 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/utils/daemonset"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
@@ -77,29 +80,31 @@ func WithReason(reason string) func(*LaunchOptions) {
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	cloudProvider  cloudprovider.CloudProvider
-	kubeClient     client.Client
-	batcher        *Batcher[types.UID]
-	volumeTopology *scheduler.VolumeTopology
-	cluster        *state.Cluster
-	recorder       events.Recorder
-	cm             *pretty.ChangeMonitor
-	clock          clock.Clock
+	cloudProvider              cloudprovider.CloudProvider
+	kubeClient                 client.Client
+	batcher                    *Batcher[types.UID]
+	volumeTopology             *scheduler.VolumeTopology
+	cluster                    *state.Cluster
+	recorder                   events.Recorder
+	cm                         *pretty.ChangeMonitor
+	clock                      clock.Clock
+	deviceAllocationController *deviceallocation.Controller
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
-	clock clock.Clock,
+	clock clock.Clock, deviceAllocationController *deviceallocation.Controller,
 ) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher[types.UID](clock),
-		cloudProvider:  cloudProvider,
-		kubeClient:     kubeClient,
-		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
-		cluster:        cluster,
-		recorder:       recorder,
-		cm:             pretty.NewChangeMonitor(),
-		clock:          clock,
+		batcher:                    NewBatcher[types.UID](clock),
+		cloudProvider:              cloudProvider,
+		kubeClient:                 kubeClient,
+		volumeTopology:             scheduler.NewVolumeTopology(kubeClient),
+		cluster:                    cluster,
+		recorder:                   recorder,
+		cm:                         pretty.NewChangeMonitor(),
+		clock:                      clock,
+		deviceAllocationController: deviceAllocationController,
 	}
 	return p
 }
@@ -257,6 +262,7 @@ func (p *Provisioner) NewScheduler(
 	ctx context.Context,
 	pods []*corev1.Pod,
 	stateNodes []*state.StateNode,
+	deletingPodUIDs sets.Set[types.UID],
 	opts ...scheduler.Options,
 ) (*scheduler.Scheduler, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
@@ -320,8 +326,25 @@ func (p *Provisioner) NewScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
+
+	// Build the DRA device allocator for this scheduling loop. Slice/device gathering happens here (rather than in the
+	// scheduler) so the same filtering can be reused by other schedulers, e.g. disruption. When DRA support is disabled,
+	// the allocator is left nil and the scheduler short-circuits DRA pods.
+	var allocator *dynamicresources.Allocator
+	if !options.FromContext(ctx).IgnoreDRARequests {
+		inClusterSlices, err := p.gatherResourceSlices(ctx, stateNodes)
+		if err != nil {
+			return nil, fmt.Errorf("gathering resourceslices, %w", err)
+		}
+		allocatedDevices, err := p.gatherAllocatedDevices(ctx, deletingPodUIDs)
+		if err != nil {
+			return nil, fmt.Errorf("gathering allocated devices, %w", err)
+		}
+		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(instanceTypes), p.kubeClient)
+	}
+
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, opts...), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -359,6 +382,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(pods) == 0 {
 		return scheduler.Results{}, nil
 	}
+	deletingPodUIDs := sets.New(lo.Map(deletingNodePods, func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
 
 	opts := []scheduler.Options{
@@ -373,6 +397,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		ctx,
 		pods,
 		nodes.Active(),
+		deletingPodUIDs,
 		opts...,
 	)
 	if err != nil {

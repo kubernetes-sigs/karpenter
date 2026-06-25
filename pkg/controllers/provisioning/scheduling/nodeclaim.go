@@ -20,8 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
+	"unique"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	opts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -111,22 +114,22 @@ func NewNodeClaim(
 // CanAdd returns whether the pod can be added to the NodeClaim
 // based on the taints/tolerations, host port compatibility,
 // requirements, resources, reserved capacity reservations, and topology requirements
-func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, relaxMinValues bool) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, err error) {
+func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, relaxMinValues bool, allocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// exposed host ports on the node
 	hostPorts := scheduling.GetHostPorts(pod)
 	if err := n.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
-		return nil, nil, nil, fmt.Errorf("checking host port usage, %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("checking host port usage, %w", err)
 	}
 	baseRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
 
 	// Check NodeClaim Affinity Requirements
 	if err := baseRequirements.Compatible(podData.Requirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, fmt.Errorf("incompatible requirements, %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("incompatible requirements, %w", err)
 	}
 	baseRequirements.Add(podData.Requirements.Values()...)
 
@@ -142,19 +145,21 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	// volume topology constraints affect downstream topology checks (e.g., pod anti-affinity).
 	var lastErr error
 	for _, volReqs := range volumeAlternatives {
-		reqs, its, ofs, err := n.tryVolumeAlternative(ctx, pod, podData, baseRequirements, volReqs, relaxMinValues)
+		reqs, its, ofs, result, err := n.tryVolumeAlternative(ctx, pod, podData, baseRequirements, volReqs, relaxMinValues, allocator)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		return reqs, its, ofs, nil
+		return reqs, its, ofs, result, nil
 	}
-	return nil, nil, nil, lastErr
+	return nil, nil, nil, nil, lastErr
 }
 
 // tryVolumeAlternative attempts to add a pod with a specific set of volume requirements,
 // checking topology, instance types, and offerings compatibility.
-func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, podData *PodData, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements, relaxMinValues bool) (scheduling.Requirements, []*cloudprovider.InstanceType, []*cloudprovider.Offering, error) {
+//
+//nolint:gocyclo
+func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, podData *PodData, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements, relaxMinValues bool, allocator *dynamicresources.Allocator) (scheduling.Requirements, []*cloudprovider.InstanceType, []*cloudprovider.Offering, *dynamicresources.AllocationResult, error) {
 	nodeClaimRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
 
 	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
@@ -162,20 +167,41 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	// while TSC counting uses pod's original affinity.
 	if volReqs != nil {
 		if err := nodeClaimRequirements.Compatible(volReqs, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-			return nil, nil, nil, fmt.Errorf("incompatible volume requirements, %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("incompatible volume requirements, %w", err)
 		}
 		nodeClaimRequirements.Add(volReqs.Values()...)
 	}
 
+	// Simulate DRA device allocation before instance-type filtering so the topology requirements contributed by the
+	// allocated devices tighten the NodeClaim's requirements and feed the full filtering pipeline.
+	var allocationResult *dynamicresources.AllocationResult
+	if podData.HasResourceClaimRequests && allocator != nil {
+		if podData.ResourceClaimErr != nil {
+			return nil, nil, nil, nil, podData.ResourceClaimErr
+		}
+		result, err := allocator.Allocate(ctx, &draNodeClaim{nc: n}, podData.ResourceClaims)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("allocating dynamic resources, %w", err)
+		}
+		// Merge the allocation's topology requirements into the NodeClaim's requirements (intersection-based narrowing).
+		if err := nodeClaimRequirements.Compatible(result.Requirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("incompatible dynamic resource requirements, %w", err)
+		}
+		nodeClaimRequirements.Add(result.Requirements.Values()...)
+		allocationResult = result
+	}
+
 	// Check Topology Requirements
-	// NOTE: podData.StrictRequirements does NOT include volume requirements,
-	// ensuring TSC counting uses pod's original affinity.
+	// NOTE: podData.StrictRequirements does NOT include volume requirements, ensuring TSC counting uses pod's original
+	// affinity.
+	// NOTE: Topology requirements should come last since they can result in a single domain from a set of compatible
+	// domains. This can result in unnecessary failures from subsequent checks that narrow requirements.
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
 
@@ -192,19 +218,31 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	if err != nil {
 		// We avoid wrapping this err because calling String() on InstanceTypeFilterError is an expensive operation
 		// due to calls to resources.Merge and stringifying the nodeClaimRequirements
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+	// Apply the DRA-specific instance type filter: only instance types whose device allocation succeeded survive.
+	if allocationResult != nil {
+		supported := sets.New(lo.Map(allocationResult.InstanceTypes, func(it dynamicresources.InstanceTypeID, _ int) string {
+			return it.Value()
+		})...)
+		remaining = lo.Filter(remaining, func(it *cloudprovider.InstanceType, _ int) bool {
+			return supported.Has(it.Name)
+		})
+		if len(remaining) == 0 {
+			return nil, nil, nil, nil, fmt.Errorf("no instance type satisfies both scheduling and dynamic resource requirements")
+		}
 	}
 	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return nodeClaimRequirements, remaining, ofs, nil
+	return nodeClaimRequirements, remaining, ofs, allocationResult, nil
 }
 
 // Add updates the NodeClaim to schedule the pod to this NodeClaim, updating
 // the NodeClaim with new requirements, instance types, and offerings to reserve
 // based on the pod scheduling
-func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements scheduling.Requirements, instanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering) {
+func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, nodeClaimRequirements scheduling.Requirements, instanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, allocator *dynamicresources.Allocator) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	n.InstanceTypeOptions = instanceTypes
@@ -216,6 +254,25 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
 	n.releaseReservedOfferings(n.reservedOfferings, offeringsToReserve)
 	n.reservedOfferings = offeringsToReserve
+
+	// Commit the DRA device allocation now that the placement decision is finalized, then release the allocator's
+	// reservations for any instance types that the allocator simulated but were pruned from the NodeClaim's final
+	// candidate set (e.g. by offering/fit filters). This frees those instance types' devices for other NodeClaims.
+	// The Allocation handle is nil when there were no new device allocations to commit (e.g. every claim was already
+	// allocated in-cluster), in which case there is nothing to commit or release.
+	if allocationResult != nil && allocationResult.Allocation != nil {
+		allocationResult.Allocation.Commit(ctx)
+		committed := sets.New(lo.Map(instanceTypes, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })...)
+		var pruned []dynamicresources.InstanceTypeID
+		for _, it := range allocationResult.InstanceTypes {
+			if !committed.Has(it.Value()) {
+				pruned = append(pruned, it)
+			}
+		}
+		if len(pruned) > 0 {
+			allocator.ReleaseInstanceType(ctx, unique.Make(n.hostname), pruned...)
+		}
+	}
 }
 
 // releaseReservedOfferings releases all offerings which are present in the current reserved offerings, but are not
@@ -287,11 +344,19 @@ func (n *NodeClaim) offeringsToReserve(
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
-// necessary before its requirements are used for instance launching
-func (n *NodeClaim) FinalizeScheduling() {
+// necessary before its requirements are used for instance launching. drivers is the set of DRA driver names whose
+// devices were allocated to pods scheduled to this NodeClaim; when non-empty it is recorded as an annotation for the
+// initialization controller to gate on.
+func (n *NodeClaim) FinalizeScheduling(drivers ...string) {
 	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
 	delete(n.Requirements, corev1.LabelHostname)
+	if len(drivers) != 0 {
+		slices.Sort(drivers)
+		n.Annotations = lo.Assign(n.Annotations, map[string]string{
+			v1.DRADriversAnnotationKey: strings.Join(drivers, ","),
+		})
+	}
 	// If there are any reserved offerings tracked, inject those requirements onto the NodeClaim. This ensures that if
 	// there are multiple reserved offerings for an instance type, we don't attempt to overlaunch into a single offering.
 	if len(n.reservedOfferings) != 0 {

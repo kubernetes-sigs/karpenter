@@ -53,6 +53,10 @@ const (
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
 	NodeClaimMinValuesRelaxedAnnotationKey     = apis.Group + "/nodeclaim-min-values-relaxed"
+	// DRADriversAnnotationKey records the comma-separated set of DRA driver names whose devices were allocated to pods
+	// scheduled to this NodeClaim. The initialization controller can gate on these drivers having published their
+	// ResourceSlices before marking the node initialized.
+	DRADriversAnnotationKey = apis.Group + "/dra-drivers"
 )
 
 // Karpenter specific finalizers

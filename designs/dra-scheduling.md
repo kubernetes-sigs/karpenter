@@ -80,7 +80,11 @@ Devices come from two sources, prioritized in this order:
 
 Published to the Kubernetes API server as `ResourceSlice` objects by DRA drivers. These represent real, existing devices on nodes in the cluster. In-cluster devices are organized into **pools**, where each pool is identified by a `(driver, poolName)` pair and may span multiple ResourceSlice objects.
 
-In-cluster devices may be **node-local** (accessible only from nodes matching a `NodeSelector`) or **cluster-wide** (accessible from all nodes via `AllNodes: true`). Node-local devices carry topology requirements that constrain which nodes can use them.
+In-cluster devices may be **node-local** or **cluster-wide** (accessible from all nodes via `AllNodes: true`). Node-local devices come in two forms:
+- **`NodeName`-pinned**: the slice sets `spec.nodeName` to a single node. These devices are accessible only from that exact node, so they can satisfy an existing node whose node name matches but can never satisfy an in-flight NodeClaim (which has no concrete node yet). They carry no label topology requirement — the node identity itself is the constraint.
+- **`NodeSelector`-scoped**: the slice uses a label `NodeSelector`. These carry topology requirements that constrain which nodes can use them, and may match both existing nodes and in-flight NodeClaims whose requirements are compatible.
+
+`ResourceSlice` objects owned by **uninitialized nodes** (nodes that have not yet reached the `Initialized` status condition) are excluded from pools. Until a node is initialized, its devices are represented by template devices instead, so its published slices are not counted as in-cluster devices (see [NodeClaim Abstraction](#nodeclaim-abstraction) and [Scheduler Initialization](#scheduler-initialization)).
 
 ### Template Devices
 
@@ -118,12 +122,12 @@ A claim with no allocation — neither in-cluster nor in-memory — proceeds thr
 
 ### Pool Gathering
 
-Pools are built from in-cluster `ResourceSlice` objects published to the API server. The gathering process:
+Pools are built from in-cluster `ResourceSlice` objects published to the API server. The provided slice set is pre-filtered by the caller to exclude slices owned by deleting/excluded nodes and by uninitialized nodes (see [Scheduler Initialization](#scheduler-initialization)); because *all* of an uninitialized node's slices are excluded, that node is wholly represented by template devices and never contributes a partial pool. The gathering process:
 
 1. Groups slices by `(driver, poolName)`.
 2. Tracks the highest generation per pool. When a newer generation is encountered, all previously accumulated slices for that pool are discarded.
 3. Determines **completeness** by comparing the total slice count at the current generation against the pool's declared `ResourceSliceCount`. Completeness is a global property computed across all slices (matching and non-matching).
-4. Filters slices by node affinity compatibility with the NodeClaim's requirements. Only matching slices contribute devices; non-matching slices still participate in generation tracking and completeness checks.
+4. Filters slices by node affinity accessibility to the NodeClaim. A slice's devices are accessible when the slice is `AllNodes`, when it pins itself via `spec.nodeName` and that name equals the NodeClaim's node (existing nodes only — in-flight NodeClaims have no node name and never match a `NodeName`-pinned slice), or when its label `NodeSelector` is compatible with the NodeClaim's requirements. Only accessible slices contribute devices; inaccessible slices still participate in generation tracking and completeness checks.
 5. Detects **invalid** pools with duplicate device names across slices.
 
 For in-flight NodeClaims, a pool is included if it is compatible with *any* remaining candidate instance type.
@@ -410,8 +414,9 @@ type Allocator struct {
 
     // The pre-filtered set of in-cluster ResourceSlices, provided at construction
     // time. The caller is responsible for excluding slices from deleting/excluded
-    // nodes before passing them in. The allocator treats this as the complete
-    // universe of in-cluster slices and does not query cluster state directly.
+    // nodes and from uninitialized nodes before passing them in. The allocator
+    // treats this as the complete universe of in-cluster slices and does not query
+    // cluster state directly.
     // Uses the ResourceSlice interface to abstract over API server slices.
     inClusterSlices []ResourceSlice
 
@@ -530,7 +535,7 @@ When the scheduler prunes an instance type from a NodeClaim's candidate set, `Re
 
 At scheduler construction (`NewScheduler`), build the DRA allocator:
 
-1. **Collect and filter in-cluster ResourceSlices**: Gather all `ResourceSlice` objects from the cluster. Filter out slices owned by nodes that are not in the stateNode set passed to the scheduler (i.e., deleting nodes, disruption candidates). Non-node-owned slices (no node owner reference) are always included. This filtering uses `metadata.ownerReferences` to determine node ownership — `spec.nodeName` indicates accessibility, not ownership.
+1. **Collect and filter in-cluster ResourceSlices**: Gather all `ResourceSlice` objects from the cluster. Filter out slices owned by nodes that are not in the stateNode set passed to the scheduler (i.e., deleting nodes, disruption candidates). Also filter out slices owned by **uninitialized nodes** (nodes that have not reached the `Initialized` status condition) — an uninitialized node's devices are represented by template devices, so including its published slices would double-count them. Non-node-owned slices (no node owner reference) are always included. This filtering uses `metadata.ownerReferences` to determine node ownership — `spec.nodeName` indicates accessibility, not ownership.
 2. Obtain the set of allocated devices from the `deviceallocation` controller's tracking state, filtered for deleting pods. The `deviceallocation.Controller` is injected directly into the provisioner (not accessed through an interface). Devices with no consumers (unowned) are treated as releasable. Deleting pods should include all pods on deleting nodes and disruption candidates.
 3. Build `AttributeBindings` from instance type metadata grouped by NodePool.
 4. Construct the `Allocator` via `NewAllocator(inClusterSlices, allocatedDevices, attributeBindings, kubeClient)`. The `allocationTracker`, `poolCache`, and `claimAllocationMetadata` start empty and are populated via `Commit()` during the scheduling loop.
@@ -542,7 +547,7 @@ The allocator is stored on the `Scheduler` struct and passed through to NodeClai
 The allocator operates on a `NodeClaim` interface that abstracts over three lifecycle phases:
 
 - **Existing initialized nodes.** Have a single known instance type. `ResourceSlices()` returns empty (all devices are already published in-cluster).
-- **Pre-initialized nodes.** Have a single known instance type but outstanding template devices not yet published. `ResourceSlices()` returns templates under that instance type.
+- **Pre-initialized nodes.** Have a single known instance type but have not yet reached the `Initialized` status condition. Template devices are the source of truth until initialization completes: `ResourceSlices()` returns the instance type's **full** template set under that instance type, and the node's published in-cluster slices are excluded from pool gathering.
 - **In-flight NodeClaims.** Have multiple candidate instance types. `ResourceSlices()` returns templates for all candidates.
 
 This abstraction allows the allocator to use identical logic regardless of whether it is evaluating an existing node, a node being set up, or a node that does not yet exist.
@@ -558,10 +563,10 @@ For existing (initialized) nodes:
 4. If allocation succeeds, the pod can be placed. The `AllocationResult.Allocation` is held until `Add()` is called. **Note**: `AllocationResult.Requirements` are **not** merged into the existing node's requirements — existing node requirements are immutable (already set in stone). The allocator validates compatibility internally; if claims could not be satisfied with the node's requirements, the allocation would have failed.
 5. On `Add()`, call `AllocationResult.Allocation.Commit(ctx)` to mark the devices as consumed.
 
-For pre-initialized nodes (existing but not yet fully initialized):
-1. The NodeClaim wraps a real node with a known instance type, but some drivers have not yet published complete pools.
-2. Published slices for registered drivers are already in the in-cluster pool set.
-3. `NodeClaim.ResourceSlices()` returns only the **outstanding** in-memory templates — i.e., templates for drivers that have not yet published a complete pool. These appear under the single known instance type in the map.
+For pre-initialized nodes (existing but not yet at the `Initialized` status condition):
+1. The NodeClaim wraps a real node with a known instance type that has not yet reached the `Initialized` status condition.
+2. Template devices are the source of truth until the node is initialized. `NodeClaim.ResourceSlices()` returns the instance type's **full** in-memory template set under the single known instance type.
+3. The node's published in-cluster `ResourceSlice`s are excluded from pool gathering while it is uninitialized (see [Scheduler Initialization](#scheduler-initialization)), so devices are not double-counted across templates and published slices. Once the node becomes initialized, its published slices become authoritative and `ResourceSlices()` returns empty — the existing initialized-node behavior.
 
 ### In-Flight NodeClaim Evaluation
 
