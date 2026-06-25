@@ -791,7 +791,10 @@ var _ = Describe("Termination", func() {
 		It("should update deletion timestamp for terminating pods when it is after node deletion timestamp", func() {
 			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 			fakeClock.SetTime(time.Now())
-			nodeTerminationTimestamp := time.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
+			// Use fakeClock for annotation so the terminator's injected-clock computation is consistent.
+			// Setting nodeTerminationTimestamp = fakeClock.Now() + TGP ensures that when the terminator
+			// computes remaining = nodeTerminationTimestamp.Sub(t.clock.Now()), it gets the expected value.
+			nodeTerminationTimestamp := fakeClock.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
 			nodeClaim.Annotations = map[string]string{
 				v1.NodeClaimTerminationTimestampAnnotationKey: nodeTerminationTimestamp.Format(time.RFC3339),
 			}
@@ -815,8 +818,10 @@ var _ = Describe("Termination", func() {
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 			ExpectNodeExists(ctx, env.Client, node.Name)
 			pod = ExpectExists(ctx, env.Client, pod)
-			Expect(pod.DeletionTimestamp.Time).To((BeTemporally("~", nodeTerminationTimestamp, 10*time.Second)))
+			Expect(pod.DeletionGracePeriodSeconds).ToNot(BeNil())
+			Expect(*pod.DeletionGracePeriodSeconds).To(BeNumerically("~", 210, 15))
 		})
+
 		Context("VolumeAttachments", func() {
 			It("should wait for volume attachments", func() {
 				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
