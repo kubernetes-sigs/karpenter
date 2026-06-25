@@ -163,10 +163,11 @@ func (t *Terminator) DeleteExpiringPods(ctx context.Context, pods []*corev1.Pod,
 	for _, pod := range pods {
 		// check if the node has an expiration time and the pod needs to be deleted
 		deleteTime := t.podDeleteTimeWithGracePeriod(nodeGracePeriodTerminationTime, pod)
-		if deleteTime != nil && time.Now().After(*deleteTime) {
+		if deleteTime != nil && t.clock.Now().After(*deleteTime) {
 			// delete pod proactively to give as much of its terminationGracePeriodSeconds as possible for deletion
 			// ensure that we clamp the maximum pod terminationGracePeriodSeconds to the node's remaining expiration time in the delete command
-			gracePeriodSeconds := lo.ToPtr(int64(time.Until(*nodeGracePeriodTerminationTime).Seconds()))
+			// clamp to a minimum of 1s to prevent force-deletion from etcd (which would violate at-most-one pod semantics)
+			gracePeriodSeconds := lo.ToPtr(max(int64(nodeGracePeriodTerminationTime.Sub(t.clock.Now()).Seconds()), 1))
 			t.recorder.Publish(terminatorevents.DisruptPodDelete(pod, gracePeriodSeconds, nodeGracePeriodTerminationTime))
 			opts := &client.DeleteOptions{
 				GracePeriodSeconds: gracePeriodSeconds,
