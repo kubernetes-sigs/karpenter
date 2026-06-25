@@ -61,6 +61,17 @@ type ClaimMetadata struct {
 	Contributions map[cloudprovider.DeviceID]DeviceContribution
 }
 
+// ContributionMetadata records a single claim's contribution to a shared device's consumed capacity, paired with the
+// pods that reserve that claim. It lets consumers reason about which portion of a shared device's aggregated capacity
+// belongs to which pods — for example, to free only the capacity held by pods that are being deleted.
+type ContributionMetadata struct {
+	// PodUIDs is the set of pod UIDs that reserve the claim contributing this capacity. Non-pod consumer UIDs are
+	// excluded. Empty when the claim is reserved but not by any pod.
+	PodUIDs []types.UID
+	// ConsumedCapacity is the capacity this single claim consumes on the device.
+	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+}
+
 // Metadata contains supplementary information about an allocated device, derived from the ReservedFor status of all
 // ResourceClaims that reference it.
 type DeviceMetadata struct {
@@ -77,6 +88,11 @@ type DeviceMetadata struct {
 	// ConsumedCapacity is the aggregated capacity consumed across all claims referencing this device.
 	// Only populated when Shared is true.
 	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+	// Contributions is the per-claim breakdown of consumed capacity on this device, one entry per referencing claim
+	// that consumes capacity, each paired with the pods reserving that claim. Only populated when Shared is true. This
+	// is the per-claim view that ConsumedCapacity aggregates; consumers that need to attribute capacity to specific
+	// pods (e.g. to release only a deleting pod's share) use this instead of the aggregate.
+	Contributions []ContributionMetadata
 }
 
 type Controller struct {
@@ -271,6 +287,10 @@ func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) Device
 		if contributions.ConsumedCapacity != nil {
 			meta.Shared = true
 			meta.ConsumedCapacity = addCapacity(meta.ConsumedCapacity, contributions.ConsumedCapacity)
+			meta.Contributions = append(meta.Contributions, ContributionMetadata{
+				PodUIDs:          claimMeta.PodUIDs,
+				ConsumedCapacity: contributions.ConsumedCapacity,
+			})
 		}
 	}
 	return meta

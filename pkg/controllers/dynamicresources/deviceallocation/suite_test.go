@@ -809,6 +809,53 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			})
 		})
 
+		It("surfaces per-claim contributions paired with their reserving pods", func() {
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("256Mi"),
+					"connections": resource.MustParse("1"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("128Mi"),
+					"connections": resource.MustParse("3"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			// One contribution per referencing claim, each attributed to that claim's reserving pod and carrying only
+			// that claim's capacity (not the aggregate).
+			Expect(meta.Contributions).To(HaveLen(2))
+			contributionForPod := func(uid types.UID) deviceallocation.ContributionMetadata {
+				for _, c := range meta.Contributions {
+					for _, podUID := range c.PodUIDs {
+						if podUID == uid {
+							return c
+						}
+					}
+				}
+				return deviceallocation.ContributionMetadata{}
+			}
+			expectCapacity(contributionForPod("uid-a").ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("256Mi"),
+				"connections": resource.MustParse("1"),
+			})
+			expectCapacity(contributionForPod("uid-b").ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("128Mi"),
+				"connections": resource.MustParse("3"),
+			})
+		})
+
 		It("does not mark a device as shared when ConsumedCapacity is nil (exclusive allocation)", func() {
 			claim := withReservedFor(
 				resourceClaim("claim-a", deviceResult("device-0")),
@@ -823,6 +870,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			meta := devices[deviceID("device-0")]
 			Expect(meta.Shared).To(BeFalse())
 			Expect(meta.ConsumedCapacity).To(BeNil())
+			Expect(meta.Contributions).To(BeEmpty())
 		})
 
 		It("handles a mix of shared and exclusive devices in the same claim", func() {
