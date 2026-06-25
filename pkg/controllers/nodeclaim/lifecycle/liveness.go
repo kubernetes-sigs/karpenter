@@ -57,18 +57,18 @@ const (
 )
 
 type NodeClaimTimeout struct {
-	duration time.Duration
-	reason   string
+	Duration time.Duration
+	Reason   string
 }
 
 var (
 	RegistrationTimeout = NodeClaimTimeout{
-		duration: registrationTimeout,
-		reason:   registrationTimeoutReason,
+		Duration: registrationTimeout,
+		Reason:   registrationTimeoutReason,
 	}
 	LaunchTimeout = NodeClaimTimeout{
-		duration: launchTimeout,
-		reason:   launchTimeoutReason,
+		Duration: launchTimeout,
+		Reason:   launchTimeoutReason,
 	}
 )
 
@@ -83,7 +83,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{Requeue: true}, nil
 	}
 	if !launched.IsTrue() {
-		if timeUntilTimeout := launchTimeout - l.clock.Since(launched.LastTransitionTime.Time); timeUntilTimeout > 0 {
+		if timeUntilTimeout := LaunchTimeout.Duration - l.clock.Since(launched.LastTransitionTime.Time); timeUntilTimeout > 0 {
 			// This should never occur because if we failed to launch we requeue the object with error instead of this requeueAfter
 			return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 		}
@@ -163,9 +163,9 @@ func (l *Liveness) deleteNodeClaimForTimeout(ctx context.Context, timeout NodeCl
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return err
 	}
-	log.FromContext(ctx).V(1).WithValues("timeout", timeout.duration, "reason", timeout.reason).Info("terminating due to timeout")
+	log.FromContext(ctx).V(1).WithValues("timeout", timeout.Duration, "reason", timeout.Reason).Info("terminating due to timeout")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       timeout.reason,
+		metrics.ReasonLabel:       timeout.Reason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	})
