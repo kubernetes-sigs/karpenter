@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 )
@@ -80,10 +81,13 @@ func nodeOwnerName(slice *resourcev1.ResourceSlice) (string, bool) {
 }
 
 // gatherAllocatedDevices reads the set of in-cluster allocated devices from the deviceallocation controller and filters
-// out devices that should be treated as available for reallocation:
+// out devices (or portions of shared-device capacity) that should be treated as available for reallocation:
 //   - Devices allocated exclusively by deleting pods (all consumers are in deletingPodUIDs) are excluded, since those
 //     pods are migrating off their nodes.
 //   - Releasable devices with no live consumers (unowned) are excluded.
+//   - For multi-allocatable (shared) devices that survive the above, the consumed capacity of any claim whose pods are
+//     all deleting is subtracted, so a deleting pod's share of a shared device is freed even when live pods keep the
+//     device itself in use.
 //
 // The remaining devices form the allocator's immutable seed set of already-allocated in-cluster devices, split into
 // exclusively-allocated devices and the consumed capacity of multi-allocatable (shared) devices.
@@ -106,18 +110,51 @@ func (p *Provisioner) gatherAllocatedDevices(ctx context.Context, deletingPodUID
 			continue
 		}
 		if meta.Shared {
-			// TODO(follow-up B1/B2): partial capacity subtraction for deleting pods. The exposed DeviceMetadata only
-			// carries the aggregated ConsumedCapacity across all claims, not the per-claim breakdown needed to free
-			// just the deleting pods' share of a shared device. Until the deviceallocation controller surfaces
-			// per-claim contributions, we pass the full aggregated capacity through unchanged. This is conservative:
-			// shared capacity held by deleting pods is not yet freed for reallocation (over-counts usage, never
-			// over-allocates).
-			state.ConsumedCapacity[id] = meta.ConsumedCapacity
+			// Free just the deleting pods' share of the device's consumed capacity. The device as a whole survives the
+			// all-consumers-deleting check above (live pods remain), but each contribution whose pods are all deleting
+			// is migrating off and its capacity should be available for reallocation.
+			effective := effectiveConsumedCapacity(meta, deletingPodUIDs)
+			if len(effective) == 0 {
+				// Every dimension was freed (or there was no live consumption left); treat the device as available.
+				continue
+			}
+			state.ConsumedCapacity[id] = effective
 			continue
 		}
 		state.ExclusiveDevices.Insert(id)
 	}
 	return state, nil
+}
+
+// effectiveConsumedCapacity computes a shared device's consumed capacity with the contributions of fully-deleting
+// claims removed. It starts from the aggregated capacity and subtracts each contribution whose reserving pods are all
+// deleting, dropping any dimension that reaches zero or below. The returned map is freshly allocated and never mutates
+// the controller's metadata.
+func effectiveConsumedCapacity(meta deviceallocation.DeviceMetadata, deletingPodUIDs sets.Set[types.UID]) map[resourcev1.QualifiedName]resource.Quantity {
+	effective := make(map[resourcev1.QualifiedName]resource.Quantity, len(meta.ConsumedCapacity))
+	for dim, qty := range meta.ConsumedCapacity {
+		effective[dim] = qty.DeepCopy()
+	}
+	for _, contribution := range meta.Contributions {
+		// A contribution reserved by no pods (e.g. a non-pod consumer) is never treated as deleting — only contributions
+		// whose entire pod set is being deleted are freed.
+		if len(contribution.PodUIDs) == 0 || !allConsumersDeleting(contribution.PodUIDs, deletingPodUIDs) {
+			continue
+		}
+		for dim, consumed := range contribution.ConsumedCapacity {
+			remaining, ok := effective[dim]
+			if !ok {
+				continue
+			}
+			remaining.Sub(consumed)
+			if remaining.Sign() <= 0 {
+				delete(effective, dim)
+				continue
+			}
+			effective[dim] = remaining
+		}
+	}
+	return effective
 }
 
 func allConsumersDeleting(podUIDs []types.UID, deletingPodUIDs sets.Set[types.UID]) bool {
