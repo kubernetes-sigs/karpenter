@@ -31,6 +31,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 const (
@@ -313,6 +314,55 @@ func CounterConsumption(counterSet string, counters map[string]resource.Quantity
 			return resourcev1.Counter{Value: q}
 		}),
 	}
+}
+
+// GPUInstanceType builds a fake instance type publishing `count` GPU template devices under test.GPUDriver.
+func GPUInstanceType(name string, count int) *cloudprovider.InstanceType {
+	deviceNames := lo.Times(count, func(i int) string { return fmt.Sprintf("%s-gpu-%d", name, i) })
+	return NewInstanceType(name,
+		WithResourceSliceTemplates(ResourceSliceTemplate(test.GPUDriver, name+"-pool", Devices(deviceNames...)...)),
+	)
+}
+
+// GPUAndNICInstanceType builds a fake instance type publishing a GPU device under test.GPUDriver and a NIC device under
+// test.NICDriver, exercising multi-driver allocation on a single node.
+func GPUAndNICInstanceType(name string) *cloudprovider.InstanceType {
+	return NewInstanceType(name,
+		WithResourceSliceTemplates(
+			ResourceSliceTemplate(test.GPUDriver, name+"-gpu-pool", Devices(name+"-gpu-0")...),
+			ResourceSliceTemplate(test.NICDriver, name+"-nic-pool", Devices(name+"-nic-0")...),
+		),
+	)
+}
+
+// CapacityGPUInstanceType builds a fake instance type publishing one multi-allocatable GPU template device with the
+// given total memory capacity and an optional RequestPolicy (nil for unconstrained capacity consumption).
+func CapacityGPUInstanceType(name, totalMemory string, policy *resourcev1.CapacityRequestPolicy) *cloudprovider.InstanceType {
+	capacityOpt := WithCapacity(test.CapacityMemory, resource.MustParse(totalMemory))
+	if policy != nil {
+		capacityOpt = WithCapacityPolicy(test.CapacityMemory, resource.MustParse(totalMemory), policy)
+	}
+	return NewInstanceType(name, WithResourceSliceTemplates(
+		ResourceSliceTemplate(test.GPUDriver, name+"-pool",
+			DeviceWith(name+"-gpu-0", WithMultipleAllocations(), capacityOpt),
+		),
+	))
+}
+
+// PartitionableGPUInstanceType builds a fake instance type modeling a partitionable device: a pool with a shared
+// counter budget and `profiles` device profiles, each consuming `perProfile` counters from the budget on allocation.
+// The counter set and the devices live in separate templates under the same pool (a slice may carry either devices or
+// shared counters, never both).
+func PartitionableGPUInstanceType(name, counterSet string, budget map[string]resource.Quantity, profiles int, perProfile map[string]resource.Quantity) *cloudprovider.InstanceType {
+	deviceProfiles := lo.Times(profiles, func(i int) cloudprovider.Device {
+		return DeviceWith(fmt.Sprintf("%s-profile-%d", name, i),
+			WithConsumesCounters(CounterConsumption(counterSet, perProfile)),
+		)
+	})
+	return NewInstanceType(name, WithResourceSliceTemplates(
+		ResourceSliceTemplateWithCounters(test.GPUDriver, name+"-pool", CounterSet(counterSet, budget)),
+		ResourceSliceTemplate(test.GPUDriver, name+"-pool", deviceProfiles...),
+	))
 }
 
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.

@@ -104,6 +104,8 @@ Claims are processed sequentially. The allocator maintains **effective requireme
 
 A claim that already has `status.allocation` set on the API server is fully allocated in the cluster. The allocator reads the topology requirements from `status.allocation.nodeSelector` and checks them for compatibility with the current effective requirements. If incompatible, the allocation fails immediately. If compatible, the requirements are merged into the effective requirements — tightening the baseline for subsequent claims and for pool gathering/filtering — and are included in the `AllocationResult`. No device reservation or DFS is needed for this claim; its devices are already committed.
 
+**Exception — claims held by deleting pods.** When a claim's `status.allocation` is set but its `status.reservedFor` consists *entirely* of pods that are being deleted (pods on deleting nodes, disruption candidates, or individually-deleting pods — the same set used to free devices during allocator initialization), the claim is reclassified as **Unallocated** and re-run through the DFS. The device it currently holds has already been freed from the allocated-device seed set for the same reason, so the DFS re-allocates the claim onto the replacement capacity rather than treating it as committed in place. A claim reserved by a mix of deleting and live pods — or by any non-pod consumer — remains committed in place, preserving the live consumers' device and the topology it contributes (this is also what keeps a partially-consumed multi-allocatable device pinned for its surviving consumers).
+
 ### Allocated (In-Memory)
 
 Multiple pending pods may reference the same ResourceClaim. When a claim that was not previously allocated is first allocated during the scheduling loop, the allocator records per-claim metadata: the associated NodeClaim ID, whether template devices were used, and the accumulated topology requirements. When a subsequent pod references that same claim, the allocator uses this metadata instead of re-running the DFS:
@@ -627,3 +629,15 @@ The gate runs in `Initialization.Reconcile()` immediately after the extended-res
 **Re-reconciliation**: the lifecycle controller watches `ResourceSlice` objects — but only when DRA is enabled — mapping a slice to the NodeClaim(s) backing the node the slice is local to (via `spec.nodeName`/Node owner reference → provider ID). This drives prompt re-evaluation as drivers publish their pools.
 
 **RBAC**: operating the gate requires the Karpenter controller to have `get;list;watch` on `resource.k8s.io` `resourceslices`. Distributions enabling DRA must grant this (the provisioning path already lists slices; this adds the `watch` verb).
+
+### Disruption / Consolidation Re-allocation Semantics
+
+Consolidation (and drift) reuse the scheduler directly via `disruption.SimulateScheduling`, so DRA is inherited. Two behaviors keep the simulation correct:
+
+1. **Candidate slices are excluded from the device universe.** `SimulateScheduling` removes consolidation candidate nodes from the `stateNodes` passed to `NewScheduler`. Because pool gathering only includes published `ResourceSlice`s owned by initialized nodes in `stateNodes` (see [Scheduler Initialization](#scheduler-initialization)), a candidate node's devices are not considered scheduling targets — the simulation can't "keep" a pod on a node it is proposing to remove.
+
+2. **Candidate pods' devices are freed and their claims re-allocated.** The set of deleting pods used during allocator construction includes not only pods on already-deleting nodes but also the **disruption candidate pods** being rescheduled (the PDB-reschedulable pods on candidate nodes). This drives a *dual mechanism* that must stay consistent:
+   - **Device freeing**: a device allocated exclusively to deleting pods is removed from the allocated-device seed set (`gatherAllocatedDevices`), and a multi-allocatable device has the deleting pods' share of its consumed capacity subtracted.
+   - **Claim re-allocation**: a claim reserved entirely by deleting pods is reclassified from "Allocated (In-Cluster)" to Unallocated and re-run through the DFS (see [Allocated (In-Cluster)](#allocated-in-cluster)).
+
+   Both halves are driven by the *same* deleting-pod set and the same per-claim `reservedFor` pod accounting, so a freed device is always matched by a re-allocated claim (and vice versa). A device or claim shared with a live pod is neither freed nor reclassified, so live consumers are never disturbed.

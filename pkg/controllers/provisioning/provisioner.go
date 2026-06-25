@@ -340,7 +340,7 @@ func (p *Provisioner) NewScheduler(
 		if err != nil {
 			return nil, fmt.Errorf("gathering allocated devices, %w", err)
 		}
-		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(instanceTypes), p.kubeClient)
+		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(instanceTypes), p.kubeClient, deletingPodUIDs)
 	}
 
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection

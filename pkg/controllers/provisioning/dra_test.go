@@ -18,7 +18,6 @@ package provisioning_test
 
 import (
 	"fmt"
-	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -43,87 +42,53 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
+// The DRA test fixtures are shared across provisioning and disruption suites. Slice/claim builders live in pkg/test;
+// instance-type builders live in pkg/cloudprovider/fake (which imports pkg/test). These thin local aliases keep the
+// existing call sites in this file terse.
 const (
-	gpuDriver = "gpu.example.com"
-	nicDriver = "nic.example.com"
+	gpuDriver      = test.GPUDriver
+	nicDriver      = test.NICDriver
+	capacityMemory = test.CapacityMemory
+	counterSetName = "gpu-slices"
 )
 
-// gpuInstanceType builds a fake instance type publishing `count` GPU template devices under gpuDriver.
-//
+var (
+	clusterWideSlice          = test.ClusterWideSlice
+	zonedSlice                = test.ZonedSlice
+	sharedCapacitySlice       = test.SharedCapacitySlice
+	allocatedClusterWideClaim = test.AllocatedClusterWideClaim
+	allocatedSharedClaim      = test.AllocatedSharedClaim
+	podConsumer               = test.PodConsumer
+	gpuAndNICInstanceType     = fake.GPUAndNICInstanceType
+)
+
 //nolint:unparam
 func gpuInstanceType(name string, count int) *cloudprovider.InstanceType {
-	deviceNames := lo.Times(count, func(i int) string { return fmt.Sprintf("%s-gpu-%d", name, i) })
-	return fake.NewInstanceType(name,
-		fake.WithResourceSliceTemplates(fake.ResourceSliceTemplate(gpuDriver, name+"-pool", fake.Devices(deviceNames...)...)),
-	)
+	return fake.GPUInstanceType(name, count)
 }
 
-// gpuAndNICInstanceType builds a fake instance type publishing a GPU device under gpuDriver and a NIC device under
-// nicDriver, exercising multi-driver allocation on a single node.
-func gpuAndNICInstanceType(name string) *cloudprovider.InstanceType {
-	return fake.NewInstanceType(name,
-		fake.WithResourceSliceTemplates(
-			fake.ResourceSliceTemplate(gpuDriver, name+"-gpu-pool", fake.Devices(name+"-gpu-0")...),
-			fake.ResourceSliceTemplate(nicDriver, name+"-nic-pool", fake.Devices(name+"-nic-0")...),
-		),
-	)
+//nolint:unparam
+func nodeLocalSlice(node *corev1.Node, driver string, deviceNames ...string) *resourcev1.ResourceSlice {
+	return test.NodeLocalSlice(node, driver, deviceNames...)
 }
-
-// capacityMemory is the capacity dimension used by the consumable-capacity tests.
-const capacityMemory resourcev1.QualifiedName = gpuDriver + "/memory"
 
 // capacity builds a single-dimension (memory) capacity request map for the given quantity.
 func capacity(amount string) map[resourcev1.QualifiedName]resource.Quantity {
-	return map[resourcev1.QualifiedName]resource.Quantity{capacityMemory: resource.MustParse(amount)}
+	return test.CapacityRequest(amount)
 }
 
-// capacityGPUInstanceType builds a fake instance type publishing one multi-allocatable GPU template device with the
-// given total memory capacity (no RequestPolicy — capacity consumption is unconstrained).
-//
 //nolint:unparam
 func capacityGPUInstanceType(name, totalMemory string) *cloudprovider.InstanceType {
-	return fake.NewInstanceType(name, fake.WithResourceSliceTemplates(
-		fake.ResourceSliceTemplate(gpuDriver, name+"-pool",
-			fake.DeviceWith(name+"-gpu-0",
-				fake.WithMultipleAllocations(),
-				fake.WithCapacity(capacityMemory, resource.MustParse(totalMemory)),
-			),
-		),
-	))
+	return fake.CapacityGPUInstanceType(name, totalMemory, nil)
 }
 
-// capacityPolicyGPUInstanceType is capacityGPUInstanceType with a RequestPolicy constraining how the memory capacity
-// may be consumed.
 func capacityPolicyGPUInstanceType(name, totalMemory string, policy *resourcev1.CapacityRequestPolicy) *cloudprovider.InstanceType {
-	return fake.NewInstanceType(name, fake.WithResourceSliceTemplates(
-		fake.ResourceSliceTemplate(gpuDriver, name+"-pool",
-			fake.DeviceWith(name+"-gpu-0",
-				fake.WithMultipleAllocations(),
-				fake.WithCapacityPolicy(capacityMemory, resource.MustParse(totalMemory), policy),
-			),
-		),
-	))
+	return fake.CapacityGPUInstanceType(name, totalMemory, policy)
 }
 
-// counterSetName is the shared-counter set used by the partitionable-device tests.
-const counterSetName = "gpu-slices"
-
-// partitionableGPUInstanceType builds a fake instance type modeling a partitionable device: a pool with a shared
-// counter budget (counterSetName) and `profiles` device profiles, each consuming `perProfile` counters from the budget
-// on allocation. The counter set and the devices live in separate templates under the same pool (a slice may carry
-// either devices or shared counters, never both).
-//
 //nolint:unparam
 func partitionableGPUInstanceType(name string, budget map[string]resource.Quantity, profiles int, perProfile map[string]resource.Quantity) *cloudprovider.InstanceType {
-	deviceProfiles := lo.Times(profiles, func(i int) cloudprovider.Device {
-		return fake.DeviceWith(fmt.Sprintf("%s-profile-%d", name, i),
-			fake.WithConsumesCounters(fake.CounterConsumption(counterSetName, perProfile)),
-		)
-	})
-	return fake.NewInstanceType(name, fake.WithResourceSliceTemplates(
-		fake.ResourceSliceTemplateWithCounters(gpuDriver, name+"-pool", fake.CounterSet(counterSetName, budget)),
-		fake.ResourceSliceTemplate(gpuDriver, name+"-pool", deviceProfiles...),
-	))
+	return fake.PartitionableGPUInstanceType(name, counterSetName, budget, profiles, perProfile)
 }
 
 // quantities is a small convenience for building single- or multi-dimension counter maps inline.
@@ -151,149 +116,6 @@ func draPodForClaims(claims ...corev1.PodResourceClaim) *corev1.Pod {
 			return corev1.ResourceClaim{Name: c.Name}
 		}),
 	})
-}
-
-// nodeLocalSlice builds a published in-cluster ResourceSlice owned by and pinned to the given node via spec.nodeName —
-// the form kubelet/DRA drivers use for node-local devices. Such a slice is accessible only from the existing node with
-// that name. The pool name follows the framework's NodeLocalPoolName convention so device allocation status
-// reconciliation lines up.
-//
-//nolint:unparam
-func nodeLocalSlice(node *corev1.Node, driver string, deviceNames ...string) *resourcev1.ResourceSlice {
-	return test.ResourceSlice(resourcev1.ResourceSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("%s-%s", node.Name, sanitizeDriver(driver)),
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "v1",
-				Kind:       "Node",
-				Name:       node.Name,
-				UID:        node.UID,
-			}},
-		},
-		Spec: resourcev1.ResourceSliceSpec{
-			Driver:   driver,
-			NodeName: lo.ToPtr(node.Name),
-			Pool:     resourcev1.ResourcePool{Name: NodeLocalPoolName(driver, node.Name), Generation: 1, ResourceSliceCount: 1},
-			Devices:  lo.Map(deviceNames, func(name string, _ int) resourcev1.Device { return resourcev1.Device{Name: name} }),
-		},
-	})
-}
-
-// zonedSlice builds a published, cluster-managed ResourceSlice whose devices are constrained to a topology zone via a
-// NodeSelector. It is not owned by any node (cluster-managed), so it is always gathered, and its zone requirement is
-// propagated onto a NodeClaim that allocates from it.
-func zonedSlice(name, driver, zone string, deviceNames ...string) *resourcev1.ResourceSlice {
-	return test.ResourceSlice(resourcev1.ResourceSlice{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: resourcev1.ResourceSliceSpec{
-			Driver: driver,
-			Pool:   resourcev1.ResourcePool{Name: name, Generation: 1, ResourceSliceCount: 1},
-			NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
-				MatchExpressions: []corev1.NodeSelectorRequirement{{
-					Key:      corev1.LabelTopologyZone,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{zone},
-				}},
-			}}},
-			Devices: lo.Map(deviceNames, func(name string, _ int) resourcev1.Device { return resourcev1.Device{Name: name} }),
-		},
-	})
-}
-
-func sanitizeDriver(driver string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(driver, ".", "-"), "/", "-")
-}
-
-// clusterWideSlice builds a published, cluster-wide (AllNodes) ResourceSlice. Its devices are accessible from any node
-// and the slice is always gathered (no node owner reference), isolating device-availability behavior from node state.
-func clusterWideSlice(name, driver string, deviceNames ...string) *resourcev1.ResourceSlice {
-	return test.ResourceSlice(resourcev1.ResourceSlice{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: resourcev1.ResourceSliceSpec{
-			Driver:   driver,
-			AllNodes: lo.ToPtr(true),
-			Pool:     resourcev1.ResourcePool{Name: name, Generation: 1, ResourceSliceCount: 1},
-			Devices:  lo.Map(deviceNames, func(n string, _ int) resourcev1.Device { return resourcev1.Device{Name: n} }),
-		},
-	})
-}
-
-// allocatedClusterWideClaim builds a ResourceClaim already allocated to a cluster-wide published device, reserved for
-// the given consumers. This seeds the deviceallocation controller's tracking so the allocator treats it as in-use.
-func allocatedClusterWideClaim(name, pool, driver, device string, consumers ...resourcev1.ResourceClaimConsumerReference) *resourcev1.ResourceClaim {
-	return test.ResourceClaim(resourcev1.ResourceClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: resourcev1.ResourceClaimSpec{
-			Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{test.ExactDeviceRequest("req", "gpu", 1)}},
-		},
-		Status: resourcev1.ResourceClaimStatus{
-			Allocation: &resourcev1.AllocationResult{
-				Devices: resourcev1.DeviceAllocationResult{
-					Results: []resourcev1.DeviceRequestAllocationResult{{
-						Request: "req",
-						Driver:  driver,
-						Pool:    pool,
-						Device:  device,
-					}},
-				},
-			},
-			ReservedFor: consumers,
-		},
-	})
-}
-
-// sharedCapacitySlice builds a published, cluster-wide (AllNodes) ResourceSlice whose single device is
-// multi-allocatable and publishes the given total memory capacity. Used to seed an in-cluster shared device for the
-// consumable-capacity reclaim test.
-func sharedCapacitySlice(name, driver, device, totalMemory string) *resourcev1.ResourceSlice {
-	return test.ResourceSlice(resourcev1.ResourceSlice{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: resourcev1.ResourceSliceSpec{
-			Driver:   driver,
-			AllNodes: lo.ToPtr(true),
-			Pool:     resourcev1.ResourcePool{Name: name, Generation: 1, ResourceSliceCount: 1},
-			Devices: []resourcev1.Device{{
-				Name:                     device,
-				AllowMultipleAllocations: lo.ToPtr(true),
-				Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
-					capacityMemory: {Value: resource.MustParse(totalMemory)},
-				},
-			}},
-		},
-	})
-}
-
-// allocatedSharedClaim builds a ResourceClaim already allocated to a shared (multi-allocatable) cluster-wide device,
-// consuming the given capacity and reserved for the given consumers. This seeds the deviceallocation controller so the
-// allocator sees the device's consumed capacity (and, via per-claim contributions, which pods hold which share).
-func allocatedSharedClaim(name, pool, driver, device string, consumed map[resourcev1.QualifiedName]resource.Quantity, consumers ...resourcev1.ResourceClaimConsumerReference) *resourcev1.ResourceClaim {
-	return test.ResourceClaim(resourcev1.ResourceClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: resourcev1.ResourceClaimSpec{
-			Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{
-				test.ExactDeviceRequestWithCapacity("req", "gpu", 1, consumed),
-			}},
-		},
-		Status: resourcev1.ResourceClaimStatus{
-			Allocation: &resourcev1.AllocationResult{
-				Devices: resourcev1.DeviceAllocationResult{
-					Results: []resourcev1.DeviceRequestAllocationResult{{
-						Request:          "req",
-						Driver:           driver,
-						Pool:             pool,
-						Device:           device,
-						ConsumedCapacity: consumed,
-					}},
-				},
-			},
-			ReservedFor: consumers,
-		},
-	})
-}
-
-// podConsumer builds a ResourceClaimConsumerReference for a pod.
-func podConsumer(pod *corev1.Pod) resourcev1.ResourceClaimConsumerReference {
-	return resourcev1.ResourceClaimConsumerReference{Resource: "pods", Name: pod.Name, UID: pod.UID}
 }
 
 var _ = Describe("Dynamic Resource Allocation", func() {
@@ -776,7 +598,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(scheduled.Name).To(Equal(node.Name))
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
-			Expect(devices).To(ConsistOf(NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
+			Expect(devices).To(ConsistOf(test.NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
 		})
 		It("should prefer an existing node's published device over launching a new node (C2)", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
@@ -967,7 +789,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			scheduled := ExpectScheduled(ctx, env.Client, pod)
 			Expect(scheduled.Name).ToNot(Equal(node.Name))
 			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
-			Expect(devices).ToNot(ConsistOf(NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
+			Expect(devices).ToNot(ConsistOf(test.NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
 		})
 		It("should exclude slices owned by a node not in cluster state (S2)", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
@@ -989,7 +811,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			// The orphan slice is excluded, so the pod is satisfied via a new NodeClaim's template device.
 			ExpectScheduled(ctx, env.Client, pod)
 			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
-			Expect(devices).ToNot(ConsistOf(NodeLocalPoolName(gpuDriver, orphanNode.Name) + "/orphan-gpu-0"))
+			Expect(devices).ToNot(ConsistOf(test.NodeLocalPoolName(gpuDriver, orphanNode.Name) + "/orphan-gpu-0"))
 		})
 	})
 
@@ -1012,7 +834,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			// The pod schedules and its device is not the excluded published device.
 			ExpectScheduled(ctx, env.Client, pod)
 			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
-			Expect(devices).ToNot(ConsistOf(NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
+			Expect(devices).ToNot(ConsistOf(test.NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
 		})
 		It("should not double-count a node's devices across the uninitialized→initialized transition (I2)", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
@@ -1031,7 +853,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			provisionDRA(podA)
 			ExpectScheduled(ctx, env.Client, podA)
 			devicesA := ExpectResourceClaimAllocated(ctx, env.Client, "default", "claim-a", gpuDriver)
-			Expect(devicesA).ToNot(ConsistOf(NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
+			Expect(devicesA).ToNot(ConsistOf(test.NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
 
 			// Initialize the node so its published slice becomes authoritative for subsequent runs.
 			ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)

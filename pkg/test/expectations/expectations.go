@@ -471,7 +471,7 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 	}
 
 	for driver, templates := range templatesByDriver {
-		poolName := NodeLocalPoolName(driver, node.Name)
+		poolName := test.NodeLocalPoolName(driver, node.Name)
 		sliceCount := int64(len(templates))
 		for i, t := range templates {
 			devices := make([]resourcev1.Device, len(t.Devices))
@@ -519,10 +519,6 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 			ExpectApplied(ctx, c, slice)
 		}
 	}
-}
-
-func NodeLocalPoolName(driverName, nodeName string) string {
-	return fmt.Sprintf("%s/%s", driverName, nodeName)
 }
 
 // ExpectResourceClaimsProcessed emulates the in-cluster ResourceClaim controller for a pod. For each of the pod's
@@ -674,7 +670,7 @@ func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 		for i, device := range devices {
 			poolName := device.DeviceID.Pool.Value()
 			if device.DeviceID.Template {
-				poolName = NodeLocalPoolName(device.DeviceID.Driver.Value(), binding.Node.Name)
+				poolName = test.NodeLocalPoolName(device.DeviceID.Driver.Value(), binding.Node.Name)
 			}
 			results[i] = resourcev1.DeviceRequestAllocationResult{
 				Request: requestNames[i],
