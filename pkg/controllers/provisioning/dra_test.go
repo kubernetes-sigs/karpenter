@@ -79,6 +79,8 @@ func capacity(amount string) map[resourcev1.QualifiedName]resource.Quantity {
 
 // capacityGPUInstanceType builds a fake instance type publishing one multi-allocatable GPU template device with the
 // given total memory capacity (no RequestPolicy — capacity consumption is unconstrained).
+//
+//nolint:unparam
 func capacityGPUInstanceType(name, totalMemory string) *cloudprovider.InstanceType {
 	return fake.NewInstanceType(name, fake.WithResourceSliceTemplates(
 		fake.ResourceSliceTemplate(gpuDriver, name+"-pool",
@@ -101,6 +103,36 @@ func capacityPolicyGPUInstanceType(name, totalMemory string, policy *resourcev1.
 			),
 		),
 	))
+}
+
+// counterSetName is the shared-counter set used by the partitionable-device tests.
+const counterSetName = "gpu-slices"
+
+// partitionableGPUInstanceType builds a fake instance type modeling a partitionable device: a pool with a shared
+// counter budget (counterSetName) and `profiles` device profiles, each consuming `perProfile` counters from the budget
+// on allocation. The counter set and the devices live in separate templates under the same pool (a slice may carry
+// either devices or shared counters, never both).
+//
+//nolint:unparam
+func partitionableGPUInstanceType(name string, budget map[string]resource.Quantity, profiles int, perProfile map[string]resource.Quantity) *cloudprovider.InstanceType {
+	deviceProfiles := lo.Times(profiles, func(i int) cloudprovider.Device {
+		return fake.DeviceWith(fmt.Sprintf("%s-profile-%d", name, i),
+			fake.WithConsumesCounters(fake.CounterConsumption(counterSetName, perProfile)),
+		)
+	})
+	return fake.NewInstanceType(name, fake.WithResourceSliceTemplates(
+		fake.ResourceSliceTemplateWithCounters(gpuDriver, name+"-pool", fake.CounterSet(counterSetName, budget)),
+		fake.ResourceSliceTemplate(gpuDriver, name+"-pool", deviceProfiles...),
+	))
+}
+
+// quantities is a small convenience for building single- or multi-dimension counter maps inline.
+func quantities(pairs ...string) map[string]resource.Quantity {
+	m := map[string]resource.Quantity{}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		m[pairs[i]] = resource.MustParse(pairs[i+1])
+	}
+	return m
 }
 
 // draPod builds an unschedulable pod referencing the named ResourceClaim from its container.
@@ -1215,6 +1247,131 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			}
 			Expect(nodeNames.Len()).To(Equal(1), "default 4Gi consumption lets three pods share one 16Gi device")
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		})
+	})
+
+	Context("Partitionable devices (K)", func() {
+		BeforeEach(func() {
+			if env.Version.Minor() < 36 {
+				Skip("Partitionable devices require K8s versions >= 1.36.x (DRAConsumableCapacity feature gate)")
+			}
+		})
+
+		It("should pack counter-constrained profiles onto one NodeClaim within budget (K1)", func() {
+			// Budget memory:80Gi; two profiles each consume 40Gi → both fit on one node's pool.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				partitionableGPUInstanceType("gpu-it", quantities("memory", "80Gi"), 2, quantities("memory", "40Gi")),
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client,
+				test.ResourceClaimForRequests("claim-a", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("claim-b", test.ExactDeviceRequest("req", "gpu", 1)),
+			)
+			podA := draPod("gpu", "claim-a")
+			podB := draPod("gpu", "claim-b")
+			provisionDRA(podA, podB)
+
+			nodeA := ExpectScheduled(ctx, env.Client, podA)
+			nodeB := ExpectScheduled(ctx, env.Client, podB)
+			Expect(nodeA.Name).To(Equal(nodeB.Name), "both 40Gi profiles fit within the 80Gi counter budget on one node")
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		})
+
+		It("should create a second NodeClaim when the counter budget is exhausted (K2)", func() {
+			// Budget 80Gi; three 40Gi profiles (120Gi) cannot all draw from one pool → a second node is required.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				partitionableGPUInstanceType("gpu-it", quantities("memory", "80Gi"), 3, quantities("memory", "40Gi")),
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			pods := lo.Times(3, func(i int) *corev1.Pod {
+				name := fmt.Sprintf("claim-%d", i)
+				ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests(name, test.ExactDeviceRequest("req", "gpu", 1)))
+				return draPod("gpu", name)
+			})
+			provisionDRA(pods...)
+
+			nodeNames := sets.New[string]()
+			for _, pod := range pods {
+				nodeNames.Insert(ExpectScheduled(ctx, env.Client, pod).Name)
+			}
+			Expect(nodeNames.Len()).To(Equal(2), "120Gi of profiles cannot fit in a single 80Gi counter budget")
+		})
+
+		It("should track multiple counter dimensions independently (K3)", func() {
+			// Budget memory:80Gi, compute:100. Two profiles consume memory:40Gi + compute:50 each → both fit.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				partitionableGPUInstanceType("gpu-it", quantities("memory", "80Gi", "compute", "100"), 2, quantities("memory", "40Gi", "compute", "50")),
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client,
+				test.ResourceClaimForRequests("claim-a", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("claim-b", test.ExactDeviceRequest("req", "gpu", 1)),
+			)
+			podA := draPod("gpu", "claim-a")
+			podB := draPod("gpu", "claim-b")
+			provisionDRA(podA, podB)
+
+			nodeA := ExpectScheduled(ctx, env.Client, podA)
+			nodeB := ExpectScheduled(ctx, env.Client, podB)
+			Expect(nodeA.Name).To(Equal(nodeB.Name), "both profiles fit within memory and compute budgets on one node")
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		})
+
+		It("should fail to schedule when a single profile exceeds the counter budget (K5)", func() {
+			// Budget memory:40Gi; the single profile consumes 80Gi — over budget, so no device is allocatable.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				partitionableGPUInstanceType("gpu-it", quantities("memory", "40Gi"), 1, quantities("memory", "80Gi")),
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		})
+
+		It("should reject a pool whose device references a non-existent counter set (K6)", func() {
+			// The device consumes from a counter set name that the pool's SharedCounters doesn't define. The allocator
+			// marks the pool invalid (getAndValidateCounterSets / validateDeviceCounterConsumption), so no device is
+			// allocatable and the pod can't schedule.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("gpu-it", fake.WithResourceSliceTemplates(
+					fake.ResourceSliceTemplateWithCounters(gpuDriver, "gpu-it-pool", fake.CounterSet(counterSetName, quantities("memory", "80Gi"))),
+					fake.ResourceSliceTemplate(gpuDriver, "gpu-it-pool",
+						fake.DeviceWith("gpu-it-profile-0",
+							fake.WithConsumesCounters(fake.CounterConsumption("nonexistent-counter-set", quantities("memory", "40Gi"))),
+						),
+					),
+				)),
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		})
+
+		It("should never co-locate profiles whose combined consumption exceeds a dimension budget (K7)", func() {
+			// Budget compute:100; two profiles each consume compute:60 (120 > 100). They must land on separate nodes.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				partitionableGPUInstanceType("gpu-it", quantities("compute", "100"), 2, quantities("compute", "60")),
+			}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client,
+				test.ResourceClaimForRequests("claim-a", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("claim-b", test.ExactDeviceRequest("req", "gpu", 1)),
+			)
+			podA := draPod("gpu", "claim-a")
+			podB := draPod("gpu", "claim-b")
+			provisionDRA(podA, podB)
+
+			nodeA := ExpectScheduled(ctx, env.Client, podA)
+			nodeB := ExpectScheduled(ctx, env.Client, podB)
+			Expect(nodeA.Name).ToNot(Equal(nodeB.Name), "60+60 compute exceeds the 100 budget, so the profiles can't share a pool")
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 		})
 	})
 })
