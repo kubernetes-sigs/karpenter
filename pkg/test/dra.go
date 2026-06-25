@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -108,6 +109,17 @@ func ExactDeviceRequest(name, className string, count int64) resourcev1.DeviceRe
 			Count:           count,
 		},
 	}
+}
+
+// ExactDeviceRequestWithCapacity builds a DeviceRequest for a fixed number of devices of the given class that also
+// requests a slice of per-dimension capacity from each device (the consumable-capacity path). A nil or empty capacity
+// map is equivalent to ExactDeviceRequest.
+func ExactDeviceRequestWithCapacity(name, className string, count int64, capacity map[resourcev1.QualifiedName]resource.Quantity) resourcev1.DeviceRequest {
+	req := ExactDeviceRequest(name, className, count)
+	if len(capacity) > 0 {
+		req.Exactly.Capacity = &resourcev1.CapacityRequirements{Requests: capacity}
+	}
+	return req
 }
 
 // AllDeviceRequest builds a DeviceRequest in "All" allocation mode for the given class.
