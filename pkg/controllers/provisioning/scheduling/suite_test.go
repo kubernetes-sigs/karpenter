@@ -5217,7 +5217,7 @@ var _ = Context("Scheduling", func() {
 	Describe("Dynamic Resource Allocation (DRA)", func() {
 		DescribeTable("should handle DRA pods correctly",
 			func(testCase string, podOptions test.PodOptions, expectNodeClaims bool, expectDRAError bool) {
-				nodePool := test.NodePool()
+				nodePool = test.NodePool()
 				ExpectApplied(ctx, env.Client, nodePool)
 
 				// Create the test pod with specified options
@@ -5356,7 +5356,7 @@ var _ = Context("Scheduling", func() {
 		)
 
 		It("should handle DaemonSet pods with DRA requirements based on IgnoreDRARequests flag value", func() {
-			nodePool := test.NodePool()
+			nodePool = test.NodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// DRA daemon pod with larger CPU requirements
@@ -5407,6 +5407,96 @@ var _ = Context("Scheduling", func() {
 
 			// Verify that when DRA is ignored, less CPU is allocated (smaller instance selected) than when DRA is counted
 			Expect(allocatedCPU1.Cmp(allocatedCPU2)).To(BeNumerically("<", 0))
+		})
+	})
+	Context("Offering Overrides", func() {
+		It("should only select instance types whose offerings have CapacityOverride when pod requests an override resource", func() {
+			extendedResource := corev1.ResourceName("test.com/extended-slots")
+			// Create instance types with default offerings
+			overrideInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "override-capable",
+				Resources: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("4"),
+					corev1.ResourceMemory: resource.MustParse("8Gi"),
+				},
+			})
+			// Append offerings with overrides cloned from existing base offerings
+			baseOfferings := make([]*cloudprovider.Offering, len(overrideInstanceType.Offerings))
+			copy(baseOfferings, overrideInstanceType.Offerings)
+			for _, o := range baseOfferings {
+				overrideOffering := &cloudprovider.Offering{
+					Available:        o.Available,
+					Requirements:     o.Requirements,
+					Price:            o.Price,
+					CapacityOverride: corev1.ResourceList{extendedResource: resource.MustParse("4")},
+					OverheadOverride: &cloudprovider.InstanceTypeOverhead{
+						SystemReserved: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
+					},
+				}
+				overrideInstanceType.Offerings = append(overrideInstanceType.Offerings, overrideOffering)
+			}
+			normalInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "normal",
+				Resources: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("4"),
+					corev1.ResourceMemory: resource.MustParse("8Gi"),
+				},
+			})
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{overrideInstanceType, normalInstanceType}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{extendedResource: resource.MustParse("1")},
+					Limits:   corev1.ResourceList{extendedResource: resource.MustParse("1")},
+				},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+
+			results, _ := prov.Schedule(ctx)
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			instanceTypeNames := lo.Map(results.NewNodeClaims[0].InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) string {
+				return it.Name
+			})
+			Expect(instanceTypeNames).To(ContainElement("override-capable"))
+			Expect(instanceTypeNames).ToNot(ContainElement("normal"))
+		})
+		It("should reject instance type when override allocatable fits but override offerings are unavailable", func() {
+			extendedResource := corev1.ResourceName("test.com/extended-slots")
+			// Create instance type with default offerings
+			overrideInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "override-capable",
+				Resources: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("4"),
+					corev1.ResourceMemory: resource.MustParse("8Gi"),
+				},
+			})
+			// Append override offerings but mark them all as UNAVAILABLE
+			baseOfferings := make([]*cloudprovider.Offering, len(overrideInstanceType.Offerings))
+			copy(baseOfferings, overrideInstanceType.Offerings)
+			for _, o := range baseOfferings {
+				overrideInstanceType.Offerings = append(overrideInstanceType.Offerings, &cloudprovider.Offering{
+					Available:        false, // unavailable!
+					Requirements:     o.Requirements,
+					Price:            o.Price,
+					CapacityOverride: corev1.ResourceList{extendedResource: resource.MustParse("4")},
+					OverheadOverride: &cloudprovider.InstanceTypeOverhead{
+						SystemReserved: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
+					},
+				})
+			}
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{overrideInstanceType}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{extendedResource: resource.MustParse("1")},
+					Limits:   corev1.ResourceList{extendedResource: resource.MustParse("1")},
+				},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+
+			results, _ := prov.Schedule(ctx)
+			// No NodeClaims should be created — the override allocatable fits but its offerings are unavailable
+			Expect(results.NewNodeClaims).To(HaveLen(0))
 		})
 	})
 })
