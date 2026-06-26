@@ -55,20 +55,23 @@ var _ = Describe("Consolidation/DRA", func() {
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 	})
 
-	// simulateConsolidation builds a disruption candidate for the given node and runs SimulateScheduling against it,
+	// simulateConsolidation builds a disruption candidate for each given node and runs SimulateScheduling against them,
 	// reconciling the deviceallocation controller first so the allocator sees the current allocated-device state. It
-	// returns the simulation results, which describe where the candidate's pods would reschedule.
-	simulateConsolidation := func(node *corev1.Node) pscheduling.Results {
+	// returns the simulation results, which describe where the candidates' pods would reschedule.
+	simulateConsolidation := func(nodes ...*corev1.Node) pscheduling.Results {
 		GinkgoHelper()
 		ExpectDeviceAllocationReconciled(ctx, env.Client, draController)
 		pdbs, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).To(Succeed())
 		nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, env.Client, cloudProvider)
 		Expect(err).To(Succeed())
-		stateNode := ExpectStateNodeExists(cluster, node)
-		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
-		Expect(err).To(Succeed())
-		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, candidate)
+		candidates := lo.Map(nodes, func(node *corev1.Node, _ int) *disruption.Candidate {
+			stateNode := ExpectStateNodeExists(cluster, node)
+			candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
+			Expect(err).To(Succeed())
+			return candidate
+		})
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, candidates...)
 		Expect(err).To(Succeed())
 		return results
 	}
@@ -208,5 +211,71 @@ var _ = Describe("Consolidation/DRA", func() {
 		// reschedule and consolidation cannot proceed.
 		Expect(results.NewNodeClaims).To(BeEmpty())
 		Expect(results.AllNonPendingPodsScheduled()).To(BeFalse())
+	})
+
+	It("re-allocates devices from multiple candidate nodes onto one replacement (B, multi-candidate)", func() {
+		// Two candidate nodes, each hosting a GPU pod holding its node's published device. A single replacement instance
+		// type with two template GPUs can host both pods. Multi-node consolidation must free both candidates' devices
+		// (B1 over all candidates) and re-allocate both claims (B2) onto the one replacement.
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.GPUInstanceType("gpu-it", 2)}
+		ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", test.GPUDriver))
+		_, node1 := gpuNodeClaimAndNode("gpu-it")
+		_, node2 := gpuNodeClaimAndNode("gpu-it")
+		ExpectApplied(ctx, env.Client, test.NodeLocalSlice(node1, test.GPUDriver, "incluster-gpu-0"))
+		ExpectApplied(ctx, env.Client, test.NodeLocalSlice(node2, test.GPUDriver, "incluster-gpu-0"))
+		pod1 := gpuPodOnNode(node1, "gpu-claim-1", test.NodeLocalPoolName(test.GPUDriver, node1.Name), "incluster-gpu-0")
+		pod2 := gpuPodOnNode(node2, "gpu-claim-2", test.NodeLocalPoolName(test.GPUDriver, node2.Name), "incluster-gpu-0")
+
+		results := simulateConsolidation(node1, node2)
+
+		// Both pods reschedule with no error onto a single replacement NodeClaim (its two template GPUs satisfy both
+		// reclassified claims). Neither candidate node is reused as a scheduling target.
+		Expect(results.PodErrors[pod1]).To(BeNil())
+		Expect(results.PodErrors[pod2]).To(BeNil())
+		Expect(results.NewNodeClaims).To(HaveLen(1))
+		Expect(results.AllNonPendingPodsScheduled()).To(BeTrue())
+		for _, en := range results.ExistingNodes {
+			Expect([]string{node1.Name, node2.Name}).ToNot(ContainElement(en.Name()), "candidate nodes must not be scheduling targets")
+		}
+	})
+
+	It("reclaims only the candidate's share of a shared device, leaving the live pod's share (B, partial)", func() {
+		// A cluster-wide multi-allocatable device with 16Gi capacity, shared between a live pod (4Gi) on a surviving node
+		// and a candidate pod (10Gi). Consolidating the candidate must reclaim only its 10Gi share — the device stays
+		// pinned for the live pod — and re-allocate the candidate's claim back onto the same shared device.
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("no-gpu-it")}
+		ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", test.GPUDriver))
+		ExpectApplied(ctx, env.Client, test.SharedCapacitySlice("shared-gpu-pool", test.GPUDriver, "shared-gpu-0", "16Gi"))
+
+		// Live pod on a surviving (non-candidate) node holds 4Gi — this share must NOT be reclaimed.
+		_, liveNode := gpuNodeClaimAndNode("no-gpu-it")
+		livePod := test.Pod()
+		ExpectApplied(ctx, env.Client, livePod)
+		ExpectManualBinding(ctx, env.Client, livePod, liveNode)
+		ExpectApplied(ctx, env.Client, test.AllocatedSharedClaim("live-claim", "shared-gpu-pool", test.GPUDriver, "shared-gpu-0", test.CapacityRequest("4Gi"), test.PodConsumer(livePod)))
+
+		// Candidate pod holds 10Gi of the same shared device.
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		_, candidateNode := gpuNodeClaimAndNode("no-gpu-it")
+		candidatePod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
+				Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+			}}},
+			ResourceClaims:          []corev1.PodResourceClaim{test.PodResourceClaimReference("gpu", "candidate-claim")},
+			ContainerResourceClaims: []corev1.ResourceClaim{{Name: "gpu"}},
+		})
+		ExpectApplied(ctx, env.Client, candidatePod)
+		ExpectManualBinding(ctx, env.Client, candidatePod, candidateNode)
+		ExpectApplied(ctx, env.Client, test.AllocatedSharedClaim("candidate-claim", "shared-gpu-pool", test.GPUDriver, "shared-gpu-0", test.CapacityRequest("10Gi"), test.PodConsumer(candidatePod)))
+
+		results := simulateConsolidation(candidateNode)
+
+		// The candidate pod reschedules: its 10Gi share is reclaimed (B1 partial subtraction) and its claim reclassified
+		// (B2), re-allocating onto the shared device whose remaining capacity (16 - 4 live = 12Gi) now fits 10Gi. The
+		// live pod's 4Gi is untouched. no-gpu-it provides no template GPU, so the cluster-wide device is the only option.
+		Expect(results.PodErrors[candidatePod]).To(BeNil())
+		Expect(results.AllNonPendingPodsScheduled()).To(BeTrue())
 	})
 })
