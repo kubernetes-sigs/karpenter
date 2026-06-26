@@ -298,7 +298,8 @@ func setupNodeOverlayBenchmarkStore(instanceTypes []*cloudprovider.InstanceType,
 				}
 			}
 			if len(spotOfferings) > 0 {
-				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings)
+				//nolint:errcheck
+				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings, nil)
 			}
 		}
 	}

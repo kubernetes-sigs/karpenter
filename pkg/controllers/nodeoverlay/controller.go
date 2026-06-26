@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
-	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -33,12 +32,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1/cel"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -82,7 +83,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{}, fmt.Errorf("listing nodepools, %w", err)
 	}
 	overlayWithRuntimeValidationFailure := map[string]error{}
-	overlaysWithConflict := []string{}
+	overlaysWithConflict := map[string]bool{}
 	temporaryStore := newInternalInstanceTypeStore()
 	nodePoolToInstanceTypes := map[string][]*cloudprovider.InstanceType{}
 
@@ -102,6 +103,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		evaluatedNodePoolItems = append(evaluatedNodePoolItems, nodePoolList.Items[i])
 	}
 
+	overlaysWithPriceApplied := map[string]bool{}
+	overlaysWithNegativePrice := map[string]bool{}
+	overlaysWithExpressionError := map[string]bool{}
 	overlayList.OrderByWeight()
 	for i := range overlayList.Items {
 		if err := overlayList.Items[i].RuntimeValidate(ctx); err != nil {
@@ -109,15 +113,19 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			continue
 		}
 
-		if !c.validateAndUpdateInstanceTypeOverrides(temporaryStore, evaluatedNodePoolItems, nodePoolToInstanceTypes, overlayList.Items[i]) {
-			overlaysWithConflict = append(overlaysWithConflict, overlayList.Items[i].Name)
+		applyResult := c.validateAndUpdateInstanceTypeOverrides(ctx, temporaryStore, evaluatedNodePoolItems, nodePoolToInstanceTypes, overlayList.Items[i])
+		if !applyResult.noConflict {
+			overlaysWithConflict[overlayList.Items[i].Name] = true
 		}
+		overlaysWithPriceApplied[overlayList.Items[i].Name] = applyResult.priceApplied
+		overlaysWithNegativePrice[overlayList.Items[i].Name] = applyResult.negativePrice
+		overlaysWithExpressionError[overlayList.Items[i].Name] = applyResult.evalError
 	}
 	temporaryStore.evaluatedNodePools.Insert(lo.Map(evaluatedNodePoolItems, func(np v1.NodePool, _ int) string {
 		return np.Name
 	})...)
 
-	err, requeue := c.updateOverlayStatuses(ctx, overlayList.Items, overlaysWithConflict, overlayWithRuntimeValidationFailure)
+	err, requeue := c.updateOverlayStatuses(ctx, overlayList.Items, overlaysWithConflict, overlayWithRuntimeValidationFailure, overlaysWithPriceApplied, overlaysWithNegativePrice, overlaysWithExpressionError)
 	if requeue {
 		return reconcile.Result{Requeue: true}, nil
 	}
@@ -160,24 +168,78 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return b.Complete(c)
 }
 
-func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *internalInstanceTypeStore, nodePoolList []v1.NodePool, nodePoolToInstanceTypes map[string][]*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
+type overlayApplyResult struct {
+	noConflict    bool
+	priceApplied  bool
+	negativePrice bool
+	evalError     bool
+}
+
+// validateAndUpdateInstanceTypeOverrides validates the overlay for conflicts and expression
+// evaluation errors, then stores it. Compilation of any CEL price expression is done once
+// and reused across the validate, pre-check, and store phases.
+func (c *Controller) validateAndUpdateInstanceTypeOverrides(ctx context.Context, temporaryStore *internalInstanceTypeStore, nodePoolList []v1.NodePool, nodePoolToInstanceTypes map[string][]*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) overlayApplyResult {
+	// Compile the CEL expression once so that all phases share the same program.
+	var compiled *cel.PriceExpression
+	if overlay.Spec.PriceExpression != nil {
+		var err error
+		compiled, err = cel.Compile(*overlay.Spec.PriceExpression)
+		if err != nil {
+			// Should have been caught by RuntimeValidate; log and skip the whole overlay.
+			log.FromContext(ctx).Error(err, "skipping overlay with invalid priceExpression", "overlay", overlay.Name)
+			return overlayApplyResult{noConflict: true}
+		}
+	}
+
 	// Due to reserved capacity type offering being dynamically injected as part of the GetInstanceTypes call
 	// We will need to make sure we are validating against each nodepool to make sure. This will ensure that
 	// overlays that are targeting reserved instance offerings will be able to apply the offering.
 	for i := range nodePoolList {
 		if !c.validateInstanceTypesOverride(temporaryStore, nodePoolList[i], nodePoolToInstanceTypes[nodePoolList[i].Name], overlay) {
-			return false
+			return overlayApplyResult{}
 		}
+	}
+
+	// Expression evaluation pre-check: if any matched offering fails evaluation, reject the
+	// entire overlay before touching the store. This prevents a bad expression from blocking
+	// lower-weight valid overlays that target the same offerings.
+	if compiled != nil && c.hasExpressionEvaluationError(ctx, compiled, nodePoolList, nodePoolToInstanceTypes, overlay) {
+		return overlayApplyResult{noConflict: true, evalError: true}
 	}
 
 	// We separate the validation and storage steps to prevent partial application of invalid node overlays.
 	// This two-step process verifies that all instance types across all NodePools are valid before
 	// applying any updates, ensuring atomicity of the operation.
+	result := overlayApplyResult{noConflict: true}
 	for i := range nodePoolList {
-		c.storeUpdatesForInstanceTypeOverride(temporaryStore, nodePoolList[i], nodePoolToInstanceTypes[nodePoolList[i].Name], overlay)
+		stored, negative := c.storeUpdatesForInstanceTypeOverride(temporaryStore, nodePoolList[i], nodePoolToInstanceTypes[nodePoolList[i].Name], overlay, compiled)
+		if stored {
+			result.priceApplied = true
+		}
+		if negative {
+			result.negativePrice = true
+		}
 	}
+	return result
+}
 
-	return true
+// hasExpressionEvaluationError returns true if the compiled expression fails to evaluate for any
+// offering matched by the overlay. Logs the first error encountered.
+func (c *Controller) hasExpressionEvaluationError(ctx context.Context, compiled *cel.PriceExpression, nodePoolList []v1.NodePool, nodePoolToInstanceTypes map[string][]*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
+	overlayRequirements := scheduling.NewNodeSelectorRequirements(lo.Map(overlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
+		return r.AsNodeSelectorRequirement()
+	})...)
+	for i := range nodePoolList {
+		for _, it := range nodePoolToInstanceTypes[nodePoolList[i].Name] {
+			for _, of := range getOverlaidOfferings(nodePoolList[i], it, overlayRequirements) {
+				if _, err := compiled.Evaluate(of.Price); err != nil {
+					log.FromContext(ctx).Error(err, "price expression evaluation failed", "overlay", overlay.Name, "instanceType", it.Name)
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
@@ -205,29 +267,43 @@ func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeSt
 	return true
 }
 
-func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) {
+// storeUpdatesForInstanceTypeOverride stores the overlay updates and returns (priceStored, negativePrice).
+// compiled is the pre-compiled CEL expression from validateAndUpdateInstanceTypeOverrides; it must be
+// non-nil when overlay.Spec.PriceExpression is set.
+func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay, compiled *cel.PriceExpression) (bool, bool) {
 	overlayRequirements := scheduling.NewNodeSelectorRequirements(lo.Map(overlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
 		return r.AsNodeSelectorRequirement()
 	})...)
 
+	hasPriceSpec := overlay.Spec.Price != nil || overlay.Spec.PriceAdjustment != nil || compiled != nil
+	var priceStored, negativePrice bool
 	for _, it := range its {
 		offerings := getOverlaidOfferings(nodePool, it, overlayRequirements)
-		// if we are not able to find any offerings for an instance type
-		// This will mean that the overlay does not select on the instance all together
 		if len(offerings) == 0 {
 			continue
 		}
-
-		store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings)
+		store.updateInstanceTypeOffering(nodePool.Name, it.Name, overlay, offerings, compiled)
+		if hasPriceSpec {
+			priceStored = true
+		}
+		if compiled != nil {
+			for _, of := range offerings {
+				// Evaluation cannot fail here because the pre-check in validateAndUpdateInstanceTypeOverrides
+				// already verified all offerings evaluate successfully.
+				if price, err := compiled.Evaluate(of.Price); err == nil && price < 0 {
+					negativePrice = true
+				}
+			}
+		}
 		store.updateInstanceTypeCapacity(nodePool.Name, it.Name, overlay)
 	}
+	return priceStored, negativePrice
 }
 
-// getOverlaidOfferings will validate that an instance type matches a set of node overlay requirements
-// if true, the set of Compatible offering. This function effectively assumes, that if the if there are no offering returned then
-// the instance type is not Compatible with the overlay requirements. In cases, were an capacity overlay is being intended to be applied
-// based on the offerings, this will be an all or nothing operation. If one offering matches to the requirements
-// it will be applied at the instance type level or all the offerings.
+// getOverlaidOfferings returns the offerings of the given instance type that are compatible with the
+// overlay requirements in the context of the given NodePool. If no offerings match, the instance type
+// is considered incompatible with the overlay and nil is returned. Capacity overlays are applied at the
+// instance type level: if any offering matches, the capacity change applies to the whole instance type.
 func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, overlayReq scheduling.Requirements) cloudprovider.Offerings {
 	// The additional requirements will be added to the instance type during scheduling simulation
 	// Since getting instance types is done on a NodePool level, these requirements were always assumed
@@ -245,7 +321,7 @@ func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, 
 }
 
 func (c *Controller) isPriceUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) bool {
-	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil {
+	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil && overlay.Spec.PriceExpression == nil {
 		return false
 	}
 
@@ -268,15 +344,15 @@ func (c *Controller) isCapacityUpdatesConflicting(store *internalInstanceTypeSto
 	return false
 }
 
-func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1alpha1.NodeOverlay, overlaysWithConflict []string, overlayWithRuntimeValidationFailure map[string]error) (error, bool) {
+func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1alpha1.NodeOverlay, overlaysWithConflict map[string]bool, overlayWithRuntimeValidationFailure map[string]error, overlaysWithPriceApplied map[string]bool, overlaysWithNegativePrice map[string]bool, overlaysWithExpressionError map[string]bool) (error, bool) {
 	errs := make([]error, 0, len(overlayList))
 	for i := range overlayList {
 		stored := overlayList[i].DeepCopy()
-		overlayList[i].StatusConditions(status.WithClock(c.clock)).SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
-		if err, ok := overlayWithRuntimeValidationFailure[overlayList[i].Name]; ok {
-			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
-		} else if lo.Contains(overlaysWithConflict, overlayList[i].Name) {
-			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
+		setValidationCondition(&overlayList[i], overlayWithRuntimeValidationFailure, overlaysWithConflict, overlaysWithExpressionError)
+		setPriceAppliedCondition(&overlayList[i], overlaysWithPriceApplied, overlaysWithExpressionError)
+		setNonNegativeCondition(&overlayList[i], overlaysWithNegativePrice)
+		if overlaysWithNegativePrice[overlayList[i].Name] {
+			log.FromContext(ctx).Info("price expression evaluated to negative value", "overlay", overlayList[i].Name)
 		}
 
 		if !equality.Semantic.DeepEqual(stored, overlayList[i]) {
@@ -296,6 +372,36 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 		}
 	}
 	return multierr.Combine(errs...), false
+}
+
+func setValidationCondition(overlay *v1alpha1.NodeOverlay, runtimeFailures map[string]error, conflicts map[string]bool, expressionErrors map[string]bool) {
+	overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+	if err, ok := runtimeFailures[overlay.Name]; ok {
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
+	} else if conflicts[overlay.Name] {
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
+	} else if expressionErrors[overlay.Name] {
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "ExpressionEvaluationError", "price expression failed to evaluate for one or more matched offerings")
+	}
+}
+
+func setPriceAppliedCondition(overlay *v1alpha1.NodeOverlay, overlaysWithPriceApplied map[string]bool, expressionErrors map[string]bool) {
+	hasPriceSpec := overlay.Spec.Price != nil || overlay.Spec.PriceAdjustment != nil || overlay.Spec.PriceExpression != nil
+	if !hasPriceSpec || overlaysWithPriceApplied[overlay.Name] {
+		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypePriceAdjusted)
+	} else if expressionErrors[overlay.Name] {
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceAdjusted, "ExpressionEvaluationError", "price expression failed to evaluate for one or more matched offerings")
+	} else {
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceAdjusted, "NoMatchingInstanceTypes", "price configuration did not match any instance types")
+	}
+}
+
+func setNonNegativeCondition(overlay *v1alpha1.NodeOverlay, overlaysWithNegativePrice map[string]bool) {
+	if overlaysWithNegativePrice[overlay.Name] {
+		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypePriceNonNegative, "NegativePrice", "price expression produced a negative value for one or more offerings")
+	} else {
+		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypePriceNonNegative)
+	}
 }
 
 // NodeOverlayEventHandler is a watcher on any object to trigger a overlay reconciliation to validate the Node Overlays

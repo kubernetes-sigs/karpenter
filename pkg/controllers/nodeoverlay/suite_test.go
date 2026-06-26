@@ -566,8 +566,11 @@ var _ = Describe("Validation", func() {
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("1.03")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("23")}}),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-2")}}),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("1.03")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("23")}}),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-2")}}),
+			Entry("PriceExpression", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.9")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.8")}}),
+			Entry("PriceExpression vs Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.9")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("23")}}),
+			Entry("Price vs PriceExpression", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("1.03")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.8")}}),
 		)
 		DescribeTable("should fail with pricing updates are the same overlays with overlapping requirements",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay) {
@@ -616,8 +619,9 @@ var _ = Describe("Validation", func() {
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("100")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("100")}}),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+100")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+100")}}),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("100")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("100")}}),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+100")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+100")}}),
+			Entry("PriceExpression", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.9")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.9")}}),
 		)
 		DescribeTable("should pass with conflicting pricing updates overlays with mutually exclusive requirements",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay) {
@@ -665,8 +669,9 @@ var _ = Describe("Validation", func() {
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("23")}}),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("+54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-2")}}),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("23")}}),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("+54")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-2")}}),
+			Entry("PriceExpression", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.9")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.8")}}),
 		)
 		DescribeTable("should pass with conflicting pricing update overlays with mutually exclusive weights",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay) {
@@ -714,9 +719,64 @@ var _ = Describe("Validation", func() {
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			},
-			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("34")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("2")}}),
-			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-4")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: new("-2")}}),
+			Entry("Price", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("34")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: lo.ToPtr("2")}}),
+			Entry("PriceAdjustment", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-4")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceAdjustment: lo.ToPtr("-2")}}),
+			Entry("PriceExpression", v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.9")}}, v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{PriceExpression: lo.ToPtr("self.price * 0.8")}}),
 		)
+	})
+	Context("PriceNonNegative Condition", func() {
+		It("should set PriceNonNegative=False when priceExpression evaluates to negative", func() {
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{Name: "negative-price-overlay"},
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
+						{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type"}},
+					},
+					Weight:          lo.ToPtr(int32(10)),
+					PriceExpression: lo.ToPtr("self.price - 999.0"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+			updated := ExpectExists(ctx, env.Client, overlay)
+			Expect(updated.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceNonNegative)).To(BeFalse())
+			Expect(updated.StatusConditions().Get(v1alpha1.ConditionTypePriceNonNegative).Reason).To(Equal("NegativePrice"))
+		})
+		It("should set PriceNonNegative=True when priceExpression evaluates to positive", func() {
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{Name: "positive-price-overlay"},
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
+						{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type"}},
+					},
+					Weight:          lo.ToPtr(int32(10)),
+					PriceExpression: lo.ToPtr("self.price * 0.9"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+			updated := ExpectExists(ctx, env.Client, overlay)
+			Expect(updated.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceNonNegative)).To(BeTrue())
+		})
+		It("should set PriceNonNegative=True when overlay has no priceExpression", func() {
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{Name: "no-expression-overlay"},
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []v1alpha1.NodeSelectorRequirement{
+						{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type"}},
+					},
+					Weight: lo.ToPtr(int32(10)),
+					Price:  lo.ToPtr("0.5"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+			updated := ExpectExists(ctx, env.Client, overlay)
+			Expect(updated.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceNonNegative)).To(BeTrue())
+		})
 	})
 	Context("Capacity Adjustment", func() {
 		It("should fail with conflicting capacity overlays with overlapping requirements", func() {
@@ -2762,5 +2822,262 @@ var _ = Describe("Failure Isolation", func() {
 		brokenInstanceTypes, err = store.ApplyAll(brokenNodePool.Name, brokenInstanceTypes)
 		Expect(err).To(BeNil())
 		Expect(len(brokenInstanceTypes)).To(BeNumerically("==", 1))
+	})
+})
+
+var _ = Describe("PriceAdjusted Condition", func() {
+	It("should set PriceAdjusted=True when price expression matches instance types", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				Price:  lo.ToPtr("1.5"),
+				Weight: lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceAdjusted)).To(BeTrue())
+	})
+	It("should set PriceAdjusted=False when price expression matches no instance types", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"nonexistent-instance-type"},
+					},
+				},
+				Price:  lo.ToPtr("1.5"),
+				Weight: lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceAdjusted)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceAdjusted).Reason).To(Equal("NoMatchingInstanceTypes"))
+	})
+	It("should set PriceAdjusted=True when overlay has no price spec", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				Weight: lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceAdjusted)).To(BeTrue())
+	})
+})
+
+var _ = Describe("PriceNonNegative Condition", func() {
+	It("should set PriceNonNegative=False when price expression produces a negative price", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				// default-instance-type has price 1.020, so subtracting 999 gives -997.98
+				PriceExpression: lo.ToPtr("self.price - 999.0"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceNonNegative)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceNonNegative).Reason).To(Equal("NegativePrice"))
+		// PriceNonNegative is informational only -- Ready must remain True
+		Expect(updatedOverlay.StatusConditions().Root().IsTrue()).To(BeTrue())
+	})
+	It("should set PriceNonNegative=True when price expression produces a non-negative price", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("self.price * 0.9"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceNonNegative)).To(BeTrue())
+	})
+	It("should set PriceNonNegative=True when no price expression is configured", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				Price:  lo.ToPtr("1.5"),
+				Weight: lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceNonNegative)).To(BeTrue())
+	})
+})
+
+var _ = Describe("PriceExpression Evaluation Error", func() {
+	It("should set ValidationSucceeded=False when priceExpression compiles but fails to evaluate", func() {
+		// self.notprice compiles fine (map<string,dyn> allows any key at compile time)
+		// but fails at evaluation time because the key does not exist in the eval map.
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("self.notprice * 0.9"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("ExpressionEvaluationError"))
+	})
+	It("should set ValidationSucceeded=True and apply price for a bare numeric literal", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("0.50"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 0.50))
+	})
+	It("should not contaminate the store when a high-weight overlay fails evaluation, allowing lower-weight valid price to apply", func() {
+		// high-weight overlay uses an invalid expression that compiles but fails evaluation
+		overlayHighWeight := test.NodeOverlay(v1alpha1.NodeOverlay{
+			ObjectMeta: metav1.ObjectMeta{Name: "high-weight-bad-expr"},
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("self.notprice * 0.9"),
+				Weight:          lo.ToPtr(int32(20)),
+			},
+		})
+		// lower-weight overlay has a valid price
+		overlayLowWeight := test.NodeOverlay(v1alpha1.NodeOverlay{
+			ObjectMeta: metav1.ObjectMeta{Name: "low-weight-valid-price"},
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				Price:  lo.ToPtr("1.50"),
+				Weight: lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlayHighWeight, overlayLowWeight)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		// high-weight overlay should have ValidationSucceeded=False with ExpressionEvaluationError
+		updatedHigh := ExpectExists(ctx, env.Client, overlayHighWeight)
+		Expect(updatedHigh.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+		Expect(updatedHigh.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("ExpressionEvaluationError"))
+
+		// lower-weight overlay should have ValidationSucceeded=True
+		updatedLow := ExpectExists(ctx, env.Client, overlayLowWeight)
+		Expect(updatedLow.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+		// the valid lower-weight price should be applied, not left at the original 1.020
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		Expect(err).To(BeNil())
+		instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
+		Expect(err).To(BeNil())
+		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.50))
+	})
+	It("should set PriceAdjusted=False with ExpressionEvaluationError reason when expression fails to evaluate", func() {
+		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+			Spec: v1alpha1.NodeOverlaySpec{
+				Requirements: []v1alpha1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"default-instance-type"},
+					},
+				},
+				PriceExpression: lo.ToPtr("self.notprice * 0.9"),
+				Weight:          lo.ToPtr(int32(10)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("ExpressionEvaluationError"))
+		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypePriceAdjusted)).To(BeFalse())
+		Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypePriceAdjusted).Reason).To(Equal("ExpressionEvaluationError"))
 	})
 })
