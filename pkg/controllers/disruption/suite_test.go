@@ -118,6 +118,12 @@ var _ = BeforeEach(func() {
 
 	recorder.Reset() // Reset the events that we captured during the run
 
+	// Rebuild the DRA device-allocation controller and the provisioner bound to it each test so DRA tracking state
+	// (which the controller accumulates across reconciles and never resets) doesn't leak between specs. This must
+	// happen before the disruptionController and queue below, which capture prov. Mirrors the provisioning suite.
+	draController = deviceallocation.NewController(env.Client)
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController)
+
 	// Ensure that we reset the disruption controller's methods after each test run
 	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	env.Clock.SetTime(time.Now())
