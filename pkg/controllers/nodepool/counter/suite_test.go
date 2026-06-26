@@ -428,4 +428,69 @@ var _ = Describe("Counter", func() {
 			Expect(*staticNodePool.Spec.Replicas).To(Equal(int64(3)))
 		})
 	})
+	Context("Status.NodeClaimConditions Field", func() {
+		It("should unset Status.NodeClaimConditions when no nodes exist", func() {
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+			Expect(nodePool.Status.NodeClaimConditions).To(BeNil())
+		})
+		It("should set Status.NodeClaimConditions when two nodes exist", func() {
+			ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+			Expect(nodePool.Status.NodeClaimConditions).ToNot(BeNil())
+			Expect(nodePool.Status.NodeClaimConditions[0]).To(Equal(v1.NodeClaimConditions{ConditionType: new(v1.ConditionTypeInitialized), Count: new(int64(2))}))
+			Expect(nodePool.Status.NodeClaimConditions[1]).To(Equal(v1.NodeClaimConditions{ConditionType: new(v1.ConditionTypeLaunched), Count: new(int64(2))}))
+			Expect(nodePool.Status.NodeClaimConditions[2]).To(Equal(v1.NodeClaimConditions{ConditionType: new("Ready"), Count: new(int64(2))}))
+		})
+		It("should update Status.NodeClaimConditions when nodes are added and removed", func() {
+			// Start with no nodes
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Status.NodeClaimConditions).To(BeNil())
+
+			// Add first node
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Status.NodeClaimConditions).ToNot(BeNil())
+			Expect(nodePool.Status.NodeClaimConditions[0]).To(Equal(v1.NodeClaimConditions{ConditionType: new(v1.ConditionTypeInitialized), Count: new(int64(1))}))
+			Expect(nodePool.Status.NodeClaimConditions[1]).To(Equal(v1.NodeClaimConditions{ConditionType: new(v1.ConditionTypeLaunched), Count: new(int64(1))}))
+			Expect(nodePool.Status.NodeClaimConditions[2]).To(Equal(v1.NodeClaimConditions{ConditionType: new("Ready"), Count: new(int64(1))}))
+
+			// Add second node
+			ExpectApplied(ctx, env.Client, node2, nodeClaim2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Status.NodeClaimConditions).ToNot(BeNil())
+			Expect(nodePool.Status.NodeClaimConditions[0]).To(Equal(v1.NodeClaimConditions{ConditionType: new(v1.ConditionTypeInitialized), Count: new(int64(2))}))
+			Expect(nodePool.Status.NodeClaimConditions[1]).To(Equal(v1.NodeClaimConditions{ConditionType: new(v1.ConditionTypeLaunched), Count: new(int64(2))}))
+			Expect(nodePool.Status.NodeClaimConditions[2]).To(Equal(v1.NodeClaimConditions{ConditionType: new("Ready"), Count: new(int64(2))}))
+
+			// Remove first node
+			ExpectDeleted(ctx, env.Client, node, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Status.NodeClaimConditions).ToNot(BeNil())
+			Expect(nodePool.Status.NodeClaimConditions[0]).To(Equal(v1.NodeClaimConditions{ConditionType: new(v1.ConditionTypeInitialized), Count: new(int64(1))}))
+			Expect(nodePool.Status.NodeClaimConditions[1]).To(Equal(v1.NodeClaimConditions{ConditionType: new(v1.ConditionTypeLaunched), Count: new(int64(1))}))
+			Expect(nodePool.Status.NodeClaimConditions[2]).To(Equal(v1.NodeClaimConditions{ConditionType: new("Ready"), Count: new(int64(1))}))
+
+			// Remove second node
+			ExpectDeleted(ctx, env.Client, node2, nodeClaim2)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Status.NodeClaimConditions).To(BeNil())
+		})
+	})
 })
