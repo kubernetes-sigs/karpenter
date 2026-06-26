@@ -164,6 +164,9 @@ func (at *AllocationTracker) Commit(alloc *allocation) {
 		}
 	}
 	at.commitCounters(alloc.nodeClaimID, alloc.counterConsumptionByIT)
+	for itID, totals := range alloc.templateCounterTotalsByIT {
+		at.InitTemplateRemainingCounters(alloc.nodeClaimID, itID, totals)
+	}
 	at.commitTemplateCounters(alloc.nodeClaimID, alloc.templateCounterConsumptionByIT)
 	at.commitCapacity(alloc.nodeClaimID, alloc.capacityConsumptionByIT)
 	at.commitTemplateCapacity(alloc.nodeClaimID, alloc.templateCapacityConsumptionByIT)
