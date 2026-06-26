@@ -477,7 +477,7 @@ func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList
 	for _, group := range instanceType.AllocatableOfferingsList() {
 		resourceFit := resources.Fits(requests, group.Allocatable)
 		for _, of := range group.Offerings {
-			if of.Available && requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+			if requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 				hasOffering = true
 				if resourceFit {
 					return true, true

@@ -211,13 +211,17 @@ func (i *InstanceType) precompute() {
 	}
 	if !hasOverrides {
 		i.allocatableOfferings = []AllocatableOfferings{
-			{Allocatable: i.computeAllocatable(nil, nil), Offerings: i.Offerings},
+			{Allocatable: i.computeAllocatable(nil, nil), Offerings: i.Offerings.Available()},
 		}
 		return
 	}
 
-	// Group offerings by their (CapacityOverride, OverheadOverride) tuple.
-	// The first group is always the base (no overrides).
+	i.allocatableOfferings = i.groupOfferingsByOverride()
+}
+
+// groupOfferingsByOverride groups available offerings by their (CapacityOverride, OverheadOverride) tuple,
+// computing an allocatable for each group. The first group is always the base (no overrides).
+func (i *InstanceType) groupOfferingsByOverride() []AllocatableOfferings {
 	type overrideKey struct {
 		capacity string
 		overhead string
@@ -228,6 +232,9 @@ func (i *InstanceType) precompute() {
 	order := []overrideKey{baseKey}
 
 	for _, o := range i.Offerings {
+		if !o.Available {
+			continue
+		}
 		if len(o.CapacityOverride) == 0 && o.OverheadOverride == nil {
 			groups[baseKey].Offerings = append(groups[baseKey].Offerings, o)
 			continue
@@ -244,7 +251,7 @@ func (i *InstanceType) precompute() {
 	}
 
 	// Build allocatable for each group
-	i.allocatableOfferings = make([]AllocatableOfferings, 0, len(order))
+	result := make([]AllocatableOfferings, 0, len(order))
 	for idx, key := range order {
 		group := groups[key]
 		if idx == 0 {
@@ -254,8 +261,9 @@ func (i *InstanceType) precompute() {
 			o := group.Offerings[0]
 			group.Allocatable = i.computeAllocatable(o.CapacityOverride, o.OverheadOverride)
 		}
-		i.allocatableOfferings = append(i.allocatableOfferings, *group)
+		result = append(result, *group)
 	}
+	return result
 }
 
 // computeAllocatable computes the allocatable resources for a given capacity/overhead override.
