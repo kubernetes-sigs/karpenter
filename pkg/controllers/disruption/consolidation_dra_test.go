@@ -240,6 +240,10 @@ var _ = Describe("Consolidation/DRA", func() {
 	})
 
 	It("reclaims only the candidate's share of a shared device, leaving the live pod's share (B, partial)", func() {
+		// Multi-allocatable devices / consumable capacity require the DRAConsumableCapacity feature, GA in k8s 1.36.
+		if env.Version.Minor() < 36 {
+			Skip("Consumable capacity requires K8s versions >= 1.36.x (DRAConsumableCapacity feature gate)")
+		}
 		// A cluster-wide multi-allocatable device with 16Gi capacity, shared between a live pod (4Gi) on a surviving node
 		// and a candidate pod (10Gi). Consolidating the candidate must reclaim only its 10Gi share — the device stays
 		// pinned for the live pod — and re-allocate the candidate's claim back onto the same shared device.

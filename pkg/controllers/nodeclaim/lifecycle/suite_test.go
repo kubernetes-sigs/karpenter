@@ -263,13 +263,22 @@ var _ = Describe("DRA Initialization Gating", func() {
 	)
 
 	BeforeEach(func() {
+		// The DRA initialization gate relies on the resource.k8s.io/v1 ResourceSlice API, which only exists on k8s
+		// >= 1.34. Skip below that — there is no DRA to gate on.
+		if env.Version.Minor() < 34 {
+			Skip("DRA is only available in K8s versions >= 1.34.x")
+		}
 		// Enable DRA so the initialization gate is active.
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(false)}))
 		nodePool = test.NodePool()
 	})
 
 	AfterEach(func() {
-		// ResourceSlices are cluster-scoped and not handled by ExpectCleanedUp; remove them between tests.
+		// ResourceSlices are cluster-scoped and not handled by ExpectCleanedUp; remove them between tests. Guard on the
+		// version since the ResourceSlice API (and thus DeleteAllOf) isn't served before 1.34.
+		if env.Version.Minor() < 34 {
+			return
+		}
 		Expect(env.Client.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).To(Succeed())
 	})
 
