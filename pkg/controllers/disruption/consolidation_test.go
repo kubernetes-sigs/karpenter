@@ -131,7 +131,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			// We get six calls here because we have Nodes and NodeClaims that fired for this event
-			// and each of the consolidation mechanisms specifies that this event should be fired
+			// from Emptiness, MultiNodeConsolidation, and SingleNodeConsolidation
 			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(6))
 		})
 		It("should fire an event when a candidate does not have a resolvable instance type", func() {
@@ -805,6 +805,13 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				// Add a pod so that the node is non-empty and eligible for consolidation
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+				})
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
@@ -867,6 +874,13 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < len(nodeClaims); i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				// Add a pod so that the node is non-empty and eligible for consolidation
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+				})
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
@@ -892,6 +906,13 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := range numNodes {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				// Add a pod so that the node is non-empty and eligible for consolidation
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+				})
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
@@ -954,6 +975,13 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < len(nodeClaims); i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				// Add a pod so that the node is non-empty and eligible for consolidation
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+				})
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
@@ -3090,7 +3118,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			// Reset the disruption controller so consolidation methods are not cached as consolidated
 			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
-			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue,
+			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 				disruption.WithMethods(NewMethodsWithNopValidator()...))
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -3534,7 +3562,7 @@ var _ = Describe("Consolidation", func() {
 		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -4153,7 +4181,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should wait for the node TTL for non-empty nodes before consolidating (multi-node)",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -4223,9 +4251,9 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
-		DescribeTable("should continue to multi-nodeclaim consolidation when emptiness fails validation after the node ttl",
+		DescribeTable("should consolidate multiple empty nodes via multi-nodeclaim consolidation",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -4244,6 +4272,7 @@ var _ = Describe("Consolidation", func() {
 							},
 						}}})
 
+				// Apply nodes without binding pods (nodes are empty)
 				ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
@@ -4254,7 +4283,7 @@ var _ = Describe("Consolidation", func() {
 						ExpectSingletonReconciled(ctx, disruptionController)
 					},
 					func() {
-						// wait for the controller to block on the validation timeout
+						// wait for the controller to block on the validation timeout (multi-node)
 						Eventually(env.Clock.HasWaiters, time.Second*5).Should(BeTrue())
 						// controller should be blocking during the timeout
 						Expect(finished.Load()).To(BeFalse())
@@ -4263,22 +4292,8 @@ var _ = Describe("Consolidation", func() {
 						ExpectExists(ctx, env.Client, nodeClaims[1])
 						ExpectExists(ctx, env.Client, nodeClaims[2])
 
-						// bind pods to nodes
-						ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-						ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
-						ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
-
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[1]))
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[2]))
-						// advance the clock so that the timeout expires for emptiness
-						Eventually(env.Clock.HasWaiters, time.Second*5).Should(BeTrue())
+						// advance the clock so that the multi-node validation timeout expires
 						env.Clock.Step(31 * time.Second)
-
-						// Succeed on multi node consolidation
-						Eventually(env.Clock.HasWaiters, time.Second*5).Should(BeTrue())
-						env.Clock.Step(31 * time.Second)
-						//ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 						Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 					},
 				)
@@ -4286,24 +4301,22 @@ var _ = Describe("Consolidation", func() {
 				// Process the item so that the nodes can be deleted.
 				cmds := queue.GetCommands()
 				Expect(cmds).To(HaveLen(1))
-				ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
+
+				// Multi-node consolidation deletes all empty nodes
 				ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 				// Cascade any deletion of the nodeclaim to the node
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0], nodeClaims[1], nodeClaims[2])
 
-				// should have 2 nodes after multi nodeclaim consolidation deletes one
-				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-				// and delete node3 in single nodeclaim consolidation
-				ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1], nodeClaims[2], nodes[2])
+				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 			},
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
 		DescribeTable("should continue to single nodeclaim consolidation when multi-nodeclaim consolidation fails validation after the node ttl",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -4429,7 +4442,7 @@ var _ = Describe("Consolidation", func() {
 				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 			}
 		})
-		It("should consider node lifetime remaining when calculating disruption cost", func() {
+		It("should consolidate the node with best savings ratio first", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -4453,7 +4466,7 @@ var _ = Describe("Consolidation", func() {
 			// need to sleep to force the second node to be created a bit after the first node.
 			ExpectApplied(ctx, env.Client, nodeClaims[1], nodes[1])
 
-			// two pods on node 1, one on node 2
+			// two pods on node 0, one on node 1
 			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
 			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
@@ -4464,16 +4477,16 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
-			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[1])
 
 			// Cascade any deletion of the nodeclaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
 
-			// the second node has more pods, so it would normally not be picked for consolidation, except it very little
-			// lifetime remaining, so it should be deleted
+			// Node 1 has fewer pods (lower RescheduleDisruptionCost) so better
+			// savings ratio (price/disruption). It sorts first and consolidates.
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
+			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
 	})
 	Context("Topology Consideration", func() {

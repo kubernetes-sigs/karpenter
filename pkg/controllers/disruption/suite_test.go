@@ -116,7 +116,7 @@ var _ = BeforeEach(func() {
 	recorder.Reset() // Reset the events that we captured during the run
 
 	// Ensure that we reset the disruption controller's methods after each test run
-	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithNopValidator()...))
+	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	env.Clock.SetTime(time.Now())
 	cluster.Reset()
 	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
@@ -463,7 +463,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, env.Clock)
 		q := disruption.NewQueue(hangCreateClient, recorder, cluster, env.Clock, p)
-		dc := disruption.NewController(env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q)
+		dc := disruption.NewController(env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q, clusterCost)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1938,14 +1938,17 @@ var _ = Describe("Metrics", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		ExpectSingletonReconciled(ctx, disruptionController)
+		// Empty nodes are handled by the Emptiness method with reason "empty"
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
-			"decision":          "delete",
-			metrics.ReasonLabel: "empty",
+			"decision":           "delete",
+			metrics.ReasonLabel:  "empty",
+			"consolidation_type": "empty",
 		})
 		ExpectMetricCounterValue(disruption.NodepoolDecisionsPerformed, 1, map[string]string{
 			metrics.NodePoolLabel: nodePool.Name,
 			"decision":            "delete",
 			metrics.ReasonLabel:   "empty",
+			"consolidation_type":  "empty",
 		})
 	})
 	It("should fire metrics for single node delete disruption", func() {
@@ -2012,6 +2015,7 @@ var _ = Describe("Metrics", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 		ExpectSingletonReconciled(ctx, disruptionController)
+		// Empty nodes are handled by the Emptiness method with reason "empty"
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
 			metrics.ReasonLabel:  "empty",

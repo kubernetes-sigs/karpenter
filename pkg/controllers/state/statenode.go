@@ -43,6 +43,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -131,8 +132,9 @@ type StateNode struct {
 	daemonSetRequests map[types.NamespacedName]corev1.ResourceList
 	daemonSetLimits   map[types.NamespacedName]corev1.ResourceList
 
-	podRequests map[types.NamespacedName]corev1.ResourceList
-	podLimits   map[types.NamespacedName]corev1.ResourceList
+	podRequests        map[types.NamespacedName]corev1.ResourceList
+	podLimits          map[types.NamespacedName]corev1.ResourceList
+	podDisruptionCosts map[types.NamespacedName]float64
 
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
@@ -145,27 +147,29 @@ type StateNode struct {
 
 func NewNode() *StateNode {
 	return &StateNode{
-		daemonSetRequests: map[types.NamespacedName]corev1.ResourceList{},
-		daemonSetLimits:   map[types.NamespacedName]corev1.ResourceList{},
-		podRequests:       map[types.NamespacedName]corev1.ResourceList{},
-		podLimits:         map[types.NamespacedName]corev1.ResourceList{},
-		hostPortUsage:     scheduling.NewHostPortUsage(),
-		volumeUsage:       scheduling.NewVolumeUsage(),
+		daemonSetRequests:  map[types.NamespacedName]corev1.ResourceList{},
+		daemonSetLimits:    map[types.NamespacedName]corev1.ResourceList{},
+		podRequests:        map[types.NamespacedName]corev1.ResourceList{},
+		podLimits:          map[types.NamespacedName]corev1.ResourceList{},
+		podDisruptionCosts: map[types.NamespacedName]float64{},
+		hostPortUsage:      scheduling.NewHostPortUsage(),
+		volumeUsage:        scheduling.NewVolumeUsage(),
 	}
 }
 
 func (in *StateNode) ShallowCopy() *StateNode {
 	return &StateNode{
-		Node:              in.Node,
-		NodeClaim:         in.NodeClaim,
-		daemonSetRequests: in.daemonSetRequests,
-		daemonSetLimits:   in.daemonSetLimits,
-		podRequests:       in.podRequests,
-		podLimits:         in.podLimits,
-		hostPortUsage:     in.hostPortUsage,
-		volumeUsage:       in.volumeUsage,
-		markedForDeletion: in.markedForDeletion,
-		nominatedUntil:    in.nominatedUntil,
+		Node:               in.Node,
+		NodeClaim:          in.NodeClaim,
+		daemonSetRequests:  in.daemonSetRequests,
+		daemonSetLimits:    in.daemonSetLimits,
+		podRequests:        in.podRequests,
+		podLimits:          in.podLimits,
+		podDisruptionCosts: in.podDisruptionCosts,
+		hostPortUsage:      in.hostPortUsage,
+		volumeUsage:        in.volumeUsage,
+		markedForDeletion:  in.markedForDeletion,
+		nominatedUntil:     in.nominatedUntil,
 	}
 }
 
@@ -420,6 +424,17 @@ func (in *StateNode) PodLimits() corev1.ResourceList {
 	return resources.Merge(lo.Values(in.podLimits)...)
 }
 
+// DisruptionCost returns the exact disruption cost for this node:
+// PerNodeBaseDisruptionCost (1.0) + sum of positive per-pod eviction costs.
+// This is maintained incrementally as pods are added/removed.
+func (in *StateNode) DisruptionCost() float64 {
+	cost := 1.0 // PerNodeBaseDisruptionCost
+	for _, c := range in.podDisruptionCosts {
+		cost += c
+	}
+	return cost
+}
+
 func (in *StateNode) MarkedForDeletion() bool {
 	// The Node is marked for deletion if:
 	//  1. The Node has MarkedForDeletion set
@@ -459,6 +474,18 @@ func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client,
 		in.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
 		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
 	}
+	// Maintain per-pod disruption cost for balanced scoring. Only non-daemon
+	// pods with positive eviction cost contribute to the node's disruption cost.
+	if !podutils.IsOwnedByDaemonSet(pod) {
+		if in.podDisruptionCosts == nil {
+			in.podDisruptionCosts = map[types.NamespacedName]float64{}
+		}
+		if evictionCost := disruptionutils.EvictionCost(ctx, pod); evictionCost > 0 {
+			in.podDisruptionCosts[podKey] = evictionCost
+		} else {
+			delete(in.podDisruptionCosts, podKey)
+		}
+	}
 	in.hostPortUsage.Add(pod, hostPorts)
 	in.volumeUsage.Add(pod, volumes)
 	return nil
@@ -471,6 +498,7 @@ func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 	delete(in.podLimits, podKey)
 	delete(in.daemonSetRequests, podKey)
 	delete(in.daemonSetLimits, podKey)
+	delete(in.podDisruptionCosts, podKey)
 }
 
 func nominationWindow(ctx context.Context) time.Duration {

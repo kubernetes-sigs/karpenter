@@ -91,6 +91,7 @@ var _ = Describe("Emptiness", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
+			// Node has a pod, so Emptiness skips it (disruption cost > base)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
@@ -99,6 +100,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
+			// Pod deleted, node is now empty. Emptiness claims it.
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
@@ -389,15 +391,15 @@ var _ = Describe("Emptiness", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
-			// Cascade any deletion of the nodeClaim to the node
+			// The node is both empty and drifted. Drift runs before Emptiness in
+			// the method list, so it claims the node. Verify deletion succeeds and
+			// the metric reflects "drifted" as the reason.
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			// we should delete the empty node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
-				metrics.ReasonLabel: "empty",
+				metrics.ReasonLabel: "drifted",
 			})
 		})
 		It("should ignore nodes without the consolidatable status condition", func() {
@@ -716,7 +718,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectExists(ctx, env.Client, node)
 	})
 	It("should wait for the node TTL for empty nodes before consolidating", func() {
-		disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+		disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
 
 		// inform cluster state about nodes and nodeclaims
