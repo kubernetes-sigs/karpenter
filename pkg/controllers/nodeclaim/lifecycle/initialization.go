@@ -146,7 +146,7 @@ func RequestedResourcesRegistered(node *corev1.Node, nodeClaim *v1.NodeClaim) (c
 }
 
 // draDriverPoolsPublished reports whether the NodeClaim's expected DRA drivers have all published a complete pool for
-// the node. When DRA is disabled or the NodeClaim has no dra-drivers annotation, it is a no-op and returns ("", true,
+// the node. When DRA is disabled or the NodeClaim has no requested-dra-drivers annotation, it is a no-op and returns ("", true,
 // nil). Otherwise it lists the node's ResourceSlices and returns the first driver missing a complete pool (with ok
 // false), or ("", true, nil) when all expected drivers are satisfied.
 func (i *Initialization) draDriverPoolsPublished(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim) (string, bool, error) {
@@ -196,9 +196,9 @@ func sliceBelongsToNode(slice *resourcev1.ResourceSlice, nodeName string) bool {
 	return false
 }
 
-// DRADriversPublished checks whether every DRA driver recorded in the NodeClaim's dra-drivers annotation has published
+// DRADriversPublished checks whether every DRA driver recorded in the NodeClaim's requested-dra-drivers annotation has published
 // at least one complete ResourceSlice pool among the node's slices. It returns the name of the first driver missing a
-// complete pool and false, or ("", true) when all expected drivers are satisfied. A NodeClaim with no dra-drivers
+// complete pool and false, or ("", true) when all expected drivers are satisfied. A NodeClaim with no requested-dra-drivers
 // annotation (or an empty value) is treated as having no expectation, so it returns ("", true).
 //
 // A pool is complete when the number of observed slices at the pool's highest generation equals the slices'

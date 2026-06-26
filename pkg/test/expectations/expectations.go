@@ -600,7 +600,7 @@ func ExpectDeviceAllocationReconciled(ctx context.Context, c client.Client, cont
 	}
 }
 
-// ExpectNodeClaimDRADrivers asserts the NodeClaim carries the karpenter.sh/dra-drivers annotation listing exactly the
+// ExpectNodeClaimDRADrivers asserts the NodeClaim carries the karpenter.sh/requested-dra-drivers annotation listing exactly the
 // expected driver names (order-independent).
 func ExpectNodeClaimDRADrivers(nc *v1.NodeClaim, drivers ...string) {
 	GinkgoHelper()

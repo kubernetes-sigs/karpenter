@@ -333,7 +333,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 		})
 	})
 
-	Context("dra-drivers annotation (G)", func() {
+	Context("requested-dra-drivers annotation (G)", func() {
 		It("should list every driver whose devices were allocated (G1)", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuAndNICInstanceType("multi-it")}
 			ExpectApplied(ctx, env.Client, nodePool,

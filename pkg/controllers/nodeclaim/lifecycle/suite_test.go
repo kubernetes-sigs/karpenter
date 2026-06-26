@@ -273,7 +273,7 @@ var _ = Describe("DRA Initialization Gating", func() {
 		Expect(env.Client.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).To(Succeed())
 	})
 
-	// registeredReadyNodeClaim creates a NodeClaim with the given dra-drivers annotation, drives it through launch and
+	// registeredReadyNodeClaim creates a NodeClaim with the given requested-dra-drivers annotation, drives it through launch and
 	// registration, and returns the NodeClaim and its Ready node. At this point the only thing blocking initialization
 	// is the DRA gate (node is Ready, registered, no taints, and requests no extended resources).
 	registeredReadyNodeClaim := func(drivers string) (*v1.NodeClaim, *corev1.Node) {
@@ -371,7 +371,7 @@ var _ = Describe("DRA Initialization Gating", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
 	})
 
-	It("initializes a NodeClaim with no dra-drivers annotation (d)", func() {
+	It("initializes a NodeClaim with no requested-dra-drivers annotation (d)", func() {
 		nodeClaim, _ := registeredReadyNodeClaim("")
 		nodeClaim = reconcile(nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
