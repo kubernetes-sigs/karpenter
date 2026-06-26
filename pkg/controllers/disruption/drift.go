@@ -117,3 +117,8 @@ func (d *Drift) Class() string {
 func (d *Drift) ConsolidationType() string {
 	return ""
 }
+
+// Weight returns 3, giving Drift the highest CFS priority among Phase 2 methods (Drift=3, Multi=2, Single=1).
+func (d *Drift) Weight() float64 {
+	return 3
+}

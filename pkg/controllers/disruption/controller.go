@@ -21,6 +21,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,14 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
+// MethodState tracks CFS scheduling state for a Phase 2 disruption method.
+// Phase 1 methods (Emptiness, StaticDrift) do not have MethodState entries.
+type MethodState struct {
+	druntime float64 // disruption runtime consumed; lower = higher scheduling priority
+	weight   float64 // higher weight = druntime grows slower = more turns
+	active   bool    // whether this method had eligible candidates last cycle
+}
+
 type Controller struct {
 	queue         *Queue
 	kubeClient    client.Client
@@ -63,6 +72,7 @@ type Controller struct {
 	methods       []Method
 	mu            sync.Mutex
 	lastRun       map[string]time.Time
+	methodStates  map[string]*MethodState // CFS state keyed by method type name; Phase 2 only
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
@@ -82,6 +92,15 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, opts ...option.Function[ControllerOptions]) *Controller {
 
 	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue)...)}, opts...)...)
+	methodStates := map[string]*MethodState{}
+	for _, m := range o.methods {
+		if m.Weight() > 0 {
+			methodStates[methodKey(m)] = &MethodState{
+				weight: m.Weight(),
+				active: true,
+			}
+		}
+	}
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -92,6 +111,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		methods:       o.methods,
+		methodStates:  methodStates,
 	}
 }
 
@@ -160,10 +180,15 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
 	}
 
-	// Attempt different disruption methods. We'll only let one method perform an action
+	// Phase 1: Emptiness and StaticDrift always run unconditionally. These are fast, batch
+	// operations that are important enough to never be starved.
+	anySuccess := false
 	for _, m := range c.methods {
-		c.recordRun(fmt.Sprintf("%T", m))
-		success, err := c.disrupt(ctx, m)
+		if m.Weight() > 0 {
+			continue // Phase 2 method, handled below
+		}
+		c.recordRun(methodKey(m))
+		success, _, err := c.disrupt(ctx, m)
 		if err != nil {
 			if errors.IsConflict(err) {
 				return reconciler.Result{Requeue: true}, nil
@@ -171,43 +196,106 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(m.Reason())), "reason")
 		}
 		if success {
-			return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+			anySuccess = true
 		}
 	}
 
-	// All methods did nothing, so return nothing to do
+	// Phase 2: CFS scheduling for Drift, MultiNode, and SingleNode. Each method tracks a
+	// druntime (disruption runtime consumed). We iterate eligible methods in CFS order
+	// (lowest druntime first), stopping when one succeeds. Methods that find no work are
+	// charged druntime for the time consumed and removed from contention for this cycle —
+	// CFS ensures that even if Drift continuously finds work, Multi and Single accumulate
+	// relatively lower druntime and will be picked first whenever they have candidates.
+	phase2 := lo.Filter(c.methods, func(m Method, _ int) bool { return m.Weight() > 0 })
+	if len(phase2) > 0 {
+		budgetsByReason, err := c.computeBudgetMappings(ctx, phase2)
+		if err != nil {
+			return reconciler.Result{}, fmt.Errorf("computing disruption budgets, %w", err)
+		}
+		eligible := c.getEligibleMethods(phase2, budgetsByReason)
+		for len(eligible) > 0 {
+			picked := c.pickLowestDruntime(eligible)
+			state := c.methodStates[methodKey(picked)]
+			c.recordRun(methodKey(picked))
+
+			start := c.clock.Now()
+			var success bool
+			if _, isDrift := picked.(*Drift); isDrift {
+				// Drift only processes one candidate per ComputeCommands call, so we run it
+				// in a time-capped loop to process multiple candidates within its time share.
+				success, err = c.disruptWithTimeCap(ctx, picked, pollingPeriod)
+			} else {
+				success, _, err = c.disrupt(ctx, picked)
+			}
+			elapsed := c.clock.Since(start).Seconds()
+
+			if err != nil {
+				if errors.IsConflict(err) {
+					return reconciler.Result{Requeue: true}, nil
+				}
+				return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(picked.Reason())), "reason")
+			}
+
+			// Always charge druntime regardless of outcome. A method that spends 180s on
+			// SimulateScheduling and finds nothing should not immediately get another turn.
+			state.druntime += elapsed / state.weight
+
+			if success {
+				anySuccess = true
+				break // One successful disruption per cycle; let state settle before re-evaluating.
+			}
+
+			// No work found: remove from contention for this cycle and try the next method.
+			state.active = false
+			eligible = lo.Reject(eligible, func(m Method, _ int) bool { return methodKey(m) == methodKey(picked) })
+		}
+		c.normalizeDruntimes(phase2)
+	}
+
+	if anySuccess {
+		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+	}
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
-func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
+// disrupt evaluates a single disruption method. reportCandidateMetrics controls whether
+// EligibleNodes is updated; callers within a time-cap loop pass false after the first iteration
+// to avoid overwriting the initial eligible count with 0 after candidates are enqueued.
+// Returns (success, hadReplacements, error): hadReplacements is true when replacement NodeClaims
+// were created (non-empty candidate), which the time-cap loop uses to stop early and avoid
+// double-booking pods from nodes whose replacements aren't yet in cluster state.
+func (c *Controller) disrupt(ctx context.Context, disruption Method, reportCandidateMetrics ...bool) (bool, bool, error) {
+	shouldReport := len(reportCandidateMetrics) == 0 || reportCandidateMetrics[0]
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
 	if err != nil {
-		return false, fmt.Errorf("determining candidates, %w", err)
+		return false, false, fmt.Errorf("determining candidates, %w", err)
 	}
-	EligibleNodes.Set(float64(len(candidates)), map[string]string{
-		metrics.ReasonLabel: strings.ToLower(string(disruption.Reason())),
-	})
+	if shouldReport {
+		EligibleNodes.Set(float64(len(candidates)), map[string]string{
+			metrics.ReasonLabel: strings.ToLower(string(disruption.Reason())),
+		})
+	}
 
 	// If there are no candidates, move to the next disruption
 	if len(candidates) == 0 {
-		return false, nil
+		return false, false, nil
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
+	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason(), shouldReport)
 	if err != nil {
-		return false, fmt.Errorf("building disruption budgets, %w", err)
+		return false, false, fmt.Errorf("building disruption budgets, %w", err)
 	}
 	// Determine the disruption action
 	cmds, err := disruption.ComputeCommands(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
-		return false, fmt.Errorf("computing disruption decision, %w", err)
+		return false, false, fmt.Errorf("computing disruption decision, %w", err)
 	}
 	cmds = lo.Filter(cmds, func(c Command, _ int) bool { return c.Decision() != NoOpDecision })
 	if len(cmds) == 0 {
-		return false, nil
+		return false, false, nil
 	}
 
 	errs := make([]error, len(cmds))
@@ -225,9 +313,144 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		}
 	})
 	if err = multierr.Combine(errs...); err != nil {
-		return false, fmt.Errorf("disrupting candidates, %w", err)
+		return false, false, fmt.Errorf("disrupting candidates, %w", err)
 	}
-	return true, nil
+	hadReplacements := lo.SomeBy(cmds, func(cmd Command) bool { return len(cmd.Replacements) > 0 })
+	return true, hadReplacements, nil
+}
+
+// methodKey returns the type name used as a key for methodStates.
+func methodKey(m Method) string {
+	return fmt.Sprintf("%T", m)
+}
+
+// computeBudgetMappings computes disruption budget mappings once per Phase 2 cycle, one per
+// distinct reason. This avoids calling BuildDisruptionBudgetMapping once per method when
+// multiple methods share the same reason (Drift uses Drifted; Multi and Single share Underutilized).
+func (c *Controller) computeBudgetMappings(ctx context.Context, methods []Method) (map[v1.DisruptionReason]map[string]int, error) {
+	seen := map[v1.DisruptionReason]bool{}
+	result := map[v1.DisruptionReason]map[string]int{}
+	for _, m := range methods {
+		reason := m.Reason()
+		if seen[reason] {
+			continue
+		}
+		seen[reason] = true
+		mapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, reason)
+		if err != nil {
+			return nil, fmt.Errorf("building disruption budgets for %s, %w", reason, err)
+		}
+		result[reason] = mapping
+	}
+	return result, nil
+}
+
+// getEligibleMethods returns the Phase 2 methods that have budget available, applying wakeup
+// logic when a method transitions from inactive to active.
+func (c *Controller) getEligibleMethods(phase2Methods []Method, budgetsByReason map[v1.DisruptionReason]map[string]int) []Method {
+	minDT := c.minDruntime(phase2Methods)
+	var eligible []Method
+	for _, m := range phase2Methods {
+		state := c.methodStates[methodKey(m)]
+		if c.hasBudgetForMethod(budgetsByReason, m) {
+			if !state.active {
+				// Wakeup: preserve any large druntime charge from a prior expensive evaluation.
+				// Only bump up to current minimum if the method's druntime is below it (which
+				// can happen after normalization when the method has been inactive long enough).
+				state.druntime = math.Max(state.druntime, minDT)
+				state.active = true
+			}
+			eligible = append(eligible, m)
+		} else {
+			state.active = false
+		}
+	}
+	return eligible
+}
+
+// hasBudgetForMethod returns true if any NodePool has remaining budget for the method's reason.
+func (c *Controller) hasBudgetForMethod(budgetsByReason map[v1.DisruptionReason]map[string]int, m Method) bool {
+	for _, budget := range budgetsByReason[m.Reason()] {
+		if budget > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// pickLowestDruntime selects the eligible method with the lowest druntime.
+// Ties are broken by order in the slice (earlier = higher priority: Drift > Multi > Single).
+func (c *Controller) pickLowestDruntime(eligible []Method) Method {
+	picked := eligible[0]
+	minDT := c.methodStates[methodKey(picked)].druntime
+	for _, m := range eligible[1:] {
+		if dt := c.methodStates[methodKey(m)].druntime; dt < minDT {
+			minDT = dt
+			picked = m
+		}
+	}
+	return picked
+}
+
+// disruptWithTimeCap runs a disruption method in a loop until the time budget is exhausted or
+// the method finds no more work. Used for Drift, which only processes one candidate per
+// ComputeCommands call; the time cap lets it process multiple candidates within its time share.
+//
+// The loop stops immediately after any disruption that creates replacement NodeClaims (non-empty
+// candidate). Without this guard, the next iteration would include pods from the newly-deleting
+// node in SimulateScheduling, but the replacement NodeClaim isn't yet in cluster state, causing
+// duplicate replacements to be created (double-booking). Empty-node deletes are safe to batch
+// because they create no replacements and leave no reschedulable pods.
+func (c *Controller) disruptWithTimeCap(ctx context.Context, m Method, budget time.Duration) (bool, error) {
+	anySuccess := false
+	first := true
+	deadline := c.clock.Now().Add(budget)
+	for c.clock.Now().Before(deadline) {
+		// Only report EligibleNodes on the first iteration. Subsequent calls see fewer
+		// candidates because earlier nodes were enqueued, which would falsely overwrite
+		// the gauge with a lower count.
+		success, hadReplacements, err := c.disrupt(ctx, m, first)
+		first = false
+		if err != nil {
+			return anySuccess, err
+		}
+		if !success {
+			break
+		}
+		anySuccess = true
+		if hadReplacements {
+			// A replacement NodeClaim was created but is not yet in cluster state. Continuing
+			// the loop would double-book pods from the newly-deleting node on the next simulation.
+			break
+		}
+	}
+	return anySuccess, nil
+}
+
+// normalizeDruntimes subtracts the minimum druntime from all Phase 2 methods to prevent
+// unbounded float64 growth while preserving relative scheduling order.
+func (c *Controller) normalizeDruntimes(phase2Methods []Method) {
+	minDT := c.minDruntime(phase2Methods)
+	if minDT == 0 {
+		return
+	}
+	for _, m := range phase2Methods {
+		c.methodStates[methodKey(m)].druntime -= minDT
+	}
+}
+
+// minDruntime returns the minimum druntime across all Phase 2 methods.
+func (c *Controller) minDruntime(phase2Methods []Method) float64 {
+	if len(phase2Methods) == 0 {
+		return 0
+	}
+	minDT := math.MaxFloat64
+	for _, m := range phase2Methods {
+		if dt := c.methodStates[methodKey(m)].druntime; dt < minDT {
+			minDT = dt
+		}
+	}
+	return minDT
 }
 
 func (c *Controller) recordRun(s string) {
