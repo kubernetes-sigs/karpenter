@@ -33,6 +33,7 @@ import (
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("CapacityBuffer", func() {
@@ -96,13 +97,13 @@ var _ = Describe("CapacityBuffer", func() {
 
 			env.ExpectCreated(bufferTemplate, buffer)
 
-			env.EventuallyExpectCapacityBufferReplicas(buffer, 3)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 3)
 
 			// With 2-CPU nodes and 1-CPU buffer pods, expect multiple nodes
 			env.EventuallyExpectCreatedNodeClaimCount(">=", 2)
 			env.EventuallyExpectInitializedNodeCount(">=", 2)
 
-			env.EventuallyExpectCapacityBufferProvisionedWithReason(buffer, "FitsExistingCapacity")
+			EventuallyExpectCapacityBufferProvisionedWithReason(env, env.Client, buffer, "FitsExistingCapacity")
 		})
 
 		It("should update buffer status when PodTemplate is updated", func() {
@@ -116,7 +117,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(bufferTemplate, buffer)
 
 			// Wait for initial resolution
-			env.EventuallyExpectCapacityBufferReady(buffer)
+			EventuallyExpectCapacityBufferReady(env, env.Client, buffer)
 
 			// Get current generation
 			cb := &autoscalingv1alpha1.CapacityBuffer{}
@@ -130,7 +131,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectUpdated(pt)
 
 			// Generation should update
-			env.EventuallyExpectCapacityBufferGenerationUpdated(buffer, originalGen)
+			EventuallyExpectCapacityBufferGenerationUpdated(env, env.Client, buffer, originalGen)
 		})
 	})
 
@@ -176,10 +177,10 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(buffer)
 
 			// 20% of 10 replicas = 2 buffer chunks
-			env.EventuallyExpectCapacityBufferReplicas(buffer, 2)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 2)
 
 			// Buffer virtual pods should be provisioned (may fit on existing nodes or new ones)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 		})
 
 		It("should provision buffer capacity using scalableRef with fixed replicas", func() {
@@ -202,10 +203,10 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(buffer)
 
 			// Buffer resolves with 3 replicas
-			env.EventuallyExpectCapacityBufferReplicas(buffer, 3)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 3)
 
 			// Buffer virtual pods should be provisioned
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 		})
 
 		It("should recover when scalable ref is created after buffer", func() {
@@ -224,13 +225,13 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(buffer)
 
 			// Buffer should initially be not ready (deployment doesn't exist yet)
-			env.EventuallyExpectCapacityBufferNotReady(buffer, "ScalableRefNotFound")
+			EventuallyExpectCapacityBufferNotReady(env, env.Client, buffer, "ScalableRefNotFound")
 
 			// Now create the deployment
 			env.ExpectCreated(scalableDeployment)
 
 			// Buffer should recover and become ready
-			env.EventuallyExpectCapacityBufferReplicas(buffer, 2)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 2)
 		})
 	})
 
@@ -247,7 +248,7 @@ var _ = Describe("CapacityBuffer", func() {
 
 			// Wait for buffer capacity to be fully provisioned
 			env.EventuallyExpectInitializedNodeCount(">=", 2)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			// Record NodeClaim count before deploying consumers
 			nodeClaimsBefore := env.EventuallyExpectCreatedNodeClaimCount(">=", 2)
@@ -276,7 +277,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.EventuallyExpectCreatedNodeClaimCount(">=", countBefore+1)
 
 			// Buffer should eventually be satisfied again
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 		})
 
 		It("should refill buffer capacity after consumption", func() {
@@ -292,7 +293,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(bufferTemplate, buffer)
 
 			env.EventuallyExpectInitializedNodeCount(">=", 2)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			initialNodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 2)
 			initialCount := len(initialNodeClaims)
@@ -318,7 +319,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.EventuallyExpectCreatedNodeClaimCount(">=", initialCount+1)
 
 			// Buffer should eventually be satisfied again
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 		})
 	})
 
@@ -334,7 +335,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(bufferTemplate, buffer)
 
 			nodes := env.EventuallyExpectInitializedNodeCount(">=", 2)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			// With ConsolidateAfter: 0s, disruption should trigger within seconds if
 			// the node were truly empty. Wait 60s to be confident it's actually protected.
@@ -353,7 +354,7 @@ var _ = Describe("CapacityBuffer", func() {
 
 			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 2)
 			env.EventuallyExpectInitializedNodeCount(">=", 2)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			env.ExpectDeleted(buffer)
 
@@ -372,7 +373,7 @@ var _ = Describe("CapacityBuffer", func() {
 
 			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 2)
 			env.EventuallyExpectInitializedNodeCount(">=", 2)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			originalNodeClaimNames := lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string { return nc.Name })
 
@@ -389,7 +390,7 @@ var _ = Describe("CapacityBuffer", func() {
 				}
 			}).WithTimeout(2 * time.Minute).Should(Succeed())
 
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 		})
 
 	})
@@ -406,7 +407,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(bufferTemplate, buffer)
 
 			env.EventuallyExpectInitializedNodeCount(">=", 2)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			// Scale buffer down to 1
 			cb := &autoscalingv1alpha1.CapacityBuffer{}
@@ -415,7 +416,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectUpdated(cb)
 
 			// Status should reflect new replica count
-			env.EventuallyExpectCapacityBufferReplicas(buffer, 1)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 1)
 		})
 
 		It("should handle scalableRef percentage update when deployment scales", func() {
@@ -450,7 +451,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(scalableDeployment, buffer)
 
 			// 20% of 5 = 1
-			env.EventuallyExpectCapacityBufferReplicas(buffer, 1)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 1)
 
 			// Scale the deployment up to 20
 			deploy := &appsv1.Deployment{}
@@ -539,16 +540,16 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(bufferTemplate, bufferTemplateSmall, bufferA, bufferB)
 
 			// Both buffers should become ready independently
-			env.EventuallyExpectCapacityBufferReplicas(bufferA, 2)
-			env.EventuallyExpectCapacityBufferReplicas(bufferB, 3)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, bufferA, 2)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, bufferB, 3)
 
 			// Capacity should be provisioned for both
 			env.EventuallyExpectCreatedNodeClaimCount(">=", 2)
 			env.EventuallyExpectInitializedNodeCount(">=", 2)
 
 			// Both should eventually report Provisioning=True
-			env.EventuallyExpectCapacityBufferProvisioned(bufferA)
-			env.EventuallyExpectCapacityBufferProvisioned(bufferB)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, bufferA)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, bufferB)
 		})
 	})
 
@@ -628,7 +629,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(bufferTemplate, buffer)
 
 			// Buffer should become provisioned (virtual pod fits alongside real pod)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			// After buffer: still exactly 1 node — buffer coexists on existing capacity
 			Consistently(func(g Gomega) {
@@ -680,7 +681,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
 			env.EventuallyExpectInitializedNodeCount(">=", 1)
 
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			// Verify the node has the expected label
 			nodes := env.EventuallyExpectInitializedNodeCount(">=", 1)
@@ -704,7 +705,7 @@ var _ = Describe("CapacityBuffer", func() {
 			// Wait for initial capacity
 			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
 			env.EventuallyExpectInitializedNodeCount(">=", 1)
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 
 			originalName := nodeClaims[0].Name
 
@@ -718,7 +719,7 @@ var _ = Describe("CapacityBuffer", func() {
 			}).WithTimeout(3 * time.Minute).Should(Succeed())
 
 			// Buffer should refill on new capacity
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 		})
 
 		It("should grow buffer replicas when limits are increased", func() {
@@ -734,7 +735,7 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(bufferTemplate, buffer)
 
 			// Initial: 2 CPU limit / 1 CPU per pod = 2 replicas
-			env.EventuallyExpectCapacityBufferReplicas(buffer, 2)
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 2)
 
 			// Wait for initial capacity
 			env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
@@ -756,7 +757,7 @@ var _ = Describe("CapacityBuffer", func() {
 			}).WithTimeout(60 * time.Second).Should(Succeed())
 
 			// Eventually all 5 replicas should be provisioned
-			env.EventuallyExpectCapacityBufferProvisioned(buffer)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 		})
 	})
 })
