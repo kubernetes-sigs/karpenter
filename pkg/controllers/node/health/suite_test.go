@@ -63,7 +63,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	queue = terminator.NewQueue(env.Clock, env.Client, recorder)
 	healthController = health.NewController(env.Client, cloudProvider, env.Clock, recorder)
 })
 
