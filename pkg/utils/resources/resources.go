@@ -123,13 +123,43 @@ func RequestsForSpec(spec *v1.PodSpec) v1.ResourceList {
 	return resourcehelper.PodRequests(&v1.Pod{Spec: *spec}, resourcehelper.PodResourcesOptions{})
 }
 
-// MaxResources returns the maximum quantities for a given list of resources
+// MaxResources returns the maximum quantities for a given list of resources.
+// Quantity structs in the list returned are only safe to mutate if Quantity.d.Dec == nil
 func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 	resourceList := v1.ResourceList{}
 	for _, resource := range resources {
 		for resourceName, quantity := range resource {
 			if value, ok := resourceList[resourceName]; !ok || quantity.Cmp(value) > 0 {
 				resourceList[resourceName] = quantity
+			}
+		}
+	}
+	return resourceList
+}
+
+// MinResources returns the minimum quantities for resources present in all lists (intersection of resources)
+// Ex: MinResources({cpu: 1}, {cpu: 2, gpu: 1}) = {cpu: 1}.
+// Quantity structs in the list returned are only safe to mutate if Quantity.d.Dec == nil
+func MinResources(resources ...v1.ResourceList) v1.ResourceList {
+	if len(resources) == 0 {
+		return v1.ResourceList{}
+	}
+
+	// Start with a copy of the first list's keys, but just copy the Quantity values
+	// Safe since we never mutate them
+	resourceList := make(v1.ResourceList, len(resources[0]))
+	for k, v := range resources[0] {
+		resourceList[k] = v
+	}
+
+	for _, rl := range resources[1:] {
+		for resourceName, quantity := range resourceList {
+			if rlQuantity, exists := rl[resourceName]; exists {
+				if rlQuantity.Cmp(quantity) < 0 {
+					resourceList[resourceName] = rlQuantity
+				}
+			} else {
+				delete(resourceList, resourceName)
 			}
 		}
 	}
