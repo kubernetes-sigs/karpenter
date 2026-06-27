@@ -228,18 +228,61 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	return cmd, nil
 }
 
+// spotToSpotConsolidationEnabled checks if spot-to-spot consolidation is enabled
+// for the given candidates. For multi-node consolidation, ALL candidate NodePools
+// must have it enabled.
+// Records an Unconsolidatable event for single-node consolidation when disabled.
+func (c *consolidation) spotToSpotConsolidationEnabled(ctx context.Context, candidates []*Candidate) bool {
+	globalEnabled := options.FromContext(ctx).FeatureGates.SpotToSpotConsolidation
+
+	for _, candidate := range candidates {
+		npEnabled := candidate.NodePool.Spec.Disruption.SpotToSpotConsolidation
+
+		// If NodePool has explicit setting, use it
+		if npEnabled != nil {
+			if !*npEnabled {
+				// This NodePool explicitly disables spot-to-spot
+				if len(candidates) == 1 {
+					c.recorder.Publish(disruptionevents.Unconsolidatable(
+						candidate.Node,
+						candidate.NodeClaim,
+						fmt.Sprintf("SpotToSpotConsolidation is disabled for NodePool %q, can't replace a spot node with a spot node", candidate.NodePool.Name),
+					)...)
+				}
+				return false
+			}
+			// This NodePool explicitly enables it, continue checking others
+			continue
+		}
+
+		// NodePool has no explicit setting (nil), fall back to global
+		if !globalEnabled {
+			if len(candidates) == 1 {
+				c.recorder.Publish(disruptionevents.Unconsolidatable(
+					candidate.Node,
+					candidate.NodeClaim,
+					"SpotToSpotConsolidation is disabled, can't replace a spot node with a spot node",
+				)...)
+			}
+			return false
+		}
+	}
+
+	// If we reach here, all NodePools either:
+	// 1. Explicitly set spotToSpotConsolidation=true (overrides global), OR
+	// 2. Had no setting (nil) and global is true (we would have returned false above otherwise)
+	return true
+}
+
 // Compute command to execute spot-to-spot consolidation if:
-//  1. The SpotToSpotConsolidation feature flag is set to true.
+//  1. The SpotToSpotConsolidation feature flag is set to true, or the NodePool explicitly enables it.
 //  2. For single-node consolidation:
 //     a. There are at least 15 cheapest instance type replacement options to consolidate.
 //     b. The current candidate is NOT part of the first 15 cheapest instance types inorder to avoid repeated consolidation.
 func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, candidates []*Candidate, results pscheduling.Results, candidatePrice float64) (Command, error) {
 
-	// Spot consolidation is turned off.
-	if !options.FromContext(ctx).FeatureGates.SpotToSpotConsolidation {
-		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "SpotToSpotConsolidation is disabled, can't replace a spot node with a spot node")...)
-		}
+	// Check if spot-to-spot consolidation is enabled (per-NodePool or global)
+	if !c.spotToSpotConsolidationEnabled(ctx, candidates) {
 		return Command{}, nil
 	}
 
