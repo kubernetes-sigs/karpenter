@@ -160,7 +160,7 @@ func NewAllocator(
 	if deletingPodUIDs == nil {
 		deletingPodUIDs = sets.New[types.UID]()
 	}
-	return &Allocator{
+	a := &Allocator{
 		allocationTracker:       NewAllocationTracker(allocatedState),
 		attributeBindings:       attributeBindings,
 		kubeClient:              kubeClient,
@@ -169,6 +169,12 @@ func NewAllocator(
 		claimAllocationMetadata: make(map[ResourceClaimID]*ResourceClaimAllocationMetadata),
 		deletingPodUIDs:         deletingPodUIDs,
 	}
+	// Pre-initialize shared counter budgets for all pools. This ensures InitRemainingCounters is
+	// never called during parallel Allocate() calls, keeping the tracker read-only under concurrency.
+	for _, pool := range GatherPools(inClusterSlices, scheduling.NewRequirements(), "") {
+		a.allocationTracker.InitRemainingCounters(pool)
+	}
+	return a
 }
 
 // AllocationResult contains the output of a successful Allocate() call.
@@ -215,6 +221,9 @@ type allocation struct {
 	// templateCapacityConsumptionByIT holds per-IT consumed capacity for template multi-allocatable
 	// devices. Subtracted from the tracker's remaining budget on Commit().
 	templateCapacityConsumptionByIT map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+	// templateCounterTotalsByIT holds the total counter budgets for template pools that were computed
+	// locally during Allocate(). Written to the tracker on Commit() to keep Allocate() read-only.
+	templateCounterTotalsByIT map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter
 }
 
 func (a *allocation) Commit(ctx context.Context) {
@@ -565,6 +574,8 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 	capacityConsumptionByIT := make(map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity)
 	// templateCapacityConsumptionByIT tracks per-IT consumed capacity for template multi-allocatable devices.
 	templateCapacityConsumptionByIT := make(map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity)
+	// templateCounterTotalsByIT tracks template counter budgets computed locally, for deferred init in Commit().
+	templateCounterTotalsByIT := make(map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter)
 
 	// Snapshot initial state for restoration between IT attempts.
 	initialPools := a.pools
@@ -609,6 +620,9 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			templateCounterConsumptionByIT[itID] = a.templateAllocatingCounters
 			capacityConsumptionByIT[itID] = a.allocatingCapacity
 			templateCapacityConsumptionByIT[itID] = a.templateAllocatingCapacity
+			if a.templateRemainingCounters != nil && a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), itID) == nil {
+				templateCounterTotalsByIT[itID] = a.templateRemainingCounters
+			}
 			// Definsive nils to prevents future regressions where allocatingCounters / templateAllocatingCounters is re-used
 			a.allocatingCounters = nil
 			a.templateAllocatingCounters = nil
@@ -684,6 +698,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			templateCounterConsumptionByIT:  templateCounterConsumptionByIT,
 			capacityConsumptionByIT:         capacityConsumptionByIT,
 			templateCapacityConsumptionByIT: templateCapacityConsumptionByIT,
+			templateCounterTotalsByIT:       templateCounterTotalsByIT,
 		},
 	}, nil
 }
@@ -814,11 +829,9 @@ func (a *allocator) tryDevice(
 				remainingCounterSets = a.templateRemainingCounters[poolKey]
 			}
 		} else {
-			pool := a.poolsByKey[poolKey]
-			if pool == nil {
+			if a.poolsByKey[poolKey] == nil {
 				return false
 			}
-			a.allocationTracker.InitRemainingCounters(pool)
 			remainingCounterSets = a.allocationTracker.RemainingCounters[poolKey]
 		}
 		if !a.checkCounters(dw.Device, poolKey, remainingCounterSets, deviceID.Template) {
@@ -947,8 +960,9 @@ func (a *allocator) buildPoolIndex() {
 }
 
 // buildTemplateCounters returns the remaining counter budgets for the current IT's template pool.
-// On first access for a (NodeClaim, IT) pair, it computes the total from SharedCounters and
-// initializes the tracker. Subsequent calls return the tracker's reference directly.
+// If a prior pod's Commit() has already initialized the tracker entry, the tracker's reference is
+// returned (with prior deductions reflected). Otherwise, totals are computed locally — the tracker
+// write is deferred to Commit() to keep Allocate() read-only on the shared tracker.
 func (a *allocator) buildTemplateCounters() map[PoolKey]map[string]map[string]resourcev1.Counter {
 	if remaining := a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), a.itID); remaining != nil {
 		return remaining
@@ -961,8 +975,7 @@ func (a *allocator) buildTemplateCounters() map[PoolKey]map[string]map[string]re
 	if totals == nil {
 		return nil
 	}
-	a.allocationTracker.InitTemplateRemainingCounters(a.nodeClaim.ID(), a.itID, totals)
-	return a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), a.itID)
+	return totals
 }
 
 // computeTemplateTotals extracts the total SharedCounters budget from template slices.
