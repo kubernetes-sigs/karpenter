@@ -174,6 +174,7 @@ var _ = AfterEach(func() {
 
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
+	disruption.ConsolidationSkippedTotal.Reset()
 	disruption.NodepoolDecisionsPerformed.Reset()
 })
 
