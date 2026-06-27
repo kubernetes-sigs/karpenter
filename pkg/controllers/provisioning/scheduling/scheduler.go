@@ -809,7 +809,7 @@ func (s *Scheduler) getCompatibleDaemonPods(ctx context.Context, node *state.Sta
 		if s.shouldSkipDaemonPod(ctx, p) {
 			continue
 		}
-		if s.isDaemonPodCompatibleWithNode(p, taints, node.Labels()) {
+		if isDaemonPodCompatibleWithNode(p, taints, node.Labels()) {
 			daemons = append(daemons, p)
 		}
 	}
@@ -821,8 +821,16 @@ func (s *Scheduler) shouldSkipDaemonPod(ctx context.Context, p *corev1.Pod) bool
 	return pod.HasDRARequirements(p) && karpopts.FromContext(ctx).IgnoreDRARequests
 }
 
-// isDaemonPodCompatibleWithNode checks if a daemon pod is compatible with the node
-func (s *Scheduler) isDaemonPodCompatibleWithNode(p *corev1.Pod, taints []corev1.Taint, nodeLabels map[string]string) bool {
+// isDaemonPodCompatibleWithNode is a named wrapper for the daemon-set scheduling call site.
+func isDaemonPodCompatibleWithNode(p *corev1.Pod, taints []corev1.Taint, nodeLabels map[string]string) bool {
+	return PodCompatibleWithNode(p, taints, nodeLabels)
+}
+
+// PodCompatibleWithNode reports whether a pod's taint tolerations and nodeSelector/affinity
+// requirements are satisfied by the given node. It is intentionally a prefilter: it does not
+// check resource fit, volume topology, or PDB constraints — those are enforced by the scheduler
+// downstream. Callers that need a full admission check must go through the scheduler instead.
+func PodCompatibleWithNode(p *corev1.Pod, taints []corev1.Taint, nodeLabels map[string]string) bool {
 	if err := scheduling.Taints(taints).ToleratesPod(p); err != nil {
 		return false
 	}
