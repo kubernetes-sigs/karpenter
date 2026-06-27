@@ -24,6 +24,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
@@ -58,6 +59,11 @@ type Allocator struct {
 	// claimAllocationMetadata contains metadata for in-memory ResourceClaim allocations, including the allocated devices
 	// and the scheduling requirements.
 	claimAllocationMetadata map[ResourceClaimID]*ResourceClaimAllocationMetadata
+	// deletingPodUIDs is the set of pods that are migrating off their current nodes (pods on deleting nodes, disruption
+	// candidates, and individually-deleting pods). A ResourceClaim whose reservedFor is composed entirely of these pods
+	// is treated as unallocated and re-run through the DFS, so its device — already freed from the allocated-device seed
+	// set for the same reason — is re-allocated rather than treated as committed in place.
+	deletingPodUIDs sets.Set[types.UID]
 }
 
 // ResourceClaimAllocationMetadataForClaim returns a copy of the allocator's internal ResourceClaim allocation metadata.
@@ -149,7 +155,11 @@ func NewAllocator(
 	allocatedState AllocatedDeviceState,
 	attributeBindings AttributeBindings,
 	kubeClient client.Client,
+	deletingPodUIDs sets.Set[types.UID],
 ) *Allocator {
+	if deletingPodUIDs == nil {
+		deletingPodUIDs = sets.New[types.UID]()
+	}
 	return &Allocator{
 		allocationTracker:       NewAllocationTracker(allocatedState),
 		attributeBindings:       attributeBindings,
@@ -157,6 +167,7 @@ func NewAllocator(
 		inClusterSlices:         inClusterSlices,
 		poolCache:               make(map[NodeClaimID][]*Pool),
 		claimAllocationMetadata: make(map[ResourceClaimID]*ResourceClaimAllocationMetadata),
+		deletingPodUIDs:         deletingPodUIDs,
 	}
 }
 
@@ -309,9 +320,9 @@ func (a *Allocator) Allocate(
 	// Phase 2: Pool gathering with cache, using the tightened effective requirements.
 	var pools []*Pool
 	if cached, ok := a.poolCache[nodeClaim.ID()]; ok {
-		pools = FilterPools(cached, classifyRes.requirements)
+		pools = FilterPools(cached, classifyRes.requirements, nodeClaim.NodeName())
 	} else {
-		pools = GatherPools(a.inClusterSlices, classifyRes.requirements)
+		pools = GatherPools(a.inClusterSlices, classifyRes.requirements, nodeClaim.NodeName())
 	}
 
 	// Build template devices by instance type.
@@ -384,12 +395,23 @@ type classificationResult struct {
 // ClassifyClaims evaluates the set of claims for the NodeClaims. It checks allocation status and ensures compatibility.
 // If any of claim is already allocated and incompatible with the NodeClaim, it returns an error. The result is the set
 // of unallocated claims and the cumalative requirements derived from the base NodeClaim and the allocated claims.
+//
+//nolint:gocyclo
 func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.ResourceClaim) (classificationResult, error) {
 	result := classificationResult{
 		requirements: copyRequirements(nodeClaim.Requirements()),
 	}
 
 	for _, claim := range claims {
+		// A claim reserved entirely by pods that are migrating off their nodes is re-allocated rather than treated as
+		// committed in place: the device it currently holds has already been freed from the allocated-device seed set
+		// (see gatherAllocatedDevices), so the DFS must re-allocate the claim onto the replacement capacity. A claim
+		// reserved by a mix of deleting and live pods — or by any non-pod consumer — stays committed below, preserving
+		// the live consumers' device and topology.
+		if claim.Status.Allocation != nil && a.claimReservedEntirelyByDeletingPods(claim) {
+			result.unallocatedClaims = append(result.unallocatedClaims, claim)
+			continue
+		}
 		// In-cluster allocated: status.allocation is set.
 		if claim.Status.Allocation != nil {
 			reqs := nodeSelectorsToRequirements(claim.Status.Allocation.NodeSelector)
@@ -427,6 +449,27 @@ func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.Res
 		result.unallocatedClaims = append(result.unallocatedClaims, claim)
 	}
 	return result, nil
+}
+
+// claimReservedEntirelyByDeletingPods reports whether a ResourceClaim is reserved by a non-empty set of pod consumers
+// that are all in the allocator's deletingPodUIDs set. Such a claim's pods are all migrating off their nodes, so the
+// claim should be re-allocated rather than treated as committed in place. A claim reserved by a non-pod consumer, by a
+// live pod, or by nothing at all returns false (it stays committed). This mirrors the pod-consumer accounting in the
+// deviceallocation controller and the allConsumersDeleting predicate used to free devices.
+func (a *Allocator) claimReservedEntirelyByDeletingPods(claim *resourcev1.ResourceClaim) bool {
+	if len(claim.Status.ReservedFor) == 0 {
+		return false
+	}
+	for i := range claim.Status.ReservedFor {
+		ref := &claim.Status.ReservedFor[i]
+		if ref.Resource != string(corev1.ResourcePods) || ref.APIGroup != "" {
+			return false
+		}
+		if !a.deletingPodUIDs.Has(ref.UID) {
+			return false
+		}
+	}
+	return true
 }
 
 // allocator is the per-Allocate() child struct that holds mutable state for the current DFS.
@@ -635,7 +678,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			allocator:                       a.Allocator,
 			nodeClaimID:                     a.nodeClaim.ID(),
 			deviceIDsByIT:                   deviceIDsByIT,
-			filteredPools:                   FilterPools(initialPools, a.requirements),
+			filteredPools:                   FilterPools(initialPools, a.requirements, a.nodeClaim.NodeName()),
 			claimMetadata:                   claimAllocMetaByRC,
 			counterConsumptionByIT:          counterConsumptionByIT,
 			templateCounterConsumptionByIT:  templateCounterConsumptionByIT,
@@ -825,7 +868,7 @@ func (a *allocator) tryDevice(
 			pools: a.pools,
 		})
 		a.requirements.Add(dw.TopologyRequirements.Values()...)
-		a.pools = FilterPools(a.pools, a.requirements)
+		a.pools = FilterPools(a.pools, a.requirements, a.nodeClaim.NodeName())
 		a.buildPoolIndex()
 		pushedSnapshot = true
 	}

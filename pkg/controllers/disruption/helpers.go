@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -80,12 +81,17 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
+	// candidatePods are the pods on consolidation candidate nodes that we will reschedule. Their UIDs feed
+	// deletingPodUIDs below so the DRA allocator frees the devices they hold and re-allocates their claims onto the
+	// replacement capacity, mirroring how pods on already-deleting nodes are treated.
+	var candidatePods []*corev1.Pod
 	for _, n := range candidates {
 		currentlyReschedulablePods := lo.Filter(n.reschedulablePods, func(p *corev1.Pod, _ int) bool {
 			return pdbs.IsCurrentlyReschedulable(p, clk, recorder)
 		})
-		pods = append(pods, currentlyReschedulablePods...)
+		candidatePods = append(candidatePods, currentlyReschedulablePods...)
 	}
+	pods = append(pods, candidatePods...)
 
 	// We get the pods that are on nodes that are deleting
 	deletingNodePods, err := deletingNodes.CurrentlyReschedulablePods(ctx, kubeClient, clk, recorder)
@@ -100,10 +106,14 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
 	opts = append(opts, schedulerOpts...)
+	// Both consolidation candidate pods and pods on already-deleting nodes are migrating off their current nodes, so
+	// the DRA allocator should treat the devices they hold as available for reallocation (and re-allocate their claims).
+	deletingPodUIDs := sets.New(lo.Map(append(candidatePods, deletingNodePods...), func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
 	scheduler, err := provisioner.NewScheduler(
 		log.IntoContext(ctx, operatorlogging.NopLogger),
 		pods,
 		stateNodes,
+		deletingPodUIDs,
 		opts...,
 	)
 	if err != nil {

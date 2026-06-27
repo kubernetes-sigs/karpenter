@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -232,42 +231,36 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool) ([]
 		return c.InstanceTypes, nil
 	}
 	return []*cloudprovider.InstanceType{
-		NewInstanceType(InstanceTypeOptions{
-			Name: "default-instance-type",
-		}),
-		NewInstanceType(InstanceTypeOptions{
-			Name: "small-instance-type",
-			Resources: map[corev1.ResourceName]resource.Quantity{
+		NewInstanceType("default-instance-type"),
+		NewInstanceType("small-instance-type",
+			WithResources(corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("2"),
 				corev1.ResourceMemory: resource.MustParse("2Gi"),
-			},
-		}),
-		NewInstanceType(InstanceTypeOptions{
-			Name: "gpu-vendor-instance-type",
-			Resources: map[corev1.ResourceName]resource.Quantity{
+			}),
+		),
+		NewInstanceType("gpu-vendor-instance-type",
+			WithResources(corev1.ResourceList{
 				ResourceGPUVendorA: resource.MustParse("2"),
-			}}),
-		NewInstanceType(InstanceTypeOptions{
-			Name: "gpu-vendor-b-instance-type",
-			Resources: map[corev1.ResourceName]resource.Quantity{
+			}),
+		),
+		NewInstanceType("gpu-vendor-b-instance-type",
+			WithResources(corev1.ResourceList{
 				ResourceGPUVendorB: resource.MustParse("2"),
-			},
-		}),
-		NewInstanceType(InstanceTypeOptions{
-			Name:             "arm-instance-type",
-			Architecture:     "arm64",
-			OperatingSystems: sets.New("ios", string(corev1.Linux), string(corev1.Windows), "darwin"),
-			Resources: map[corev1.ResourceName]resource.Quantity{
+			}),
+		),
+		NewInstanceType("arm-instance-type",
+			WithArchitecture("arm64"),
+			WithOperatingSystems("ios", string(corev1.Linux), string(corev1.Windows), "darwin"),
+			WithResources(corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("16"),
 				corev1.ResourceMemory: resource.MustParse("128Gi"),
-			},
-		}),
-		NewInstanceType(InstanceTypeOptions{
-			Name: "single-pod-instance-type",
-			Resources: map[corev1.ResourceName]resource.Quantity{
+			}),
+		),
+		NewInstanceType("single-pod-instance-type",
+			WithResources(corev1.ResourceList{
 				corev1.ResourcePods: resource.MustParse("1"),
-			},
-		}),
+			}),
+		),
 	}, nil
 }
 

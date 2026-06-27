@@ -81,14 +81,18 @@ type Pool struct {
 //
 // inClusterSlices are pre-filtered ResourceSlices from the API server (deleting nodes
 // already excluded by the caller).
+//
+// nodeName is the name of the concrete node backing the NodeClaim being evaluated, or "" for in-flight/new
+// NodeClaims. Slices pinned to a node via spec.nodeName contribute devices only when nodeName matches.
 func GatherPools(
 	inClusterSlices []ResourceSlice,
 	requirements scheduling.Requirements,
+	nodeName string,
 ) []*Pool {
 	builders := map[PoolKey]*poolBuilder{}
 
 	for _, s := range inClusterSlices {
-		matched := sliceMatchesRequirements(s, requirements)
+		matched := sliceMatchesRequirements(s, requirements, nodeName)
 		key := PoolKey{Driver: s.Driver(), Pool: s.Pool().Name}
 		b, ok := builders[key]
 		if !ok {
@@ -112,10 +116,10 @@ func GatherPools(
 // matching slices after filtering are dropped entirely. This is used for incremental cache
 // narrowing — the cached superset is re-filtered against tightened requirements without
 // rebuilding from scratch.
-func FilterPools(pools []*Pool, requirements scheduling.Requirements) []*Pool {
+func FilterPools(pools []*Pool, requirements scheduling.Requirements, nodeName string) []*Pool {
 	var filtered []*Pool
 	for _, pool := range pools {
-		if p := filterPool(pool, requirements); p != nil {
+		if p := filterPool(pool, requirements, nodeName); p != nil {
 			filtered = append(filtered, p)
 		}
 	}
@@ -125,7 +129,7 @@ func FilterPools(pools []*Pool, requirements scheduling.Requirements) []*Pool {
 // filterPool returns a copy of the pool containing only slices (and their devices) that match
 // the requirements. Devices with ConsumesCounters on non-matching slices are moved to
 // NonTargetingDevices. Returns nil if no slices match and no NonTargetingDevices exist.
-func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
+func filterPool(pool *Pool, requirements scheduling.Requirements, nodeName string) *Pool {
 	p := &Pool{
 		Key:                 pool.Key,
 		Incomplete:          pool.Incomplete,
@@ -134,7 +138,7 @@ func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
 		NonTargetingDevices: pool.NonTargetingDevices,
 	}
 	for _, s := range pool.Slices {
-		if !sliceMatchesRequirements(s, requirements) {
+		if !sliceMatchesRequirements(s, requirements, nodeName) {
 			// If the slice no longer matches but has device(s) that consume counters,
 			// we move the device over to NonTargetingDevices
 			for _, d := range s.Devices() {
@@ -161,10 +165,19 @@ func filterPool(pool *Pool, requirements scheduling.Requirements) *Pool {
 	return p
 }
 
-// sliceMatchesRequirements checks whether a ResourceSlice's node affinity is either compatible with
-// the NodeClaim's requirements or when it declares SharedCounters (as they are pool-level budgets)
-// Only in-cluster (non-potential) slices are supported; potential slices indicate a programming error.
-func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requirements) bool {
+// sliceMatchesRequirements checks whether a ResourceSlice's node affinity makes its devices accessible to the
+// NodeClaim being evaluated, or whether it declares SharedCounters (which are pool-level budgets accessible
+// everywhere). Only in-cluster (non-potential) slices are supported; potential slices indicate a programming error.
+// nodeName is the name of the concrete node backing the NodeClaim, or "" for in-flight/new NodeClaims that don't yet
+// have a node.
+//
+// A slice is accessible to the NodeClaim when:
+//   - it is AllNodes (accessible everywhere), or
+//   - it declares SharedCounters (pool-level budgets, accessible everywhere), or
+//   - it pins itself to a node via spec.nodeName and that name equals the NodeClaim's node (so it only ever matches an
+//     existing node, never an in-flight one), or
+//   - it uses a label NodeSelector compatible with the NodeClaim's requirements.
+func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requirements, nodeName string) bool {
 	if s.Potential() {
 		panic("potential slices must not be passed to pool gathering or filtering")
 	}
@@ -173,6 +186,9 @@ func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requireme
 	}
 	if s.SharedCounters() != nil {
 		return true
+	}
+	if sliceNodeName := s.NodeName(); sliceNodeName != "" {
+		return nodeName != "" && sliceNodeName == nodeName
 	}
 	if ns := s.NodeSelector(); ns != nil {
 		return nodeSelectorsMatch(ns, requirements)
