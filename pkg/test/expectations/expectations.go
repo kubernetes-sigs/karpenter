@@ -453,6 +453,7 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 		return
 	}
 	np := &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nc.Labels[v1.NodePoolLabelKey]}}
+	np.Spec.Template.Spec.NodeClassRef = nc.Spec.NodeClassRef
 	instanceTypes, err := cp.GetInstanceTypes(ctx, np)
 	Expect(err).ToNot(HaveOccurred())
 	it, found := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {

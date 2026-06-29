@@ -5397,13 +5397,10 @@ var _ = Context("Scheduling", func() {
 		It("should only select instance types whose offerings have CapacityOverride when pod requests an override resource", func() {
 			extendedResource := corev1.ResourceName("test.com/extended-slots")
 			// Create instance types with default offerings
-			overrideInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "override-capable",
-				Resources: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("4"),
-					corev1.ResourceMemory: resource.MustParse("8Gi"),
-				},
-			})
+			overrideInstanceType := fake.NewInstanceType("override-capable", fake.WithResources(corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			}))
 			// Append offerings with overrides cloned from existing base offerings
 			baseOfferings := make([]*cloudprovider.Offering, len(overrideInstanceType.Offerings))
 			copy(baseOfferings, overrideInstanceType.Offerings)
@@ -5419,13 +5416,10 @@ var _ = Context("Scheduling", func() {
 				}
 				overrideInstanceType.Offerings = append(overrideInstanceType.Offerings, overrideOffering)
 			}
-			normalInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "normal",
-				Resources: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("4"),
-					corev1.ResourceMemory: resource.MustParse("8Gi"),
-				},
-			})
+			normalInstanceType := fake.NewInstanceType("normal", fake.WithResources(corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			}))
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{overrideInstanceType, normalInstanceType}
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
@@ -5447,13 +5441,10 @@ var _ = Context("Scheduling", func() {
 		It("should reject instance type when override allocatable fits but override offerings are unavailable", func() {
 			extendedResource := corev1.ResourceName("test.com/extended-slots")
 			// Create instance type with default offerings
-			overrideInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "override-capable",
-				Resources: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("4"),
-					corev1.ResourceMemory: resource.MustParse("8Gi"),
-				},
-			})
+			overrideInstanceType := fake.NewInstanceType("override-capable", fake.WithResources(corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			}))
 			// Append override offerings but mark them all as UNAVAILABLE
 			baseOfferings := make([]*cloudprovider.Offering, len(overrideInstanceType.Offerings))
 			copy(baseOfferings, overrideInstanceType.Offerings)
