@@ -187,18 +187,16 @@ func deviceResultWithCapacity(device string, capacity map[resourcev1.QualifiedNa
 	}
 }
 
-// triggerHydration reconciles a no-allocation claim to fire the controller's hydrationOnce, making
-// subsequent AllocatedDevices calls non-blocking. Call this at the start of any test that is not
-// explicitly testing the hydration blocking behavior.
+// triggerHydration calls Hydrate() directly to close hydrationCh, making subsequent AllocatedDevices
+// calls non-blocking. In production this is triggered by a manager runnable after cache sync. Call
+// this at the start of any test that is not explicitly testing the hydration blocking behavior.
 func triggerHydration() {
-	dummy := resourceClaim("hydration-trigger")
-	ExpectApplied(ctx, env.Client, dummy)
-	ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(dummy))
+	controller.Hydrate(ctx)
 }
 
 var _ = Describe("DeviceAllocation Controller", func() {
 	Describe("Hydration", func() {
-		It("blocks until the first reconcile completes", func() {
+		It("blocks until hydration completes", func() {
 			results := make(chan map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata, 1)
 			go func() {
 				defer GinkgoRecover()
