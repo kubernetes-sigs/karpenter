@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -92,5 +93,50 @@ var _ = Describe("NodeUtils", func() {
 		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
+	})
+	Context("CountReschedulablePodsOnNode", func() {
+		It("should return 0 for an empty node name", func() {
+			count, err := nodeutils.CountReschedulablePodsOnNode(ctx, env.Client, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(0))
+		})
+		It("should return 0 when no pods are bound to the node", func() {
+			testNode = test.Node()
+			ExpectApplied(ctx, env.Client, testNode)
+			count, err := nodeutils.CountReschedulablePodsOnNode(ctx, env.Client, testNode.Name)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(0))
+		})
+		It("should count only reschedulable pods bound to the node", func() {
+			testNode = test.Node()
+			ExpectApplied(ctx, env.Client, testNode)
+			isController := true
+			// 2 reschedulable pods (active, no DaemonSet/Node owner).
+			pod1 := test.Pod(test.PodOptions{NodeName: testNode.Name})
+			pod2 := test.Pod(test.PodOptions{NodeName: testNode.Name})
+			// 1 DaemonSet-owned pod (excluded by IsReschedulable).
+			daemonsetPod := test.Pod(test.PodOptions{
+				NodeName: testNode.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1",
+						Kind:       "DaemonSet",
+						Name:       "ds",
+						UID:        "ds-uid",
+						Controller: &isController,
+					}},
+				},
+			})
+			// 1 pod bound to a different node (excluded by field selector).
+			otherNode := test.Node()
+			ExpectApplied(ctx, env.Client, otherNode)
+			otherPod := test.Pod(test.PodOptions{NodeName: otherNode.Name})
+
+			ExpectApplied(ctx, env.Client, pod1, pod2, daemonsetPod, otherPod)
+
+			count, err := nodeutils.CountReschedulablePodsOnNode(ctx, env.Client, testNode.Name)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(2))
+		})
 	})
 })
