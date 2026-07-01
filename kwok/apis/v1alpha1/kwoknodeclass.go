@@ -21,6 +21,12 @@ import (
 )
 
 type KWOKNodeClassSpec struct {
+	// MaxPods is an override for the maximum number of pods that can run on
+	// a worker node instance.
+	// +kubebuilder:validation:Minimum:=0
+	// +optional
+	MaxPods *int64 `json:"maxPods,omitempty"`
+
 	// NodeRegistrationDelay is a delay for KWOK nodes to register to the cluster.
 	// This is meant to model instance startup time that can happen when hardware
 	// needs to start on providers that are backed by real instances.
@@ -28,6 +34,15 @@ type KWOKNodeClassSpec struct {
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	NodeRegistrationDelay metav1.Duration `json:"nodeRegistrationDelay,omitempty"`
+
+	// ReservedResources is subtracted from the node's resource Capacity to compute
+	// the node's Allocatable resources.  If this value is not specified, it falls
+	// back to a default of 100m CPU and 10Mi of RAM
+	// KubeReserved contains resources reserved for Kubernetes system components.
+	// +kubebuilder:validation:XValidation:message="valid keys for kubeReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
+	// +kubebuilder:validation:XValidation:message="kubeReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
+	// +optional
+	ReservedResources map[string]string `json:"reservedResources,omitempty"`
 }
 
 // KWOKNodeClass is the Schema for the KWOKNodeClass API
