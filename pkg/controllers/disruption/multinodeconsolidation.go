@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"time"
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
@@ -29,10 +28,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
 const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
@@ -127,7 +126,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 
 	lastSavedCommand := Command{}
 	// Set a timeout
-	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
+	timeoutCtx, cancel := context.WithTimeout(ctx, options.FromContext(ctx).MultiNodeConsolidationTimeout)
 	defer cancel()
 	for min <= max {
 		mid := (min + max) / 2
