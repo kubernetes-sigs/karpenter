@@ -175,6 +175,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
+	// nodePool is a shared cache-backed pointer; treat as read-only. DeepCopy before mutating.
 	nodePool := nodePoolMap[nodePoolName]
 	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool
