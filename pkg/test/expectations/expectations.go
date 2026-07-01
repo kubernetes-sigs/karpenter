@@ -453,6 +453,7 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 		return
 	}
 	np := &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nc.Labels[v1.NodePoolLabelKey]}}
+	np.Spec.Template.Spec.NodeClassRef = nc.Spec.NodeClassRef
 	instanceTypes, err := cp.GetInstanceTypes(ctx, np)
 	Expect(err).ToNot(HaveOccurred())
 	it, found := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
@@ -581,17 +582,14 @@ func ExpectResourceClaimsProcessed(ctx context.Context, c client.Client, pod *co
 	ExpectApplied(ctx, c, pod)
 }
 
-// ExpectDeviceAllocationReconciled reconciles the deviceallocation controller across every ResourceClaim currently on
-// the cluster. The first call triggers the controller's hydration (which otherwise blocks AllocatedDevices, and thus
-// the provisioner's DRA path); subsequent calls refresh the tracked allocation state to reflect claims allocated in a
-// prior provisioning run. envtest has no running controller manager, so tests must drive this explicitly before a
-// provisioning round that relies on the in-cluster allocated-device set.
+// ExpectDeviceAllocationReconciled hydrates the deviceallocation controller (unblocking AllocatedDevices) and reconciles
+// every ResourceClaim currently on the cluster. In production, hydration is triggered by a manager runnable after cache
+// sync; in envtest there is no running controller manager, so tests must call this explicitly before a provisioning
+// round that relies on the in-cluster allocated-device set.
 func ExpectDeviceAllocationReconciled(ctx context.Context, c client.Client, controller *deviceallocation.Controller) {
 	GinkgoHelper()
-	// The controller hydrates on its first Reconcile (guarded by sync.Once), which lists all claims and unblocks
-	// AllocatedDevices. Reconciling a non-existent key is sufficient to trigger hydration without double-closing the
-	// hydration channel, and is a no-op for tracking state when the claim is absent.
-	ExpectReconciled(ctx, controller, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "device-allocation-hydration-trigger"}})
+	// Hydrate is guarded by sync.Once internally, so calling it multiple times is safe.
+	controller.Hydrate(ctx)
 	// Reconcile every existing claim to pick up allocation-status changes committed by prior provisioning runs.
 	claimList := &resourcev1.ResourceClaimList{}
 	Expect(c.List(ctx, claimList)).To(Succeed())
