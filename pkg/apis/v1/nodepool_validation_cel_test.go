@@ -258,6 +258,31 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
+		It("should succeed when creating a budget with a timeZone", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: new("* * * * *"),
+				TimeZone: new("America/New_York"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should fail when creating a budget with a timeZone but no schedule", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				TimeZone: new("America/New_York"),
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail when creating a budget with an empty timeZone", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: new("* * * * *"),
+				TimeZone: new(""),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
 		It("should succeed when creating a budget with hours and minutes in duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
