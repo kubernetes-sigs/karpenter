@@ -24,15 +24,23 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1/cel"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
 type priceUpdate struct {
-	OverlayUpdate *string
-	lowestWeight  *int32
+	overlayName     string
+	adjustedPrice   float64
+	zone            string
+	capacityType    string
+	reservationID   string
+	OverlayUpdate   *string
+	PriceExpression *cel.PriceExpression
+	lowestWeight    *int32
 }
 
 type capacityUpdate struct {
+	overlayName                   string
 	OverlayUpdate                 corev1.ResourceList
 	lowestWeightCapacityResources corev1.ResourceList
 	lowestWeight                  *int32
@@ -86,6 +94,46 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 	}
 
 	return internalStore.apply(nodePoolName, it), nil
+}
+
+// PriceOverlayForOffering returns the overlay name and adjusted price for the offering
+// matching the given nodePool, instanceType, zone, capacityType, and reservationID.
+// reservationID should be empty for non-reserved offerings. Returns ok=false when no
+// price overlay applies to this combination.
+func (s *InstanceTypeStore) PriceOverlayForOffering(nodePoolName, instanceTypeName, zone, capacityType, reservationID string) (overlayName string, adjustedPrice float64, ok bool) {
+	internalStore := lo.FromPtr(s.store.Load())
+	itUpdates, exists := internalStore.updates[nodePoolName]
+	if !exists {
+		return "", 0, false
+	}
+	itUpdate, exists := itUpdates[instanceTypeName]
+	if !exists {
+		return "", 0, false
+	}
+	for _, pu := range itUpdate.Price {
+		if pu.zone == zone && pu.capacityType == capacityType && pu.reservationID == reservationID {
+			return pu.overlayName, pu.adjustedPrice, true
+		}
+	}
+	return "", 0, false
+}
+
+// CapacityOverlayName returns the name of the overlay that applied a capacity change
+// for the given nodePool and instanceType. Returns ok=false when no capacity overlay applies.
+func (s *InstanceTypeStore) CapacityOverlayName(nodePoolName, instanceTypeName string) (overlayName string, ok bool) {
+	internalStore := lo.FromPtr(s.store.Load())
+	itUpdates, exists := internalStore.updates[nodePoolName]
+	if !exists {
+		return "", false
+	}
+	itUpdate, exists := itUpdates[instanceTypeName]
+	if !exists {
+		return "", false
+	}
+	if itUpdate.Capacity == nil || itUpdate.Capacity.overlayName == "" {
+		return "", false
+	}
+	return itUpdate.Capacity.overlayName, true
 }
 
 // InstanceTypeStore manages instance type updates for node pools.
@@ -156,14 +204,25 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 	result := make(cloudprovider.Offerings, len(offerings))
 	for i, offering := range offerings {
 		if overlay, ok := priceUpdates[offering.Requirements.String()]; ok {
-			// This offering needs modification - create a copy
 			copiedOffering := &cloudprovider.Offering{
 				Requirements:        offering.Requirements, // Shared - requirements are immutable
 				Price:               offering.Price,
 				Available:           offering.Available,
 				ReservationCapacity: offering.ReservationCapacity,
 			}
-			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
+			if overlay.PriceExpression != nil {
+				newPrice, err := overlay.PriceExpression.Evaluate(offering.Price)
+				if err != nil {
+					// Evaluation errors are caught at reconcile time and surface as ValidationSucceeded=False;
+					// if one slips through here, skip the offering rather than panic.
+					result[i] = offering
+					continue
+				}
+				copiedOffering.Price = newPrice
+				copiedOffering.SetPriceOverlayApplied()
+			} else {
+				copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
+			}
 			result[i] = copiedOffering
 		} else {
 			// Not modified - share the pointer
@@ -191,11 +250,15 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 
 	if i.updates[nodePoolName][instanceTypeName].Capacity == nil {
 		i.updates[nodePoolName][instanceTypeName].Capacity = &capacityUpdate{
+			overlayName:                   nodeOverlay.Name,
 			OverlayUpdate:                 nodeOverlay.Spec.Capacity,
 			lowestWeightCapacityResources: nodeOverlay.Spec.Capacity,
 			lowestWeight:                  nodeOverlay.Spec.Weight,
 		}
 	} else {
+		if i.updates[nodePoolName][instanceTypeName].Capacity.overlayName == "" {
+			i.updates[nodePoolName][instanceTypeName].Capacity.overlayName = nodeOverlay.Name
+		}
 		for resource, quantity := range nodeOverlay.Spec.Capacity {
 			if _, foundCapacityUpdate := i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource]; foundCapacityUpdate {
 				continue
@@ -237,11 +300,15 @@ func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName str
 
 // updateInstanceTypeOffering add a new Price overlay update to the associated instance type.
 // NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
-func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings) {
-	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
-	if price == nil {
+// compiled must be non-nil when nodeOverlay.Spec.PriceExpression is set; it is compiled once by the
+// caller so that both storage and evaluation share the same program.
+func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings, compiled *cel.PriceExpression) {
+	hasPriceField := nodeOverlay.Spec.Price != nil || nodeOverlay.Spec.PriceAdjustment != nil
+	if !hasPriceField && compiled == nil {
 		return
 	}
+
+	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
 
 	_, ok := i.updates[nodePoolName]
 	if !ok {
@@ -257,9 +324,23 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 			update.lowestWeight = nodeOverlay.Spec.Weight
 			continue
 		}
+		var adjustedPrice float64
+		if compiled != nil {
+			// Evaluation cannot fail here; pre-check in validateAndUpdateInstanceTypeOverrides
+			// already verified all offerings evaluate successfully.
+			adjustedPrice, _ = compiled.Evaluate(of.Price)
+		} else {
+			adjustedPrice = cloudprovider.AdjustedPrice(of.Price, lo.FromPtr(price))
+		}
 		i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()] = &priceUpdate{
-			OverlayUpdate: price,
-			lowestWeight:  nodeOverlay.Spec.Weight,
+			overlayName:     nodeOverlay.Name,
+			adjustedPrice:   adjustedPrice,
+			zone:            of.Zone(),
+			capacityType:    of.CapacityType(),
+			reservationID:   of.ReservationID(),
+			OverlayUpdate:   price,
+			PriceExpression: compiled,
+			lowestWeight:    nodeOverlay.Spec.Weight,
 		}
 	}
 }

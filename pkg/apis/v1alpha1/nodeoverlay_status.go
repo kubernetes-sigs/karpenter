@@ -24,6 +24,12 @@ const (
 	// ConditionTypeValidationSucceeded = "ValidationSucceeded" condition indicates that the
 	// runtime-based configuration is valid and conflict for this NodeOverlay
 	ConditionTypeValidationSucceeded = "ValidationSucceeded"
+	// ConditionTypePriceAdjusted = "PriceAdjusted" condition indicates whether the overlay's
+	// price configuration was applied to at least one instance type offering
+	ConditionTypePriceAdjusted = "PriceAdjusted"
+	// ConditionTypePriceNonNegative = "PriceNonNegative" condition indicates whether the overlay's
+	// price expression produced non-negative prices for all matched offerings
+	ConditionTypePriceNonNegative = "PriceNonNegative"
 )
 
 // NodeOverlayStatus defines the observed state of NodeOverlay
@@ -39,6 +45,7 @@ type NodeOverlayStatus struct {
 func (in *NodeOverlay) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	return status.NewReadyConditions(
 		ConditionTypeValidationSucceeded,
+		ConditionTypePriceAdjusted,
 	).For(in, opts...)
 }
 

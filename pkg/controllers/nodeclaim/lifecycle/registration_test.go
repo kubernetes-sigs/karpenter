@@ -676,6 +676,7 @@ var _ = Describe("Registration", func() {
 						},
 					},
 				},
+				nil,
 			)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -705,6 +706,7 @@ var _ = Describe("Registration", func() {
 						},
 					},
 				},
+				nil,
 			)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -741,6 +743,7 @@ var _ = Describe("Registration", func() {
 						},
 					},
 				},
+				nil,
 			)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -776,6 +779,7 @@ var _ = Describe("Registration", func() {
 						},
 					},
 				},
+				nil,
 			)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -813,6 +817,7 @@ var _ = Describe("Registration", func() {
 						},
 					},
 				},
+				nil,
 			)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -850,6 +855,7 @@ var _ = Describe("Registration", func() {
 						},
 					},
 				},
+				nil,
 			)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -888,6 +894,7 @@ var _ = Describe("Registration", func() {
 						},
 					},
 				},
+				nil,
 			)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -916,7 +923,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should complete registration with empty hooks slice", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), []cloudprovider.NodeLifecycleHook{})
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), []cloudprovider.NodeLifecycleHook{}, nil)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
@@ -936,7 +943,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should complete registration with nil hooks slice", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil)
+				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil, nil)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
@@ -966,6 +973,7 @@ var _ = Describe("Registration", func() {
 						},
 					},
 				},
+				nil,
 			)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
