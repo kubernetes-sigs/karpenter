@@ -125,6 +125,13 @@ var (
 		v1.LabelInstanceType:            v1.LabelInstanceTypeStable,
 		v1.LabelFailureDomainBetaRegion: v1.LabelTopologyRegion,
 	}
+
+	// NormalizedLabelValues translates label values when a label key is normalized
+	// via NormalizedLabels. The map key is the normalized (target) label key, and
+	// the value is a map from original values to their normalized equivalents.
+	// For example, a CSI driver may use "" for non-zonal topology while the cloud
+	// provider uses "0" — this mapping bridges that gap.
+	NormalizedLabelValues = map[string]map[string]string{}
 )
 
 // IsRestrictedLabel returns an error if the label is restricted.
