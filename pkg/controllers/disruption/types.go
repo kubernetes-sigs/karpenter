@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
@@ -79,10 +80,80 @@ type Candidate struct {
 	capacityType      string
 	DisruptionCost    float64
 	reschedulablePods []*corev1.Pod
+
+	// Price is the cheapest compatible offering price for this candidate.
+	// Precomputed at creation to avoid repeated offering lookups.
+	Price float64
+	// RescheduleDisruptionCost is 1.0 (base) + sum of positive pod eviction costs
+	// for reschedulable pods. Used by balanced scoring.
+	RescheduleDisruptionCost float64
 }
+
+// ScoreResult holds the three values needed to decide whether a move passes.
+type ScoreResult struct {
+	SavingsFraction    float64
+	DisruptionFraction float64
+	K                  int32
+}
+
+// Score is savings/disruption, guarded for zero denominators and non-positive savings.
+func (r ScoreResult) Score() float64 {
+	if r.SavingsFraction <= 0 {
+		return 0
+	}
+	if r.DisruptionFraction == 0 {
+		return math.Inf(1)
+	}
+	return r.SavingsFraction / r.DisruptionFraction
+}
+
+func (r ScoreResult) Threshold() float64 { return 1.0 / float64(r.K) }
+func (r ScoreResult) Approved() bool     { return r.Score() >= r.Threshold() }
+
+// resolveNodePrice returns the actual price of a running node by looking up the
+// offering that matches the node's zone and capacity-type labels.
+// Returns 0 when the instance type is nil or no matching offering exists.
+func resolveNodePrice(node *state.StateNode, instanceType *cloudprovider.InstanceType) float64 {
+	if instanceType == nil {
+		return 0
+	}
+	labels := node.Labels()
+	price, ok := instanceType.OfferingPrice(labels[corev1.LabelTopologyZone], labels[v1.CapacityTypeLabelKey])
+	if !ok {
+		return 0
+	}
+	if math.IsNaN(price) {
+		return 0
+	}
+	return price
+}
+
+// PerNodeBaseDisruptionCost is the inherent cost of draining a node (cordon,
+// drain, API calls, replacement latency). Could become per-NodePool if GPU
+// nodes need higher weight. See designs/balanced-consolidation.md.
+const PerNodeBaseDisruptionCost = 1.0
+
+func computeRescheduleDisruptionCost(ctx context.Context, reschedulablePods []*corev1.Pod) float64 {
+	cost := PerNodeBaseDisruptionCost
+	for _, p := range reschedulablePods {
+		cost += math.Max(0, disruptionutils.EvictionCost(ctx, p))
+	}
+	return cost
+}
+
+// SavingsRatio returns cost per unit disruption (higher = prefer to disrupt).
+func (c *Candidate) SavingsRatio() float64 { return c.Price / c.RescheduleDisruptionCost }
 
 func (c *Candidate) OwnedByStaticNodePool() bool {
 	return c.NodePool.Spec.Replicas != nil
+}
+
+// IsEmpty reports that no pod contributes positive reschedule disruption cost.
+// A node with running pods whose eviction costs all clamp to zero is Empty under
+// this definition; the Empty disruption reason and Empty budgets govern its
+// deletion through the Emptiness method.
+func (c *Candidate) IsEmpty() bool {
+	return c.RescheduleDisruptionCost <= PerNodeBaseDisruptionCost
 }
 
 //nolint:gocyclo
@@ -104,6 +175,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
+	// nodePool is a shared cache-backed pointer; treat as read-only. DeepCopy before mutating.
 	nodePool := nodePoolMap[nodePoolName]
 	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool
@@ -123,20 +195,23 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 			return nil, err
 		}
 	}
+	reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) })
 	return &Candidate{
 		StateNode:         node,
 		instanceType:      instanceType,
 		NodePool:          nodePool,
 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
 		zone:              node.Labels()[corev1.LabelTopologyZone],
-		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
+		reschedulablePods: reschedulable,
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
+		DisruptionCost:           disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
+		Price:                    resolveNodePrice(node, instanceType),
+		RescheduleDisruptionCost: computeRescheduleDisruptionCost(ctx, reschedulable),
 	}, nil
 }
 
 type Replacement struct {
-	*scheduling.NodeClaim
+	*pscheduling.NodeClaim
 
 	Name string
 	// Use a bool track if a node has already been initialized so we can fire metrics for initialization once.
@@ -145,8 +220,8 @@ type Replacement struct {
 	Initialized bool
 }
 
-func replacementsFromNodeClaims(newNodeClaims ...*scheduling.NodeClaim) []*Replacement {
-	return lo.Map(newNodeClaims, func(n *scheduling.NodeClaim, _ int) *Replacement { return &Replacement{NodeClaim: n} })
+func replacementsFromNodeClaims(newNodeClaims ...*pscheduling.NodeClaim) []*Replacement {
+	return lo.Map(newNodeClaims, func(n *pscheduling.NodeClaim, _ int) *Replacement { return &Replacement{NodeClaim: n} })
 }
 
 type Command struct {
@@ -157,9 +232,18 @@ type Command struct {
 	CreationTimestamp time.Time
 	ID                uuid.UUID
 
-	Results      scheduling.Results
-	Candidates   []*Candidate
-	Replacements []*Replacement
+	Results             pscheduling.Results
+	Candidates          []*Candidate
+	Replacements        []*Replacement
+	PoolDisruptionCosts map[string]float64
+}
+
+// Reason returns the disruption reason for this command.
+func (c Command) Reason() v1.DisruptionReason {
+	if c.Method == nil {
+		return ""
+	}
+	return c.Method.Reason()
 }
 
 type Decision string
@@ -179,6 +263,36 @@ func (c Command) Decision() Decision {
 	default:
 		return NoOpDecision
 	}
+}
+
+// PoolDisruptionCost returns the disruption cost for a given pool. If the
+// pre-computed map is populated, it reads from there; otherwise it falls back
+// to computing from candidates (for backwards compat in tests).
+func (c Command) PoolDisruptionCost(poolName string) float64 {
+	if c.PoolDisruptionCosts != nil {
+		return c.PoolDisruptionCosts[poolName]
+	}
+	// Fallback: compute from candidates directly.
+	var cost float64
+	for _, cand := range c.Candidates {
+		if cand.NodePool.Name == poolName {
+			cost += cand.RescheduleDisruptionCost
+		}
+	}
+	return cost
+}
+
+// computePoolDisruptionCosts groups candidates by NodePool name and sums
+// RescheduleDisruptionCost per group.
+func computePoolDisruptionCosts(candidates []*Candidate) map[string]float64 {
+	if len(candidates) == 0 {
+		return nil
+	}
+	costs := make(map[string]float64, len(candidates))
+	for _, c := range candidates {
+		costs[c.NodePool.Name] += c.RescheduleDisruptionCost
+	}
+	return costs
 }
 
 // SourceNodeNames returns the names of all candidate nodes
@@ -236,24 +350,29 @@ func (c Command) StringForNode(candidate *Candidate) string {
 	return fmt.Sprintf("%s: [%s] (part of %d-node consolidation)", c.Decision(), candidate.Name(), len(c.Candidates))
 }
 
+// SourceCost sums Price across all candidates in this command.
+func (c Command) SourceCost() float64 {
+	return lo.SumBy(c.Candidates, func(cd *Candidate) float64 { return cd.Price })
+}
+
 // EstimatedSavings returns the estimated cost savings from this consolidation.
-// Returns 0.0 when pricing cannot be determined. getCandidatePrices handles missing
-// offerings by returning 0.0, which causes consolidation to skip the candidate.
+// Returns 0.0 when pricing cannot be determined.
 func (c Command) EstimatedSavings() float64 {
-	sourcePrice := getCandidatePrices(c.Candidates)
+	sourcePrice := c.SourceCost()
 
 	// For delete consolidation, all source cost is savings
 	if len(c.Replacements) == 0 {
 		return sourcePrice
 	}
 
-	// For replace consolidation, sum destination costs from all replacement NodeClaims
+	// For replace consolidation, sum destination costs from all replacement NodeClaims.
+	// Filter to available offerings so ICE'd zones don't produce an optimistic estimate.
 	destPrice := 0.0
 	for _, nodeClaim := range c.Results.NewNodeClaims {
 		if len(nodeClaim.InstanceTypeOptions) > 0 {
-			offerings := nodeClaim.InstanceTypeOptions[0].Offerings
-			if len(offerings) > 0 {
-				destPrice += offerings.Cheapest().Price
+			available := nodeClaim.InstanceTypeOptions[0].Offerings.Available()
+			if len(available) > 0 {
+				destPrice += available.Cheapest().Price
 			}
 		}
 	}
@@ -296,7 +415,7 @@ func (c Command) LogValues() []any {
 			).Else(v1.CapacityTypeOnDemand),
 		}
 		if len(c.Replacements) == 1 {
-			m["instance-types"] = scheduling.InstanceTypeList(replacement.InstanceTypeOptions)
+			m["instance-types"] = pscheduling.InstanceTypeList(replacement.InstanceTypeOptions)
 		}
 		return m
 	})
