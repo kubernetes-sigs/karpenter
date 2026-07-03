@@ -18,6 +18,8 @@ package lifecycle_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -248,5 +251,146 @@ var _ = Describe("Finalizer", func() {
 
 		Expect(nodeClaim.StatusConditions().Get(status.ConditionReady).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(status.ConditionReady).ObservedGeneration).To(Equal(nodeClaim.Generation))
+	})
+})
+
+var _ = Describe("DRA Initialization Gating", func() {
+	var nodePool *v1.NodePool
+
+	const (
+		driverA = "driver-a.example.com"
+		driverB = "driver-b.example.com"
+	)
+
+	BeforeEach(func() {
+		// The DRA initialization gate relies on the resource.k8s.io/v1 ResourceSlice API, which only exists on k8s
+		// >= 1.34. Skip below that — there is no DRA to gate on.
+		if env.Version.Minor() < 34 {
+			Skip("DRA is only available in K8s versions >= 1.34.x")
+		}
+		// Enable DRA so the initialization gate is active.
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(false)}))
+		nodePool = test.NodePool()
+	})
+
+	AfterEach(func() {
+		// ResourceSlices are cluster-scoped and not handled by ExpectCleanedUp; remove them between tests. Guard on the
+		// version since the ResourceSlice API (and thus DeleteAllOf) isn't served before 1.34.
+		if env.Version.Minor() < 34 {
+			return
+		}
+		Expect(env.Client.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).To(Succeed())
+	})
+
+	// registeredReadyNodeClaim creates a NodeClaim with the given requested-dra-drivers annotation, drives it through launch and
+	// registration, and returns the NodeClaim and its Ready node. At this point the only thing blocking initialization
+	// is the DRA gate (node is Ready, registered, no taints, and requests no extended resources).
+	registeredReadyNodeClaim := func(drivers string) (*v1.NodeClaim, *corev1.Node) {
+		GinkgoHelper()
+		ncOpts := v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}}
+		if drivers != "" {
+			ncOpts.Annotations = map[string]string{v1.DRADriversAnnotationKey: drivers}
+		}
+		nodeClaim := test.NodeClaim(ncOpts)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{
+			ProviderID: nodeClaim.Status.ProviderID,
+			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node)
+		return nodeClaim, ExpectExists(ctx, env.Client, node)
+	}
+
+	// nodeSlice builds a ResourceSlice pinned to the node, declaring a pool with the given driver, pool name, generation,
+	// total slice count, and a single device. Apply `count` of these (incrementing the device name) to complete a pool.
+	nodeSlice := func(node *corev1.Node, driver, pool string, generation, count int64, device string) *resourcev1.ResourceSlice {
+		return test.ResourceSlice(resourcev1.ResourceSlice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            fmt.Sprintf("%s-%s-%s", node.Name, pool, device),
+				OwnerReferences: []metav1.OwnerReference{{APIVersion: "v1", Kind: "Node", Name: node.Name, UID: node.UID}},
+			},
+			Spec: resourcev1.ResourceSliceSpec{
+				Driver:   driver,
+				NodeName: lo.ToPtr(node.Name),
+				Pool:     resourcev1.ResourcePool{Name: pool, Generation: generation, ResourceSliceCount: count},
+				Devices:  []resourcev1.Device{{Name: device}},
+			},
+		})
+	}
+	reconcile := func(nodeClaim *v1.NodeClaim) *v1.NodeClaim {
+		GinkgoHelper()
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		return ExpectExists(ctx, env.Client, nodeClaim)
+	}
+
+	It("holds initialization until the expected driver publishes a complete pool (a)", func() {
+		nodeClaim, node := registeredReadyNodeClaim(driverA)
+
+		nodeClaim = reconcile(nodeClaim)
+		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
+		Expect(cond.IsUnknown()).To(BeTrue())
+		Expect(cond.Reason).To(Equal("DRADriverPoolsNotPublished"))
+
+		ExpectApplied(ctx, env.Client, nodeSlice(node, driverA, "pool-a", 1, 1, "dev-0"))
+		nodeClaim = reconcile(nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+	})
+
+	It("does not consider an incomplete pool satisfied (b)", func() {
+		nodeClaim, node := registeredReadyNodeClaim(driverA)
+
+		// Pool declares 2 slices but only 1 is published.
+		ExpectApplied(ctx, env.Client, nodeSlice(node, driverA, "pool-a", 1, 2, "dev-0"))
+		nodeClaim = reconcile(nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsUnknown()).To(BeTrue())
+
+		// Publishing the second slice completes the pool.
+		ExpectApplied(ctx, env.Client, nodeSlice(node, driverA, "pool-a", 1, 2, "dev-1"))
+		nodeClaim = reconcile(nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+	})
+
+	It("does not let stale older-generation slices satisfy a newer incomplete pool (b2)", func() {
+		nodeClaim, node := registeredReadyNodeClaim(driverA)
+
+		// Generation 1 was complete (count 1), but generation 2 now declares 2 slices with only 1 published.
+		ExpectApplied(ctx, env.Client, nodeSlice(node, driverA, "pool-a", 2, 2, "dev-0"))
+		nodeClaim = reconcile(nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsUnknown()).To(BeTrue())
+	})
+
+	It("requires every expected driver to publish a complete pool (c)", func() {
+		nodeClaim, node := registeredReadyNodeClaim(strings.Join([]string{driverA, driverB}, ","))
+
+		// Only driverA has a complete pool.
+		ExpectApplied(ctx, env.Client, nodeSlice(node, driverA, "pool-a", 1, 1, "dev-0"))
+		nodeClaim = reconcile(nodeClaim)
+		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
+		Expect(cond.IsUnknown()).To(BeTrue())
+		Expect(cond.Message).To(ContainSubstring(driverB))
+
+		// Publish driverB's pool — now both are satisfied.
+		ExpectApplied(ctx, env.Client, nodeSlice(node, driverB, "pool-b", 1, 1, "dev-0"))
+		nodeClaim = reconcile(nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+	})
+
+	It("initializes a NodeClaim with no requested-dra-drivers annotation (d)", func() {
+		nodeClaim, _ := registeredReadyNodeClaim("")
+		nodeClaim = reconcile(nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+	})
+
+	It("skips the gate when DRA is disabled (e)", func() {
+		// Even with an annotation and no published slices, a DRA-disabled cluster initializes normally.
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(true)}))
+		nodeClaim, _ := registeredReadyNodeClaim(driverA)
+		nodeClaim = reconcile(nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
 	})
 })

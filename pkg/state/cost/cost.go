@@ -327,11 +327,7 @@ func findOfferingPrice(instanceTypes []*cloudprovider.InstanceType, key Offering
 		if it == nil || it.Name != key.InstanceName {
 			continue
 		}
-		for _, o := range it.Offerings {
-			if o.Zone() == key.Zone && o.CapacityType() == key.CapacityType {
-				return o.Price, true
-			}
-		}
+		return it.OfferingPrice(key.Zone, key.CapacityType)
 	}
 	return 0, false
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -35,8 +36,12 @@ type (
 	InstanceTypeID  = unique.Handle[string]
 	NodeClaimID     = unique.Handle[string]
 	NodePoolID      = unique.Handle[string]
-	ResourceClaimID = unique.Handle[string]
+	ResourceClaimID = unique.Handle[types.NamespacedName]
 )
+
+func resourceClaimID(claim *resourcev1.ResourceClaim) ResourceClaimID {
+	return unique.Make(types.NamespacedName{Namespace: claim.Namespace, Name: claim.Name})
+}
 
 // DeviceID wraps cloudprovider.DeviceID with scheduling-specific metadata.
 // Template indicates whether the device comes from a cloud provider template
@@ -56,6 +61,10 @@ func (id *DeviceID) String() string {
 type NodeClaim interface {
 	// ID returns a unique identifier for this NodeClaim.
 	ID() NodeClaimID
+	// NodeName returns the name of the concrete node backing this NodeClaim, or "" for in-flight/new NodeClaims that
+	// don't yet have a node. Published ResourceSlices pinned to a node via spec.nodeName are only accessible from the
+	// existing node with this name.
+	NodeName() string
 	// NodePoolID returns the NodePool this NodeClaim belongs to.
 	NodePoolID() NodePoolID
 	// Requirements returns the current scheduling requirements.
@@ -90,6 +99,10 @@ type ResourceSlice interface {
 	//     topology requirements that constrain the NodeClaim. Potential devices are always
 	//     node-local and do not constrain topology.
 	Potential() bool
+	// NodeName returns the name of the node the slice's devices are local to when the slice pins itself to a single
+	// node via spec.nodeName, or "" otherwise. A node-name-pinned slice is accessible only from that exact node, so it
+	// can never satisfy an in-flight NodeClaim — only an existing node with the same name.
+	NodeName() string
 	// NodeSelector returns the node selector if the slice uses label-based node affinity, or nil.
 	NodeSelector() *corev1.NodeSelector
 	// AllNodes returns true if the slice's devices are accessible from all nodes.
@@ -100,6 +113,9 @@ type ResourceSlice interface {
 	// ResourceSliceCount returns the total number of slices expected in this pool.
 	// Used to determine pool completeness. Template slices return 1.
 	ResourceSliceCount() int64
+	// SharedCounters returns the counter set definitions declared by this slice.
+	// Returns nil if the slice declares no counter sets.
+	SharedCounters() []resourcev1.CounterSet
 }
 
 // apiServerSlice adapts a resourcev1.ResourceSlice from the API server to the ResourceSlice interface.
@@ -132,9 +148,16 @@ func (s *apiServerSlice) Devices() []cloudprovider.Device {
 			for k, v := range d.Attributes {
 				attrs[k] = v
 			}
+			capacity := make(map[resourcev1.QualifiedName]resourcev1.DeviceCapacity, len(d.Capacity))
+			for k, v := range d.Capacity {
+				capacity[k] = v
+			}
 			s.devices[i] = cloudprovider.Device{
-				Name:       unique.Make(d.Name),
-				Attributes: attrs,
+				Name:                     unique.Make(d.Name),
+				Attributes:               attrs,
+				Capacity:                 capacity,
+				AllowMultipleAllocations: lo.FromPtr(d.AllowMultipleAllocations),
+				ConsumesCounters:         d.ConsumesCounters,
 			}
 		}
 	}
@@ -143,6 +166,10 @@ func (s *apiServerSlice) Devices() []cloudprovider.Device {
 
 func (s *apiServerSlice) Potential() bool {
 	return false
+}
+
+func (s *apiServerSlice) NodeName() string {
+	return lo.FromPtr(s.slice.Spec.NodeName)
 }
 
 func (s *apiServerSlice) NodeSelector() *corev1.NodeSelector {
@@ -162,6 +189,10 @@ func (s *apiServerSlice) Generation() int64 {
 
 func (s *apiServerSlice) ResourceSliceCount() int64 {
 	return s.slice.Spec.Pool.ResourceSliceCount
+}
+
+func (s *apiServerSlice) SharedCounters() []resourcev1.CounterSet {
+	return s.slice.Spec.SharedCounters
 }
 
 // templateSlice adapts a cloudprovider.ResourceSliceTemplate to the ResourceSlice interface.
@@ -190,6 +221,10 @@ func (s *templateSlice) Potential() bool {
 	return true
 }
 
+func (s *templateSlice) NodeName() string {
+	return ""
+}
+
 func (s *templateSlice) NodeSelector() *corev1.NodeSelector {
 	return nil
 }
@@ -204,6 +239,10 @@ func (s *templateSlice) Generation() int64 {
 
 func (s *templateSlice) ResourceSliceCount() int64 {
 	return 1
+}
+
+func (s *templateSlice) SharedCounters() []resourcev1.CounterSet {
+	return s.template.SharedCounters
 }
 
 // nodeSelectorsToRequirements extracts scheduling requirements from a NodeSelector.

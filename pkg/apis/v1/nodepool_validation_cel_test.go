@@ -145,6 +145,47 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
+		DescribeTable("should succeed on a valid consolidationPolicy", func(value string) {
+			raw := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			lo.Must0(unstructured.SetNestedField(raw, value, "spec", "disruption", "consolidationPolicy"))
+			unstructuredPool := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(raw, unstructuredPool))
+
+			Expect(env.Client.Create(ctx, unstructuredPool)).To(Succeed())
+		},
+			Entry("WhenEmpty", "WhenEmpty"),
+			Entry("WhenEmptyOrUnderutilized", "WhenEmptyOrUnderutilized"),
+			Entry("Balanced", "Balanced"),
+		)
+		DescribeTable("should fail on an invalid consolidationPolicy", func(value string) {
+			raw := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			lo.Must0(unstructured.SetNestedField(raw, value, "spec", "disruption", "consolidationPolicy"))
+			unstructuredPool := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(raw, unstructuredPool))
+
+			Expect(env.Client.Create(ctx, unstructuredPool)).To(Not(Succeed()))
+		},
+			Entry("quoted 1", "1"),
+			Entry("quoted 2", "2"),
+			Entry("quoted 3", "3"),
+			Entry("level 0", "0"),
+			Entry("level 4", "4"),
+			Entry("level 10", "10"),
+			Entry("lowercase balanced", "balanced"),
+			Entry("lowercase whenempty", "whenempty"),
+			Entry("empty string", ""),
+			Entry("WhenUnderutilized", "WhenUnderutilized"),
+			Entry("arbitrary string", "foo"),
+		)
+		DescribeTable("should pass RuntimeValidate for valid consolidationPolicy",
+			func(policy ConsolidationPolicy) {
+				nodePool.Spec.Disruption.ConsolidationPolicy = policy
+				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+			},
+			Entry("WhenEmpty", ConsolidationPolicyWhenEmpty),
+			Entry("WhenEmptyOrUnderutilized", ConsolidationPolicyWhenEmptyOrUnderutilized),
+			Entry("Balanced", ConsolidationPolicyBalanced),
+		)
 		It("should fail when creating a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",

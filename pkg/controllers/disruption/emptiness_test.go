@@ -91,6 +91,7 @@ var _ = Describe("Emptiness", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
+			// Node has a pod, so Emptiness skips it (disruption cost > base)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
@@ -99,6 +100,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
+			// Pod deleted, node is now empty. Emptiness claims it.
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
@@ -389,15 +391,15 @@ var _ = Describe("Emptiness", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
-			// Cascade any deletion of the nodeClaim to the node
+			// The node is both empty and drifted. Drift runs before Emptiness in
+			// the method list, so it claims the node. Verify deletion succeeds and
+			// the metric reflects "drifted" as the reason.
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			// we should delete the empty node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
-				metrics.ReasonLabel: "empty",
+				metrics.ReasonLabel: "drifted",
 			})
 		})
 		It("should ignore nodes without the consolidatable status condition", func() {
@@ -716,7 +718,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectExists(ctx, env.Client, node)
 	})
 	It("should wait for the node TTL for empty nodes before consolidating", func() {
-		disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
+		disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
 
 		// inform cluster state about nodes and nodeclaims
@@ -800,6 +802,120 @@ var _ = Describe("Emptiness", func() {
 			candidates, err = disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 			Expect(candidates).To(HaveLen(0))
+		})
+	})
+	Context("Buffer pod protection", func() {
+		It("should not disrupt a node that hosts virtual buffer pods", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// Mark the node as hosting buffer pods
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 3,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Node should NOT be deleted because it hosts buffer capacity
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+
+		It("should disrupt a node once buffer pods are cleared", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// First: mark node as hosting buffer pods
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 2,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+
+			// Now: buffer consumed (real pods took the space, or buffer deleted)
+			cluster.UpdateBufferPodCounts(map[string]int{})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// Node should now be deleted
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		})
+
+		It("should only protect the specific node with buffer pods, not others", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, nodeClaim2, node2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+
+			// Only node1 hosts buffer pods
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 1,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim2)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
+
+			// node2 should be deleted (no buffer), node1 should remain
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectNotFound(ctx, env.Client, nodeClaim2)
+		})
+
+		It("should not consider a node with real pods AND buffer pods as empty", func() {
+			pod := test.Pod()
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// Node has both real pods and buffer pods
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 2,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Node should NOT be empty-deleted (it has real pods)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+
+		It("should protect multiple nodes that each host buffer pods", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, nodeClaim2, node2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+
+			// Both nodes host buffer pods
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID:  2,
+				node2.Spec.ProviderID: 3,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Neither node should be deleted
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectExists(ctx, env.Client, nodeClaim2)
+		})
+
+		It("should not protect a node with zero buffer pod count", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// Buffer pods were cleared (count = 0 explicitly)
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 0,
+			})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// Node should be deleted — zero buffer pods means it's empty
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		})
 	})
 })

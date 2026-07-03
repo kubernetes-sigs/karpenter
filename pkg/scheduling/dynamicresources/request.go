@@ -19,9 +19,10 @@ package dynamicresources
 import (
 	"context"
 	"fmt"
-	"unique"
 
+	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
@@ -58,6 +59,9 @@ type RequestData struct {
 	AllTemplateDevicesByIT map[InstanceTypeID][]DeviceWithID
 	// Selectors is the combined set of selectors from the class and request.
 	Selectors []resourcev1.DeviceSelector
+	// CapacityRequests contains the per-dimension capacity requirements from
+	// ExactDeviceRequest.Capacity.Requests. nil when no capacity is requested.
+	CapacityRequests map[resourcev1.QualifiedName]resource.Quantity
 }
 
 // ClaimData holds the parsed constraints and requests for a single ResourceClaim.
@@ -82,7 +86,7 @@ func ValidateClaimRequest(
 	bindingFallback *AttributeBindingFallback,
 ) (*ClaimData, error) {
 	data := &ClaimData{
-		ID: unique.Make(claim.Name),
+		ID: resourceClaimID(claim),
 	}
 
 	// Build constraints.
@@ -95,6 +99,8 @@ func ValidateClaimRequest(
 				AttributeBindingFallback: bindingFallback,
 			}
 			data.Constraints = append(data.Constraints, mac)
+		case c.DistinctAttribute != nil:
+			return nil, fmt.Errorf("claim %q: DistinctAttribute constraints not done yet", claim.Name)
 		default:
 			return nil, fmt.Errorf("claim %q: unsupported constraint type", claim.Name)
 		}
@@ -207,6 +213,10 @@ func validateExactRequest(
 		AllocationMode: resourcev1.DeviceAllocationModeExactCount,
 	}
 
+	if req.Capacity != nil {
+		rd.CapacityRequests = req.Capacity.Requests
+	}
+
 	if req.AllocationMode == resourcev1.DeviceAllocationModeAll {
 		rd.AllocationMode = resourcev1.DeviceAllocationModeAll
 		rd.NumDevices = 0
@@ -304,8 +314,10 @@ func DeviceMatchesSelectors(
 		}
 
 		match, _, err := result.DeviceMatches(ctx, dracel.Device{
-			Driver:     deviceID.Driver.Value(),
-			Attributes: device.Attributes,
+			Driver:                   deviceID.Driver.Value(),
+			Attributes:               device.Attributes,
+			Capacity:                 device.Capacity,
+			AllowMultipleAllocations: lo.ToPtr(device.AllowMultipleAllocations),
 		})
 		if err != nil {
 			return false, fmt.Errorf("CEL expression %q evaluation failed: %w", s.CEL.Expression, err)

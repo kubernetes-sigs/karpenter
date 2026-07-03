@@ -45,6 +45,11 @@ type ResourceSliceTemplate struct {
 	Pool ResourcePool
 	// Devices is the list of expected devices in this slice.
 	Devices []Device
+	// SharedCounters is the list of expected counter sets in this slice.
+	// A ResourceSliceTemplate with SharedCounters must not also contain Devices —
+	// these are mutually exclusive. If both are set, the devices will be silently
+	// ignored during pool gathering.
+	SharedCounters []resourcev1.CounterSet
 }
 
 // ResourcePool identifies a pool of devices within a driver.
@@ -60,6 +65,14 @@ type Device struct {
 	// Attributes are the device's properties used for CEL selector evaluation and
 	// MatchAttribute constraint checking.
 	Attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute
+	// Capacity defines the set of capacities for this device.
+	Capacity map[resourcev1.QualifiedName]resourcev1.DeviceCapacity
+	// AllowMultipleAllocations marks whether the device is allowed to be allocated
+	// to multiple DeviceRequests.
+	AllowMultipleAllocations bool
+	// ConsumesCounters declares which sharedCounters this device consumes from
+	// on allocation.
+	ConsumesCounters []resourcev1.DeviceCounterConsumption
 }
 
 // AttributeBinding declares that a set of devices on an instance type will share a common

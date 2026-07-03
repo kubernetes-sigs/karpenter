@@ -57,6 +57,18 @@ func (in *ResourceSliceTemplate) DeepCopyInto(out *ResourceSliceTemplate) {
 			in.Devices[i].DeepCopyInto(&out.Devices[i])
 		}
 	}
+	if in.SharedCounters != nil {
+		out.SharedCounters = make([]resourcev1.CounterSet, len(in.SharedCounters))
+		for i, cs := range in.SharedCounters {
+			out.SharedCounters[i].Name = cs.Name
+			if cs.Counters != nil {
+				out.SharedCounters[i].Counters = make(map[string]resourcev1.Counter, len(cs.Counters))
+				for k, v := range cs.Counters {
+					out.SharedCounters[i].Counters[k] = resourcev1.Counter{Value: v.Value.DeepCopy()}
+				}
+			}
+		}
+	}
 }
 
 func (in *ResourceSliceTemplate) DeepCopy() *ResourceSliceTemplate {
@@ -74,6 +86,24 @@ func (in *Device) DeepCopyInto(out *Device) {
 		out.Attributes = make(map[resourcev1.QualifiedName]resourcev1.DeviceAttribute, len(in.Attributes))
 		for key, val := range in.Attributes {
 			out.Attributes[key] = *val.DeepCopy()
+		}
+	}
+	if in.Capacity != nil {
+		out.Capacity = make(map[resourcev1.QualifiedName]resourcev1.DeviceCapacity, len(in.Capacity))
+		for key, val := range in.Capacity {
+			out.Capacity[key] = *val.DeepCopy()
+		}
+	}
+	if in.ConsumesCounters != nil {
+		out.ConsumesCounters = make([]resourcev1.DeviceCounterConsumption, len(in.ConsumesCounters))
+		for i, consumption := range in.ConsumesCounters {
+			out.ConsumesCounters[i].CounterSet = consumption.CounterSet
+			if consumption.Counters != nil {
+				out.ConsumesCounters[i].Counters = make(map[string]resourcev1.Counter, len(consumption.Counters))
+				for k, v := range consumption.Counters {
+					out.ConsumesCounters[i].Counters[k] = resourcev1.Counter{Value: v.Value.DeepCopy()}
+				}
+			}
 		}
 	}
 }
