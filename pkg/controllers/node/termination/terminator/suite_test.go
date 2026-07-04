@@ -251,6 +251,26 @@ var _ = Describe("Eviction/Queue", func() {
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
 		})
+		It("should keep the earlier deadline when Add is called again with a looser one", func() {
+			// Once a pod has a force-delete deadline, a later Add must not push it out — otherwise
+			// an in-flight force-delete could be downgraded to a PDB-respecting eviction.
+			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
+			ExpectApplied(ctx, env.Client, pdb, pod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// Tight deadline first: TGP=120s doesn't fit in the remaining 60s → force-delete.
+			tightDeadline := env.Clock.Now().Add(time.Minute * 1)
+			queue.Add(&tightDeadline, pod)
+			// Looser deadline second: TGP=120s fits in the remaining 1h → normal eviction would suffice.
+			looseDeadline := env.Clock.Now().Add(time.Hour)
+			queue.Add(&looseDeadline, pod)
+
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			// Tight deadline retained, so force-delete triggers despite the blocking PDB.
+			pod = ExpectExists(ctx, env.Client, pod)
+			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
+			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
+		})
 		It("should clean up the queue entry when the pod is already gone", func() {
 			nodeTerminationTime := env.Clock.Now().Add(time.Minute * 1)
 			queue.Add(&nodeTerminationTime, pod)

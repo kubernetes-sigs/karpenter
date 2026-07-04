@@ -90,7 +90,7 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 }
 
 // Drain evicts pods from the node and returns true when all pods are evicted
-// https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
+// https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
 func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time) error {
 	pods, err := nodeutils.GetPods(ctx, t.kubeClient, node)
 	if err != nil {
@@ -110,7 +110,7 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 }
 
 func (t *Terminator) groupPodsByPriority(pods []*corev1.Pod) [][]*corev1.Pod {
-	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
+	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
 	var nonCriticalNonDaemon, nonCriticalDaemon, criticalNonDaemon, criticalDaemon []*corev1.Pod
 	for _, pod := range pods {
 		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
