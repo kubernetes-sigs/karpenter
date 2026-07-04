@@ -53,14 +53,6 @@ import (
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-// queueItem holds the per-pod state needed by the Queue's reconciler. The
-// reconciler decides at reconcile time whether to evict or force-delete based
-// on nodeTerminationTime and the pod's grace period — there is no upfront
-// per-pod mode. A nil nodeTerminationTime means "no deadline; always evict".
-type queueItem struct {
-	nodeTerminationTime *time.Time
-}
-
 const (
 	evictionQueueBaseDelay = 100 * time.Millisecond
 	evictionQueueMaxDelay  = 10 * time.Second
@@ -102,7 +94,11 @@ type Queue struct {
 	sync.Mutex
 
 	source chan event.TypedGenericEvent[*corev1.Pod]
-	items  map[QueueKey]queueItem
+	// items maps each enqueued pod to its node's terminationGracePeriod deadline.
+	// The reconciler decides evict vs force-delete per reconcile from that deadline
+	// plus the pod's own grace period — no upfront per-pod mode. A nil value means
+	// "no deadline; always evict".
+	items map[QueueKey]*time.Time
 
 	clock      clock.Clock
 	kubeClient client.Client
@@ -112,7 +108,7 @@ type Queue struct {
 func NewQueue(clk clock.Clock, kubeClient client.Client, recorder events.Recorder) *Queue {
 	return &Queue{
 		source:     make(chan event.TypedGenericEvent[*corev1.Pod], 10000),
-		items:      map[QueueKey]queueItem{},
+		items:      map[QueueKey]*time.Time{},
 		clock:      clk,
 		kubeClient: kubeClient,
 		recorder:   recorder,
@@ -149,20 +145,36 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 // Add enqueues pods for drain. The queue decides per reconcile whether to
 // evict (respecting PDB) or force-delete based on whether the pod's grace
 // period would extend past nodeTerminationTime; pass nil to disable the
-// force-delete path entirely. Re-adding a pod overwrites its deadline so the
-// next reconcile picks up the latest value.
+// force-delete path entirely. Re-adding a pod keeps the earlier of the
+// existing and new deadlines — a later Add can tighten the deadline but never
+// push it out or clear it, so an in-flight force-delete cannot be downgraded.
 func (q *Queue) Add(nodeTerminationTime *time.Time, pods ...*corev1.Pod) {
 	q.Lock()
 	defer q.Unlock()
 
 	for _, pod := range pods {
 		qk := NewQueueKey(pod)
-		_, enqueued := q.items[qk]
-		q.items[qk] = queueItem{nodeTerminationTime: nodeTerminationTime}
+		existing, enqueued := q.items[qk]
+		q.items[qk] = earlier(existing, nodeTerminationTime)
 		if !enqueued {
 			q.source <- event.TypedGenericEvent[*corev1.Pod]{Object: pod}
 		}
 	}
+}
+
+// earlier returns the earlier of a and b, treating nil as "no deadline" (+∞).
+// Returns nil only when both are nil.
+func earlier(a, b *time.Time) *time.Time {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	if a.Before(*b) {
+		return a
+	}
+	return b
 }
 
 func (q *Queue) Has(pod *corev1.Pod) bool {
@@ -177,7 +189,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	ctx = injection.WithControllerName(ctx, q.Name())
 
 	q.Lock()
-	item, ok := q.items[NewQueueKey(pod)]
+	nodeTerminationTime, ok := q.items[NewQueueKey(pod)]
 	q.Unlock()
 	if !ok {
 		//This is a different pod than the one the queue, we should exit without evicting
@@ -187,8 +199,8 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		return reconcile.Result{}, nil
 	}
 
-	if needsForceDelete(pod, item.nodeTerminationTime, q.clock) {
-		return q.forceDelete(ctx, pod, item.nodeTerminationTime)
+	if q.needsForceDelete(pod, nodeTerminationTime) {
+		return q.forceDelete(ctx, pod, nodeTerminationTime)
 	}
 	// Pod is terminal (Failed/Succeeded) or terminating so drop the queue entry.
 	// Reconcile won't fire again once the pod is gone, so this is our only chance to clean up.
@@ -209,7 +221,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 // grace period would (or already does) extend past nodeTerminationTime if
 // allowed to run on its own. Re-evaluated on every reconcile, so a pod stuck
 // on a PDB upgrades to force-delete naturally once the deadline passes.
-func needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time, clk clock.Clock) bool {
+func (q *Queue) needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time) bool {
 	if nodeTerminationTime == nil {
 		return false
 	}
@@ -220,7 +232,7 @@ func needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time, clk clock
 		return false
 	}
 	deleteTime := nodeTerminationTime.Add(time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second * -1)
-	return clk.Now().After(deleteTime)
+	return q.clock.Now().After(deleteTime)
 }
 
 // evict removes a pod via the Kubernetes eviction subresource, respecting PDBs.
