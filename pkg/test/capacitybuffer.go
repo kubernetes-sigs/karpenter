@@ -21,11 +21,11 @@ import (
 
 	"github.com/imdario/mergo"
 
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 )
 
-func CapacityBuffer(overrides ...autoscalingv1alpha1.CapacityBuffer) *autoscalingv1alpha1.CapacityBuffer {
-	override := autoscalingv1alpha1.CapacityBuffer{}
+func CapacityBuffer(overrides ...autoscalingv1beta1.CapacityBuffer) *autoscalingv1beta1.CapacityBuffer {
+	override := autoscalingv1beta1.CapacityBuffer{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&override, opts, mergo.WithOverride); err != nil {
 			panic(fmt.Sprintf("failed to merge: %v", err))
@@ -37,7 +37,7 @@ func CapacityBuffer(overrides ...autoscalingv1alpha1.CapacityBuffer) *autoscalin
 	if override.Namespace == "" {
 		override.Namespace = "default"
 	}
-	return &autoscalingv1alpha1.CapacityBuffer{
+	return &autoscalingv1beta1.CapacityBuffer{
 		ObjectMeta: NamespacedObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,
 		Status:     override.Status,
