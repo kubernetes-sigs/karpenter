@@ -45,7 +45,29 @@ import (
 )
 
 type nodeClaimReconciler interface {
-	Reconcile(context.Context, *v1.NodePool, *v1.NodeClaim) (reconcile.Result, error)
+	Reconcile(context.Context, *v1.NodePool, *v1.NodeClaim, *transitionLogger) (reconcile.Result, error)
+}
+
+// transitionLogger buffers condition transition logs until the status patch succeeds,
+// so reconciles racing a stale informer cache don't log the same transition twice
+type transitionLogger struct {
+	entries []transitionLogEntry
+}
+
+type transitionLogEntry struct {
+	message       string
+	keysAndValues []any
+}
+
+func (t *transitionLogger) Record(message string, keysAndValues ...any) {
+	t.entries = append(t.entries, transitionLogEntry{message: message, keysAndValues: keysAndValues})
+}
+
+func (t *transitionLogger) Flush(ctx context.Context) {
+	for _, e := range t.entries {
+		log.FromContext(ctx).V(1).Info(e.message, e.keysAndValues...)
+	}
+	t.entries = nil
 }
 
 // Controller is a disruption controller that adds StatusConditions to nodeclaims when they meet certain disruption conditions
@@ -93,7 +115,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	results, errs := c.runReconcilers(ctx, nodePool, nodeClaim)
+	results, transitions, errs := c.runReconcilers(ctx, nodePool, nodeClaim)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
@@ -105,6 +127,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
+	transitions.Flush(ctx)
 	if errs != nil {
 		return reconcile.Result{}, errs
 	}
@@ -133,7 +156,8 @@ func (c *Controller) runReconcilers(
 	ctx context.Context,
 	np *v1.NodePool,
 	nc *v1.NodeClaim,
-) ([]reconcile.Result, error) {
+) ([]reconcile.Result, *transitionLogger, error) {
+	transitions := &transitionLogger{}
 	reconcilers := []nodeClaimReconciler{c.drift}
 	// NodeClaims belonging to static NodePools are never eligible for consolidation, so we shouldn't mark them as consolidatable
 	if np.Spec.Replicas == nil {
@@ -142,9 +166,9 @@ func (c *Controller) runReconcilers(
 	results := make([]reconcile.Result, 0, len(reconcilers))
 	var errs error
 	for _, r := range reconcilers {
-		res, err := r.Reconcile(ctx, np, nc)
+		res, err := r.Reconcile(ctx, np, nc, transitions)
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-	return results, errs
+	return results, transitions, errs
 }
