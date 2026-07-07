@@ -97,7 +97,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	if err != nil {
 		log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", err.Error())
 	}
-	metrics.PodsDisruptedTotal.Add(float64(len(reschedulablePods)), labels)
+	metrics.PodsDisruptionInitiatedTotal.Add(float64(len(reschedulablePods)), labels)
 	// We sleep here after the delete operation since we want to ensure that we are able to read our own writes so that
 	// we avoid duplicating metrics and log lines due to quick re-queues.
 	// USE CAUTION when determining whether to increase this timeout or remove this line

@@ -122,7 +122,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		if podErr != nil {
 			log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", podErr.Error())
 		}
-		metrics.PodsDisruptedTotal.Add(float64(len(reschedulablePods)), labels)
+		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(reschedulablePods)), labels)
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconciler.Result{}, err

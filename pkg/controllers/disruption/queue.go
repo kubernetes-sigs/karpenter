@@ -245,7 +245,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			metrics.CapacityTypeLabel: cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
 		}
 		metrics.NodeClaimsDisruptedTotal.Inc(labels)
-		metrics.PodsDisruptedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
+		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.

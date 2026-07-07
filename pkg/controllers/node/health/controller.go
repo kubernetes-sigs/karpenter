@@ -183,7 +183,7 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	if err != nil {
 		log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", err.Error())
 	}
-	metrics.PodsDisruptedTotal.Add(float64(len(reschedulablePods)), labels)
+	metrics.PodsDisruptionInitiatedTotal.Add(float64(len(reschedulablePods)), labels)
 	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
 		Condition:                 pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
