@@ -176,19 +176,37 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 	return true, nil
 }
 
+// computeReplicas combines the buffer's sizing signals following the upstream API
+// contract: replicas and percentage are combined with max(), then bounded by limits.
+// https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/proposals/buffers.md
+//
+// candidates carries sizing signals the caller already resolved (the percentage-derived
+// count from a scalableRef), since percentage needs the live scalable replica count.
 func computeReplicas(cb *autoscalingv1alpha1.CapacityBuffer, podSpec *v1.PodSpec, candidates []int32) int32 {
 	if cb.Spec.Replicas != nil {
 		candidates = append(candidates, *cb.Spec.Replicas)
 	}
+
+	var limitReplicas *int32
 	if cb.Spec.Limits != nil && podSpec != nil {
-		if limitReplicas, ok := calculateLimitReplicas(v1.ResourceList(cb.Spec.Limits), podSpec); ok {
-			candidates = append(candidates, limitReplicas)
+		if l, ok := calculateLimitReplicas(v1.ResourceList(cb.Spec.Limits), podSpec); ok {
+			limitReplicas = &l
 		}
 	}
+
+	// With no explicit sizing signals, limits alone determine the buffer size.
 	if len(candidates) == 0 {
+		if limitReplicas != nil {
+			return *limitReplicas
+		}
 		return 0
 	}
-	return lo.Min(candidates)
+
+	desired := lo.Max(candidates)
+	if limitReplicas != nil {
+		return lo.Min([]int32{desired, *limitReplicas})
+	}
+	return desired
 }
 
 // handleResolveError sets the ReadyForProvisioning condition to False and returns
