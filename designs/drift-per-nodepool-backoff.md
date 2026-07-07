@@ -194,6 +194,7 @@ Introduce a **per-NodePool drift back-off tracker**. Three interaction points:
 type NodePoolBackoff struct {
 	mu    sync.Mutex
 	clock clock.Clock
+	rand  *rand.Rand // injectable so jitter is deterministic in tests
 	state map[string]*backoffEntry // keyed by NodePool name
 }
 
@@ -211,12 +212,14 @@ type backoffEntry struct {
 
 ### Back-off formula
 
-On each unrecoverable failure, grow the window exponentially and clamp it to a single
-absolute ceiling (`maxDelay`):
+On each unrecoverable failure, grow the window exponentially, clamp it to a single
+absolute ceiling (`maxDelay`), and apply randomized **jitter**:
 
 ```
-level := level + 1
-until := now + min(baseDelay * 2^(level-1), maxDelay)
+level  := level + 1
+window := min(baseDelay * 2^(level-1), maxDelay)
+window := window/2 + rand[0, window/2)   // equal jitter: keeps a floor of window/2
+until  := now + window
 ```
 
 Proposed defaults (mirroring the existing retry-duration bounds in `queue.go`, which
@@ -335,13 +338,13 @@ func (b *NodePoolBackoff) Fail(nodePool string) {
 	window := baseDelay << (e.level - 1) // baseDelay * 2^(level-1)
 	if window > maxDelay || window <= 0 {
 		window = maxDelay
+		e.level = maxLevel // saturate level so the shift above can never overflow
 	}
+	// Equal jitter: keep a floor of window/2, spread the remainder randomly. This
+	// de-synchronizes pools that failed from a shared cause (e.g. common-AZ ICE) so
+	// their probe windows don't expire — and re-escalate — in lockstep.
+	window = window/2 + time.Duration(b.rand.Int63n(int64(window/2)))
 	e.until = b.clock.Now().Add(window)
-	// Once the window has saturated at maxDelay, stop growing level so the shift
-	// above can never overflow on a pool that fails indefinitely.
-	if window == maxDelay {
-		e.level = maxLevel
-	}
 }
 
 func (b *NodePoolBackoff) Reset(nodePool string) {
@@ -375,8 +378,9 @@ Sequence for a persistently failing pool (`spark`) alongside a healthy younger p
    and serviced normally.
 4. At `now+1m`: `spark` probes one candidate. If ICE again → `Fail` → `level=2`,
    `until=now+2m`. If it succeeds → `Reset("spark")`, pool healthy again.
-5. Window grows `1m, 2m, 4m, 8m, 10m, 10m…` (clamped at `maxDelay`) until capacity
-   returns.
+5. The window grows `1m, 2m, 4m, 8m, 10m, 10m…` (clamped at `maxDelay`)
+   until capacity returns; each actual window is equal-jittered to `[½w, w)`, so the
+   values above are centers, not exact times.
 
 This removes both symptoms: `spark` no longer holds the head of line every pass, and
 launch attempts drop from "every pass" to "one per back-off window."
@@ -424,7 +428,10 @@ launch attempts drop from "every pass" to "one per back-off window."
 ## Testing plan
 
 - **Unit (tracker):** `Fail` growth/cap, `Reset`, `Selectable` transitions
-  (healthy → backing off → probe → recovered), driven by a fake `clock.Clock`.
+  (healthy → backing off → probe → recovered), driven by a fake `clock.Clock`. Inject a
+  seeded `*rand.Rand` so jitter is deterministic; assert each window lands in `[½w, w)`
+  and that two pools failed at the same instant with the same `level` get *different*
+  `until` values (de-synchronization).
 - **Unit (`Drift.ComputeCommands`):** with a backed-off NodePool, assert its
   candidates are skipped and a younger NodePool's candidate is selected instead;
   assert the probe allows exactly one in-flight replacement after expiry.
