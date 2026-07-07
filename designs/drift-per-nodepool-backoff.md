@@ -459,19 +459,6 @@ launch attempts drop from "every pass" to "one per back-off window."
   without additional state dimensions. Can be revisited if a use case emerges where
   NodePool-level tracking is too coarse (e.g. a single large NodePool spanning
   multiple AZs where only one AZ is capacity-constrained).
-- **Fairness ordering (least-recently-serviced NodePool first) instead of / in
-  addition to back-off.** Deliberately excluded from this RFC's scope. A maintainer
-  raised a specific concern that fairness ordering could let disruption budgets be
-  consumed by NodeClaims that are slower to disrupt (e.g. `do-not-disrupt` with
-  termination-grace-period enabled), effectively trading one head-of-line problem for
-  another. As of this writing the issue thread has not settled whether fairness
-  should become a second, separate RFC/PR — the issue author raised a
-  counter-scenario (a large, healthy NodePool with fast replacements starving a
-  smaller one) suggesting fairness may still be needed for that case. This RFC
-  intentionally stands alone as the back-off half of the two originally proposed
-  fixes; fairness ordering is left to a follow-up RFC pending that discussion, so as
-  not to block back-off (which addresses the reported production issue on its own)
-  on an unresolved design question.
 
 ## Open questions
 
