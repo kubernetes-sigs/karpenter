@@ -161,8 +161,9 @@ design below must be revisited.
   probe cap all depend on this.
 - **A drift command's outcome is observed exactly once**, in `Queue.Reconcile` via
   `CompleteCommand`, and is unambiguously either success (`cmd.Succeeded == true`) or
-  unrecoverable failure. All back-off state transitions happen only there; the
-  synchronous selection path in `Drift.ComputeCommands` only *reads* back-off state.
+  unrecoverable failure. `level`/`until` transitions happen only there. The synchronous
+  selection path in `Drift.ComputeCommands` mutates back-off state only by atomically
+  claiming or releasing the single probe slot (`probing`), never `level`/`until`.
 - **`Drift.ComputeCommands` emits ≤ 1 command per pass and stops at the first
   schedulable candidate.** Back-off is layered as an additional per-candidate skip; it
   never walks past the first schedulable candidate nor batches commands. (This is the
@@ -185,7 +186,7 @@ Introduce a **per-NodePool drift back-off tracker**. Three interaction points:
    NodePool is currently backed off. Allow a single probing candidate once the
    back-off window has elapsed.
 3. **Reset on success.** A successful drift replacement clears the NodePool's
-   back-off level and window.
+   back-off level, window, and reserved probe slot.
 
 ### Back-off state
 
@@ -199,8 +200,9 @@ type NodePoolBackoff struct {
 }
 
 type backoffEntry struct {
-	level int       // number of consecutive unrecoverable failures (0 == healthy)
-	until time.Time // no candidates selectable before this time
+	level   int       // number of consecutive unrecoverable failures (0 == healthy)
+	until   time.Time // no candidates selectable before this time
+	probing bool      // a single probe replacement has been claimed and not yet resolved
 }
 ```
 
@@ -208,7 +210,9 @@ type backoffEntry struct {
 - `until` is the earliest time the pool may be selected again.
 - After `until` has passed while `level > 0`, the pool is in a **probe** state: it may
   select **at most one** in-flight drift replacement until the next success or
-  failure resolves it.
+  failure resolves it. `probing` is the tracker's *own* record of that single in-flight
+  probe, so the cap does not depend on reading the queue's in-flight counts (see
+  [Concurrency: claiming the probe slot](#concurrency-claiming-the-probe-slot)).
 
 ### Back-off formula
 
@@ -241,8 +245,15 @@ The `Queue.Reconcile` unrecoverable/success branches are the single authoritativ
 place where a drift command's fate is known. We hook there, gated on the command's
 reason so only drift is affected:
 
-- **Success** (`cmd.Succeeded == true`): `backoff.Reset(nodePool)`.
-- **Unrecoverable failure**: `backoff.Fail(nodePool)`.
+- **Success** (`cmd.Succeeded == true`): `backoff.Reset(nodePool)` — clears level,
+  window, and the reserved probe slot.
+- **Unrecoverable failure**: `backoff.Fail(nodePool)` — grows the window and clears the
+  reserved probe slot (a new probe may be claimed after the new window).
+- **Failed to launch** (`StartCommand` errors, so the command never enters the queue
+  and no success/failure will be observed): `backoff.Fail(nodePool)` for a drift
+  command, so the reserved probe slot is released rather than leaked. `StartCommand`
+  already performs cleanup (untaint, clear condition) on this path; releasing the probe
+  slot belongs alongside it.
 
 Per the single-NodePool-per-command [invariant](#invariants), the NodePool key is
 `cmd.Candidates[0].NodePool.Name`. We guard with
@@ -263,30 +274,41 @@ for _, candidate := range slices.Concat(emptyCandidates, nonEmptyCandidates) {
 	if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 		continue
 	}
-	// NEW: skip pools that are backed off, or already have a probe in flight.
-	if !d.backoff.Selectable(candidate.NodePool.Name, d.inflightDriftReplacements(candidate.NodePool.Name)) {
-		continue
+	// NEW: atomically claim selectability. Healthy pools claim nothing; a pool in its
+	// probe window reserves the single probe slot for exactly one caller.
+	claim, ok := d.backoff.TryClaim(candidate.NodePool.Name)
+	if !ok {
+		continue // backing off, or a probe is already in flight for this pool
 	}
 	results, err := SimulateScheduling(...)
-	// ... unchanged ...
+	if err != nil {
+		claim.Release() // candidate not dispatched → free the probe slot
+		if errors.Is(err, errCandidateDeleting) {
+			continue
+		}
+		return []Command{}, err
+	}
+	if !results.AllNonPendingPodsScheduled() {
+		claim.Release() // candidate not dispatched → free the probe slot
+		d.recorder.Publish(disruptionevents.Blocked(...)...)
+		continue
+	}
+	// The command will be handed to the queue; the probe slot stays reserved and is
+	// released later by the queue when the command resolves (Fail/Reset) or fails to
+	// launch (see below). Do NOT Release here.
+	cmd := Command{ /* ...unchanged... */ }
 	return []Command{cmd}, nil
 }
 ```
 
-`Selectable(nodePool, inflight)` returns:
+`TryClaim(nodePool)` returns:
 
-- `true` if `level == 0` (healthy).
-- `false` if `now < until` (backing off).
-- Probe: if `now >= until` and `level > 0`, return `true` only when `inflight == 0`
-  (cap the pool to a single in-flight drift replacement until it recovers).
-
-`inflightDriftReplacements(nodePool)` counts drift commands currently in the `Queue`
-for that NodePool. The `Queue` already indexes in-flight commands by providerID
-(`ProviderIDToCommand`); so it can expose a small helper to count in-flight drift
-replacements per NodePool. (The existing `queue.HasAny` check in `NewCandidate`
-already prevents re-selecting a node that is actively in the queue; the probe cap is
-about limiting *how many distinct* candidates from a recovering pool can be in flight
-at once — one.)
+- `(_, true)` with an empty claim if `level == 0` (healthy) — nothing reserved,
+  `Release` is a no-op.
+- `(_, false)` if `now < until` (backing off).
+- `(_, false)` if `probing` is already set (a probe is in flight for this pool).
+- `(claim{probe:true}, true)` if `now >= until` and `level > 0` and no probe is in
+  flight — this atomically reserves the pool's single probe slot.
 
 ### Wiring / ownership
 
@@ -345,27 +367,52 @@ func (b *NodePoolBackoff) Fail(nodePool string) {
 	// their probe windows don't expire — and re-escalate — in lockstep.
 	window = window/2 + time.Duration(b.rand.Int63n(int64(window/2)))
 	e.until = b.clock.Now().Add(window)
+	e.probing = false // the probe (if any) is resolved; a new one may be claimed after the window
 }
 
 func (b *NodePoolBackoff) Reset(nodePool string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.state, nodePool)
+	delete(b.state, nodePool) // success clears level, window, and probing
 }
 
-// Selectable reports whether a candidate from nodePool may be selected this pass,
-// given the number of drift replacements currently in flight for that pool.
-func (b *NodePoolBackoff) Selectable(nodePool string, inflight int) bool {
+// TryClaim atomically decides whether a candidate from nodePool may be selected this
+// pass, and — for a pool in the probe window — reserves the single probe slot so no
+// other pass can select a second probe. It returns a claim the caller must Release if
+// the candidate is not actually handed to the queue.
+func (b *NodePoolBackoff) TryClaim(nodePool string) (claim, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	e, ok := b.state[nodePool]
 	if !ok || e.level == 0 {
-		return true // healthy
+		return claim{}, true // healthy: selectable, nothing reserved
 	}
 	if b.clock.Now().Before(e.until) {
-		return false // backing off
+		return claim{}, false // backing off
 	}
-	return inflight == 0 // probe: at most one in flight
+	if e.probing {
+		return claim{}, false // a probe is already in flight for this pool
+	}
+	e.probing = true // reserve the single probe slot for this caller
+	return claim{b: b, nodePool: nodePool, probe: true}, true
+}
+
+// claim represents a reserved probe slot. Release is a no-op for healthy pools.
+type claim struct {
+	b        *NodePoolBackoff
+	nodePool string
+	probe    bool
+}
+
+func (c claim) Release() {
+	if !c.probe {
+		return
+	}
+	c.b.mu.Lock()
+	defer c.b.mu.Unlock()
+	if e, ok := c.b.state[c.nodePool]; ok {
+		e.probing = false
+	}
 }
 ```
 
@@ -414,7 +461,8 @@ launch attempts drop from "every pass" to "one per back-off window."
 ## Backward compatibility & failure modes
 
 - **No API/CRD changes.** Behavior for clusters that never hit unrecoverable drift
-  failures is unchanged (`level` stays `0`, `Selectable` always returns `true`).
+  failures is unchanged (`level` stays `0`, `TryClaim` always returns selectable with
+  nothing reserved).
 - **Controller restart.** State is in-memory; a restart clears it. Worst case, the
   loop briefly re-attempts a failing pool once before backing off again — a
   transient blip, identical to how `PreviouslyUnseenNodePools` resets on
@@ -427,14 +475,21 @@ launch attempts drop from "every pass" to "one per back-off window."
 
 ## Testing plan
 
-- **Unit (tracker):** `Fail` growth/cap, `Reset`, `Selectable` transitions
+- **Unit (tracker):** `Fail` growth/cap, `Reset`, and `TryClaim`/`Release` transitions
   (healthy → backing off → probe → recovered), driven by a fake `clock.Clock`. Inject a
   seeded `*rand.Rand` so jitter is deterministic; assert each window lands in `[½w, w)`
   and that two pools failed at the same instant with the same `level` get *different*
   `until` values (de-synchronization).
+- **Unit (tracker, probe cap):** after the window expires, a first `TryClaim` succeeds
+  and reserves the probe; a second `TryClaim` for the same pool returns `false` until
+  the claim is `Release`d or a `Fail`/`Reset` resolves it. Assert a claimed-but-released
+  slot is re-claimable. This is the concurrency invariant that replaces the old
+  read-the-queue count.
 - **Unit (`Drift.ComputeCommands`):** with a backed-off NodePool, assert its
   candidates are skipped and a younger NodePool's candidate is selected instead;
-  assert the probe allows exactly one in-flight replacement after expiry.
+  assert exactly one probe is emitted after expiry; and assert that a candidate
+  abandoned after claiming (unschedulable / `errCandidateDeleting`) releases the probe
+  slot so the pool is not wedged.
 - **Queue integration:** simulate an unrecoverable failure (replacement NodeClaim
   deleted, as in the ICE path) and assert `Fail` is invoked for the drift command's
   NodePool and *not* for consolidation commands.
