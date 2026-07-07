@@ -179,11 +179,11 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	metrics.NodeClaimsDisruptedTotal.Inc(labels)
 	// Pods on the node have not yet started draining at this point — list captures
 	// the pre-disruption state. Errors don't fail the reconcile; the metric reports 0.
-	podCount, err := nodeutils.CountReschedulablePodsOnNode(ctx, c.kubeClient, node.Name)
+	reschedulablePods, err := nodeutils.ReschedulablePods(ctx, c.kubeClient, node.Name)
 	if err != nil {
-		log.FromContext(ctx).V(1).Info("counting reschedulable pods for disruption metric", "error", err.Error())
+		log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", err.Error())
 	}
-	metrics.PodsDisruptedTotal.Add(float64(podCount), labels)
+	metrics.PodsDisruptedTotal.Add(float64(len(reschedulablePods)), labels)
 	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
 		Condition:                 pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],

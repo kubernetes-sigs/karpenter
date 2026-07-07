@@ -116,13 +116,13 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		}
 		metrics.NodeClaimsDisruptedTotal.Inc(labels)
 		// GC runs when the cloudprovider node is gone or NotReady; pod records may
-		// linger or already be cleaned up. CountReschedulablePodsOnNode handles the
-		// empty-nodename case and any list error by returning 0 with a logged error.
-		podCount, podErr := nodeutils.CountReschedulablePodsOnNode(ctx, c.kubeClient, nodeClaims[i].Status.NodeName)
+		// linger or already be cleaned up. GetPods (via ReschedulablePods) skips the
+		// empty-nodename case; any list error is logged and treated as zero pods.
+		reschedulablePods, podErr := nodeutils.ReschedulablePods(ctx, c.kubeClient, nodeClaims[i].Status.NodeName)
 		if podErr != nil {
-			log.FromContext(ctx).V(1).Info("counting reschedulable pods for disruption metric", "error", podErr.Error())
+			log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", podErr.Error())
 		}
-		metrics.PodsDisruptedTotal.Add(float64(podCount), labels)
+		metrics.PodsDisruptedTotal.Add(float64(len(reschedulablePods)), labels)
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconciler.Result{}, err

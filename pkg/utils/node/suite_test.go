@@ -94,20 +94,20 @@ var _ = Describe("NodeUtils", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
 	})
-	Context("CountReschedulablePodsOnNode", func() {
-		It("should return 0 for an empty node name", func() {
-			count, err := nodeutils.CountReschedulablePodsOnNode(ctx, env.Client, "")
+	Context("ReschedulablePods", func() {
+		It("should return no pods for an empty node name", func() {
+			pods, err := nodeutils.ReschedulablePods(ctx, env.Client, "")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(count).To(Equal(0))
+			Expect(pods).To(BeEmpty())
 		})
-		It("should return 0 when no pods are bound to the node", func() {
+		It("should return no pods when no pods are bound to the node", func() {
 			testNode = test.Node()
 			ExpectApplied(ctx, env.Client, testNode)
-			count, err := nodeutils.CountReschedulablePodsOnNode(ctx, env.Client, testNode.Name)
+			pods, err := nodeutils.ReschedulablePods(ctx, env.Client, testNode.Name)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(count).To(Equal(0))
+			Expect(pods).To(BeEmpty())
 		})
-		It("should count only reschedulable pods bound to the node", func() {
+		It("should return only reschedulable pods bound to the node", func() {
 			testNode = test.Node()
 			ExpectApplied(ctx, env.Client, testNode)
 			isController := true
@@ -134,9 +134,9 @@ var _ = Describe("NodeUtils", func() {
 
 			ExpectApplied(ctx, env.Client, pod1, pod2, daemonsetPod, otherPod)
 
-			count, err := nodeutils.CountReschedulablePodsOnNode(ctx, env.Client, testNode.Name)
+			pods, err := nodeutils.ReschedulablePods(ctx, env.Client, testNode.Name)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(count).To(Equal(2))
+			Expect(pods).To(HaveLen(2))
 		})
 	})
 })

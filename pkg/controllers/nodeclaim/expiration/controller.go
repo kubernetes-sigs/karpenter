@@ -93,11 +93,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	// Pods that haven't started draining yet still appear bound to the node, so the
 	// list call here captures the pre-disruption state. Errors are logged but do not
 	// fail the reconcile — the metric just reports 0 for this disruption event.
-	podCount, err := nodeutils.CountReschedulablePodsOnNode(ctx, c.kubeClient, nodeClaim.Status.NodeName)
+	reschedulablePods, err := nodeutils.ReschedulablePods(ctx, c.kubeClient, nodeClaim.Status.NodeName)
 	if err != nil {
-		log.FromContext(ctx).V(1).Info("counting reschedulable pods for disruption metric", "error", err.Error())
+		log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", err.Error())
 	}
-	metrics.PodsDisruptedTotal.Add(float64(podCount), labels)
+	metrics.PodsDisruptedTotal.Add(float64(len(reschedulablePods)), labels)
 	// We sleep here after the delete operation since we want to ensure that we are able to read our own writes so that
 	// we avoid duplicating metrics and log lines due to quick re-queues.
 	// USE CAUTION when determining whether to increase this timeout or remove this line
