@@ -149,6 +149,32 @@ influences candidate selection, with no persistence and no API surface.
   at the first schedulable candidate.
 - No API/CRD changes; no persisted state.
 
+## Invariants
+
+These are the assumptions this design relies on. If any of them stops holding, the corresponding part of the
+design below must be revisited.
+
+- **A drift command targets exactly one NodePool.** Today `Drift.ComputeCommands`
+  emits a command with a single candidate, and every candidate belongs to exactly one
+  NodePool, so a command maps unambiguously to one NodePool
+  (`cmd.Candidates[0].NodePool.Name`). Back-off keys, `Fail`/`Reset` calls, and the
+  probe cap all depend on this.
+- **A drift command's outcome is observed exactly once**, in `Queue.Reconcile` via
+  `CompleteCommand`, and is unambiguously either success (`cmd.Succeeded == true`) or
+  unrecoverable failure. All back-off state transitions happen only there; the
+  synchronous selection path in `Drift.ComputeCommands` only *reads* back-off state.
+- **`Drift.ComputeCommands` emits ≤ 1 command per pass and stops at the first
+  schedulable candidate.** Back-off is layered as an additional per-candidate skip; it
+  never walks past the first schedulable candidate nor batches commands. (This is the
+  contract preserved in [Goals](#goals), restated here as a dependency of the
+  enforcement logic.)
+- **The `Drift` method instance and the shared `NodePoolBackoff` persist for the
+  controller's lifetime.** Karpenter runs a single active disruption reconciler
+  (singleton), so there is exactly one reader and no cross-replica coordination. In-
+  memory state is therefore sufficient and authoritative for the running process. This is a performance/fairness
+  optimization, not correctness-critical; discarding it (e.g. on restart) at worst
+  re-attempts a failing pool once before backing off again.
+
 ## Proposal
 
 Introduce a **per-NodePool drift back-off tracker**. Three interaction points:
@@ -185,13 +211,12 @@ type backoffEntry struct {
 
 ### Back-off formula
 
-On each unrecoverable failure, grow the window exponentially, matching the model in
-the issue's simulation (`base × 2^(n−1)`, capped):
+On each unrecoverable failure, grow the window exponentially and clamp it to a single
+absolute ceiling (`maxDelay`):
 
 ```
-level      := level + 1
-multiplier := min(2^(level-1), maxMultiplier)
-until      := now + baseDelay * multiplier
+level := level + 1
+until := now + min(baseDelay * 2^(level-1), maxDelay)
 ```
 
 Proposed defaults (mirroring the existing retry-duration bounds in `queue.go`, which
@@ -200,8 +225,7 @@ already use `10m`–`1h`):
 | Parameter        | Default | Rationale |
 | ---------------- | ------- | --------- |
 | `baseDelay`      | `1m`    | First retry after a short delay; fast enough to recover quickly if ICE clears, slow enough to stop the storm. |
-| `maxMultiplier`  | `8`     | Caps the window at `8 × baseDelay`. |
-| `maxDelay` (cap) | `10m`   | Absolute ceiling on the window regardless of multiplier. |
+| `maxDelay` (cap) | `10m`   | Absolute ceiling on the back-off window. Reached after ~4 consecutive failures (`1m → 2m → 4m → 8m → 10m`). |
 
 These are proposed as **package constants** initially (consistent with
 `minRetryDuration`/`maxRetryDuration` in `queue.go`), with the option to promote them
@@ -217,8 +241,8 @@ reason so only drift is affected:
 - **Success** (`cmd.Succeeded == true`): `backoff.Reset(nodePool)`.
 - **Unrecoverable failure**: `backoff.Fail(nodePool)`.
 
-Because a drift command always has exactly one candidate (and therefore one
-NodePool), the NodePool key is `cmd.Candidates[0].NodePool.Name`. We guard with
+Per the single-NodePool-per-command [invariant](#invariants), the NodePool key is
+`cmd.Candidates[0].NodePool.Name`. We guard with
 `cmd.Reason() == v1.DisruptionReasonDrifted` so consolidation/emptiness commands do
 not touch drift back-off state.
 
@@ -308,12 +332,16 @@ func (b *NodePoolBackoff) Fail(nodePool string) {
 	defer b.mu.Unlock()
 	e := b.entry(nodePool)
 	e.level++
-	mult := math.Min(math.Pow(2, float64(e.level-1)), maxMultiplier)
-	window := time.Duration(float64(baseDelay) * mult)
-	if window > maxDelay {
+	window := baseDelay << (e.level - 1) // baseDelay * 2^(level-1)
+	if window > maxDelay || window <= 0 {
 		window = maxDelay
 	}
 	e.until = b.clock.Now().Add(window)
+	// Once the window has saturated at maxDelay, stop growing level so the shift
+	// above can never overflow on a pool that fails indefinitely.
+	if window == maxDelay {
+		e.level = maxLevel
+	}
 }
 
 func (b *NodePoolBackoff) Reset(nodePool string) {
@@ -347,8 +375,8 @@ Sequence for a persistently failing pool (`spark`) alongside a healthy younger p
    and serviced normally.
 4. At `now+1m`: `spark` probes one candidate. If ICE again → `Fail` → `level=2`,
    `until=now+2m`. If it succeeds → `Reset("spark")`, pool healthy again.
-5. Window grows `1m, 2m, 4m, 8m, 8m…` (capped by `maxMultiplier`/`maxDelay`) until
-   capacity returns.
+5. Window grows `1m, 2m, 4m, 8m, 10m, 10m…` (clamped at `maxDelay`) until capacity
+   returns.
 
 This removes both symptoms: `spark` no longer holds the head of line every pass, and
 launch attempts drop from "every pass" to "one per back-off window."
@@ -440,7 +468,7 @@ launch attempts drop from "every pass" to "one per back-off window."
 
 ## Open questions
 
-1. Should back-off parameters (`baseDelay`, `maxMultiplier`, `maxDelay`) be package
+1. Should back-off parameters (`baseDelay`, `maxDelay`) be package
    constants, controller flags, or both? Proposed: constants now, flags if requested.
 2. Should timeouts and ICE failures be weighted differently, or is uniform
    unrecoverable-failure handling sufficient for v1? Proposed: uniform for v1.
