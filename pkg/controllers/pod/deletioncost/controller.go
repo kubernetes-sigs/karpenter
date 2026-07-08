@@ -136,7 +136,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, fmt.Errorf("updating pod deletion costs, %w", err)
 	}
 
-	log.FromContext(ctx).V(1).WithValues("nodeCount", len(nodeRanks)).Info("updated pod deletion costs")
+	// Only log when at least one node was ranked; the empty case is not
+	// interesting log noise at V(1).
+	if len(nodeRanks) > 0 {
+		log.FromContext(ctx).V(1).WithValues("nodeCount", len(nodeRanks)).Info("updated pod deletion costs")
+	}
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }
 
