@@ -230,6 +230,42 @@ Discover `MutatingWebhookConfiguration` resources, construct `AdmissionReview` r
 
 Delay consolidation after a resize event (e.g., reset `consolidateAfter`) or skip nodes with active resizes entirely. Simpler but doesn't solve the core problem (incorrect prediction of post-eviction size), doesn't fix destination capacity calculation, and blocks consolidation on a node even when safe. With accurate predictions, consolidation can safely proceed without artificial delays.
 
+## Graduation Criteria
+
+The VPA prediction mechanism (Part 2) starts with reading VPA CRD objects directly. This is the correct starting point regardless of which long-term mechanism materializes, because it requires no upstream changes and works with all existing VPA installations. Karpenter only produces predictions when VPA objects exist in the cluster; if VPA is not installed or no VPAs are configured, there is no effect on Karpenter's behavior.
+
+The long-term graduation path depends on which upstream mechanism is adopted:
+
+### Path A: VPA-Independent Mechanism
+
+If a VPA-independent prediction mechanism becomes available (e.g., dry-run pod creates with dedicated RBAC), Karpenter can switch without requiring any changes to VPA. The existing admission webhook already handles dry-run requests, so VPA doesn't need to ship a new API.
+
+| | Mechanism | When | Customer Action |
+|--|-----------|------|-----------------|
+| Initial | CRD reading | Until the new mechanism is available in K8s | None |
+| Dual support | Both (runtime K8s version check) | While Karpenter supports K8s versions with and without the new mechanism | None |
+| CRD reading dropped | New mechanism only | Once Karpenter's minimum supported K8s version includes the new mechanism | Upgrade cluster to meet Karpenter's minimum K8s version |
+
+No VPA coordination required. The transition is driven entirely by K8s version support.
+
+### Path B: VPA-Dependent Mechanism
+
+If the prediction mechanism requires VPA to ship a new API, the transition requires coordination with the customer's VPA version.
+
+| | Mechanism | When | Customer Action |
+|--|-----------|------|-----------------|
+| Initial | CRD reading | Until VPA ships a new prediction API | None |
+| Dual support | Both (prefers new API, falls back to CRD reading) | Karpenter versions that support both old and new VPA | None (auto-detected) |
+| CRD reading dropped | New API only | Karpenter version that removes CRD reading | Upgrade VPA before upgrading Karpenter |
+
+Requires VPA to ship the new API, which is outside our control. CRD reading is dropped at a documented Karpenter version boundary: customers must upgrade VPA before upgrading Karpenter past that version.
+
+
+### Notes
+
+- CRD reading has near-zero maintenance cost (GA API, stable fields, read-only). We retain the option to keep it indefinitely if neither path materializes.
+
+
 ## References
 
 - [InPlacePodVerticalScaling KEP-1287](https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/1287-in-place-update-pod-resources)
