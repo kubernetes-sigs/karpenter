@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
@@ -355,95 +356,117 @@ var _ = Describe("CapacityBuffer Controller", func() {
 	})
 
 	Context("Replica calculation", func() {
-		// replicaCase parametrizes the desired-replica computation. When deployReplicas
-		// is set, the buffer references a Deployment of that size via scalableRef;
-		// otherwise it references a PodTemplate. podCPU (if set) is the per-pod CPU
-		// request, and limitCPU (if set) is the buffer's CPU limit.
-		type replicaCase struct {
-			podCPU         string
-			deployReplicas *int32
-			replicas       *int32
-			percentage     *int32
-			limitCPU       string
-			expected       int32
-		}
-
-		DescribeTable("computing desired replicas",
-			func(tc replicaCase) {
-				container := v1.Container{Name: "app", Image: "pause:latest"}
-				if tc.podCPU != "" {
-					container.Resources = v1.ResourceRequirements{
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse(tc.podCPU)},
-					}
-				}
-				podSpec := v1.PodSpec{Containers: []v1.Container{container}}
-
-				cbSpec := autoscalingv1alpha1.CapacityBufferSpec{
-					Replicas:   tc.replicas,
-					Percentage: tc.percentage,
-				}
-				if tc.limitCPU != "" {
-					cbSpec.Limits = autoscalingv1alpha1.Limits{v1.ResourceCPU: resource.MustParse(tc.limitCPU)}
-				}
-
-				if tc.deployReplicas != nil {
-					deploy := &appsv1.Deployment{
-						ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"},
-						Spec: appsv1.DeploymentSpec{
-							Replicas: tc.deployReplicas,
-							Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "workload"}},
-							Template: v1.PodTemplateSpec{
-								ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "workload"}},
-								Spec:       podSpec,
-							},
-						},
-					}
-					cbSpec.ScalableRef = &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "workload"}
-					ExpectApplied(ctx, env.Client, deploy)
-				} else {
-					pt := &v1.PodTemplate{
-						ObjectMeta: metav1.ObjectMeta{Name: "template", Namespace: "default"},
-						Template:   v1.PodTemplateSpec{Spec: podSpec},
-					}
-					cbSpec.PodTemplateRef = &autoscalingv1alpha1.LocalObjectRef{Name: "template"}
-					ExpectApplied(ctx, env.Client, pt)
-				}
-
-				cb := &autoscalingv1alpha1.CapacityBuffer{
-					ObjectMeta: metav1.ObjectMeta{Name: "buffer", Namespace: "default"},
-					Spec:       cbSpec,
-				}
-				ExpectApplied(ctx, env.Client, cb)
+		// Each entry passes the backing workload and a buffer that references it; the body
+		// applies both, reconciles, and asserts the resolved status.Replicas.
+		DescribeTable("should resolve buffer replicas from replicas, percentage, and limits",
+			func(backing client.Object, cb *autoscalingv1alpha1.CapacityBuffer, expected int32) {
+				ExpectApplied(ctx, env.Client, backing, cb)
 				ExpectObjectReconciled(ctx, env.Client, cbController, cb)
-
-				cb = ExpectExists(ctx, env.Client, cb)
-				Expect(cb.Status.Replicas).ToNot(BeNil())
-				Expect(*cb.Status.Replicas).To(Equal(tc.expected))
+				Expect(ExpectExists(ctx, env.Client, cb).Status.Replicas).To(HaveValue(Equal(expected)))
 			},
-			Entry("fixed replicas only", replicaCase{
-				replicas: lo.ToPtr(int32(7)), expected: 7,
-			}),
-			Entry("replicas capped by binding limit (podTemplateRef)", replicaCase{
-				podCPU: "1", replicas: lo.ToPtr(int32(10)), limitCPU: "3", expected: 3,
-			}),
-			Entry("non-binding limit does not reduce (podTemplateRef)", replicaCase{
-				podCPU: "1", replicas: lo.ToPtr(int32(3)), limitCPU: "10", expected: 3,
-			}),
-			Entry("limits only", replicaCase{
-				podCPU: "1", limitCPU: "5", expected: 5,
-			}),
-			Entry("percentage only (scalableRef)", replicaCase{
-				podCPU: "500m", deployReplicas: lo.ToPtr(int32(10)), percentage: lo.ToPtr(int32(20)), expected: 2,
-			}),
-			Entry("max of replicas and percentage (scalableRef)", replicaCase{
-				podCPU: "500m", deployReplicas: lo.ToPtr(int32(10)), replicas: lo.ToPtr(int32(5)), percentage: lo.ToPtr(int32(80)), expected: 8,
-			}),
-			Entry("max of replicas and percentage capped by limit (scalableRef)", replicaCase{
-				podCPU: "1", deployReplicas: lo.ToPtr(int32(10)), replicas: lo.ToPtr(int32(5)), percentage: lo.ToPtr(int32(80)), limitCPU: "4", expected: 4,
-			}),
-			Entry("percentage rounds up to minimum 1 (scalableRef)", replicaCase{
-				podCPU: "100m", deployReplicas: lo.ToPtr(int32(1)), percentage: lo.ToPtr(int32(10)), expected: 1,
-			}),
+			// podTemplateRef: replicas and limits only (percentage requires a scalableRef).
+			Entry("fixed replicas only",
+				test.PodTemplate(test.PodTemplateOptions{ObjectMeta: metav1.ObjectMeta{Name: "pt-fixed"}}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-fixed", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "pt-fixed"},
+						Replicas:       lo.ToPtr(int32(7)),
+					},
+				},
+				int32(7)),
+			// replicas = 10, capped by limit (3 CPU / 1 CPU per pod = 3)
+			Entry("replicas capped by binding limit",
+				test.PodTemplate(test.PodTemplateOptions{ObjectMeta: metav1.ObjectMeta{Name: "pt-cap"}, PodOptions: cpuPod()}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-cap", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "pt-cap"},
+						Replicas:       lo.ToPtr(int32(10)),
+						Limits:         autoscalingv1alpha1.Limits{v1.ResourceCPU: resource.MustParse("3")},
+					},
+				},
+				int32(3)),
+			// limit allows 10 pods, so the cap does not bind => 3
+			Entry("non-binding limit does not reduce (podTemplateRef)",
+				test.PodTemplate(test.PodTemplateOptions{ObjectMeta: metav1.ObjectMeta{Name: "pt-loose"}, PodOptions: cpuPod()}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-loose", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "pt-loose"},
+						Replicas:       lo.ToPtr(int32(3)),
+						Limits:         autoscalingv1alpha1.Limits{v1.ResourceCPU: resource.MustParse("10")},
+					},
+				},
+				int32(3)),
+			// limits alone determine the count (5 CPU / 1 CPU per pod = 5)
+			Entry("limits only",
+				test.PodTemplate(test.PodTemplateOptions{ObjectMeta: metav1.ObjectMeta{Name: "pt-limit"}, PodOptions: cpuPod()}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-limit", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "pt-limit"},
+						Limits:         autoscalingv1alpha1.Limits{v1.ResourceCPU: resource.MustParse("5")},
+					},
+				},
+				int32(5)),
+			// scalableRef: max(replicas, percentage), then capped by limits.
+			Entry("percentage only",
+				test.Deployment(test.DeploymentOptions{ObjectMeta: metav1.ObjectMeta{Name: "d-pct-only"}, Replicas: 10}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-pct-only", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						ScalableRef: deploymentRef("d-pct-only"),
+						Percentage:  lo.ToPtr(int32(20)),
+					},
+				},
+				int32(2)),
+			Entry("replicas > percentage",
+				test.Deployment(test.DeploymentOptions{ObjectMeta: metav1.ObjectMeta{Name: "d-repl"}, Replicas: 10}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-repl", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						ScalableRef: deploymentRef("d-repl"),
+						Replicas:    lo.ToPtr(int32(5)),
+						Percentage:  lo.ToPtr(int32(20)), // 20% of 10 = 2 => max(5, 2) = 5
+					},
+				},
+				int32(5)),
+			Entry("percentage > replicas",
+				test.Deployment(test.DeploymentOptions{ObjectMeta: metav1.ObjectMeta{Name: "d-pct"}, Replicas: 10}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-pct", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						ScalableRef: deploymentRef("d-pct"),
+						Replicas:    lo.ToPtr(int32(5)),
+						Percentage:  lo.ToPtr(int32(80)), // 80% of 10 = 8 => max(5, 8) = 8
+					},
+				},
+				int32(8)),
+			// limit caps the max() only when it binds (downward).
+			Entry("max of replicas and percentage capped by limit",
+				test.Deployment(test.DeploymentOptions{ObjectMeta: metav1.ObjectMeta{Name: "d-cap"}, Replicas: 10, PodOptions: cpuPod()}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-scap", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						ScalableRef: deploymentRef("d-cap"),
+						Replicas:    lo.ToPtr(int32(5)),
+						Percentage:  lo.ToPtr(int32(80)), // max(5, 8) = 8
+						Limits:      autoscalingv1alpha1.Limits{v1.ResourceCPU: resource.MustParse("4")},
+					},
+				},
+				int32(4)),
+			// percentage rounds up to a floor of 1 (10% of 1 = 0.1 => 1).
+			Entry("percentage rounds up to a minimum of 1",
+				test.Deployment(test.DeploymentOptions{ObjectMeta: metav1.ObjectMeta{Name: "d-min"}, Replicas: 1}),
+				&autoscalingv1alpha1.CapacityBuffer{
+					ObjectMeta: metav1.ObjectMeta{Name: "cb-min", Namespace: "default"},
+					Spec: autoscalingv1alpha1.CapacityBufferSpec{
+						ScalableRef: deploymentRef("d-min"),
+						Percentage:  lo.ToPtr(int32(10)),
+					},
+				},
+				int32(1)),
 		)
 	})
 
@@ -619,6 +642,21 @@ var _ = Describe("CapacityBuffer Controller", func() {
 		})
 	})
 })
+
+// cpuPod returns PodOptions requesting 1 CPU, so a buffer's CPU limit maps directly
+// to a pod count (limit N CPU / 1 CPU per pod = N) when exercising the limit cap.
+func cpuPod() test.PodOptions {
+	return test.PodOptions{
+		ResourceRequirements: v1.ResourceRequirements{
+			Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+		},
+	}
+}
+
+// deploymentRef is a scalableRef pointing at a Deployment of the given name.
+func deploymentRef(name string) *autoscalingv1alpha1.ScalableRef {
+	return &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: name}
+}
 
 //nolint:unparam
 func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
