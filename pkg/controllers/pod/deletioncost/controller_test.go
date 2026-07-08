@@ -17,13 +17,17 @@ limitations under the License.
 package deletioncost_test
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -31,6 +35,20 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
+
+// pdbListFailingClient wraps a client.Client and returns an error when asked
+// to List PodDisruptionBudget objects; all other calls pass through unchanged.
+// Used to drive the fetchPDBs error path in RankNodes at the reconcile level.
+type pdbListFailingClient struct {
+	client.Client
+}
+
+func (c *pdbListFailingClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*policyv1.PodDisruptionBudgetList); ok {
+		return errors.New("simulated PDB list failure for test")
+	}
+	return c.Client.List(ctx, list, opts...)
+}
 
 var _ = Describe("Controller", func() {
 	var nodePool *v1.NodePool
@@ -191,6 +209,90 @@ var _ = Describe("Controller", func() {
 				updatedPod := &corev1.Pod{}
 				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
 				Expect(updatedPod.Annotations).To(HaveKey(corev1.PodDeletionCost))
+			}
+		})
+	})
+
+	// Deferred behavior: a single dependency failure (PDB list or per-node pod
+	// list) aborts the entire Reconcile cycle. There is no per-NodePool partial
+	// success path — nodes on healthy NodePools also skip annotation for that
+	// cycle. This test documents the current single-error-aborts-all behavior;
+	// a per-NodePool granular error path is deferred to a follow-up.
+	//
+	// TODO(kp-dses9q): once RankNodes fans out per-NodePool with multierr, this
+	// test should be updated to assert that a PDB-list failure only skips the
+	// affected NodePool and healthy NodePools still get their pods annotated.
+	Context("Deferred: per-NodePool error granularity (kp-dses9q)", func() {
+		It("should _Deferred_ abort the entire reconcile when the PDB list fails, leaving healthy NodePools' pods unannotated", func() {
+			// Set up TWO NodePools. Node 0 belongs to nodePool (with a disrupted
+			// taint so RankNodes triggers fetchPDBs). Nodes 1 and 2 belong to
+			// otherPool and are healthy — under a per-NodePool granular error
+			// path they would still be ranked and annotated. Under the current
+			// abort-all behavior, none of the three pods gets an annotation.
+			otherPool := test.NodePool()
+			otherPool.Name = "other-pool"
+			otherPool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
+			otherPool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+			ExpectApplied(ctx, env.Client, nodePool, otherPool)
+
+			// Node 0: on nodePool, tainted disrupted so fetchPDBs runs.
+			ncPool0, nodePool0 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			nodePool0.Spec.Taints = append(nodePool0.Spec.Taints, v1.DisruptedNoScheduleTaint)
+			// Nodes 1 and 2: on otherPool, healthy.
+			ncOther1, nodeOther1 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: otherPool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ncOther2, nodeOther2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: otherPool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, ncPool0, nodePool0, ncOther1, nodeOther1, ncOther2, nodeOther2)
+
+			podOnDisrupted := rsOwnedPod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+				NodeName:   nodePool0.Name,
+			})
+			podOnHealthy1 := rsOwnedPod(test.PodOptions{NodeName: nodeOther1.Name})
+			podOnHealthy2 := rsOwnedPod(test.PodOptions{NodeName: nodeOther2.Name})
+			ExpectApplied(ctx, env.Client, podOnDisrupted, podOnHealthy1, podOnHealthy2)
+
+			// Apply a PDB so the disrupted node has a plausible PDB world; the
+			// test client fails the list call itself, but seeding a real PDB
+			// keeps the fixture realistic in case future test-refactors probe
+			// the pre-list state.
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: podOnDisrupted.Namespace},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 0},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+
+			nodes := []*corev1.Node{nodePool0, nodeOther1, nodeOther2}
+			nodeClaims := []*v1.NodeClaim{ncPool0, ncOther1, ncOther2}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			// Wrap env.Client to fail the PDB list. All other traffic (nodepool
+			// list, pod list, patches) flows through unchanged.
+			failing := &pdbListFailingClient{Client: env.Client}
+			controller := deletioncost.NewController(fakeClock, failing, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).To(HaveOccurred(), "current behavior: PDB list failure aborts the whole reconcile")
+
+			// None of the pods, on either NodePool, got annotated. This is the
+			// property the follow-up bead (kp-dses9q) will change.
+			for _, pod := range []*corev1.Pod{podOnDisrupted, podOnHealthy1, podOnHealthy2} {
+				observed := &corev1.Pod{}
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), observed)).To(Succeed())
+				Expect(observed.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),
+					"pod %s on healthy or affected NodePool should not have been annotated during the aborted reconcile", pod.Name)
 			}
 		})
 	})
