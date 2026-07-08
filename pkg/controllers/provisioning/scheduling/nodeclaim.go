@@ -579,7 +579,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			// the tradeoff to not short-circuiting on the filtering is that we can report much better error messages
 			// about why scheduling failed
 			itCompat := compatible(it, requirements)
-			itFits, itHasOffering := fits(it, totalRequests, requirements)
+			itFits, itHasOffering := fits(it, totalRequestsForInstanceType, requirements)
 
 			// track if any single instance type met a single criteria
 			err.requirementsMet = err.requirementsMet || itCompat

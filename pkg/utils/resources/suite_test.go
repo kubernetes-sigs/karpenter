@@ -710,6 +710,8 @@ var _ = Describe("Resources", func() {
 			)
 			Expect(result[v1.ResourceCPU]).To(Equal(resource.MustParse("1")))
 			Expect(result).ToNot(HaveKey(v1.ResourceMemory))
+		})
+	})
 	Context("UseStatusResources", func() {
 		It("should use allocatedResources when higher than spec requests (resize-down in progress)", func() {
 			pod := test.Pod(test.PodOptions{
