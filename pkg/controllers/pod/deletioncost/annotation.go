@@ -33,16 +33,24 @@ import (
 // podPatchStats aggregates per-pod patch outcomes across a single reconcile.
 // Carried by value through helpers so the outer reconcile can fold per-iteration
 // stats with += and emit metrics once at the end.
+//
+// nodeErrors counts nodes whose pod-list fetch failed (so we never even
+// attempted to patch their pods). podErrors counts individual per-pod patch
+// failures. The two are kept separate so the emitted metrics can distinguish a
+// flaky apiserver-list from a flaky pod-patch path; a single hiccup that drops
+// one node's list looks very different from N per-pod patch failures.
 type podPatchStats struct {
-	updated int
-	skipped int
-	errors  int
+	updated    int
+	skipped    int
+	nodeErrors int
+	podErrors  int
 }
 
 func (s *podPatchStats) add(other podPatchStats) {
 	s.updated += other.updated
 	s.skipped += other.skipped
-	s.errors += other.errors
+	s.nodeErrors += other.nodeErrors
+	s.podErrors += other.podErrors
 }
 
 // UpdatePodDeletionCosts updates pod deletion cost annotations for all pods on
@@ -66,8 +74,12 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 	for _, nodeRank := range nodeRanks {
 		pods, err := nodeRank.Node.Pods(ctx, kubeClient)
 		if err != nil {
+			// Node-fetch failure: we never even attempted to patch this
+			// node's pods, so count one node error and skip. We do not know
+			// how many pods would have been touched because the list call
+			// failed, so we cannot attribute pod-level errors here.
 			aggErr = multierr.Append(aggErr, err)
-			totals.errors++
+			totals.nodeErrors++
 			continue
 		}
 		var stats podPatchStats
@@ -85,13 +97,15 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 
 	podsUpdatedTotal.Add(float64(totals.updated), map[string]string{resultLabel: "updated"})
 	podsUpdatedTotal.Add(float64(totals.skipped), map[string]string{resultLabel: "skipped_unchanged"})
-	podsUpdatedTotal.Add(float64(totals.errors), map[string]string{resultLabel: "error"})
+	podsUpdatedTotal.Add(float64(totals.podErrors), map[string]string{resultLabel: "error"})
+	nodesErroredTotal.Add(float64(totals.nodeErrors), noLabels)
 
-	if totals.updated > 0 || totals.errors > 0 {
+	if totals.updated > 0 || totals.podErrors > 0 || totals.nodeErrors > 0 {
 		log.FromContext(ctx).WithValues(
 			"updated", totals.updated,
 			"skipped", totals.skipped,
-			"errors", totals.errors,
+			"podErrors", totals.podErrors,
+			"nodeErrors", totals.nodeErrors,
 		).V(1).Info("pod deletion cost annotation update completed")
 	}
 	return aggErr
@@ -121,7 +135,7 @@ func applyRankToPods(ctx context.Context, kubeClient client.Client, pods []*core
 				continue
 			}
 			err = multierr.Append(err, perr)
-			stats.errors++
+			stats.podErrors++
 			continue
 		}
 		stats.updated++
@@ -140,7 +154,7 @@ func clearRanksFromPods(ctx context.Context, kubeClient client.Client, pods []*c
 		switch {
 		case perr != nil:
 			err = multierr.Append(err, perr)
-			stats.errors++
+			stats.podErrors++
 		case cleared:
 			stats.updated++
 		default:

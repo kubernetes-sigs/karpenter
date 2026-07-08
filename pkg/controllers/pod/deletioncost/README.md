@@ -140,7 +140,12 @@ Metrics exported by this controller are bounded and small:
 - `nodes_ranked` gauge, no labels.
 - `reconcile_skipped_total` counter, no labels.
 - `pods_updated_total` counter with one label `result` taking three values
-  (`updated`, `skipped_unchanged`, `error`) — cardinality 3.
+  (`updated`, `skipped_unchanged`, `error`) — cardinality 3. The `error`
+  value counts per-pod patch failures only.
+- `nodes_errored_total` counter, no labels. Counts nodes whose pod-list
+  fetch failed and were therefore skipped entirely. Kept separate from
+  `pods_updated_total{result=error}` so operators can distinguish a flaky
+  apiserver-list path from a flaky per-pod patch path.
 - `ranking_duration_seconds` and `annotation_duration_seconds` histograms,
   no labels.
 
