@@ -930,12 +930,12 @@ func podSetKey(pods []*corev1.Pod) string {
 	if len(pods) == 0 {
 		return ""
 	}
-	uids := make([]string, len(pods))
+	keys := make([]string, len(pods))
 	for i, p := range pods {
-		uids[i] = string(p.UID)
+		keys[i] = client.ObjectKeyFromObject(p).String()
 	}
-	sort.Strings(uids)
-	return strings.Join(uids, ",")
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }
 
 // isDaemonPodCompatible determines if the daemon pod is compatible with the NodeClaimTemplate for daemon scheduling
