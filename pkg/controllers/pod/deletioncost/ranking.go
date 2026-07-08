@@ -99,6 +99,8 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 		// because every Group A node is "delete first, no questions asked";
 		// distinguishing among them by pod count would imply a preference
 		// the kube-scheduler shouldn't be encoding.
+		// MinInt32 means max delete-priority to the RS controller (int32
+		// min = int32 max-priority; the value can't go any lower).
 		result = append(result, NodeRank{Node: node, Rank: math.MinInt32, Pods: nodePods[node.Name()]})
 	}
 	for _, node := range drifted {

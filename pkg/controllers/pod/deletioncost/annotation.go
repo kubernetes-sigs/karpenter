@@ -210,12 +210,14 @@ func applyRankToPod(ctx context.Context, kubeClient client.Client, pod *corev1.P
 	return podOutcome{result: outcomeErrored, err: err}
 }
 
-// clearRanksFromPods removes pod-deletion-cost from each pod via
-// clearDeletionCost. Uses the same workqueue.ParallelizeUntil pattern as
-// applyRankToPods so the two paths are symmetric. Retryable failures (429,
-// server timeout, unavailable) are retried per-pod via podPatchRetryBackoff;
-// NotFound and Conflict short-circuit as skips (logged at V(1)); everything
-// else is aggregated as pod-level errors.
+// clearRanksFromPods removes pod-deletion-cost from each pod. Uses the same
+// workqueue.ParallelizeUntil pattern as applyRankToPods so the two paths are
+// symmetric. Retryable failures (429, server timeout, unavailable) are retried
+// per-pod via podPatchRetryBackoff; NotFound and Conflict short-circuit as
+// skips (logged at V(1)); everything else is aggregated as pod-level errors.
+// We classify NotFound/Conflict here in the caller instead of using
+// client.IgnoreNotFound because we need to count skipped pods and log at V(1);
+// IgnoreNotFound would silently swallow both.
 func clearRanksFromPods(ctx context.Context, kubeClient client.Client, pods []*corev1.Pod) (podPatchStats, error) {
 	outcomes := make([]podOutcome, len(pods))
 	workqueue.ParallelizeUntil(ctx, podPatchWorkers, len(pods), func(i int) {
