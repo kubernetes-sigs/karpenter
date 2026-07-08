@@ -226,3 +226,10 @@ func FromContext(ctx context.Context) *Options {
 	}
 	return retval.(*Options)
 }
+
+// HasContext reports whether Options have been injected into ctx. Callers that only need
+// to read a feature gate default can use this to preserve default behavior on raw
+// contexts (e.g. tests) without triggering FromContext's panic.
+func HasContext(ctx context.Context) bool {
+	return ctx.Value(optionsKey{}) != nil
+}

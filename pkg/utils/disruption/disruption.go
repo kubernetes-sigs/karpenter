@@ -88,7 +88,7 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 			// cannot overpower the QoS/priority bands above it.
 			cost += parsedCost / math.Pow(2, 27.0)
 		}
-	} else if !options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
+	} else if !podDeletionCostManagementEnabled(ctx) {
 		if podDeletionCostStr, ok := p.Annotations[corev1.PodDeletionCost]; ok {
 			podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
 			if err != nil {
@@ -117,6 +117,19 @@ func ReschedulingCost(ctx context.Context, pods []*corev1.Pod) float64 {
 		cost += EvictionCost(ctx, p)
 	}
 	return cost
+}
+
+// podDeletionCostManagementEnabled reports whether the PodDeletionCostManagement feature
+// gate is enabled on the ctx's options. When options are absent (e.g. tests that construct
+// raw contexts without going through the operator injector), the gate is treated as its
+// default OFF value so the legacy pod-deletion-cost fallback path remains callable without
+// ceremony. Prod call sites always inject options via operator.Runtime, so this default
+// only affects call paths that never had a chance to reach the gate-ON branch.
+func podDeletionCostManagementEnabled(ctx context.Context) bool {
+	if !options.HasContext(ctx) {
+		return false
+	}
+	return options.FromContext(ctx).FeatureGates.PodDeletionCostManagement
 }
 
 func IsUnderConsolidateAfter(nodePool *v1.NodePool, nodeClaim *v1.NodeClaim, c clock.Clock) bool {
