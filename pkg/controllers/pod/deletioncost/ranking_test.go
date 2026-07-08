@@ -388,12 +388,11 @@ var _ = Describe("Ranking", func() {
 		})
 	})
 
-	Context("50-node cap", func() {
-		It("should drop excess nodes beyond maxNodesPerCycle in the controller", func() {
-			// The 50-node cap is enforced by the controller (not RankNodes itself).
-			// Build 55 nodes, run a full reconcile, and confirm only the top
-			// 50 ranked pods received an annotation; the remaining pods are
-			// untouched.
+	Context("Bounded labeling: cap applies to Groups B/C/D only", func() {
+		// maxNodesPerCycle caps the number of Group B/C/D nodes annotated per
+		// reconcile; Group A is exempt because those nodes are already tainted
+		// for disruption and stay stable once labeled.
+		It("should cap Group C nodes at maxNodesPerCycle when no Group A is present", func() {
 			const totalNodes = 55
 			const cap = 50
 
@@ -414,7 +413,6 @@ var _ = Describe("Ranking", func() {
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Count how many of the 55 pods got the deletion-cost annotation.
 			annotated := 0
 			for _, p := range pods {
 				updated := &corev1.Pod{}
@@ -423,7 +421,187 @@ var _ = Describe("Ranking", func() {
 					annotated++
 				}
 			}
-			Expect(annotated).To(Equal(cap), "exactly maxNodesPerCycle (50) pods should receive the annotation")
+			Expect(annotated).To(Equal(cap), "exactly maxNodesPerCycle (50) Group C pods should receive the annotation")
+		})
+
+		It("should annotate every Group A node even when Group A alone exceeds maxNodesPerCycle", func() {
+			// 60 Group A nodes (disrupted taint + PDB-blocked pods) plus 3
+			// Group C nodes. All 60 Group A nodes must be annotated (cap
+			// exempt); the 3 Group C nodes get annotated because they fit
+			// inside the tail cap of 50.
+			const groupANodes = 60
+			const groupCNodes = 3
+			const total = groupANodes + groupCNodes
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(total, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			// PDB blocks pods labeled app=blocked.
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: "default"},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 0},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+
+			groupAPods := make([]*corev1.Pod, groupANodes)
+			groupCPods := make([]*corev1.Pod, groupCNodes)
+			for i := 0; i < groupANodes; i++ {
+				nodes[i].Spec.Taints = append(nodes[i].Spec.Taints, v1.DisruptedNoScheduleTaint)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				groupAPods[i] = rsOwnedPod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+					NodeName:   nodes[i].Name,
+				})
+				ExpectApplied(ctx, env.Client, groupAPods[i])
+			}
+			for i := 0; i < groupCNodes; i++ {
+				idx := groupANodes + i
+				ExpectApplied(ctx, env.Client, nodeClaims[idx], nodes[idx])
+				groupCPods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[idx].Name})
+				ExpectApplied(ctx, env.Client, groupCPods[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Every Group A pod carries math.MinInt32.
+			for _, p := range groupAPods {
+				Expect(expectPodRank(p)).To(Equal(math.MinInt32))
+			}
+			// Every Group C pod carries a strictly-negative non-sentinel rank
+			// (3 <= tail cap of 50).
+			for _, p := range groupCPods {
+				Expect(expectPodRank(p)).To(BeNumerically("<", 0))
+				Expect(expectPodRank(p)).To(BeNumerically(">", math.MinInt32))
+			}
+		})
+
+		It("should exempt Group A from the cap and truncate only Group C overflow", func() {
+			// 10 Group A + 60 Group C. Expect all 10 A annotated, 50 of the
+			// 60 C annotated, and the remaining 10 C untouched.
+			const groupANodes = 10
+			const groupCNodes = 60
+			const cap = 50
+			const total = groupANodes + groupCNodes
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(total, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: "default"},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 0},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+
+			groupAPods := make([]*corev1.Pod, groupANodes)
+			groupCPods := make([]*corev1.Pod, groupCNodes)
+			for i := 0; i < groupANodes; i++ {
+				nodes[i].Spec.Taints = append(nodes[i].Spec.Taints, v1.DisruptedNoScheduleTaint)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				groupAPods[i] = rsOwnedPod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+					NodeName:   nodes[i].Name,
+				})
+				ExpectApplied(ctx, env.Client, groupAPods[i])
+			}
+			for i := 0; i < groupCNodes; i++ {
+				idx := groupANodes + i
+				ExpectApplied(ctx, env.Client, nodeClaims[idx], nodes[idx])
+				groupCPods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[idx].Name})
+				ExpectApplied(ctx, env.Client, groupCPods[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// All 10 Group A pods annotated with math.MinInt32.
+			for _, p := range groupAPods {
+				Expect(expectPodRank(p)).To(Equal(math.MinInt32))
+			}
+			// Exactly cap of the 60 Group C pods carry a negative rank; the
+			// remainder is untouched.
+			annotatedC := 0
+			for _, p := range groupCPods {
+				updated := &corev1.Pod{}
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(p), updated)).To(Succeed())
+				if _, ok := updated.Annotations[corev1.PodDeletionCost]; ok {
+					annotatedC++
+				}
+			}
+			Expect(annotatedC).To(Equal(cap), "exactly maxNodesPerCycle (50) Group C pods should be annotated when Group A + Group C exceed the cap")
+		})
+
+		It("should annotate everything when total nodes fit within Group A exemption plus cap", func() {
+			// 30 Group A + 30 Group C. All 60 nodes should be annotated (A is
+			// exempt, C fits inside the 50 cap).
+			const groupANodes = 30
+			const groupCNodes = 30
+			const total = groupANodes + groupCNodes
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(total, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: "default"},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 0},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+
+			groupAPods := make([]*corev1.Pod, groupANodes)
+			groupCPods := make([]*corev1.Pod, groupCNodes)
+			for i := 0; i < groupANodes; i++ {
+				nodes[i].Spec.Taints = append(nodes[i].Spec.Taints, v1.DisruptedNoScheduleTaint)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				groupAPods[i] = rsOwnedPod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+					NodeName:   nodes[i].Name,
+				})
+				ExpectApplied(ctx, env.Client, groupAPods[i])
+			}
+			for i := 0; i < groupCNodes; i++ {
+				idx := groupANodes + i
+				ExpectApplied(ctx, env.Client, nodeClaims[idx], nodes[idx])
+				groupCPods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[idx].Name})
+				ExpectApplied(ctx, env.Client, groupCPods[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			for _, p := range groupAPods {
+				Expect(expectPodRank(p)).To(Equal(math.MinInt32))
+			}
+			for _, p := range groupCPods {
+				Expect(expectPodRank(p)).To(BeNumerically("<", 0))
+				Expect(expectPodRank(p)).To(BeNumerically(">", math.MinInt32))
+			}
 		})
 	})
 

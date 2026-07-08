@@ -19,6 +19,7 @@ package deletioncost
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
@@ -39,7 +40,9 @@ import (
 
 const (
 	reconcileInterval = time.Minute
-	maxNodesPerCycle  = 50
+	// maxNodesPerCycle bounds how many Group B/C/D nodes are annotated per
+	// reconcile. Group A nodes are exempt; see capNodeRanks.
+	maxNodesPerCycle = 50
 )
 
 // Controller manages pod deletion cost annotations for Karpenter-managed nodes.
@@ -127,9 +130,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
-	if len(nodeRanks) > maxNodesPerCycle {
-		nodeRanks = nodeRanks[:maxNodesPerCycle]
-	}
+	nodeRanks = capNodeRanks(nodeRanks, maxNodesPerCycle)
 
 	if err := UpdatePodDeletionCosts(ctx, c.kubeClient, nodeRanks); err != nil {
 		return reconciler.Result{}, fmt.Errorf("updating pod deletion costs, %w", err)
@@ -160,4 +161,26 @@ func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodeP
 		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
 	return lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) { return np.Name, np }), nil
+}
+
+// capNodeRanks admits every Group A node (Rank == math.MinInt32) and caps the
+// remaining groups (B/C/D) at limit. Group A nodes are already tainted for
+// disruption and expected to be stable once labeled, so labeling churn stays
+// bounded even when Group A exceeds limit.
+func capNodeRanks(nodeRanks []NodeRank, limit int) []NodeRank {
+	// RankNodes emits Group A first (see ranking.go). Walk the prefix so the
+	// split is O(len) without a second pass.
+	groupACount := 0
+	for _, r := range nodeRanks {
+		if r.Rank != math.MinInt32 {
+			break
+		}
+		groupACount++
+	}
+	tail := nodeRanks[groupACount:]
+	if len(tail) > limit {
+		tail = tail[:limit]
+	}
+	// Reslice from the underlying array so we avoid a fresh allocation.
+	return nodeRanks[:groupACount+len(tail)]
 }
