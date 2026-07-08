@@ -160,6 +160,11 @@ func (c *Controller) shouldSkipUnchanged(ctx context.Context) bool {
 
 // buildNodePoolMap lists all managed NodePools and returns a map keyed by name.
 func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodePool, error) {
+	// TODO(maintainers): both this controller and disruption/controller.go list NodePools
+	// every reconcile rather than reading from the nodepool informer cache. Is that
+	// deliberate (e.g. to guarantee freshness), or would the informer cache be
+	// acceptable here? The perf cost of listing is bounded on typical fleets, so this
+	// is not urgent to change.
 	nodePools, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)
