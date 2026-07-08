@@ -19,15 +19,64 @@ package deletioncost
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
+)
+
+// podPatchWorkers caps the parallel-dispatch fan-out for per-pod patches. At
+// 50 nodes per cycle and up to 30 pods per node this bounds concurrent
+// in-flight patches to 10 while still delivering roughly a 10x wall-time
+// speedup vs the fully-sequential shape. It is deliberately lower than
+// state/statenode.go's implicit N=len(nodes) because pods per cycle can be an
+// order of magnitude larger than nodes per cycle, and we want this
+// alpha-feature controller to stay behind higher-priority controllers when
+// the apiserver is under load.
+const podPatchWorkers = 10
+
+// podPatchRetryBackoff is the per-pod exponential backoff used for retryable
+// patch errors (429 TooManyRequests, server timeouts). Kept slower than
+// retry.DefaultBackoff (10ms base, 5x factor) because if the apiserver is
+// already throttling us, this controller should back off aggressively and
+// yield to higher-priority controllers rather than tighten the retry loop.
+var podPatchRetryBackoff = wait.Backoff{
+	Steps:    4,
+	Duration: 200 * time.Millisecond,
+	Factor:   2.0,
+	Jitter:   0.2,
+}
+
+// isRetryableAPIError reports whether err is a transient failure that a
+// per-pod retry loop should back off and retry. NotFound and Conflict are
+// deliberately NOT retryable: NotFound means the pod is gone (skip) and
+// Conflict means another writer raced us (skip and retry on the next
+// reconcile cycle instead).
+func isRetryableAPIError(err error) bool {
+	return apierrors.IsTooManyRequests(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err)
+}
+
+// podOutcome captures the result of a single per-pod dispatch. Exactly one of
+// the three counters is incremented per outcome; err is set only when result
+// is "errored".
+type podOutcome struct {
+	result string
+	err    error
+}
+
+const (
+	outcomeUpdated = "updated"
+	outcomeSkipped = "skipped"
+	outcomeErrored = "errored"
 )
 
 // podPatchStats aggregates per-pod patch outcomes across a single reconcile.
@@ -65,8 +114,12 @@ func (s *podPatchStats) add(other podPatchStats) {
 // customer-set values. Customers steering Karpenter consolidation are expected
 // to use karpenter.sh/disruption-cost instead.
 //
-// Per-pod errors are aggregated via multierr.Append so the caller sees the full
-// set of failures from a single reconcile.
+// Per-pod dispatch runs in parallel via workqueue.ParallelizeUntil, bounded
+// by podPatchWorkers. Retryable failures (429 TooManyRequests, server
+// timeout, unavailable) are retried per-pod under podPatchRetryBackoff so a
+// throttled apiserver does not fail an entire cycle; per-pod errors are
+// aggregated via multierr.Append so the caller sees the full set of
+// failures.
 //
 // NotFound and Conflict on the patch are both classified as Skipped: NotFound
 // means the pod is already gone, Conflict means another writer raced us and
@@ -111,83 +164,131 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 	return aggErr
 }
 
-// applyRankToPods writes pod-deletion-cost=rank to each pod via patchAnnotation,
-// classifying NotFound and Conflict as skipped (logged at V(1)) and aggregating
-// other errors via multierr.Append.
+// applyRankToPods writes pod-deletion-cost=rank to each pod via patchAnnotation.
+// Per-pod dispatch runs in parallel through workqueue.ParallelizeUntil bounded
+// by podPatchWorkers so a large per-node pod list does not blast the apiserver
+// with a burst of goroutines. Retryable failures (429, server timeout,
+// unavailable) are retried per-pod with podPatchRetryBackoff; NotFound and
+// Conflict short-circuit as skips (logged at V(1)); everything else is
+// classified as a pod-level error and aggregated via multierr.Append. We
+// classify NotFound/Conflict here in the caller instead of using
+// client.IgnoreNotFound because we need to count skipped pods and log at V(1);
+// IgnoreNotFound would silently swallow both.
 func applyRankToPods(ctx context.Context, kubeClient client.Client, pods []*corev1.Pod, rank int) (podPatchStats, error) {
 	value := strconv.Itoa(rank)
-	var stats podPatchStats
-	var err error
-	for _, pod := range pods {
-		if !needsUpdate(pod, value) {
-			stats.skipped++
-			continue
-		}
-		if perr := patchAnnotation(ctx, kubeClient, pod, value); perr != nil {
-			if apierrors.IsNotFound(perr) {
-				log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("pod not found, skipping annotation update")
-				stats.skipped++
-				continue
-			}
-			if apierrors.IsConflict(perr) {
-				log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("conflict updating pod annotation, will retry on next reconcile")
-				stats.skipped++
-				continue
-			}
-			err = multierr.Append(err, perr)
-			stats.podErrors++
-			continue
-		}
-		stats.updated++
-	}
-	return stats, err
+	outcomes := make([]podOutcome, len(pods))
+	workqueue.ParallelizeUntil(ctx, podPatchWorkers, len(pods), func(i int) {
+		outcomes[i] = applyRankToPod(ctx, kubeClient, pods[i], value)
+	})
+	return foldOutcomes(outcomes)
 }
 
-// clearRanksFromPods removes pod-deletion-cost from each pod via clearDeletionCost,
-// counting cleared patches as updated and aggregating non-NotFound/non-Conflict
-// errors via multierr.Append.
+// applyRankToPod issues the patch for a single pod. Skips the API call
+// entirely when the pod's annotation is already at the desired value, and
+// retries the retryable-API-error subset (429, server timeout, unavailable)
+// with podPatchRetryBackoff. 429s intentionally do not fall through to the
+// controller-runtime rate limiter here; per-pod retry keeps the burden on
+// this individual pod instead of failing the whole cycle.
+func applyRankToPod(ctx context.Context, kubeClient client.Client, pod *corev1.Pod, value string) podOutcome {
+	if !needsUpdate(pod, value) {
+		return podOutcome{result: outcomeSkipped}
+	}
+	err := retry.OnError(podPatchRetryBackoff, isRetryableAPIError, func() error {
+		return patchAnnotation(ctx, kubeClient, pod, value)
+	})
+	if err == nil {
+		return podOutcome{result: outcomeUpdated}
+	}
+	if apierrors.IsNotFound(err) {
+		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("pod not found, skipping annotation update")
+		return podOutcome{result: outcomeSkipped}
+	}
+	if apierrors.IsConflict(err) {
+		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("conflict updating pod annotation, will retry on next reconcile")
+		return podOutcome{result: outcomeSkipped}
+	}
+	return podOutcome{result: outcomeErrored, err: err}
+}
+
+// clearRanksFromPods removes pod-deletion-cost from each pod via
+// clearDeletionCost. Uses the same workqueue.ParallelizeUntil pattern as
+// applyRankToPods so the two paths are symmetric. Retryable failures (429,
+// server timeout, unavailable) are retried per-pod via podPatchRetryBackoff;
+// NotFound and Conflict short-circuit as skips (logged at V(1)); everything
+// else is aggregated as pod-level errors.
 func clearRanksFromPods(ctx context.Context, kubeClient client.Client, pods []*corev1.Pod) (podPatchStats, error) {
+	outcomes := make([]podOutcome, len(pods))
+	workqueue.ParallelizeUntil(ctx, podPatchWorkers, len(pods), func(i int) {
+		outcomes[i] = clearRankFromPod(ctx, kubeClient, pods[i])
+	})
+	return foldOutcomes(outcomes)
+}
+
+// clearRankFromPod issues the clear patch for a single pod. Returns
+// outcomeSkipped for pods without the annotation and for NotFound/Conflict
+// responses; outcomeUpdated when a patch fired successfully; outcomeErrored
+// otherwise. Symmetric with applyRankToPod: NotFound/Conflict classification
+// happens here in the caller so we can count skips and log at V(1) alongside
+// the write path.
+func clearRankFromPod(ctx context.Context, kubeClient client.Client, pod *corev1.Pod) podOutcome {
+	if _, ok := pod.Annotations[corev1.PodDeletionCost]; !ok {
+		return podOutcome{result: outcomeSkipped}
+	}
+	err := retry.OnError(podPatchRetryBackoff, isRetryableAPIError, func() error {
+		return clearAnnotation(ctx, kubeClient, pod)
+	})
+	if err == nil {
+		return podOutcome{result: outcomeUpdated}
+	}
+	if apierrors.IsNotFound(err) {
+		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("pod not found, skipping annotation clear")
+		return podOutcome{result: outcomeSkipped}
+	}
+	if apierrors.IsConflict(err) {
+		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("conflict clearing pod annotation, will retry on next reconcile")
+		return podOutcome{result: outcomeSkipped}
+	}
+	return podOutcome{result: outcomeErrored, err: err}
+}
+
+// foldOutcomes rolls a slice of per-pod outcomes into a single podPatchStats
+// and aggregated error. Each outcome contributes to exactly one of the three
+// counters; errored outcomes also append their err to the multierr.
+func foldOutcomes(outcomes []podOutcome) (podPatchStats, error) {
 	var stats podPatchStats
 	var err error
-	for _, pod := range pods {
-		cleared, perr := clearDeletionCost(ctx, kubeClient, pod)
-		switch {
-		case perr != nil:
-			err = multierr.Append(err, perr)
-			stats.podErrors++
-		case cleared:
+	for i := range outcomes {
+		switch outcomes[i].result {
+		case outcomeUpdated:
 			stats.updated++
-		default:
+		case outcomeSkipped:
 			stats.skipped++
+		case outcomeErrored:
+			stats.podErrors++
+			err = multierr.Append(err, outcomes[i].err)
 		}
 	}
 	return stats, err
 }
 
-// clearDeletionCost removes the pod-deletion-cost annotation from a pod when
-// the node's group is do-not-disrupt. Returns (cleared, err) so callers can
-// distinguish patches issued from no-ops. NotFound and Conflict are silently
-// treated as no-ops (logged at V(1)) since the pod is gone or another writer
-// raced us; we'll converge on the next reconcile.
-func clearDeletionCost(ctx context.Context, kubeClient client.Client, pod *corev1.Pod) (bool, error) {
-	if _, ok := pod.Annotations[corev1.PodDeletionCost]; !ok {
-		return false, nil
-	}
+// clearAnnotation removes the pod-deletion-cost annotation from a pod via a
+// merge patch with optimistic-lock. Returns the raw error from the apiserver;
+// classification (NotFound/Conflict/retryable/hard-error) lives in the caller
+// (clearRankFromPod), symmetric with patchAnnotation and the write path.
+//
+// Uses MergeFromWithOptimisticLock because we want to detect races with other
+// writers of pod-deletion-cost (customer kubectl, third-party HPAs, admission
+// webhooks) via 409 Conflict. The Conflict-skip semantics allow us to
+// converge on the next reconcile without overwriting a value that was written
+// between our read and write. This is different from the more-common
+// rationale in this codebase (list-merge-replace protection); see
+// pkg/controllers/nodeclaim/lifecycle/controller.go:295-309 for a similar
+// annotation-race precedent.
+func clearAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.Pod) error {
 	updated := pod.DeepCopy()
 	delete(updated.Annotations, corev1.PodDeletionCost)
 	patch := client.MergeFromWithOptions(pod, client.MergeFromWithOptimisticLock{})
-	if err := kubeClient.Patch(ctx, updated, patch); err != nil {
-		if apierrors.IsNotFound(err) {
-			log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("pod not found, skipping annotation clear")
-			return false, nil
-		}
-		if apierrors.IsConflict(err) {
-			log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("conflict clearing pod annotation, will retry on next reconcile")
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+	return kubeClient.Patch(ctx, updated, patch)
 }
 
 // needsUpdate reports whether the pod's pod-deletion-cost annotation already
@@ -204,8 +305,18 @@ func needsUpdate(pod *corev1.Pod, value string) bool {
 }
 
 // patchAnnotation sets the pod-deletion-cost annotation on a pod via a merge
-// patch with optimistic-lock so concurrent writers cannot silently overwrite
-// each other. The caller's pod object is not mutated; we mutate a deep-copy.
+// patch with optimistic-lock. The caller's pod object is not mutated; we
+// mutate a deep-copy.
+//
+// Uses MergeFromWithOptimisticLock because we want to detect races with other
+// writers of pod-deletion-cost (customer kubectl, third-party HPAs, admission
+// webhooks) via 409 Conflict. The Conflict-skip semantics allow us to
+// converge on the next reconcile without overwriting a value that was written
+// between our read and write. This is different from the more-common
+// rationale in this codebase (list-merge-replace protection, e.g.
+// state/statenode.go:523-526); see
+// pkg/controllers/nodeclaim/lifecycle/controller.go:295-309 for a similar
+// annotation-race precedent.
 func patchAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.Pod, value string) error {
 	updated := pod.DeepCopy()
 	if updated.Annotations == nil {
