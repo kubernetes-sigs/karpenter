@@ -47,8 +47,7 @@ const commandValidationDelay = 15 * time.Second
 // MinInstanceTypesForSpotToSpotConsolidation is the minimum number of instanceTypes in a NodeClaim needed to trigger spot-to-spot single-node consolidation
 const MinInstanceTypesForSpotToSpotConsolidation = 15
 
-// consolidation is the base consolidation controller that provides common functionality used across the different
-// consolidation methods.
+// consolidation provides common functionality for single-node and multi-node consolidation.
 type consolidation struct {
 	// Consolidation needs to be aware of the queue for validation
 	queue                  *Queue
@@ -59,6 +58,18 @@ type consolidation struct {
 	cloudProvider          cloudprovider.CloudProvider
 	recorder               events.Recorder
 	lastConsolidationState time.Time
+	// evaluator is initialized non-nil at construction. SetNodePoolTotals
+	// replaces it with a balancedEvaluator carrying the new totals.
+	evaluator Evaluator
+}
+
+// NodePoolTotalsSetter is implemented by disruption methods that use balanced scoring.
+type NodePoolTotalsSetter interface {
+	SetNodePoolTotals(map[string]NodePoolTotals)
+}
+
+func (c *consolidation) SetNodePoolTotals(totals map[string]NodePoolTotals) {
+	c.evaluator = NewBalancedEvaluator(totals, c.recorder)
 }
 
 func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
@@ -71,6 +82,7 @@ func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient cli
 		provisioner:   provisioner,
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
+		evaluator:     noopEvaluator{},
 	}
 }
 
@@ -85,7 +97,7 @@ func (c *consolidation) markConsolidated() {
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
-func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
+func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 	// Disable consolidation for static NodePool
 	if cn.OwnedByStaticNodePool() {
 		return false
@@ -111,21 +123,32 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.NodePool.Name))...)
 		return false
 	}
-	// If we don't have the "WhenEmptyOrUnderutilized" policy set, we should not do any of the consolidation methods, but
-	// we should also not fire an event here to users since this can be confusing when the field on the NodePool
-	// is named "consolidationPolicy"
-	if cn.NodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyWhenEmptyOrUnderutilized {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has non-empty consolidation disabled", cn.NodePool.Name))...)
+	// Empty nodes are handled by Emptiness (reason "Empty") for correct budget accounting.
+	if cn.IsEmpty() {
 		return false
 	}
-	// return true if consolidatable
+	// WhenEmpty pools only allow empty-node deletions, which Emptiness handles.
+	if cn.NodePool.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyWhenEmpty {
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation policy WhenEmpty, but node is not empty", cn.NodePool.Name))...)
+		return false
+	}
 	return cn.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
-// sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result
-func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].DisruptionCost < candidates[j].DisruptionCost
+// sortCandidates sorts candidates by price/disruption ratio descending.
+// The binary search in multi-node consolidation tries the first N candidates
+// as a batch. Ratio sort means the batch contains the highest-value nodes,
+// so budget-limited cycles execute the most impactful moves first.
+//
+// This changes multi-node behavior for WhenEmptyOrUnderutilized, which
+// previously sorted by disruption cost ascending. The old sort found batches
+// that were easy to pack (low-disruption nodes fit together). The new sort
+// finds batches worth packing (high savings per unit disruption). The binary
+// search still converges because it shrinks the window until scheduling
+// succeeds.
+func (c *consolidation) sortCandidates(_ context.Context, candidates []*Candidate) []*Candidate {
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].SavingsRatio() > candidates[j].SavingsRatio()
 	})
 	return candidates
 }
@@ -136,7 +159,7 @@ func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	var err error
 	// Run scheduling simulation to compute consolidation option
-	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.clock, c.recorder, candidates...)
+	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.clock, c.recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, candidates...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {
@@ -157,8 +180,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// were we able to schedule all the pods on the inflight candidates?
 	if len(results.NewNodeClaims) == 0 {
 		return Command{
-			Candidates: candidates,
-			Results:    results,
+			Candidates:          candidates,
+			Results:             results,
+			PoolDisruptionCosts: computePoolDisruptionCosts(candidates),
 		}, nil
 	}
 
@@ -172,7 +196,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
-	candidatePrice := getCandidatePrices(candidates)
+	candidatePrice := sumCandidatePrices(candidates)
 
 	allExistingAreSpot := true
 	for _, cn := range candidates {
@@ -219,9 +243,10 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	cmd := Command{
-		Candidates:   candidates,
-		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
-		Results:      results,
+		Candidates:          candidates,
+		Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
+		Results:             results,
+		PoolDisruptionCosts: computePoolDisruptionCosts(candidates),
 	}
 	cmd.EmitCandidateEvents(c.recorder)
 
@@ -268,9 +293,10 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	// We don't have any requirement to check the remaining instance type flexibility, so exit early in this case.
 	if len(candidates) > 1 {
 		cmd := Command{
-			Candidates:   candidates,
-			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
-			Results:      results,
+			Candidates:          candidates,
+			Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
+			Results:             results,
+			PoolDisruptionCosts: computePoolDisruptionCosts(candidates),
 		}
 		cmd.EmitCandidateEvents(c.recorder)
 
@@ -306,32 +332,12 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	}
 
 	cmd := Command{
-		Candidates:   candidates,
-		Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
-		Results:      results,
+		Candidates:          candidates,
+		Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
+		Results:             results,
+		PoolDisruptionCosts: computePoolDisruptionCosts(candidates),
 	}
 	cmd.EmitCandidateEvents(c.recorder)
 
 	return cmd, nil
-}
-
-// getCandidatePrices returns the sum of the prices of the given candidates
-func getCandidatePrices(candidates []*Candidate) float64 {
-	var price float64
-	for _, c := range candidates {
-		// Handle test commands or candidates without instance type info
-		if c == nil || c.instanceType == nil {
-			return 0.0
-		}
-		reqs := scheduling.NewLabelRequirements(c.Labels())
-		compatibleOfferings := c.instanceType.Offerings.Compatible(reqs)
-		if len(compatibleOfferings) == 0 {
-			// Offerings may no longer exist due to cloud provider changes, deprecated instance types,
-			// or capacity reservations that are no longer selected. Model as free so consolidation
-			// skips this candidate; drift should handle nodes with mismatched offerings.
-			return 0.0
-		}
-		price += compatibleOfferings.Cheapest().Price
-	}
-	return price
 }

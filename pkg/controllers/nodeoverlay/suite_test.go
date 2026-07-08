@@ -31,7 +31,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -80,19 +79,16 @@ var _ = BeforeEach(func() {
 	store.Reset()
 
 	cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-		fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "default-instance-type",
-			Offerings: []*cloudprovider.Offering{
-				{
-					Available: true,
-					Requirements: scheduling.NewLabelRequirements(map[string]string{
-						v1.CapacityTypeLabelKey:  "spot",
-						corev1.LabelTopologyZone: "test-zone-1",
-					}),
-					Price: 1.020,
-				},
-			},
-		}),
+		fake.NewInstanceType("default-instance-type",
+			fake.WithOfferings(cloudprovider.Offering{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  "spot",
+					corev1.LabelTopologyZone: "test-zone-1",
+				}),
+				Price: 1.020,
+			}),
+		),
 	}
 	ExpectApplied(ctx, env.Client, nodePool)
 })
@@ -237,16 +233,14 @@ var _ = Describe("Validation", func() {
 			})
 			It("should succeed with requirements overlays don't overlap", func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-					fake.NewInstanceType(fake.InstanceTypeOptions{
-						Name:             "arm-instance-type",
-						Architecture:     "arm64",
-						OperatingSystems: sets.New(string(corev1.Linux), string(corev1.Windows), "darwin"),
-					}),
-					fake.NewInstanceType(fake.InstanceTypeOptions{
-						Name:             "amd-instance-type",
-						Architecture:     "amd64",
-						OperatingSystems: sets.New("ios"),
-					}),
+					fake.NewInstanceType("arm-instance-type",
+						fake.WithArchitecture("arm64"),
+						fake.WithOperatingSystems(string(corev1.Linux), string(corev1.Windows), "darwin"),
+					),
+					fake.NewInstanceType("amd-instance-type",
+						fake.WithArchitecture("amd64"),
+						fake.WithOperatingSystems("ios"),
+					),
 				}
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					ObjectMeta: metav1.ObjectMeta{
@@ -296,10 +290,9 @@ var _ = Describe("Validation", func() {
 		Describe("Offering Requirements", func() {
 			BeforeEach(func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-					fake.NewInstanceType(fake.InstanceTypeOptions{
-						Name: "default-instance-type",
-						Offerings: []*cloudprovider.Offering{
-							{
+					fake.NewInstanceType("default-instance-type",
+						fake.WithOfferings(
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -307,7 +300,7 @@ var _ = Describe("Validation", func() {
 								}),
 								Price: 1.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "on-demand",
@@ -315,7 +308,7 @@ var _ = Describe("Validation", func() {
 								}),
 								Price: 2.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -323,7 +316,7 @@ var _ = Describe("Validation", func() {
 								}),
 								Price: 3.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "reserved",
@@ -331,8 +324,8 @@ var _ = Describe("Validation", func() {
 								}),
 								Price: 4.020,
 							},
-						},
-					}),
+						),
+					),
 				}
 			})
 			It("should fail with requirements overlays overlap on zone", func() {
@@ -1291,10 +1284,9 @@ var _ = Describe("Instance Type Controller", func() {
 		DescribeTable("should apply pricing updates for instances types for capacity type",
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-					fake.NewInstanceType(fake.InstanceTypeOptions{
-						Name: "default-instance-type",
-						Offerings: []*cloudprovider.Offering{
-							{
+					fake.NewInstanceType("default-instance-type",
+						fake.WithOfferings(
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1302,7 +1294,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 1.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "on-demand",
@@ -1310,8 +1302,8 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 5.020,
 							},
-						},
-					}),
+						),
+					),
 				}
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
@@ -1357,10 +1349,9 @@ var _ = Describe("Instance Type Controller", func() {
 		DescribeTable("should apply pricing updates for instances types for availability zone",
 			func(changesOverlay v1alpha1.NodeOverlay, expectedValue float64) {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-					fake.NewInstanceType(fake.InstanceTypeOptions{
-						Name: "default-instance-type",
-						Offerings: []*cloudprovider.Offering{
-							{
+					fake.NewInstanceType("default-instance-type",
+						fake.WithOfferings(
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1368,7 +1359,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 1.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1376,8 +1367,8 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 5.020,
 							},
-						},
-					}),
+						),
+					),
 				}
 				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
@@ -1423,10 +1414,9 @@ var _ = Describe("Instance Type Controller", func() {
 		DescribeTable("should update price updates offerings instance types from multiple overlays",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay, expectedValueOne float64, expectedValueTwo float64, expectedValueThree float64) {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-					fake.NewInstanceType(fake.InstanceTypeOptions{
-						Name: "default-instance-type",
-						Offerings: []*cloudprovider.Offering{
-							{
+					fake.NewInstanceType("default-instance-type",
+						fake.WithOfferings(
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1434,7 +1424,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 1.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "on-demand",
@@ -1442,7 +1432,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 2.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "reserved",
@@ -1450,8 +1440,8 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 4.020,
 							},
-						},
-					}),
+						),
+					),
 				}
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
@@ -1530,10 +1520,9 @@ var _ = Describe("Instance Type Controller", func() {
 		DescribeTable("should update price updates offerings instance types from multiple overlays with different weights",
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay, expectedValueOne float64, expectedValueTwo float64) {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-					fake.NewInstanceType(fake.InstanceTypeOptions{
-						Name: "default-instance-type",
-						Offerings: []*cloudprovider.Offering{
-							{
+					fake.NewInstanceType("default-instance-type",
+						fake.WithOfferings(
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1541,7 +1530,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 1.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "on-demand",
@@ -1549,7 +1538,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 2.020,
 							},
-							{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "reserved",
@@ -1557,8 +1546,8 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 4.020,
 							},
-						},
-					}),
+						),
+					),
 				}
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					ObjectMeta: metav1.ObjectMeta{
@@ -2039,45 +2028,36 @@ var _ = Describe("Instance Type Controller", func() {
 		})
 		It("should update capacity for instance types from multiple overlays", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "default-instance-type-zone-one",
-					Offerings: []*cloudprovider.Offering{
-						{
-							Available: true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  "spot",
-								corev1.LabelTopologyZone: "test-zone-1",
-							}),
-							Price: 1.020,
-						},
-					},
-				}),
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "default-instance-type-zone-two",
-					Offerings: []*cloudprovider.Offering{
-						{
-							Available: true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  "on-demand",
-								corev1.LabelTopologyZone: "test-zone-2",
-							}),
-							Price: 2.020,
-						},
-					},
-				}),
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "default-instance-type-zone-four",
-					Offerings: []*cloudprovider.Offering{
-						{
-							Available: true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  "reserved",
-								corev1.LabelTopologyZone: "test-zone-4",
-							}),
-							Price: 4.020,
-						},
-					},
-				}),
+				fake.NewInstanceType("default-instance-type-zone-one",
+					fake.WithOfferings(cloudprovider.Offering{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  "spot",
+							corev1.LabelTopologyZone: "test-zone-1",
+						}),
+						Price: 1.020,
+					}),
+				),
+				fake.NewInstanceType("default-instance-type-zone-two",
+					fake.WithOfferings(cloudprovider.Offering{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  "on-demand",
+							corev1.LabelTopologyZone: "test-zone-2",
+						}),
+						Price: 2.020,
+					}),
+				),
+				fake.NewInstanceType("default-instance-type-zone-four",
+					fake.WithOfferings(cloudprovider.Offering{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  "reserved",
+							corev1.LabelTopologyZone: "test-zone-4",
+						}),
+						Price: 4.020,
+					}),
+				),
 			}
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
@@ -2143,19 +2123,16 @@ var _ = Describe("Instance Type Controller", func() {
 		})
 		It("should update capacity for one instance types from multiple overlays", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "default-instance-type-zone-one",
-					Offerings: []*cloudprovider.Offering{
-						{
-							Available: true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  "spot",
-								corev1.LabelTopologyZone: "test-zone-1",
-							}),
-							Price: 1.020,
-						},
-					},
-				}),
+				fake.NewInstanceType("default-instance-type-zone-one",
+					fake.WithOfferings(cloudprovider.Offering{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  "spot",
+							corev1.LabelTopologyZone: "test-zone-1",
+						}),
+						Price: 1.020,
+					}),
+				),
 			}
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
@@ -2210,45 +2187,36 @@ var _ = Describe("Instance Type Controller", func() {
 		})
 		It("should update price offerings instance types from multiple overlays with different weights", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "default-instance-type-zone-one",
-					Offerings: []*cloudprovider.Offering{
-						{
-							Available: true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  "spot",
-								corev1.LabelTopologyZone: "test-zone-1",
-							}),
-							Price: 1.020,
-						},
-					},
-				}),
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "default-instance-type-zone-two",
-					Offerings: []*cloudprovider.Offering{
-						{
-							Available: true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  "on-demand",
-								corev1.LabelTopologyZone: "test-zone-2",
-							}),
-							Price: 2.020,
-						},
-					},
-				}),
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "default-instance-type-zone-four",
-					Offerings: []*cloudprovider.Offering{
-						{
-							Available: true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  "reserved",
-								corev1.LabelTopologyZone: "test-zone-4",
-							}),
-							Price: 4.020,
-						},
-					},
-				}),
+				fake.NewInstanceType("default-instance-type-zone-one",
+					fake.WithOfferings(cloudprovider.Offering{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  "spot",
+							corev1.LabelTopologyZone: "test-zone-1",
+						}),
+						Price: 1.020,
+					}),
+				),
+				fake.NewInstanceType("default-instance-type-zone-two",
+					fake.WithOfferings(cloudprovider.Offering{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  "on-demand",
+							corev1.LabelTopologyZone: "test-zone-2",
+						}),
+						Price: 2.020,
+					}),
+				),
+				fake.NewInstanceType("default-instance-type-zone-four",
+					fake.WithOfferings(cloudprovider.Offering{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  "reserved",
+							corev1.LabelTopologyZone: "test-zone-4",
+						}),
+						Price: 4.020,
+					}),
+				),
 			}
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{

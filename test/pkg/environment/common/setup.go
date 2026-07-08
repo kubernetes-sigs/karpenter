@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
+	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -55,21 +56,31 @@ var (
 		&v1.NodeClaimList{},
 	}
 	CleanableObjects = []client.Object{
-		&corev1.Pod{},
-		&appsv1.Deployment{},
-		&appsv1.DaemonSet{},
-		&policyv1.PodDisruptionBudget{},
-		&corev1.PersistentVolumeClaim{},
-		&corev1.PersistentVolume{},
-		&storagev1.StorageClass{},
-		&v1.NodePool{},
-		&corev1.LimitRange{},
-		&schedulingv1.PriorityClass{},
-		&corev1.Node{},
-		&v1.NodeClaim{},
-		&v1alpha1.NodeOverlay{},
+		// admissionregistration.k8s.io
 		&admissionregistrationv1.ValidatingAdmissionPolicy{},
 		&admissionregistrationv1.ValidatingAdmissionPolicyBinding{},
+		// apps
+		&appsv1.DaemonSet{},
+		&appsv1.Deployment{},
+		// autoscaling.x-k8s.io
+		&autoscalingv1alpha1.CapacityBuffer{},
+		// core
+		&corev1.LimitRange{},
+		&corev1.Node{},
+		&corev1.PersistentVolume{},
+		&corev1.PersistentVolumeClaim{},
+		&corev1.Pod{},
+		&corev1.PodTemplate{},
+		// karpenter.sh
+		&v1.NodeClaim{},
+		&v1.NodePool{},
+		&v1alpha1.NodeOverlay{},
+		// policy
+		&policyv1.PodDisruptionBudget{},
+		// scheduling.k8s.io
+		&schedulingv1.PriorityClass{},
+		// storage.k8s.io
+		&storagev1.StorageClass{},
 	}
 )
 

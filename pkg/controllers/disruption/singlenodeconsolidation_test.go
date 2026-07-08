@@ -101,16 +101,18 @@ var _ = Describe("SingleNodeConsolidation", func() {
 	})
 
 	Context("Candidate Shuffling", func() {
-		It("should sort candidates by disruption cost", func() {
+		It("should sort candidates by savings ratio descending", func() {
 			candidates, err := createCandidates(1.0, 3)
 			Expect(err).To(BeNil())
 
 			sortedCandidates := consolidation.SortCandidates(ctx, candidates)
 
-			// Verify candidates are sorted by disruption cost
+			// Verify candidates are sorted by savings ratio (price/RescheduleDisruptionCost) descending
 			Expect(sortedCandidates).To(HaveLen(9))
 			for i := 0; i < len(sortedCandidates)-1; i++ {
-				Expect(sortedCandidates[i].DisruptionCost).To(BeNumerically("<=", sortedCandidates[i+1].DisruptionCost))
+				ratioI := sortedCandidates[i].Price / sortedCandidates[i].RescheduleDisruptionCost
+				ratioJ := sortedCandidates[i+1].Price / sortedCandidates[i+1].RescheduleDisruptionCost
+				Expect(ratioI).To(BeNumerically(">=", ratioJ))
 			}
 		})
 
@@ -125,61 +127,45 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			Expect(sortedCandidates[0].NodePool.Name).To(Equal(nodePool2.Name))
 		})
 
-		It("should interweave candidates from different nodepools", func() {
-			// Create candidates with different disruption costs
-			// We'll create 3 sets of candidates with costs 1.0, 2.0, and 3.0
-			// Use 1 node per nodepool to make the test more predictable
+		It("should sort candidates by savings ratio with different disruption costs", func() {
+			// Create candidates and assign different RescheduleDisruptionCost values
+			// to verify savings ratio ordering (price/RescheduleDisruptionCost descending)
 			candidates1, err := createCandidates(1.0, 1)
 			Expect(err).To(BeNil())
+			for _, c := range candidates1 {
+				c.RescheduleDisruptionCost = 1.0 // high ratio (price/1.0)
+			}
 
 			candidates2, err := createCandidates(2.0, 1)
 			Expect(err).To(BeNil())
+			for _, c := range candidates2 {
+				c.RescheduleDisruptionCost = 5.0 // medium ratio (price/5.0)
+			}
 
 			candidates3, err := createCandidates(3.0, 1)
 			Expect(err).To(BeNil())
+			for _, c := range candidates3 {
+				c.RescheduleDisruptionCost = 20.0 // low ratio (price/20.0)
+			}
 
-			// Combine all candidates
+			// Combine in reverse order
 			allCandidates := append(candidates3, append(candidates2, candidates1...)...)
 
 			// Sort candidates
 			sortedCandidates := consolidation.SortCandidates(ctx, allCandidates)
-
-			// Verify candidates are interweaved from different nodepools
-			// First we should have all candidates with disruption cost 1, then 2, then 3
-			// Within each cost group, we should have one from each nodepool
 			Expect(sortedCandidates).To(HaveLen(9))
 
-			// Check first three candidates (all with cost 1)
-			nodePoolsInFirstGroup := []string{
-				sortedCandidates[0].NodePool.Name,
-				sortedCandidates[1].NodePool.Name,
-				sortedCandidates[2].NodePool.Name,
-			}
-			Expect(nodePoolsInFirstGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
+			// First 3 should have ratio = price/1.0 (highest)
 			for i := range 3 {
-				Expect(sortedCandidates[i].DisruptionCost).To(Equal(1.0))
+				Expect(sortedCandidates[i].RescheduleDisruptionCost).To(Equal(1.0))
 			}
-
-			// Check next three candidates (all with cost 2)
-			nodePoolsInSecondGroup := []string{
-				sortedCandidates[3].NodePool.Name,
-				sortedCandidates[4].NodePool.Name,
-				sortedCandidates[5].NodePool.Name,
-			}
-			Expect(nodePoolsInSecondGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
+			// Next 3 should have ratio = price/5.0
 			for i := 3; i < 6; i++ {
-				Expect(sortedCandidates[i].DisruptionCost).To(Equal(2.0))
+				Expect(sortedCandidates[i].RescheduleDisruptionCost).To(Equal(5.0))
 			}
-
-			// Check last three candidates (all with cost 3)
-			nodePoolsInThirdGroup := []string{
-				sortedCandidates[6].NodePool.Name,
-				sortedCandidates[7].NodePool.Name,
-				sortedCandidates[8].NodePool.Name,
-			}
-			Expect(nodePoolsInThirdGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
+			// Last 3 should have ratio = price/20.0 (lowest)
 			for i := 6; i < 9; i++ {
-				Expect(sortedCandidates[i].DisruptionCost).To(Equal(3.0))
+				Expect(sortedCandidates[i].RescheduleDisruptionCost).To(Equal(20.0))
 			}
 		})
 

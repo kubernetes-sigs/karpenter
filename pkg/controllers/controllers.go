@@ -94,14 +94,15 @@ func NewControllers(
 	opts ...option.Function[ControllerOptions],
 ) []controller.Controller {
 	o := option.Resolve(opts...)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
+	deviceAllocationController := deviceallocation.NewController(kubeClient)
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue, clusterCost),
 		provisioning.NewPodController(kubeClient, p, cluster),
 		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient, cloudProvider),
@@ -127,7 +128,7 @@ func NewControllers(
 	}
 
 	if !options.FromContext(ctx).IgnoreDRARequests {
-		controllers = append(controllers, deviceallocation.NewController(kubeClient))
+		controllers = append(controllers, deviceAllocationController)
 	}
 
 	if !options.FromContext(ctx).DisableClusterStateObservability {
@@ -162,7 +163,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
-		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock))
+		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController))
 		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock, recorder))
 	}
 
