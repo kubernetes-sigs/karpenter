@@ -28,7 +28,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -48,16 +47,12 @@ var _ = Describe("Controller", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 	})
 
-	It("should skip reconciliation when feature gate is disabled", func() {
-		opts := test.Options()
-		opts.FeatureGates.PodDeletionCostManagement = false
-		disabledCtx := options.ToContext(ctx, opts)
-
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
-		result, err := controller.Reconcile(disabledCtx)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(result.RequeueAfter).ToNot(BeZero())
-	})
+	// The PodDeletionCostManagement feature gate is enforced at registration in
+	// pkg/controllers/controllers.go (see the guarded NewController call there):
+	// when the gate is off the controller is never instantiated. The gate is
+	// read once at process start and is not dynamic, so there is no in-Reconcile
+	// runtime check to test. The registration-time guard is a compile-time
+	// property of controllers.go and is covered by that file's structure alone.
 
 	It("should reconcile and update pod annotations when feature gate is enabled", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{

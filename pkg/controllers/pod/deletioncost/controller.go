@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
@@ -89,15 +88,14 @@ func (c *Controller) Name() string {
 // limiter; on error the operatorpkg reconciler adapter drops the RequeueAfter
 // (see operatorpkg/reconciler.AsReconcilerWithRateLimiter) so the explicit
 // reconcileInterval here only takes effect on the success and skip paths.
+//
+// The PodDeletionCostManagement feature gate is enforced at registration in
+// pkg/controllers/controllers.go. The gate is read once at process start and
+// is not dynamic (a Karpenter restart is required to change it), so if the
+// gate is off this controller is never instantiated and Reconcile is never
+// invoked. No runtime gate check is needed here.
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
-
-	// Defensive: the controller is also gated at registration in
-	// pkg/controllers/controllers.go, so this branch only fires if the gate is
-	// flipped to false at runtime.
-	if !options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
-		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
-	}
 
 	var nodes []*state.StateNode
 	for node := range c.cluster.Nodes() {
