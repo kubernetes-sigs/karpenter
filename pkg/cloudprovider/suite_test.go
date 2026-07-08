@@ -105,6 +105,81 @@ var _ = Describe("Instance Type", func() {
 		Expect(result.Memory().Value()).To(BeNumerically("~", expectedMemory.Value()))
 		Expect(result.Cpu().Value()).To(BeNumerically("~", expectedCPU.Value()))
 	})
+	It("should compute a single allocatable when no offerings have overrides", func() {
+		it := cloudprovider.InstanceType{
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("4"),
+				v1.ResourceMemory: resource.MustParse("16Gi"),
+				v1.ResourcePods:   resource.MustParse("110"),
+			},
+			Overhead: &cloudprovider.InstanceTypeOverhead{
+				KubeReserved: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("100m"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			},
+			Offerings: []*cloudprovider.Offering{
+				{Available: true},
+				{Available: true},
+			},
+		}
+		groups := it.AllocatableOfferingsList()
+		Expect(groups).To(HaveLen(1))
+		Expect(groups[0].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
+		expectedMem := resource.MustParse("15Gi")
+		Expect(groups[0].Allocatable.Memory().Value()).To(BeNumerically("==", expectedMem.Value()))
+	})
+	It("should compute multiple allocatables when offerings have overrides", func() {
+		extendedResource := v1.ResourceName("test.com/extended-slots")
+		it := cloudprovider.InstanceType{
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("4"),
+				v1.ResourceMemory: resource.MustParse("16Gi"),
+				v1.ResourcePods:   resource.MustParse("110"),
+			},
+			Overhead: &cloudprovider.InstanceTypeOverhead{
+				KubeReserved: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("100m"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			},
+			Offerings: []*cloudprovider.Offering{
+				{Available: true},
+				{Available: true},
+				{
+					Available:        true,
+					CapacityOverride: v1.ResourceList{extendedResource: resource.MustParse("12")},
+					OverheadOverride: &cloudprovider.InstanceTypeOverhead{
+						SystemReserved: v1.ResourceList{v1.ResourceMemory: resource.MustParse("3Gi")},
+					},
+				},
+				{
+					Available:        true,
+					CapacityOverride: v1.ResourceList{extendedResource: resource.MustParse("12")},
+					OverheadOverride: &cloudprovider.InstanceTypeOverhead{
+						SystemReserved: v1.ResourceList{v1.ResourceMemory: resource.MustParse("3Gi")},
+					},
+				},
+			},
+		}
+		groups := it.AllocatableOfferingsList()
+		Expect(groups).To(HaveLen(2))
+
+		// Base allocatable: no extended resource, full memory
+		Expect(groups[0].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
+		expectedBaseMem := resource.MustParse("15Gi")
+		Expect(groups[0].Allocatable.Memory().Value()).To(BeNumerically("==", expectedBaseMem.Value()))
+		Expect(groups[0].Allocatable[extendedResource]).To(BeZero())
+		Expect(groups[0].Offerings).To(HaveLen(2)) // two base offerings
+
+		// Override allocatable: has extended resource, reduced memory due to additional overhead
+		Expect(groups[1].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
+		expectedOverrideMem := resource.MustParse("12Gi")
+		Expect(groups[1].Allocatable.Memory().Value()).To(BeNumerically("==", expectedOverrideMem.Value()))
+		slotQty := groups[1].Allocatable[extendedResource]
+		Expect(slotQty.Value()).To(BeNumerically("==", 12))
+		Expect(groups[1].Offerings).To(HaveLen(2)) // two override offerings
+	})
 	Context("AdjustedPrice", func() {
 		DescribeTable("should adjust price based overlay values",
 			func(priceAdjustment string, basePrice float64, expectedPrice float64) {

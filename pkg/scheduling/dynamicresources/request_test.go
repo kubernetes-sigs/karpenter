@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
 	"k8s.io/utils/ptr"
@@ -40,7 +41,7 @@ var _ = Describe("Request Validation", func() {
 	)
 
 	BeforeEach(func() {
-		celCache = dracel.NewCache(100, dracel.Features{})
+		celCache = dracel.NewCache(100, dracel.Features{EnableConsumableCapacity: true})
 
 		// Create DeviceClasses in the API server.
 		ExpectApplied(ctx, env.Client,
@@ -64,7 +65,7 @@ var _ = Describe("Request Validation", func() {
 			makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 				withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
 		}
-		pools = dynamicresources.GatherPools(slices, reqs)
+		pools = dynamicresources.GatherPools(slices, reqs, "")
 	})
 
 	// makeTemplateDevices builds a map of instance type ID to template devices for use
@@ -111,6 +112,37 @@ var _ = Describe("Request Validation", func() {
 			Expect(data.Requests[0].Name).To(Equal("gpu-req"))
 			Expect(data.Requests[0].NumDevices).To(Equal(2))
 			Expect(data.Requests[0].AllocationMode).To(Equal(resourcev1.DeviceAllocationModeExactCount))
+			Expect(data.Requests[0].CapacityRequests).To(BeNil())
+		})
+
+		It("should populate CapacityRequests when Capacity is set", func() {
+			claim := &resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
+				Spec: resourcev1.ResourceClaimSpec{
+					Devices: resourcev1.DeviceClaim{
+						Requests: []resourcev1.DeviceRequest{
+							{
+								Name: "gpu-req",
+								Exactly: &resourcev1.ExactDeviceRequest{
+									DeviceClassName: "empty-class",
+									Count:           1,
+									Capacity: &resourcev1.CapacityRequirements{
+										Requests: map[resourcev1.QualifiedName]resource.Quantity{
+											"gpu.example.com/memory": resource.MustParse("16Gi"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			data, err := dynamicresources.ValidateClaimRequest(ctx, env.Client, claim, pools, nil, celCache, nil)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(data.Requests).To(HaveLen(1))
+			Expect(data.Requests[0].CapacityRequests).To(HaveLen(1))
+			Expect(data.Requests[0].CapacityRequests["gpu.example.com/memory"]).To(Equal(resource.MustParse("16Gi")))
 		})
 
 		It("should validate multiple requests in a single claim", func() {
@@ -450,6 +482,25 @@ var _ = Describe("Request Validation", func() {
 			Expect(mac.AttributeBindingFallback.NodePool).To(Equal("default"))
 		})
 
+		It("should fail on DistinctAttribute constraints (not yet supported)", func() {
+			attr := resourcev1.FullyQualifiedName("gpu.example.com/numa-node")
+			claim := &resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
+				Spec: resourcev1.ResourceClaimSpec{
+					Devices: resourcev1.DeviceClaim{
+						Constraints: []resourcev1.DeviceConstraint{
+							{DistinctAttribute: &attr},
+						},
+					},
+				},
+			}
+
+			_, err := dynamicresources.ValidateClaimRequest(ctx, env.Client, claim, pools, nil, celCache, nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("DistinctAttribute"))
+			Expect(err.Error()).To(ContainSubstring("not done yet"))
+		})
+
 		It("should fail on unsupported constraint types", func() {
 			claim := &resourcev1.ResourceClaim{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -624,7 +675,7 @@ var _ = Describe("Request Validation", func() {
 							}),
 						)),
 				}
-				gpuPools := dynamicresources.GatherPools(slices, reqs)
+				gpuPools := dynamicresources.GatherPools(slices, reqs, "")
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -739,7 +790,7 @@ var _ = Describe("Request Validation", func() {
 							}),
 						)),
 				}
-				inClusterPools := dynamicresources.GatherPools(slices, reqs)
+				inClusterPools := dynamicresources.GatherPools(slices, reqs, "")
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -807,7 +858,7 @@ var _ = Describe("Request Validation", func() {
 							}),
 						)),
 				}
-				inClusterPools := dynamicresources.GatherPools(slices, reqs)
+				inClusterPools := dynamicresources.GatherPools(slices, reqs, "")
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -847,7 +898,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s2", "nic.example.com", "pool-b", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices("nic-0")),
 				}
-				multiPools := dynamicresources.GatherPools(slices, reqs)
+				multiPools := dynamicresources.GatherPools(slices, reqs, "")
 				Expect(multiPools).To(HaveLen(2))
 
 				claim := &resourcev1.ResourceClaim{
@@ -916,7 +967,7 @@ var _ = Describe("Request Validation", func() {
 							}),
 						)),
 				}
-				a100Pools := dynamicresources.GatherPools(slices, reqs)
+				a100Pools := dynamicresources.GatherPools(slices, reqs, "")
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -974,7 +1025,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-big", "gpu.example.com", "pool-big", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				bigPools := dynamicresources.GatherPools(slices, reqs)
+				bigPools := dynamicresources.GatherPools(slices, reqs, "")
 
 				claim := &resourcev1.ResourceClaim{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-claim"},
@@ -1040,7 +1091,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-20", "gpu.example.com", "pool-20", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				largePools := dynamicresources.GatherPools(slices, reqs)
+				largePools := dynamicresources.GatherPools(slices, reqs, "")
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  10, // 20 + 10 = 30 <= 32
@@ -1084,7 +1135,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-15", "gpu.example.com", "pool-15", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				mixedPools := dynamicresources.GatherPools(slices, reqs)
+				mixedPools := dynamicresources.GatherPools(slices, reqs, "")
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  5,  // 25 + 5 = 30 <= 32
@@ -1133,7 +1184,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-30", "gpu.example.com", "pool-30", withAllNodes(), withGeneration(1, 1),
 						withAPIDevices(deviceNames...)),
 				}
-				largePools := dynamicresources.GatherPools(slices, reqs)
+				largePools := dynamicresources.GatherPools(slices, reqs, "")
 
 				templateDevices := makeTemplateDevices(map[string]int{
 					"c5.large":  5, // 30 + 5 = 35 > 32
@@ -1234,10 +1285,16 @@ var _ = Describe("Request Validation", func() {
 					"gpu.example.com/model":  {StringValue: ptr.To("H100")},
 					"gpu.example.com/memory": {IntValue: ptr.To(int64(80))},
 				},
+				Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+					"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+				},
+				AllowMultipleAllocations: true,
 			}
 			selectors := []resourcev1.DeviceSelector{
 				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "H100"`}},
 				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].memory > 40`}},
+				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.capacity["gpu.example.com"].vram.isGreaterThan(quantity("40Gi"))`}},
+				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.allowMultipleAllocations == true`}},
 			}
 
 			match, err := dynamicresources.DeviceMatchesSelectors(ctx, d,
@@ -1295,6 +1352,38 @@ var _ = Describe("Request Validation", func() {
 				deviceID("gpu.example.com", "pool", "gpu-0"), selectors, celCache)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to compile"))
+		})
+
+		It("should not match when capacity selector fails", func() {
+			d := cloudprovider.Device{
+				Name: unique.Make("gpu-0"),
+				Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+					"gpu.example.com/memory": {Value: resource.MustParse("20Gi")},
+				},
+			}
+			selectors := []resourcev1.DeviceSelector{
+				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.capacity["gpu.example.com"].memory.isGreaterThan(quantity("40Gi"))`}},
+			}
+
+			match, err := dynamicresources.DeviceMatchesSelectors(ctx, d,
+				deviceID("gpu.example.com", "pool", "gpu-0"), selectors, celCache)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(match).To(BeFalse())
+		})
+
+		It("should not match when AllowMultipleAllocations is false", func() {
+			d := cloudprovider.Device{
+				Name:                     unique.Make("exclusive-gpu"),
+				AllowMultipleAllocations: false,
+			}
+			selectors := []resourcev1.DeviceSelector{
+				{CEL: &resourcev1.CELDeviceSelector{Expression: `device.allowMultipleAllocations == true`}},
+			}
+
+			match, err := dynamicresources.DeviceMatchesSelectors(ctx, d,
+				deviceID("gpu.example.com", "pool", "exclusive-gpu"), selectors, celCache)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(match).To(BeFalse())
 		})
 	})
 })

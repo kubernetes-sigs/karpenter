@@ -235,7 +235,7 @@ var _ = Describe("ResourceSlice Interface", func() {
 			Expect(slice.Potential()).To(BeTrue())
 		})
 
-		It("should return devices directly from the template", func() {
+		It("should return devices with attributes, capacity, and AllowMultipleAllocations", func() {
 			devices := slice.Devices()
 			Expect(devices).To(HaveLen(1))
 			Expect(devices[0].Name).To(Equal(unique.Make("gpu-0")))

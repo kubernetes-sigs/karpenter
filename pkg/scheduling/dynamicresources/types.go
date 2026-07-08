@@ -61,6 +61,10 @@ func (id *DeviceID) String() string {
 type NodeClaim interface {
 	// ID returns a unique identifier for this NodeClaim.
 	ID() NodeClaimID
+	// NodeName returns the name of the concrete node backing this NodeClaim, or "" for in-flight/new NodeClaims that
+	// don't yet have a node. Published ResourceSlices pinned to a node via spec.nodeName are only accessible from the
+	// existing node with this name.
+	NodeName() string
 	// NodePoolID returns the NodePool this NodeClaim belongs to.
 	NodePoolID() NodePoolID
 	// Requirements returns the current scheduling requirements.
@@ -95,6 +99,10 @@ type ResourceSlice interface {
 	//     topology requirements that constrain the NodeClaim. Potential devices are always
 	//     node-local and do not constrain topology.
 	Potential() bool
+	// NodeName returns the name of the node the slice's devices are local to when the slice pins itself to a single
+	// node via spec.nodeName, or "" otherwise. A node-name-pinned slice is accessible only from that exact node, so it
+	// can never satisfy an in-flight NodeClaim — only an existing node with the same name.
+	NodeName() string
 	// NodeSelector returns the node selector if the slice uses label-based node affinity, or nil.
 	NodeSelector() *corev1.NodeSelector
 	// AllNodes returns true if the slice's devices are accessible from all nodes.
@@ -160,6 +168,10 @@ func (s *apiServerSlice) Potential() bool {
 	return false
 }
 
+func (s *apiServerSlice) NodeName() string {
+	return lo.FromPtr(s.slice.Spec.NodeName)
+}
+
 func (s *apiServerSlice) NodeSelector() *corev1.NodeSelector {
 	return s.slice.Spec.NodeSelector
 }
@@ -207,6 +219,10 @@ func (s *templateSlice) Devices() []cloudprovider.Device {
 
 func (s *templateSlice) Potential() bool {
 	return true
+}
+
+func (s *templateSlice) NodeName() string {
+	return ""
 }
 
 func (s *templateSlice) NodeSelector() *corev1.NodeSelector {
