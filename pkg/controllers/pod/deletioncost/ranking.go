@@ -181,19 +181,21 @@ func fetchPDBs(ctx context.Context, kubeClient client.Client) ([]parsedPDB, erro
 	return out, nil
 }
 
-// partitionNodes splits nodes into four tiers. Order matters: a node that is
-// disrupted+PDB-blocked (Group A semantics) takes precedence over a do-not-disrupt
-// signal because Group A nodes are already on the disruption path; once
-// Karpenter has tainted them, Group A is the right cohort regardless of pod
-// annotations. Within the remaining nodes, do-not-disrupt and consolidation-disabled
-// route to Group D, drifted to Group B, everything else to Group C.
+// partitionNodes splits nodes into four tiers. Order matters: a node that
+// matches any Group A predicate takes precedence over a do-not-disrupt signal
+// because Group A nodes are already on the disruption path; once Karpenter
+// has tainted them, Group A is the right cohort regardless of pod
+// annotations. Within the remaining nodes, do-not-disrupt and
+// consolidation-disabled route to Group D, drifted to Group B, everything
+// else to Group C.
 //
 // RFC §"Partitioning":
-//   - Group A: disrupted (karpenter.sh/disrupted taint) AND PDB-blocked, OR
-//     hosts a non-RS-owned pod. Both reflect "delete this node first" semantics:
-//     PDB-blocked means consolidation is already stuck on it; non-RS-owned
-//     means the pod has no controller to recreate it, so disrupting that node
-//     is more painful than disrupting a fresh node.
+//   - Group A: any of (disrupted (karpenter.sh/disrupted taint) OR
+//     PDB-blocked OR hosts a non-RS-owned pod). Each of the three predicates
+//     reflects a "delete this node first" signal: disrupted means Karpenter
+//     is already committed; PDB-blocked means consolidation is already
+//     stuck; non-RS-owned means the pod has no controller to recreate it,
+//     so disrupting that node is more painful than disrupting a fresh node.
 //   - Group B: drifted (NodeClaim ConditionTypeDrifted=True), not in A.
 //   - Group C: normal — consolidation candidates, not in A/B/D.
 //   - Group D: node-level do-not-disrupt annotation, do-not-disrupt pods, or
@@ -201,11 +203,11 @@ func fetchPDBs(ctx context.Context, kubeClient client.Client) ([]parsedPDB, erro
 func partitionNodes(nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs []parsedPDB) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
 	for _, node := range nodes {
 		pods := nodePods[node.Name()]
-		// Group A first — a disrupted+blocked node or a node hosting a
-		// non-RS-owned pod is "delete first" regardless of do-not-disrupt
-		// signals on the node itself or its pods. RFC §"Group A" calls for
-		// OR semantics across these two predicates.
-		if (isDisrupted(node) && hasPDBBlockedPods(pods, pdbs)) || hasNonRSOwnedPods(pods) {
+		// Group A first — any of the three Group A signals routes here
+		// regardless of do-not-disrupt signals on the node itself or its
+		// pods. RFC §"Group A" calls for OR semantics across all three
+		// predicates: A || B || C, not (A && B) || C.
+		if isDisrupted(node) || hasPDBBlockedPods(pods, pdbs) || hasNonRSOwnedPods(pods) {
 			disruptedBlocked = append(disruptedBlocked, node)
 			continue
 		}

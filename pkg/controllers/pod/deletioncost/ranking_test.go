@@ -441,7 +441,11 @@ var _ = Describe("Ranking", func() {
 			Expect(ranks).To(BeEmpty())
 		})
 
-		It("should _Edge_ not classify disrupted node without PDB-blocked pods as Group A", func() {
+		It("should _Edge_ classify a disrupted node as Group A even without PDB-blocked pods", func() {
+			// RFC §"Group A" uses OR semantics across the three predicates
+			// (disrupted OR PDB-blocked OR non-RS-owned). A node that carries
+			// the disrupted taint is already on the disruption path and
+			// belongs in Group A regardless of PDB state.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -451,13 +455,15 @@ var _ = Describe("Ranking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
-			// Node 0: disrupted taint but no PDB-blocked pods
+			// Node 0: disrupted taint but no PDB-blocked pods.
 			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
 			ExpectApplied(ctx, env.Client, nodes[0])
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name}))
+			disruptedPod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, disruptedPod)
 
-			// Node 1: normal
-			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name}))
+			// Node 1: normal.
+			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
+			ExpectApplied(ctx, env.Client, normalPod)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
@@ -470,14 +476,15 @@ var _ = Describe("Ranking", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(2))
 
-			// Both should be in the normal tier (no Group A) since there's no
-			// PDB blocking. Observable only in NodeRank.HasDoNotDisrupt=false
-			// AND no math.MinInt32 rank; the reconcile-driven version would
-			// see the same two negative annotations and could not distinguish
-			// "Group C" from "Group A overflow back to C".
+			// Node 0 (disrupted) is Group A → math.MinInt32.
+			// Node 1 (normal) is Group C → strictly greater than MinInt32.
 			for _, r := range ranks {
 				Expect(r.HasDoNotDisrupt).To(BeFalse())
-				Expect(r.Rank).To(BeNumerically(">", math.MinInt32))
+				if r.Node.Node.Name == nodes[0].Name {
+					Expect(r.Rank).To(Equal(int(math.MinInt32)))
+				} else {
+					Expect(r.Rank).To(BeNumerically(">", math.MinInt32))
+				}
 			}
 		})
 
