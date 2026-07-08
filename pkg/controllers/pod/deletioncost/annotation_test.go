@@ -43,13 +43,13 @@ import (
 // per-pod retry-with-backoff path in applyRankToPods / clearRanksFromPods.
 type throttlingClient struct {
 	client.Client
-	remaining atomic.Int32
-	seen      atomic.Int32
+	remaining atomic.Int64
+	seen      atomic.Int64
 }
 
 func newThrottlingClient(inner client.Client, throttleFirst int) *throttlingClient {
 	tc := &throttlingClient{Client: inner}
-	tc.remaining.Store(int32(throttleFirst))
+	tc.remaining.Store(int64(throttleFirst))
 	return tc
 }
 
@@ -386,7 +386,7 @@ var _ = Describe("Annotation", func() {
 
 			// The patch retried at least twice (2 throttled attempts + 1
 			// success = 3 total). Some slack for jitter/reordering.
-			Expect(int(throttler.seen.Load())).To(BeNumerically(">=", 3))
+			Expect(throttler.seen.Load()).To(BeNumerically(">=", int64(3)))
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
