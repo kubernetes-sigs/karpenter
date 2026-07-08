@@ -92,6 +92,37 @@ var _ = Describe("Controller", func() {
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
 	})
 
+	It("should requeue with 1s backoff when cluster state is not synced", func() {
+		// Matches the disruption controller convention: wait for cluster sync
+		// before ranking against a potentially partial view. Apply a
+		// NodeClaim + Node to the API server but do NOT push them into the
+		// state.Cluster informer, and clear the hasSynced flag so Synced()
+		// re-runs the deep check and finds the state missing the applied
+		// node. Under this condition Reconcile must short-circuit with a 1s
+		// requeue and write no annotations.
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		pod := rsOwnedPod(test.PodOptions{NodeName: node.Name})
+		ExpectApplied(ctx, env.Client, pod)
+		// Deliberately skip ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated:
+		// state.Cluster does not observe the applied node/nodeclaim.
+		cluster.SetSynced(false)
+
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+		result, err := controller.Reconcile(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(time.Second))
+
+		// The controller returned before ranking or patching, so the pod has
+		// no pod-deletion-cost annotation.
+		observed := &corev1.Pod{}
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), observed)).To(Succeed())
+		Expect(observed.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
+	})
+
 	It("should skip when change detection finds no changes", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},

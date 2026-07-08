@@ -97,6 +97,13 @@ func (c *Controller) Name() string {
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
+	// Wait for cluster state to sync before ranking. Same convention the
+	// disruption controller uses (pkg/controllers/disruption/controller.go)
+	// so we don't rank against a partial node view during initial hydration.
+	if !c.cluster.Synced(ctx) {
+		return reconciler.Result{RequeueAfter: time.Second}, nil
+	}
+
 	var nodes []*state.StateNode
 	for node := range c.cluster.Nodes() {
 		nodes = append(nodes, node)
