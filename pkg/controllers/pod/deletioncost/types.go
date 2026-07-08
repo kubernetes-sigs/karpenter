@@ -17,6 +17,7 @@ limitations under the License.
 package deletioncost
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -25,11 +26,14 @@ import (
 
 // NodeRank pairs a state node with the rank value the controller plans to
 // write to its pods. HasDoNotDisrupt indicates Group D, where the controller
-// clears the annotation rather than writing rank.
+// clears the annotation rather than writing rank. Pods carries the pod list
+// captured during RankNodes so UpdatePodDeletionCosts does not have to re-list
+// pods from the apiserver.
 type NodeRank struct {
 	Node            *state.StateNode
 	Rank            int
 	HasDoNotDisrupt bool
+	Pods            []*corev1.Pod
 }
 
 // parsedPDB pairs a PDB with its pre-parsed selector. We pre-parse once per

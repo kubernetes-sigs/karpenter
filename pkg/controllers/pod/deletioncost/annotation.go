@@ -39,6 +39,12 @@ import (
 // failures. The two are kept separate so the emitted metrics can distinguish a
 // flaky apiserver-list from a flaky pod-patch path; a single hiccup that drops
 // one node's list looks very different from N per-pod patch failures.
+//
+// Since RankNodes now pre-fetches per-node pods once and caches them on
+// NodeRank.Pods, a per-node fetch failure is currently caught upstream in
+// RankNodes and fails the whole reconcile; nodeErrors thus stays at 0 in
+// practice today. It is kept on the struct for future changes (e.g. lazy
+// per-node re-fetch) so the split-counter shape does not have to be reworked.
 type podPatchStats struct {
 	updated    int
 	skipped    int
@@ -72,16 +78,10 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 	var aggErr error
 
 	for _, nodeRank := range nodeRanks {
-		pods, err := nodeRank.Node.Pods(ctx, kubeClient)
-		if err != nil {
-			// Node-fetch failure: we never even attempted to patch this
-			// node's pods, so count one node error and skip. We do not know
-			// how many pods would have been touched because the list call
-			// failed, so we cannot attribute pod-level errors here.
-			aggErr = multierr.Append(aggErr, err)
-			totals.nodeErrors++
-			continue
-		}
+		// Pods are captured on NodeRank during RankNodes so we do not re-list
+		// per node here. If RankNodes ever produces a nil Pods slice (empty
+		// node), the helpers treat it as zero pods.
+		pods := nodeRank.Pods
 		var stats podPatchStats
 		var perr error
 		if nodeRank.HasDoNotDisrupt {

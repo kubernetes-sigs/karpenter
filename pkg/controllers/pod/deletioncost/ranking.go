@@ -99,18 +99,18 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 		// because every Group A node is "delete first, no questions asked";
 		// distinguishing among them by pod count would imply a preference
 		// the kube-scheduler shouldn't be encoding.
-		result = append(result, NodeRank{Node: node, Rank: math.MinInt32})
+		result = append(result, NodeRank{Node: node, Rank: math.MinInt32, Pods: nodePods[node.Name()]})
 	}
 	for _, node := range drifted {
-		result = append(result, NodeRank{Node: node, Rank: currentRank})
+		result = append(result, NodeRank{Node: node, Rank: currentRank, Pods: nodePods[node.Name()]})
 		currentRank++
 	}
 	for _, node := range normal {
-		result = append(result, NodeRank{Node: node, Rank: currentRank})
+		result = append(result, NodeRank{Node: node, Rank: currentRank, Pods: nodePods[node.Name()]})
 		currentRank++
 	}
 	for _, node := range doNotDisrupt {
-		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: true})
+		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: true, Pods: nodePods[node.Name()]})
 		currentRank++
 	}
 

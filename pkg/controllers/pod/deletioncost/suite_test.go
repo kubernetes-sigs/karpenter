@@ -31,6 +31,7 @@ import (
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -110,4 +111,14 @@ func rsOwnedPod(opts ...test.PodOptions) *corev1.Pod {
 	// with any user-supplied ObjectMeta fields.
 	opts[0].OwnerReferences = append(opts[0].OwnerReferences, rsOwner)
 	return test.Pod(opts...)
+}
+
+// nodeRankWithPods builds a NodeRank populated with the pods currently on the
+// given state node. RankNodes normally fills the Pods field; direct-call tests
+// that construct NodeRank literals go through this helper so they see the
+// same shape.
+func nodeRankWithPods(sn *state.StateNode, rank int, hasDND bool) deletioncost.NodeRank {
+	pods, err := sn.Pods(ctx, env.Client)
+	Expect(err).ToNot(HaveOccurred())
+	return deletioncost.NodeRank{Node: sn, Rank: rank, HasDoNotDisrupt: hasDND, Pods: pods}
 }
