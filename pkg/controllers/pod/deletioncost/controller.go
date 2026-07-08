@@ -104,10 +104,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
-	var nodes []*state.StateNode
-	for node := range c.cluster.Nodes() {
-		nodes = append(nodes, node)
-	}
+	// DeepCopyNodes matches the disruption controller convention: it takes
+	// a snapshot under the cluster mutex so downstream calls that outlive
+	// the iterator can't observe torn state. The alternative is iterating
+	// c.cluster.Nodes() and appending pointers, which relies on an implicit
+	// invariant that state.Cluster never mutates a StateNode in place.
+	nodes := c.cluster.DeepCopyNodes()
 	if len(nodes) == 0 {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
