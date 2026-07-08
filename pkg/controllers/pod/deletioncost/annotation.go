@@ -18,9 +18,9 @@ package deletioncost
 
 import (
 	"context"
-	"errors"
 	"strconv"
 
+	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
@@ -51,7 +51,7 @@ func (s *podPatchStats) add(other podPatchStats) {
 // customer-set values. Customers steering Karpenter consolidation are expected
 // to use karpenter.sh/disruption-cost instead.
 //
-// Per-pod errors are aggregated via errors.Join so the caller sees the full
+// Per-pod errors are aggregated via multierr.Append so the caller sees the full
 // set of failures from a single reconcile.
 //
 // NotFound and Conflict on the patch are both classified as Skipped: NotFound
@@ -66,7 +66,7 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 	for _, nodeRank := range nodeRanks {
 		pods, err := nodeRank.Node.Pods(ctx, kubeClient)
 		if err != nil {
-			aggErr = errors.Join(aggErr, err)
+			aggErr = multierr.Append(aggErr, err)
 			totals.errors++
 			continue
 		}
@@ -79,7 +79,7 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 		}
 		totals.add(stats)
 		if perr != nil {
-			aggErr = errors.Join(aggErr, perr)
+			aggErr = multierr.Append(aggErr, perr)
 		}
 	}
 
@@ -99,13 +99,13 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 
 // applyRankToPods writes pod-deletion-cost=rank to each pod via patchAnnotation,
 // classifying NotFound and Conflict as skipped (logged at V(1)) and aggregating
-// other errors via errors.Join.
+// other errors via multierr.Append.
 func applyRankToPods(ctx context.Context, kubeClient client.Client, pods []*corev1.Pod, rank int) (podPatchStats, error) {
 	value := strconv.Itoa(rank)
 	var stats podPatchStats
 	var err error
 	for _, pod := range pods {
-		if !needsUpdate(pod, rank) {
+		if !needsUpdate(pod, value) {
 			stats.skipped++
 			continue
 		}
@@ -120,7 +120,7 @@ func applyRankToPods(ctx context.Context, kubeClient client.Client, pods []*core
 				stats.skipped++
 				continue
 			}
-			err = errors.Join(err, perr)
+			err = multierr.Append(err, perr)
 			stats.errors++
 			continue
 		}
@@ -131,7 +131,7 @@ func applyRankToPods(ctx context.Context, kubeClient client.Client, pods []*core
 
 // clearRanksFromPods removes pod-deletion-cost from each pod via clearDeletionCost,
 // counting cleared patches as updated and aggregating non-NotFound/non-Conflict
-// errors via errors.Join.
+// errors via multierr.Append.
 func clearRanksFromPods(ctx context.Context, kubeClient client.Client, pods []*corev1.Pod) (podPatchStats, error) {
 	var stats podPatchStats
 	var err error
@@ -139,7 +139,7 @@ func clearRanksFromPods(ctx context.Context, kubeClient client.Client, pods []*c
 		cleared, perr := clearDeletionCost(ctx, kubeClient, pod)
 		switch {
 		case perr != nil:
-			err = errors.Join(err, perr)
+			err = multierr.Append(err, perr)
 			stats.errors++
 		case cleared:
 			stats.updated++
@@ -177,15 +177,16 @@ func clearDeletionCost(ctx context.Context, kubeClient client.Client, pod *corev
 }
 
 // needsUpdate reports whether the pod's pod-deletion-cost annotation already
-// matches the desired rank. Avoids unnecessary API writes when the value is
-// already correct. Relies on Go's nil-safe map read: indexing a nil map
-// returns the zero value plus ok=false, so no separate nil-check is needed.
-func needsUpdate(pod *corev1.Pod, rank int) bool {
+// matches the desired value. The caller passes the pre-stringified rank so the
+// strconv.Itoa cost is paid once per node instead of once per pod. Relies on
+// Go's nil-safe map read: indexing a nil map returns the zero value plus
+// ok=false, so no separate nil-check is needed.
+func needsUpdate(pod *corev1.Pod, value string) bool {
 	current, ok := pod.Annotations[corev1.PodDeletionCost]
 	if !ok {
 		return true
 	}
-	return current != strconv.Itoa(rank)
+	return current != value
 }
 
 // patchAnnotation sets the pod-deletion-cost annotation on a pod via a merge
