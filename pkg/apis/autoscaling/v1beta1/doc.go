@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Upstream source: k8s.io/autoscaler/cluster-autoscaler/apis/capacitybuffer/autoscaling.x-k8s.io/v1alpha1
+// Upstream source: k8s.io/autoscaler/cluster-autoscaler/apis/capacitybuffer/autoscaling.x-k8s.io/v1beta1
 // These types are copied from the upstream CapacityBuffer API to avoid pulling in the entire
 // autoscaler module and its transitive dependencies. Keep in sync with upstream as needed.
 
@@ -22,7 +22,7 @@ limitations under the License.
 // +k8s:deepcopy-gen=package,register
 // +k8s:defaulter-gen=TypeMeta
 // +groupName=autoscaling.x-k8s.io
-package v1alpha1 // doc.go is discovered by codegen
+package v1beta1 // doc.go is discovered by codegen
 
 import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +36,7 @@ const (
 )
 
 func init() {
-	gv := schema.GroupVersion{Group: Group, Version: "v1alpha1"}
+	gv := schema.GroupVersion{Group: Group, Version: "v1beta1"}
 	v1.AddToGroupVersion(scheme.Scheme, gv)
 	scheme.Scheme.AddKnownTypes(gv,
 		&CapacityBuffer{},

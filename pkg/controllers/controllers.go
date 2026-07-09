@@ -31,6 +31,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/capacitybuffer"
@@ -173,6 +174,20 @@ func NewControllers(
 
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
 		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p))
+		if !options.FromContext(ctx).DisableClusterStateObservability {
+			// Emit the standard operator_status_condition_* metrics for CapacityBuffer.
+			// A GenericObjectController reads status.conditions reflectively, so the
+			// upstream CapacityBuffer type is used as-is without implementing operatorpkg's
+			// status.Object interface or persisting a Karpenter-specific Ready condition.
+			controllers = append(controllers,
+				status.NewGenericObjectController[*autoscalingv1beta1.CapacityBuffer](
+					kubeClient,
+					mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
+					status.EmitDeprecatedMetrics,
+					status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
+				),
+			)
+		}
 	}
 
 	return controllers

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1_test
+package v1beta1_test
 
 import (
 	"context"
@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -49,7 +49,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	cbList := &autoscalingv1alpha1.CapacityBufferList{}
+	cbList := &autoscalingv1beta1.CapacityBufferList{}
 	Expect(env.Client.List(ctx, cbList)).To(Succeed())
 	for i := range cbList.Items {
 		Expect(env.Client.Delete(ctx, &cbList.Items[i])).To(Succeed())
@@ -74,15 +74,15 @@ var _ = Describe("CapacityBuffer CRD", func() {
 			Expect(crd.Spec.Scope).To(Equal(apiextensionsv1.NamespaceScoped))
 		})
 		It("should create and retrieve a CapacityBuffer resource", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-buffer", Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "my-template"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "my-template"},
 					Replicas:       lo.ToPtr[int32](5),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
-			retrieved := &autoscalingv1alpha1.CapacityBuffer{}
+			retrieved := &autoscalingv1beta1.CapacityBuffer{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(cb), retrieved)).To(Succeed())
 			Expect(retrieved.Spec.PodTemplateRef.Name).To(Equal("my-template"))
 			Expect(lo.FromPtr(retrieved.Spec.Replicas)).To(Equal(int32(5)))
@@ -90,153 +90,153 @@ var _ = Describe("CapacityBuffer CRD", func() {
 	})
 	Context("Schema Validation", func() {
 		It("should accept a valid CapacityBuffer with podTemplateRef and replicas", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "my-template"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "my-template"},
 					Replicas:       lo.ToPtr[int32](3),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
 		})
 		It("should accept a valid CapacityBuffer with podTemplateRef and limits", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "my-template"},
-					Limits:         autoscalingv1alpha1.Limits{corev1.ResourceCPU: resource.MustParse("4")},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "my-template"},
+					Limits:         autoscalingv1beta1.Limits{corev1.ResourceCPU: resource.MustParse("4")},
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
 		})
 		It("should accept a valid CapacityBuffer with scalableRef", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					ScalableRef: &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
 					Replicas:    lo.ToPtr[int32](5),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
 		})
 		It("should accept scalableRef with empty apiGroup for core API group", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					ScalableRef: &autoscalingv1alpha1.ScalableRef{Kind: "ReplicationController", Name: "my-rc"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{Kind: "ReplicationController", Name: "my-rc"},
 					Replicas:    lo.ToPtr[int32](1),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
 		})
 		It("should reject setting both podTemplateRef and scalableRef", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "my-template"},
-					ScalableRef:    &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "my-template"},
+					ScalableRef:    &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
 					Replicas:       lo.ToPtr[int32](3),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).ToNot(Succeed())
 		})
 		It("should reject podTemplateRef without replicas or limits", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "my-template"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "my-template"},
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).ToNot(Succeed())
 		})
 		It("should reject negative replicas", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "my-template"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "my-template"},
 					Replicas:       lo.ToPtr[int32](-1),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).ToNot(Succeed())
 		})
 		It("should reject negative percentage", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					ScalableRef: &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
 					Percentage:  lo.ToPtr[int32](-1),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).ToNot(Succeed())
 		})
 		It("should reject empty podTemplateRef name", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: ""},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: ""},
 					Replicas:       lo.ToPtr[int32](1),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).ToNot(Succeed())
 		})
 		It("should reject empty scalableRef kind", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					ScalableRef: &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "", Name: "my-deploy"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: "", Name: "my-deploy"},
 					Replicas:    lo.ToPtr[int32](1),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).ToNot(Succeed())
 		})
 		It("should reject empty scalableRef name", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					ScalableRef: &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: ""},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: ""},
 					Replicas:    lo.ToPtr[int32](1),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).ToNot(Succeed())
 		})
 		It("should accept zero replicas", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "my-template"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "my-template"},
 					Replicas:       lo.ToPtr[int32](0),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
 		})
 		It("should accept zero percentage", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					ScalableRef: &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
 					Percentage:  lo.ToPtr[int32](0),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
 		})
 		It("should set default provisioningStrategy", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: "my-template"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "my-template"},
 					Replicas:       lo.ToPtr[int32](1),
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
-			retrieved := &autoscalingv1alpha1.CapacityBuffer{}
+			retrieved := &autoscalingv1beta1.CapacityBuffer{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(cb), retrieved)).To(Succeed())
 			Expect(lo.FromPtr(retrieved.Spec.ProvisioningStrategy)).To(Equal("buffer.x-k8s.io/active-capacity"))
 		})
 		It("should accept both replicas and percentage together", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					ScalableRef: &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
 					Replicas:    lo.ToPtr[int32](10),
 					Percentage:  lo.ToPtr[int32](20),
 				},
@@ -244,10 +244,10 @@ var _ = Describe("CapacityBuffer CRD", func() {
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
 		})
 		It("should accept scalableRef without replicas or limits", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{
+			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: test.RandomName(), Namespace: "default"},
-				Spec: autoscalingv1alpha1.CapacityBufferSpec{
-					ScalableRef: &autoscalingv1alpha1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: "Deployment", Name: "my-deploy"},
 				},
 			}
 			Expect(env.Client.Create(ctx, cb)).To(Succeed())
