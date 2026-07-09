@@ -176,19 +176,34 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 	return true, nil
 }
 
+// computeReplicas derives the desired buffer replica count from the configured
+// constraints, following Cluster Autoscaler's semantics:
+//   - replicas and percentage are combined by taking the MAX of the two.
+//   - limits act as an upper bound (MIN) on that value.
+//   - if neither replicas nor percentage is set, limits alone determine how many
+//     units fit within the resource limits.
+//
+// candidates holds the percentage-derived replica count (if percentage is set);
+// the fixed replicas value is added here.
 func computeReplicas(cb *autoscalingv1alpha1.CapacityBuffer, podSpec *v1.PodSpec, candidates []int32) int32 {
 	if cb.Spec.Replicas != nil {
 		candidates = append(candidates, *cb.Spec.Replicas)
 	}
+
+	// desired is the max of replicas and percentage. hasSizeConstraint is false
+	// when neither is set, in which case limits alone determine the count.
+	hasSizeConstraint := len(candidates) > 0
+	desired := lo.Max(candidates)
+
 	if cb.Spec.Limits != nil && podSpec != nil {
 		if limitReplicas, ok := calculateLimitReplicas(v1.ResourceList(cb.Spec.Limits), podSpec); ok {
-			candidates = append(candidates, limitReplicas)
+			if hasSizeConstraint {
+				return lo.Min([]int32{desired, limitReplicas})
+			}
+			return limitReplicas
 		}
 	}
-	if len(candidates) == 0 {
-		return 0
-	}
-	return lo.Min(candidates)
+	return desired
 }
 
 // handleResolveError sets the ReadyForProvisioning condition to False and returns
