@@ -30,12 +30,10 @@ import (
 // captured during RankNodes so UpdatePodDeletionCosts does not have to re-list
 // pods from the apiserver.
 //
-// Rank carries a value even for Group D nodes (assigned in ranking.go's
-// sequential-rank loop) but is only read by UpdatePodDeletionCosts when
-// HasDoNotDisrupt=false. Go lacks sum types, so we model the two-variant
-// classifier with a bool discriminator plus an unused field in one branch
-// rather than a Group-A/B/C variant + Group-D variant. See ranking.go for
-// the branch that assigns Rank on Group D nodes.
+// Rank is only meaningful when HasDoNotDisrupt=false; Group D entries leave
+// Rank at its zero value and UpdatePodDeletionCosts ignores it. Group D nodes
+// are excluded from the sequential-rank walk so the range of annotated ranks
+// is contiguous.
 type NodeRank struct {
 	Node            *state.StateNode
 	Rank            int

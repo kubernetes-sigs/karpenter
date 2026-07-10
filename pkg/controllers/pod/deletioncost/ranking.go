@@ -67,12 +67,12 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 		}
 	}
 
-	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(nodes, nodePoolMap, nodePods, pdbs)
+	// Sort once by pod count ascending with a deterministic name tie-break.
+	// partitionNodes preserves input order, so each partition inherits this
+	// ordering — one sort instead of four.
+	sortByPodCount(nodes, nodePods)
 
-	sortByPodCount(disruptedBlocked, nodePods)
-	sortByPodCount(drifted, nodePods)
-	sortByPodCount(normal, nodePods)
-	sortByPodCount(doNotDisrupt, nodePods)
+	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(nodes, nodePoolMap, nodePods, pdbs)
 
 	// Apply per-NodePool disruption budget limits to Groups B and C. Nodes
 	// that exceed the budget are moved to Group D. NodePoolStats is the
@@ -88,10 +88,14 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 	doNotDisrupt = append(doNotDisrupt, normalOverflow...)
 
 	// Group A nodes get math.MinInt32 and do not consume the contiguous rank
-	// space below zero. The remaining groups receive sequential ranks starting
-	// at -(B+C+D) so that drift and normal sort first under
-	// PodDeletionCost-ascending semantics.
-	remaining := len(drifted) + len(normal) + len(doNotDisrupt)
+	// space below zero. Groups B and C receive sequential ranks starting at
+	// -(B+C) so that drift and normal sort first under PodDeletionCost-
+	// ascending semantics; the range spans -(B+C) up to -1 with no gap.
+	// Group D nodes do NOT consume rank space because their annotations are
+	// cleared, not written — including them in the rank walk would leave
+	// visible gaps in the annotated range (e.g. 10 normal + 10 doNotDisrupt
+	// would produce annotations at -20..-11 with nothing at -10..-1).
+	remaining := len(drifted) + len(normal)
 	currentRank := -remaining
 	result := make([]NodeRank, 0, len(nodes))
 	for _, node := range disruptedBlocked {
@@ -112,8 +116,10 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 		currentRank++
 	}
 	for _, node := range doNotDisrupt {
-		result = append(result, NodeRank{Node: node, Rank: currentRank, HasDoNotDisrupt: true, Pods: nodePods[node.Name()]})
-		currentRank++
+		// Rank is unused for Group D — UpdatePodDeletionCosts sees
+		// HasDoNotDisrupt=true and clears the annotation rather than reading
+		// Rank. Leave Rank at its zero value.
+		result = append(result, NodeRank{Node: node, HasDoNotDisrupt: true, Pods: nodePods[node.Name()]})
 	}
 
 	nodesRanked.Set(float64(len(result)), noLabels)
