@@ -27,23 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-)
-
-const (
-	// DisruptionCostAnnotation is the user-facing Karpenter annotation for expressing
-	// the cost of evicting a pod during consolidation. Customers set this on workloads
-	// to influence which pods Karpenter prefers to evict during consolidation.
-	//
-	// This is a new public annotation introduced alongside the PodDeletionCostManagement
-	// feature. No prior Karpenter release defined an annotation at this key in the
-	// karpenter.sh API group, so workloads upgrading from earlier versions are
-	// unaffected by default. Operators who choose this key for other purposes on a
-	// workload will have their value parsed as a consolidation cost; see the
-	// deletioncost README "Migration" section for the audit step.
-	DisruptionCostAnnotation = apis.Group + "/disruption-cost"
 )
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the ExpireAfter
@@ -77,11 +62,11 @@ func LifetimeRemaining(clock clock.Clock, nodePool *v1.NodePool, nodeClaim *v1.N
 //     customers who have not migrated to the new annotation.
 func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 	cost := 1.0
-	if costStr, ok := p.Annotations[DisruptionCostAnnotation]; ok {
+	if costStr, ok := p.Annotations[v1.DisruptionCostAnnotationKey]; ok {
 		parsedCost, err := strconv.ParseFloat(costStr, 64)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed parsing disruption cost",
-				"annotation", DisruptionCostAnnotation, "value", costStr, "pod", client.ObjectKeyFromObject(p))
+				"annotation", v1.DisruptionCostAnnotationKey, "value", costStr, "pod", client.ObjectKeyFromObject(p))
 		} else {
 			// 2^27 = max representable pod-deletion-cost (int32 ceiling).
 			// Dividing here normalizes the user value into [0, 1) so it
