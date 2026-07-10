@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // DRAConfigSpec defines the desired state of DRAConfig
@@ -150,5 +151,8 @@ type DRAConfigList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&DRAConfig{}, &DRAConfigList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &DRAConfig{}, &DRAConfigList{})
+		return nil
+	})
 }
