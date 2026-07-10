@@ -20,11 +20,13 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,8 +42,12 @@ import (
 
 const (
 	reconcileInterval = time.Minute
-	// maxNodesPerCycle bounds how many Group B/C/D nodes are annotated per
-	// reconcile. Group A nodes are exempt; see capNodeRanks.
+	// maxNodesPerCycle bounds the number of Group B/C/D nodes actually
+	// annotated per reconcile. The pre-filter drops no-op nodes before the
+	// cap applies, so this is a ceiling on nodes-that-mutate rather than on
+	// nodes-considered. With ~30 pods/node this bounds worst-case per-cycle
+	// pod writes near the RFC's 1,500 write target. Group A nodes are
+	// exempt (see capNodeRanks).
 	maxNodesPerCycle = 50
 )
 
@@ -132,6 +138,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
+	// Drop nodes whose pod annotations already match their planned rank so
+	// the per-cycle cap admits nodes that will actually mutate at least one
+	// pod. Group A nodes carry the math.MinInt32 sentinel and are exempt
+	// from the cap already; filterNoOpNodes also preserves them so re-labels
+	// (e.g. a rare taint bounce) still fire fast.
+	nodeRanks = filterNoOpNodes(nodeRanks)
 	nodeRanks = capNodeRanks(nodeRanks, maxNodesPerCycle)
 
 	if err := UpdatePodDeletionCosts(ctx, c.kubeClient, nodeRanks); err != nil {
@@ -144,6 +156,46 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		log.FromContext(ctx).V(1).WithValues("nodeCount", len(nodeRanks)).Info("updated pod deletion costs")
 	}
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
+}
+
+// filterNoOpNodes drops entries whose per-pod annotations already match the
+// planned rank (or, for Group D entries, whose pods already lack the
+// annotation). Otherwise these no-op nodes would consume slots in the
+// per-cycle cap without actually mutating any pod. Group A nodes carry the
+// math.MinInt32 sentinel and are always admitted so they annotate promptly.
+func filterNoOpNodes(nodeRanks []NodeRank) []NodeRank {
+	filtered := nodeRanks[:0]
+	for _, nr := range nodeRanks {
+		if nr.Rank == math.MinInt32 || nodeMutatesAnyPod(nr) {
+			filtered = append(filtered, nr)
+		}
+	}
+	return filtered
+}
+
+// nodeMutatesAnyPod reports whether applying nr's planned annotation state
+// would change at least one pod on the node. Called only for non-Group-A
+// entries; Group A is exempt from the pre-filter.
+func nodeMutatesAnyPod(nr NodeRank) bool {
+	if nr.HasDoNotDisrupt {
+		// Group D: any pod that still carries pod-deletion-cost needs a clear.
+		for _, pod := range nr.Pods {
+			if _, ok := pod.Annotations[corev1.PodDeletionCost]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	// Groups B/C: any pod whose annotation differs from the planned rank
+	// needs a patch. Compare against the pre-stringified rank so the same
+	// itoa cost isn't paid per pod.
+	value := strconv.Itoa(nr.Rank)
+	for _, pod := range nr.Pods {
+		if pod.Annotations[corev1.PodDeletionCost] != value {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldSkipUnchanged returns true if cluster state has not changed since the last reconcile.
