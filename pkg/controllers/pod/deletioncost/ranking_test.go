@@ -614,7 +614,7 @@ var _ = Describe("Ranking", func() {
 	// bypass explicit for reviewers.
 	Context("Edge: direct-helper partition checks", func() {
 		It("should _Edge_ leave RankNodes a no-op on empty node list", func() {
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, nil, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, nil, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(BeEmpty())
 		})
@@ -650,7 +650,7 @@ var _ = Describe("Ranking", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(2))
 
@@ -714,7 +714,7 @@ var _ = Describe("Ranking", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, cluster, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(3))
 

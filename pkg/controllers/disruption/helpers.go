@@ -260,9 +260,17 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 // deletion). Shared between BuildDisruptionBudgetMapping and the deletion-cost
 // controller so the two stay in lockstep on which nodes count toward each budget.
 func NodePoolStats(cluster *state.Cluster) (numNodes, disrupting map[string]int) {
+	return NodePoolStatsFromNodes(cluster.DeepCopyNodes())
+}
+
+// NodePoolStatsFromNodes computes the same per-NodePool counts as NodePoolStats
+// against a caller-supplied snapshot. Callers that already hold a DeepCopy
+// (e.g. the deletion-cost controller) reuse it here instead of paying for a
+// second cluster-wide deep copy.
+func NodePoolStatsFromNodes(nodes []*state.StateNode) (numNodes, disrupting map[string]int) {
 	numNodes = map[string]int{}
 	disrupting = map[string]int{}
-	for _, node := range cluster.DeepCopyNodes() {
+	for _, node := range nodes {
 		// We only consider nodes that we own and are initialized towards the total.
 		// If a node is launched/registered, but not initialized, pods aren't scheduled
 		// to the node, and these are treated as unhealthy until they're cleaned up.

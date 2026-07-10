@@ -18,8 +18,6 @@ package deletioncost
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	policyv1 "k8s.io/api/policy/v1"
-	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
@@ -39,11 +37,4 @@ type NodeRank struct {
 	Rank            int
 	HasDoNotDisrupt bool
 	Pods            []*corev1.Pod
-}
-
-// parsedPDB pairs a PDB with its pre-parsed selector. We pre-parse once per
-// reconcile so the per-pod inner loop in hasPDBBlockedPods is allocation-free.
-type parsedPDB struct {
-	pdb      *policyv1.PodDisruptionBudget
-	selector labels.Selector
 }

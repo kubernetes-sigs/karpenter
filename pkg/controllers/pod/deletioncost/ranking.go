@@ -23,9 +23,6 @@ import (
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
-	policyv1 "k8s.io/api/policy/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -34,6 +31,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
 // RankNodes ranks nodes using PodCount strategy with four-tier partitioning:
@@ -43,8 +41,10 @@ import (
 //   - Group D: Do-not-disrupt nodes, ranked at the top so the controller clears their annotations.
 //
 // Per-NodePool disruption budgets bound Groups B and C. Nodes exceeding either
-// budget overflow into Group D.
-func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool) ([]NodeRank, error) {
+// budget overflow into Group D. The nodes slice must be a pre-computed
+// snapshot (typically cluster.DeepCopyNodes()); RankNodes reuses it for the
+// per-NodePool count so we don't pay for a second cluster-wide deep copy.
+func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool) ([]NodeRank, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
@@ -59,9 +59,9 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 	// PDBs are only consulted for nodes that already carry the disrupted
 	// taint; on a steady-state cluster that's rare. Skip the cluster-wide
 	// list entirely when no candidate is disrupted.
-	var pdbs []parsedPDB
+	var pdbs pdb.Limits
 	if anyDisrupted(nodes) {
-		pdbs, err = fetchPDBs(ctx, kubeClient)
+		pdbs, err = pdb.NewLimits(ctx, kubeClient)
 		if err != nil {
 			return nil, fmt.Errorf("listing pod disruption budgets, %w", err)
 		}
@@ -72,13 +72,15 @@ func RankNodes(ctx context.Context, kubeClient client.Client, cluster *state.Clu
 	// ordering — one sort instead of four.
 	sortByPodCount(nodes, nodePods)
 
-	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(nodes, nodePoolMap, nodePods, pdbs)
+	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(ctx, clk, nodes, nodePoolMap, nodePods, pdbs)
 
 	// Apply per-NodePool disruption budget limits to Groups B and C. Nodes
-	// that exceed the budget are moved to Group D. NodePoolStats is the
-	// shared helper that disruption.BuildDisruptionBudgetMapping also uses,
-	// so the two controllers count the same nodes against the same budget.
-	numNodes, disrupting := disruption.NodePoolStats(cluster)
+	// that exceed the budget are moved to Group D. NodePoolStatsFromNodes is
+	// the shared helper that disruption.BuildDisruptionBudgetMapping also
+	// uses (via NodePoolStats), so the two controllers count the same nodes
+	// against the same budget; the FromNodes variant reuses this caller's
+	// existing snapshot instead of paying for a second deep copy.
+	numNodes, disrupting := disruption.NodePoolStatsFromNodes(nodes)
 	driftBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonDrifted)
 	consolidationBudget := buildBudgetForReason(ctx, nodePoolMap, numNodes, disrupting, clk, v1.DisruptionReasonUnderutilized)
 	var driftOverflow, normalOverflow []*state.StateNode
@@ -165,28 +167,6 @@ func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state
 	return out, nil
 }
 
-// fetchPDBs lists every PDB and pre-parses its selector. Malformed selectors
-// fail closed (the PDB is treated as matching every pod in its namespace) so
-// the controller errs on the side of classifying nodes as PDB-blocked rather
-// than ignoring potentially-blocking PDBs.
-func fetchPDBs(ctx context.Context, kubeClient client.Client) ([]parsedPDB, error) {
-	var list policyv1.PodDisruptionBudgetList
-	if err := kubeClient.List(ctx, &list); err != nil {
-		return nil, err
-	}
-	out := make([]parsedPDB, 0, len(list.Items))
-	for i := range list.Items {
-		pdb := &list.Items[i]
-		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
-		if err != nil {
-			log.FromContext(ctx).V(1).WithValues("pdb", client.ObjectKeyFromObject(pdb)).Error(err, "PDB selector failed to parse, treating as match-everything (fail-closed)")
-			selector = labels.Everything()
-		}
-		out = append(out, parsedPDB{pdb: pdb, selector: selector})
-	}
-	return out, nil
-}
-
 // partitionNodes splits nodes into four tiers. Order matters: a node that
 // matches any Group A predicate takes precedence over a do-not-disrupt signal
 // because Group A nodes are already on the disruption path; once Karpenter
@@ -206,14 +186,14 @@ func fetchPDBs(ctx context.Context, kubeClient client.Client) ([]parsedPDB, erro
 //   - Group C: normal — consolidation candidates, not in A/B/D.
 //   - Group D: node-level do-not-disrupt annotation, do-not-disrupt pods, or
 //     NodePool with consolidation disabled (ConsolidateAfter=Never).
-func partitionNodes(nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs []parsedPDB) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
+func partitionNodes(ctx context.Context, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs pdb.Limits) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
 	for _, node := range nodes {
 		pods := nodePods[node.Name()]
 		// Group A first — any of the three Group A signals routes here
 		// regardless of do-not-disrupt signals on the node itself or its
 		// pods. RFC §"Group A" calls for OR semantics across all three
 		// predicates: A || B || C, not (A && B) || C.
-		if isDisrupted(node) || hasPDBBlockedPods(pods, pdbs) || hasNonRSOwnedPods(pods) {
+		if isDisrupted(node) || hasPDBBlockedPods(ctx, clk, pods, pdbs) || hasNonRSOwnedPods(pods) {
 			disruptedBlocked = append(disruptedBlocked, node)
 			continue
 		}
@@ -321,29 +301,18 @@ func isDrifted(node *state.StateNode) bool {
 	return node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
 }
 
-// hasPDBBlockedPods reports whether any of the node's pods is blocked by a
-// PDB with DisruptionsAllowed=0. Operates on pre-parsed selectors so the
-// per-pod inner loop is allocation-free.
-func hasPDBBlockedPods(pods []*corev1.Pod, pdbs []parsedPDB) bool {
+// hasPDBBlockedPods reports whether any of the node's pods is currently
+// blocked by a matching PDB with DisruptionsAllowed=0. Delegates to
+// pdb.Limits.CanEvictPods, which is the same PDB helper the disruption
+// controller uses, so the two controllers agree on what "PDB-blocked" means.
+// A nil pdbs argument (no PDBs listed because no candidate is disrupted)
+// short-circuits to false.
+func hasPDBBlockedPods(ctx context.Context, clk clock.Clock, pods []*corev1.Pod, pdbs pdb.Limits) bool {
 	if len(pods) == 0 || len(pdbs) == 0 {
 		return false
 	}
-	for _, pod := range pods {
-		podLabels := labels.Set(pod.Labels)
-		for i := range pdbs {
-			p := &pdbs[i]
-			if p.pdb.Namespace != pod.Namespace {
-				continue
-			}
-			if p.pdb.Status.DisruptionsAllowed != 0 {
-				continue
-			}
-			if p.selector.Matches(podLabels) {
-				return true
-			}
-		}
-	}
-	return false
+	_, canEvict := pdbs.CanEvictPods(pods, clk, nil)
+	return !canEvict
 }
 
 // hasDoNotDisruptPods returns true if any pod on the node carries the

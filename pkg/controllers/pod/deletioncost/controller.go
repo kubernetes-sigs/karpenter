@@ -128,7 +128,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, fmt.Errorf("building node pool map, %w", err)
 	}
 
-	nodeRanks, err := RankNodes(ctx, c.kubeClient, c.cluster, c.clock, nodes, nodePoolMap)
+	nodeRanks, err := RankNodes(ctx, c.kubeClient, c.clock, nodes, nodePoolMap)
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
