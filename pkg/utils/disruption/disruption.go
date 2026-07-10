@@ -104,16 +104,12 @@ func ReschedulingCost(ctx context.Context, pods []*corev1.Pod) float64 {
 	return cost
 }
 
-// podDeletionCostManagementEnabled reports whether the PodDeletionCostManagement feature
-// gate is enabled on the ctx's options. When options are absent (e.g. tests that construct
-// raw contexts without going through the operator injector), the gate is treated as its
-// default OFF value so the legacy pod-deletion-cost fallback path remains callable without
-// ceremony. Prod call sites always inject options via operator.Runtime, so this default
-// only affects call paths that never had a chance to reach the gate-ON branch.
+// podDeletionCostManagementEnabled reports whether the PodDeletionCostManagement
+// feature gate is enabled on the ctx's options. Prod call sites inject options
+// via operator.Runtime; tests that reach EvictionCost must do the same so that
+// a missing-options bug surfaces as a panic instead of a silently-wrong gate
+// reading.
 func podDeletionCostManagementEnabled(ctx context.Context) bool {
-	if !options.HasContext(ctx) {
-		return false
-	}
 	return options.FromContext(ctx).FeatureGates.PodDeletionCostManagement
 }
 
