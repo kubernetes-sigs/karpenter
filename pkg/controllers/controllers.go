@@ -65,14 +65,25 @@ import (
 	statenodeclaimgc "sigs.k8s.io/karpenter/pkg/controllers/state/nodeclaimgc"
 	staticdeprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
 	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
+	vpacontroller "sigs.k8s.io/karpenter/pkg/controllers/vpa"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
 )
 
 type ControllerOptions struct {
-	registrationHooks []cloudprovider.NodeLifecycleHook
+	registrationHooks    []cloudprovider.NodeLifecycleHook
+	disableVPAPrediction bool
+}
+
+// WithoutVPAPrediction disables the VPA prediction controller. Use this when
+// a different prediction source is registered separately.
+func WithoutVPAPrediction() option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.disableVPAPrediction = true
+	}
 }
 
 // WithRegistrationHook registers a hook that blocks Karpenter from marking a node as registered
@@ -95,6 +106,7 @@ func NewControllers(
 	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
+	predictionStore *prediction.Store,
 	opts ...option.Function[ControllerOptions],
 ) []controller.Controller {
 	o := option.Resolve(opts...)
@@ -193,6 +205,10 @@ func NewControllers(
 				),
 			)
 		}
+	}
+
+	if !o.disableVPAPrediction {
+		controllers = append(controllers, vpacontroller.NewController(kubeClient, predictionStore))
 	}
 
 	return controllers
