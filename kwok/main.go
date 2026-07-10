@@ -47,5 +47,6 @@ func main() {
 			overlayUndecoratedCloudProvider,
 			clusterState,
 			op.InstanceTypeStore,
+			op.PredictionStore,
 		)...).Start(ctx)
 }
