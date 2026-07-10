@@ -107,6 +107,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
+	// Cheap change-detection check runs before the DeepCopy so an
+	// unchanged cluster never pays the snapshot cost.
+	if c.shouldSkipUnchanged(ctx) {
+		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
+	}
+
 	// DeepCopyNodes matches the disruption controller convention: it takes
 	// a snapshot under the cluster mutex so downstream calls that outlive
 	// the iterator can't observe torn state. The alternative is iterating
@@ -114,10 +120,6 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	// invariant that state.Cluster never mutates a StateNode in place.
 	nodes := c.cluster.DeepCopyNodes()
 	if len(nodes) == 0 {
-		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
-	}
-
-	if c.shouldSkipUnchanged(ctx) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
@@ -158,13 +160,10 @@ func (c *Controller) shouldSkipUnchanged(ctx context.Context) bool {
 	return false
 }
 
-// buildNodePoolMap lists all managed NodePools and returns a map keyed by name.
+// buildNodePoolMap lists all managed NodePools and returns a map keyed by
+// name. kubeClient.List reads from the shared informer cache, so this is
+// cheap on the reconcile hot path.
 func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodePool, error) {
-	// TODO(maintainers): both this controller and disruption/controller.go list NodePools
-	// every reconcile rather than reading from the nodepool informer cache. Is that
-	// deliberate (e.g. to guarantee freshness), or would the informer cache be
-	// acceptable here? The perf cost of listing is bounded on typical fleets, so this
-	// is not urgent to change.
 	nodePools, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)

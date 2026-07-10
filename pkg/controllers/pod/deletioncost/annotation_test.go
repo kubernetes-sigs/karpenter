@@ -434,11 +434,11 @@ var _ = Describe("Annotation", func() {
 
 		It("should skip the API call when the pod's annotation already matches the desired value", func() {
 			// applyRankToPods computes value = strconv.Itoa(rank) once per
-			// node and passes it into needsUpdate. When the current
-			// annotation already equals the pre-computed value, needsUpdate
-			// returns false and the patch never fires. Verify by counting
-			// patches through a countingClient: a pod whose current value
-			// matches the desired rank should not be patched.
+			// node and each per-pod dispatch short-circuits when the
+			// annotation already equals that value, so the patch never fires.
+			// Verify by counting patches through a countingClient: a pod
+			// whose current value matches the desired rank should not be
+			// patched.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -465,7 +465,7 @@ var _ = Describe("Annotation", func() {
 			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
 			Expect(deletioncost.UpdatePodDeletionCosts(ctx, counter, nodeRanks)).To(Succeed())
 
-			// needsUpdate short-circuited; no patch was issued.
+			// Short-circuit hit; no patch was issued.
 			Expect(counter.PatchCount()).To(Equal(0))
 		})
 	})

@@ -35,7 +35,7 @@ import (
 )
 
 // podPatchWorkers caps the parallel-dispatch fan-out for per-pod patches. At
-// 50 nodes per cycle and up to 30 pods per node this bounds concurrent
+// 50 nodes per cycle and an average of 30 pods per node this bounds concurrent
 // in-flight patches to 10 while still delivering roughly a 10x wall-time
 // speedup vs the fully-sequential shape. It is deliberately lower than
 // state/statenode.go's implicit N=len(nodes) because pods per cycle can be an
@@ -190,7 +190,7 @@ func applyRankToPods(ctx context.Context, kubeClient client.Client, pods []*core
 // controller-runtime rate limiter here; per-pod retry keeps the burden on
 // this individual pod instead of failing the whole cycle.
 func applyRankToPod(ctx context.Context, kubeClient client.Client, pod *corev1.Pod, value string) podOutcome {
-	if !needsUpdate(pod, value) {
+	if pod.Annotations[corev1.PodDeletionCost] == value {
 		return podOutcome{result: outcomeSkipped}
 	}
 	err := retry.OnError(podPatchRetryBackoff, isRetryableAPIError, func() error {
@@ -291,19 +291,6 @@ func clearAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.
 	delete(updated.Annotations, corev1.PodDeletionCost)
 	patch := client.MergeFromWithOptions(pod, client.MergeFromWithOptimisticLock{})
 	return kubeClient.Patch(ctx, updated, patch)
-}
-
-// needsUpdate reports whether the pod's pod-deletion-cost annotation already
-// matches the desired value. The caller passes the pre-stringified rank so the
-// strconv.Itoa cost is paid once per node instead of once per pod. Relies on
-// Go's nil-safe map read: indexing a nil map returns the zero value plus
-// ok=false, so no separate nil-check is needed.
-func needsUpdate(pod *corev1.Pod, value string) bool {
-	current, ok := pod.Annotations[corev1.PodDeletionCost]
-	if !ok {
-		return true
-	}
-	return current != value
 }
 
 // patchAnnotation sets the pod-deletion-cost annotation on a pod via a merge
