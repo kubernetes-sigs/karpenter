@@ -2,6 +2,8 @@ name: kind-perf-e2e
 on:
   push:
     branches: [main]
+  pull_request:
+    types: [labeled, synchronize]
   workflow_run:
     workflows:
       - ApprovalComment
@@ -10,7 +12,18 @@ on:
   workflow_dispatch:
 jobs:
   kind-perf-e2e:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      (github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'ok-to-test') &&
+       !contains(github.event.pull_request.labels.*.name, 'skip-perf') &&
+       (contains(github.event.pull_request.labels.*.name, 'perf-check') ||
+        ((contains(github.event.pull_request.labels.*.name, 'size/XL') ||
+          contains(github.event.pull_request.labels.*.name, 'size/XXL')) &&
+         (startsWith(github.event.pull_request.title, 'feat:') ||
+          startsWith(github.event.pull_request.title, 'fix:')))))
     permissions:
       issues: write
     strategy:
@@ -36,3 +49,4 @@ jobs:
       suite: Performance
       focus: ${{ matrix.test.focus }}
       test_name: ${{ matrix.test.name }}
+      repeat: 10
