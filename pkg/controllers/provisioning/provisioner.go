@@ -380,6 +380,9 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	pods := append(pendingPods, deletingNodePods...)
 	// nothing to schedule, so just return success
 	if len(pods) == 0 {
+		// No pods means no unschedulable pods either -- Solve() won't run to report this, so
+		// reset it directly or it will keep reporting its last value indefinitely.
+		scheduler.UnschedulablePodsCount.Set(0, nil)
 		return scheduler.Results{}, nil
 	}
 	deletingPodUIDs := sets.New(lo.Map(deletingNodePods, func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
@@ -432,9 +435,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	scheduler.UnschedulablePodsCount.Set(
 		// A reserved offering error doesn't indicate a pod is unschedulable, just that the scheduling decision was deferred.
 		float64(len(results.PodErrors)-len(reservedOfferingErrors)),
-		map[string]string{
-			scheduler.ControllerLabel: injection.GetControllerName(ctx),
-		},
+		nil,
 	)
 	if len(results.NewNodeClaims) > 0 {
 		log.FromContext(ctx).WithValues(

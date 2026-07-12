@@ -4380,10 +4380,48 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, i)
 			}
 			_, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
-			m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", map[string]string{"controller": "provisioner"})
+			m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", nil)
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 10))
 			Expect(err).To(BeNil())
+		})
+		It("should reset the UnschedulablePodsCount metric to 0 once all unschedulable pods clear", func() {
+			nodePool = test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									Key:      corev1.LabelInstanceTypeStable,
+									Operator: corev1.NodeSelectorOpIn,
+									Values: []string{
+										"default-instance-type",
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			podsUnschedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "unknown"}}, 10)
+			for _, i := range podsUnschedulable {
+				ExpectApplied(ctx, env.Client, i)
+			}
+			_, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
+			Expect(err).To(BeNil())
+			m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", nil)
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 10))
+
+			// All unschedulable pods clear (deleted) -- there is nothing left pending, so the
+			// Schedule() loop exits early before Solve() ever runs.
+			ExpectDeleted(ctx, env.Client, lo.Map(podsUnschedulable, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			_, err = prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
+			Expect(err).To(BeNil())
+			m, ok = FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", nil)
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 0))
 		})
 		It("should surface the schedulingDuration metric after executing a scheduling loop", func() {
 			nodePool = test.NodePool()
