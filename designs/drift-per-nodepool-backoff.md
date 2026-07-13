@@ -211,8 +211,8 @@ type backoffEntry struct {
 - After `until` has passed while `level > 0`, the pool is in a **probe** state: it may
   select **at most one** in-flight drift replacement until the next success or
   failure resolves it. `probing` is the tracker's *own* record of that single in-flight
-  probe, so the cap does not depend on reading the queue's in-flight counts (see
-  [Concurrency: claiming the probe slot](#concurrency-claiming-the-probe-slot)).
+  probe: `TryClaim` sets it under the tracker's lock and returns a claim, so the cap is
+  self-contained and does not require inspecting queue state.
 
 ### Back-off formula
 
@@ -483,8 +483,7 @@ launch attempts drop from "every pass" to "one per back-off window."
 - **Unit (tracker, probe cap):** after the window expires, a first `TryClaim` succeeds
   and reserves the probe; a second `TryClaim` for the same pool returns `false` until
   the claim is `Release`d or a `Fail`/`Reset` resolves it. Assert a claimed-but-released
-  slot is re-claimable. This is the concurrency invariant that replaces the old
-  read-the-queue count.
+  slot is re-claimable. This exercises the single-probe concurrency invariant.
 - **Unit (`Drift.ComputeCommands`):** with a backed-off NodePool, assert its
   candidates are skipped and a younger NodePool's candidate is selected instead;
   assert exactly one probe is emitted after expiry; and assert that a candidate
@@ -526,6 +525,15 @@ launch attempts drop from "every pass" to "one per back-off window."
    standalone `*NodePoolBackoff` injected into both from `controllers.go`.
 4. Is a per-NodePool skip event too noisy at scale, warranting rate-limiting or
    V(1)-only logging instead? Proposed: rate-limited event + V(1) log.
+
+## Future work
+
+- **Rotation within equivalence classes.** Today drift always selects the oldest
+  candidate. If the oldest candidate in a pool is blocked for a candidate-specific
+  reason, back-off keys on the whole NodePool and every retry re-selects that same
+  doomed node. Rotating/randomizing the selected candidate *within an equivalence
+  class* (candidates with interchangeable scheduling requirements) would let a pool's
+  other candidates make progress while one stays stuck.
 
 ## References
 
