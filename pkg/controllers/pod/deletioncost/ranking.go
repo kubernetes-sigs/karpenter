@@ -72,7 +72,7 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	// ordering — one sort instead of four.
 	sortByPodCount(nodes, nodePods)
 
-	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(ctx, clk, nodes, nodePoolMap, nodePods, pdbs)
+	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(clk, nodes, nodePoolMap, nodePods, pdbs)
 
 	// Apply per-NodePool disruption budget limits to Groups B and C. Nodes
 	// that exceed the budget are moved to Group D. NodePoolStatsFromNodes is
@@ -186,14 +186,14 @@ func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state
 //   - Group C: normal — consolidation candidates, not in A/B/D.
 //   - Group D: node-level do-not-disrupt annotation, do-not-disrupt pods, or
 //     NodePool with consolidation disabled (ConsolidateAfter=Never).
-func partitionNodes(ctx context.Context, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs pdb.Limits) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
+func partitionNodes(clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs pdb.Limits) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
 	for _, node := range nodes {
 		pods := nodePods[node.Name()]
 		// Group A first — any of the three Group A signals routes here
 		// regardless of do-not-disrupt signals on the node itself or its
 		// pods. RFC §"Group A" calls for OR semantics across all three
 		// predicates: A || B || C, not (A && B) || C.
-		if isDisrupted(node) || hasPDBBlockedPods(ctx, clk, pods, pdbs) || hasNonRSOwnedPods(pods) {
+		if isDisrupted(node) || hasPDBBlockedPods(clk, pods, pdbs) || hasNonRSOwnedPods(pods) {
 			disruptedBlocked = append(disruptedBlocked, node)
 			continue
 		}
@@ -307,7 +307,7 @@ func isDrifted(node *state.StateNode) bool {
 // controller uses, so the two controllers agree on what "PDB-blocked" means.
 // A nil pdbs argument (no PDBs listed because no candidate is disrupted)
 // short-circuits to false.
-func hasPDBBlockedPods(ctx context.Context, clk clock.Clock, pods []*corev1.Pod, pdbs pdb.Limits) bool {
+func hasPDBBlockedPods(clk clock.Clock, pods []*corev1.Pod, pdbs pdb.Limits) bool {
 	if len(pods) == 0 || len(pdbs) == 0 {
 		return false
 	}
