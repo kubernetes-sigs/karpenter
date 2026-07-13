@@ -25,6 +25,7 @@ import (
 
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -80,7 +81,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client))
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client))
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}

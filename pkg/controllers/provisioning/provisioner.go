@@ -30,6 +30,8 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -89,11 +91,12 @@ type Provisioner struct {
 	cm                         *pretty.ChangeMonitor
 	clock                      clock.Clock
 	deviceAllocationController *deviceallocation.Controller
+	virtualPodCache            *virtualpods.Cache
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
-	clock clock.Clock, deviceAllocationController *deviceallocation.Controller,
+	clock clock.Clock, deviceAllocationController *deviceallocation.Controller, virtualPodCache *virtualpods.Cache,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:                    NewBatcher[types.UID](clock),
@@ -105,6 +108,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		cm:                         pretty.NewChangeMonitor(),
 		clock:                      clock,
 		deviceAllocationController: deviceAllocationController,
+		virtualPodCache:            virtualPodCache,
 	}
 	return p
 }
@@ -215,7 +219,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	// run PVC topology checks on synthetic pods or pollute cluster state with
 	// their "decisions". Gated by the feature flag.
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
-		pods = p.appendVirtualPods(ctx, pods)
+		pods = append(pods, p.virtualPodCache.GetAll()...)
 	}
 	return pods, nil
 }

@@ -30,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -52,7 +54,7 @@ func TestCapacityBuffer(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
-	cbController = NewController(env.Client, &fakeTrigger{})
+	cbController = NewController(env.Client, &fakeTrigger{}, virtualpods.NewVirtualPodCache(env.Client))
 })
 
 var _ = AfterEach(func() {
@@ -520,7 +522,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 	Context("Provisioner trigger", func() {
 		It("should trigger the provisioner after a successful reconcile", func() {
 			trigger := &fakeTrigger{}
-			ctrl := NewController(env.Client, trigger)
+			ctrl := NewController(env.Client, trigger, virtualpods.NewVirtualPodCache(env.Client))
 
 			pt := &v1.PodTemplate{
 				ObjectMeta: metav1.ObjectMeta{Name: "trig-template", Namespace: "default"},
@@ -544,7 +546,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 
 		It("should NOT trigger the provisioner when resolution fails", func() {
 			trigger := &fakeTrigger{}
-			ctrl := NewController(env.Client, trigger)
+			ctrl := NewController(env.Client, trigger, virtualpods.NewVirtualPodCache(env.Client))
 
 			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: "no-trig-buffer", Namespace: "default"},
@@ -557,6 +559,76 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
 
 			Expect(trigger.calls).To(BeEmpty())
+		})
+	})
+
+	Context("Virtual pod cache", func() {
+		It("should populate the cache after a successful reconcile", func() {
+			cache := virtualpods.NewVirtualPodCache(env.Client)
+			ctrl := NewController(env.Client, &fakeTrigger{}, cache)
+
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "cache-template", Namespace: "default"},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{Containers: []v1.Container{{Name: "c", Image: "p"}}},
+				},
+			}
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "cache-buffer", Namespace: "default"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "cache-template"},
+					Replicas:       lo.ToPtr(int32(3)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+
+			Expect(cache.GetAll()).To(HaveLen(3))
+		})
+
+		It("should remove the cache entry when resolution fails with NotFound", func() {
+			cache := virtualpods.NewVirtualPodCache(env.Client)
+			ctrl := NewController(env.Client, &fakeTrigger{}, cache)
+
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "gone-template", Namespace: "default"},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{Containers: []v1.Container{{Name: "c", Image: "p"}}},
+				},
+			}
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "gone-buffer", Namespace: "default"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "gone-template"},
+					Replicas:       lo.ToPtr(int32(2)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			Expect(cache.GetAll()).To(HaveLen(2))
+
+			// Delete the referenced template so resolution now fails with NotFound.
+			// The buffer is no longer ready for provisioning, so its stale entry
+			// must be dropped from the cache.
+			ExpectDeleted(ctx, env.Client, pt)
+			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			Expect(cache.GetAll()).To(BeEmpty())
+		})
+
+		It("should not touch the cache when a buffer has neither ref set", func() {
+			cache := virtualpods.NewVirtualPodCache(env.Client)
+			ctrl := NewController(env.Client, &fakeTrigger{}, cache)
+
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "no-ref-buffer", Namespace: "default"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					Replicas: lo.ToPtr(int32(1)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, cb)
+			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+
+			Expect(cache.GetAll()).To(BeEmpty())
 		})
 	})
 

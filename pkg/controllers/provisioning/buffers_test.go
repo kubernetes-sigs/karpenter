@@ -27,60 +27,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
-
-var _ = Describe("buildVirtualPods", func() {
-	It("should create the correct number of pods with expected metadata", func() {
-		cb := readyBuffer("web", 3)
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{Name: "app", Image: "pause:v1"}},
-		}
-
-		pods := buildVirtualPods(cb, spec)
-		Expect(pods).To(HaveLen(3))
-
-		for i, p := range pods {
-			idx := i + 1
-			Expect(p.Name).To(Equal("capacity-buffer-web-" + itoa(idx)))
-			Expect(p.Namespace).To(Equal("default"))
-			Expect(string(p.UID)).To(Equal("uid-web-" + itoa(idx)))
-			Expect(p.Annotations[autoscalingv1beta1.FakePodAnnotationKey]).To(Equal("true"))
-			Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("web"))
-			Expect(p.Labels[autoscalingv1beta1.BufferNamespaceLabel]).To(Equal("default"))
-			Expect(p.Spec.Priority).ToNot(BeNil())
-			Expect(*p.Spec.Priority).To(Equal(autoscalingv1beta1.VirtualPodPriority))
-			Expect(p.Spec.NodeName).To(BeEmpty())
-
-			hasUnschedulable := false
-			for _, c := range p.Status.Conditions {
-				if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
-					hasUnschedulable = true
-				}
-			}
-			Expect(hasUnschedulable).To(BeTrue(), "pod[%d] missing PodScheduled=False/Unschedulable condition", i)
-		}
-	})
-
-	It("should produce deterministic UIDs across calls", func() {
-		cb := readyBuffer("web", 2)
-		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
-		a := buildVirtualPods(cb, spec)
-		b := buildVirtualPods(cb, spec)
-		Expect(a).To(HaveLen(len(b)))
-		for i := range a {
-			Expect(a[i].UID).To(Equal(b[i].UID))
-		}
-	})
-
-	It("should return nil for zero replicas", func() {
-		cb := readyBuffer("web", 0)
-		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
-		Expect(buildVirtualPods(cb, spec)).To(BeNil())
-	})
-})
 
 var _ = Describe("bufferKeyOf", func() {
 	It("should return empty string for nil pod", func() {
@@ -136,128 +88,6 @@ var _ = Describe("bufferKeyOf", func() {
 	})
 })
 
-var _ = Describe("sanitizeVirtualPodSpec", func() {
-	It("should drop PVC volumes and their mounts", func() {
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name: "app",
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "data", MountPath: "/data"},
-					{Name: "config", MountPath: "/config"},
-				},
-			}},
-			InitContainers: []corev1.Container{{
-				Name: "init",
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "data", MountPath: "/init-data"},
-				},
-			}},
-			Volumes: []corev1.Volume{
-				{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "my-pvc"}}},
-				{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "cfg"}}}},
-			},
-		}
-
-		result := sanitizeVirtualPodSpec(spec)
-
-		Expect(result.Volumes).To(HaveLen(1))
-		Expect(result.Volumes[0].Name).To(Equal("config"))
-		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
-		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("config"))
-		Expect(result.InitContainers[0].VolumeMounts).To(BeEmpty())
-	})
-
-	It("should drop ephemeral volumes and their mounts", func() {
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name: "app",
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "scratch", MountPath: "/scratch"},
-					{Name: "config", MountPath: "/config"},
-				},
-			}},
-			Volumes: []corev1.Volume{
-				{Name: "scratch", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
-					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-						Spec: corev1.PersistentVolumeClaimSpec{},
-					},
-				}}},
-				{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "cfg"}}}},
-			},
-		}
-
-		result := sanitizeVirtualPodSpec(spec)
-
-		Expect(result.Volumes).To(HaveLen(1))
-		Expect(result.Volumes[0].Name).To(Equal("config"))
-		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
-		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("config"))
-	})
-
-	It("should drop both PVC and ephemeral volumes together", func() {
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name: "app",
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "pvc-vol", MountPath: "/data"},
-					{Name: "eph-vol", MountPath: "/scratch"},
-					{Name: "secret-vol", MountPath: "/secret"},
-				},
-			}},
-			Volumes: []corev1.Volume{
-				{Name: "pvc-vol", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "my-pvc"}}},
-				{Name: "eph-vol", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
-					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{},
-				}}},
-				{Name: "secret-vol", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "s"}}},
-			},
-		}
-
-		result := sanitizeVirtualPodSpec(spec)
-
-		Expect(result.Volumes).To(HaveLen(1))
-		Expect(result.Volumes[0].Name).To(Equal("secret-vol"))
-		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
-		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("secret-vol"))
-	})
-
-	It("should preserve tolerations, nodeSelector, and affinity", func() {
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{Name: "app", Image: "pause:latest"}},
-			Tolerations: []corev1.Toleration{{
-				Key:      "dedicated",
-				Operator: corev1.TolerationOpEqual,
-				Value:    "buffer",
-				Effect:   corev1.TaintEffectNoSchedule,
-			}},
-			NodeSelector: map[string]string{
-				"node-type": "buffer",
-			},
-			Affinity: &corev1.Affinity{
-				PodAffinity: &corev1.PodAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"app": "web"},
-						},
-						TopologyKey: "kubernetes.io/hostname",
-					}},
-				},
-			},
-		}
-
-		result := sanitizeVirtualPodSpec(spec)
-
-		Expect(result.Tolerations).To(HaveLen(1))
-		Expect(result.Tolerations[0].Key).To(Equal("dedicated"))
-		Expect(result.Tolerations[0].Value).To(Equal("buffer"))
-		Expect(result.NodeSelector).To(HaveKeyWithValue("node-type", "buffer"))
-		Expect(result.Affinity).ToNot(BeNil())
-		Expect(result.Affinity.PodAffinity).ToNot(BeNil())
-		Expect(result.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution).To(HaveLen(1))
-		Expect(result.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0].TopologyKey).To(Equal("kubernetes.io/hostname"))
-	})
-})
-
 var _ = Describe("IsVirtualPod", func() {
 	It("should return false for nil pod", func() {
 		Expect(IsVirtualPod(nil)).To(BeFalse())
@@ -290,8 +120,8 @@ var _ = Describe("classifyBufferPods", func() {
 		buffers := map[string]*autoscalingv1beta1.CapacityBuffer{"default/a": cbA, "default/b": cbB}
 		spec := corev1.PodSpec{}
 
-		aPods := buildVirtualPods(cbA, spec)
-		bPods := buildVirtualPods(cbB, spec)
+		aPods := virtualpods.BuildVirtualPods(cbA, spec)
+		bPods := virtualpods.BuildVirtualPods(cbB, spec)
 
 		results := scheduler.Results{
 			ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{aPods[0], aPods[1]}}},
@@ -325,8 +155,8 @@ var _ = Describe("classifyBufferPods", func() {
 		}
 		spec := corev1.PodSpec{}
 
-		aPods := buildVirtualPods(cbA, spec)
-		bPods := buildVirtualPods(cbB, spec)
+		aPods := virtualpods.BuildVirtualPods(cbA, spec)
+		bPods := virtualpods.BuildVirtualPods(cbB, spec)
 
 		results := scheduler.Results{
 			ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{aPods[0], bPods[0], bPods[1]}}},
@@ -391,8 +221,8 @@ var _ = Describe("bufferPodCountsFromResults", func() {
 		cbB := readyBuffer("b", 2)
 		spec := corev1.PodSpec{}
 
-		aPods := buildVirtualPods(cbA, spec)
-		bPods := buildVirtualPods(cbB, spec)
+		aPods := virtualpods.BuildVirtualPods(cbA, spec)
+		bPods := virtualpods.BuildVirtualPods(cbB, spec)
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real-pod", Namespace: "default"}}
 
 		nodeA := makeExistingNode("provider-a")
@@ -477,28 +307,6 @@ var _ = Describe("listBuffersReadyForProvisioning", func() {
 	})
 })
 
-var _ = Describe("buildVirtualPods with scalableRef buffer", func() {
-	It("should create pods with expected metadata for scalableRef buffers", func() {
-		cb := readyScalableRefBuffer("scalable-app", 2)
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}},
-		}
-
-		pods := buildVirtualPods(cb, spec)
-		Expect(pods).To(HaveLen(2))
-
-		for i, p := range pods {
-			idx := i + 1
-			Expect(p.Name).To(Equal("capacity-buffer-scalable-app-" + itoa(idx)))
-			Expect(p.Namespace).To(Equal("default"))
-			Expect(p.Annotations[autoscalingv1beta1.FakePodAnnotationKey]).To(Equal("true"))
-			Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("scalable-app"))
-			Expect(p.Labels[autoscalingv1beta1.BufferNamespaceLabel]).To(Equal("default"))
-			Expect(*p.Spec.Priority).To(Equal(autoscalingv1beta1.VirtualPodPriority))
-		}
-	})
-})
-
 var _ = Describe("computeProvisioningCondition with scalableRef buffer", func() {
 	It("should return True/FitsExistingCapacity for scalableRef buffer when all pods fit", func() {
 		cb := readyScalableRefBuffer("scalable", 2)
@@ -520,7 +328,7 @@ var _ = Describe("computeProvisioningCondition with scalableRef buffer", func() 
 var _ = Describe("filterVirtualPodErrors", func() {
 	It("should remove virtual pods from error map", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[*corev1.Pod]error{
@@ -536,7 +344,7 @@ var _ = Describe("filterVirtualPodErrors", func() {
 
 	It("should return empty map when all pods are virtual", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
 
 		input := map[*corev1.Pod]error{
 			virtualPods[0]: fmt.Errorf("err"),
@@ -569,7 +377,7 @@ var _ = Describe("filterVirtualPodErrors", func() {
 var _ = Describe("filterVirtualPodMapping", func() {
 	It("should remove virtual pods from pod slices", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[string][]*corev1.Pod{
@@ -584,7 +392,7 @@ var _ = Describe("filterVirtualPodMapping", func() {
 
 	It("should drop keys entirely when only virtual pods remain", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[string][]*corev1.Pod{
@@ -600,7 +408,7 @@ var _ = Describe("filterVirtualPodMapping", func() {
 
 	It("should return empty map when all pods are virtual", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
 
 		input := map[string][]*corev1.Pod{
 			"nodepool-a": {virtualPods[0], virtualPods[1]},
@@ -713,26 +521,4 @@ func readyBufferInNamespace(name, namespace string, replicas int32) *autoscaling
 			}},
 		},
 	}
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	var buf [20]byte
-	n := len(buf)
-	for i > 0 {
-		n--
-		buf[n] = byte('0' + i%10)
-		i /= 10
-	}
-	if neg {
-		n--
-		buf[n] = '-'
-	}
-	return string(buf[n:])
 }

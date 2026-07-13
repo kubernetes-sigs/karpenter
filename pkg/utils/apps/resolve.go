@@ -55,6 +55,49 @@ type ScalableRefResult struct {
 	ScalableReplicas int32
 }
 
+// BufferResolution holds the pod spec and ref-specific metadata resolved from a
+// CapacityBuffer's spec. UsesPodTemplate distinguishes which fields are set:
+// PodTemplateName/PodTemplateGeneration for podTemplateRef, ScalableReplicas for
+// scalableRef.
+type BufferResolution struct {
+	PodSpec               corev1.PodSpec
+	UsesPodTemplate       bool
+	PodTemplateName       string
+	PodTemplateGeneration int64
+	ScalableReplicas      int32
+}
+
+// ResolveCapacityBuffer resolves a CapacityBuffer's pod spec from whichever ref
+// its spec declares (podTemplateRef or scalableRef). It centralizes the dispatch
+// shared by the buffer controller (which also reads the returned metadata to
+// update status) and the virtual pod cache (which only needs the pod spec).
+func ResolveCapacityBuffer(ctx context.Context, c client.Client, cb *autoscalingv1beta1.CapacityBuffer) (*BufferResolution, error) {
+	switch {
+	case cb.Spec.PodTemplateRef != nil:
+		result, err := ResolvePodTemplateRef(ctx, c, cb.Spec.PodTemplateRef.Name, cb.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		return &BufferResolution{
+			PodSpec:               result.PodSpec,
+			UsesPodTemplate:       true,
+			PodTemplateName:       result.Name,
+			PodTemplateGeneration: result.Generation,
+		}, nil
+	case cb.Spec.ScalableRef != nil:
+		result, err := ResolveScalableRef(ctx, c, cb.Spec.ScalableRef, cb.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		return &BufferResolution{
+			PodSpec:          result.PodSpec,
+			ScalableReplicas: result.ScalableReplicas,
+		}, nil
+	default:
+		return nil, fmt.Errorf("buffer %q has neither podTemplateRef nor scalableRef in spec", cb.Name)
+	}
+}
+
 // ResolveScalableRef fetches the workload referenced by a ScalableRef and returns
 // its pod spec and replica count.
 func ResolveScalableRef(ctx context.Context, c client.Client, ref *autoscalingv1beta1.ScalableRef, namespace string) (*ScalableRefResult, error) {

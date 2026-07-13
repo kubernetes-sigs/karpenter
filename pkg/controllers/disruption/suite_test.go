@@ -27,6 +27,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 
@@ -102,7 +104,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	recorder = test.NewEventRecorder()
 	draController = deviceallocation.NewController(env.Client)
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController)
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
 	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
 })
 
@@ -122,7 +124,7 @@ var _ = BeforeEach(func() {
 	// (which the controller accumulates across reconciles and never resets) doesn't leak between specs. This must
 	// happen before the disruptionController and queue below, which capture prov. Mirrors the provisioning suite.
 	draController = deviceallocation.NewController(env.Client)
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController)
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
 
 	// Ensure that we reset the disruption controller's methods after each test run
 	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
@@ -470,7 +472,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		hangCreateClient := newHangCreateClient(env.Client)
 		defer hangCreateClient.Stop()
 
-		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(hangCreateClient))
+		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(hangCreateClient), virtualpods.NewVirtualPodCache(hangCreateClient))
 		q := disruption.NewQueue(hangCreateClient, recorder, cluster, env.Clock, p)
 		dc := disruption.NewController(env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q, clusterCost)
 

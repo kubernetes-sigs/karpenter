@@ -46,6 +46,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -100,7 +102,7 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client))
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client))
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
 })
 
@@ -2043,7 +2045,7 @@ var _ = Context("Scheduling", func() {
 						return []string{o.(*corev1.Pod).Spec.NodeName}
 					},
 				).Build()
-				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(kubeClient))
+				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(kubeClient), virtualpods.NewVirtualPodCache(kubeClient))
 				controller := informer.NewNodeController(kubeClient, cluster)
 				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
 				ExpectApplied(ctx, kubeClient, nodePool)
