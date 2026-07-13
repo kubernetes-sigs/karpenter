@@ -266,49 +266,36 @@ command) do **not** change back-off state — the command is still in flight.
 ### Where back-off is enforced
 
 In `Drift.ComputeCommands`, extend the per-candidate skip logic. Today it skips a
-candidate only when the NodePool's disruption budget is exhausted. We add a back-off
-check immediately after:
+candidate only when the NodePool's disruption budget is exhausted; the back-off gate
+slots in immediately after — `TryClaim` returns whether the candidate may be selected,
+plus a `claim` for the reserved probe slot:
 
 ```go
-for _, candidate := range slices.Concat(emptyCandidates, nonEmptyCandidates) {
-	if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
-		continue
-	}
-	// NEW: atomically claim selectability. Healthy pools claim nothing; a pool in its
-	// probe window reserves the single probe slot for exactly one caller.
-	claim, ok := d.backoff.TryClaim(candidate.NodePool.Name)
-	if !ok {
-		continue // backing off, or a probe is already in flight for this pool
-	}
-	results, err := SimulateScheduling(...)
-	if err != nil {
-		claim.Release() // candidate not dispatched → free the probe slot
-		if errors.Is(err, errCandidateDeleting) {
-			continue
-		}
-		return []Command{}, err
-	}
-	if !results.AllNonPendingPodsScheduled() {
-		claim.Release() // candidate not dispatched → free the probe slot
-		d.recorder.Publish(disruptionevents.Blocked(...)...)
-		continue
-	}
-	// The command will be handed to the queue; the probe slot stays reserved and is
-	// released later by the queue when the command resolves (Fail/Reset) or fails to
-	// launch (see below). Do NOT Release here.
-	cmd := Command{ /* ...unchanged... */ }
-	return []Command{cmd}, nil
+if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
+	continue
 }
+// NEW back-off gate: healthy pools pass through claiming nothing; a backed-off pool is
+// skipped; a pool whose window has expired reserves its single probe slot here.
+claim, ok := d.backoff.TryClaim(candidate.NodePool.Name)
+if !ok {
+	continue
+}
+// ... existing SimulateScheduling + schedulability checks, unchanged ...
 ```
 
-`TryClaim(nodePool)` returns:
+The claim carries one obligation: any path that abandons the candidate before it
+becomes a command — unschedulable pods, `errCandidateDeleting`, or another simulation
+error — must `claim.Release()` to free the reserved slot. A candidate that is returned
+as a command keeps its slot reserved until the queue resolves it (see
+[Where failures/successes are observed](#where-failuressuccesses-are-observed)).
 
-- `(_, true)` with an empty claim if `level == 0` (healthy) — nothing reserved,
-  `Release` is a no-op.
-- `(_, false)` if `now < until` (backing off).
-- `(_, false)` if `probing` is already set (a probe is in flight for this pool).
-- `(claim{probe:true}, true)` if `now >= until` and `level > 0` and no probe is in
-  flight — this atomically reserves the pool's single probe slot.
+`TryClaim(nodePool)` decides selectability as follows:
+
+- **Selectable, nothing reserved** if `level == 0` (healthy).
+- **Not selectable** if `now < until` (backing off).
+- **Not selectable** if a probe is already in flight for the pool.
+- **Selectable, reserves the single probe slot** if the window has expired
+  (`now >= until`, `level > 0`) and no probe is in flight.
 
 ### Wiring / ownership
 
@@ -349,72 +336,24 @@ passes — the same property `PreviouslyUnseenNodePools` relies on.
 
 ## Detailed design
 
-Pseudocode for the tracker:
+The tracker exposes three lock-guarded operations over the `backoffEntry` defined in
+[Back-off state](#back-off-state). The state transitions are the design-relevant part;
+the procedural details (locking, the `claim` handle) are left to the implementation PR.
 
-```go
-func (b *NodePoolBackoff) Fail(nodePool string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	e := b.entry(nodePool)
-	e.level++
-	window := baseDelay << (e.level - 1) // baseDelay * 2^(level-1)
-	if window > maxDelay || window <= 0 {
-		window = maxDelay
-		e.level = maxLevel // saturate level so the shift above can never overflow
-	}
-	// Equal jitter: keep a floor of window/2, spread the remainder randomly. This
-	// de-synchronizes pools that failed from a shared cause (e.g. common-AZ ICE) so
-	// their probe windows don't expire — and re-escalate — in lockstep.
-	window = window/2 + time.Duration(b.rand.Int63n(int64(window/2)))
-	e.until = b.clock.Now().Add(window)
-	e.probing = false // the probe (if any) is resolved; a new one may be claimed after the window
-}
+- **`Fail(nodePool)`** — on an unrecoverable drift failure: increment `level`, recompute
+  `until` per the [back-off formula](#back-off-formula) (exponential, clamped to
+  `maxDelay`, then equal-jittered), and clear `probing`. `level` stops growing once the
+  window saturates at `maxDelay`, so the exponent cannot overflow.
+- **`Reset(nodePool)`** — on a successful drift replacement: delete the entry, returning
+  the pool to healthy (`level == 0`, no window, no reserved probe).
+- **`TryClaim(nodePool) → (claim, ok)`** — during selection: decide selectability and,
+  for a pool whose window has expired, atomically set `probing` to reserve the single
+  probe slot. The returned `claim` exposes `Release()` to free a reserved slot (a no-op
+  for a healthy pool). Its decision is specified by the table in
+  [Where back-off is enforced](#where-back-off-is-enforced).
 
-func (b *NodePoolBackoff) Reset(nodePool string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	delete(b.state, nodePool) // success clears level, window, and probing
-}
-
-// TryClaim atomically decides whether a candidate from nodePool may be selected this
-// pass, and — for a pool in the probe window — reserves the single probe slot so no
-// other pass can select a second probe. It returns a claim the caller must Release if
-// the candidate is not actually handed to the queue.
-func (b *NodePoolBackoff) TryClaim(nodePool string) (claim, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	e, ok := b.state[nodePool]
-	if !ok || e.level == 0 {
-		return claim{}, true // healthy: selectable, nothing reserved
-	}
-	if b.clock.Now().Before(e.until) {
-		return claim{}, false // backing off
-	}
-	if e.probing {
-		return claim{}, false // a probe is already in flight for this pool
-	}
-	e.probing = true // reserve the single probe slot for this caller
-	return claim{b: b, nodePool: nodePool, probe: true}, true
-}
-
-// claim represents a reserved probe slot. Release is a no-op for healthy pools.
-type claim struct {
-	b        *NodePoolBackoff
-	nodePool string
-	probe    bool
-}
-
-func (c claim) Release() {
-	if !c.probe {
-		return
-	}
-	c.b.mu.Lock()
-	defer c.b.mu.Unlock()
-	if e, ok := c.b.state[c.nodePool]; ok {
-		e.probing = false
-	}
-}
-```
+`Fail` and `Reset` are the only transitions of `level`/`until`; `TryClaim` and `Release`
+are the only transitions of `probing`.
 
 Sequence for a persistently failing pool (`spark`) alongside a healthy younger pool
 (`ingress`), with defaults `baseDelay = 1m`:
