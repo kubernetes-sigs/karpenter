@@ -1193,6 +1193,85 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
 		})
+		It("should ignore daemonsets when no instance types meet the daemonset requirements", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					NodeRequirements:     []corev1.NodeSelectorRequirement{{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"non-existent-instance-type"}}},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
+				}},
+			))
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was not respected
+			// If we launch with 4Gi, this means the Daemon pod was respected
+			allocatable := instanceTypeMap[node.Labels[corev1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
+		})
+		It("should account for daemonsets with a custom label nodeSelector that matches the nodepool", func() {
+			ExpectApplied(ctx, env.Client,
+				test.NodePool(v1.NodePool{
+					Spec: v1.NodePoolSpec{
+						Template: v1.NodeClaimTemplate{
+							ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"purpose": "monitoring"}},
+						},
+					},
+				}),
+				test.DaemonSet(
+					test.DaemonSetOptions{PodOptions: test.PodOptions{
+						NodeSelector:         map[string]string{"purpose": "monitoring"},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
+					}},
+				))
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[corev1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should filter out daemonsets based on instance type requirements", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(),
+				test.DaemonSet(
+					test.DaemonSetOptions{PodOptions: test.PodOptions{
+						NodeRequirements:     []corev1.NodeSelectorRequirement{{Key: fake.LabelInstanceSize, Operator: corev1.NodeSelectorOpIn, Values: []string{"small"}}},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+					}},
+				),
+				test.DaemonSet(
+					test.DaemonSetOptions{PodOptions: test.PodOptions{
+						NodeRequirements:     []corev1.NodeSelectorRequirement{{Key: fake.LabelInstanceSize, Operator: corev1.NodeSelectorOpIn, Values: []string{"large"}}},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10")}},
+					}},
+				),
+			)
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was not respected
+			// If we launch with 4Gi, this means the Daemon pod was respected
+			allocatable := instanceTypeMap[node.Labels[corev1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
 		It("should account daemonsets with NotIn operator and unspecified key", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
@@ -1410,6 +1489,36 @@ var _ = Describe("Provisioning", func() {
 			// If we launch with 2Gi, this means the Daemon pod was not respected
 			// If we launch with 4Gi, this means the Daemon pod was respected
 			allocatable := instanceTypeMap[node.Labels[corev1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should not account for daemonset hostports when daemonset would not schedule on selected node", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi")}},
+					NodeRequirements:     []corev1.NodeSelectorRequirement{{Key: fake.LabelInstanceSize, Operator: corev1.NodeSelectorOpIn, Values: []string{"large"}}},
+					HostPorts:            []int32{8080},
+				}},
+			))
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
+					NodeRequirements:     []corev1.NodeSelectorRequirement{{Key: fake.LabelInstanceSize, Operator: corev1.NodeSelectorOpIn, Values: []string{"small"}}},
+					HostPorts:            []int32{8081},
+				}},
+			))
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+					NodeRequirements:     []corev1.NodeSelectorRequirement{{Key: fake.LabelInstanceSize, Operator: corev1.NodeSelectorOpIn, Values: []string{"small"}}},
+					HostPorts:            []int32{8080},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[corev1.LabelInstanceTypeStable]].Capacity
+			Expect(node.Labels[fake.LabelInstanceSize]).To(Equal("small"))
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
@@ -1845,6 +1954,33 @@ var _ = Describe("Provisioning", func() {
 				corev1.ResourcePods:   resource.MustParse("2"),
 			})
 			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("should not double-count daemon overhead when multiple pods are scheduled to the same nodeclaim", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Mi")}},
+				}},
+			))
+			pod1 := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Mi")}},
+				},
+			)
+			pod2 := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Mi")}},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			// Total should be: 2 pods (1 cpu each) + 1 daemon (1 cpu) = 3 cpu, not 4 cpu
+			ExpectNodeClaimRequests(cloudProvider.CreateCalls[0], corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("3"),
+				corev1.ResourceMemory: resource.MustParse("3Mi"),
+				corev1.ResourcePods:   resource.MustParse("3"),
+			})
+			ExpectScheduled(ctx, env.Client, pod1)
+			ExpectScheduled(ctx, env.Client, pod2)
 		})
 	})
 	Context("Volume Topology Requirements", func() {

@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 )
 
 // PodTemplateResult holds the resolved data from a PodTemplate lookup.
@@ -57,7 +57,7 @@ type ScalableRefResult struct {
 
 // ResolveScalableRef fetches the workload referenced by a ScalableRef and returns
 // its pod spec and replica count.
-func ResolveScalableRef(ctx context.Context, c client.Client, ref *autoscalingv1alpha1.ScalableRef, namespace string) (*ScalableRefResult, error) {
+func ResolveScalableRef(ctx context.Context, c client.Client, ref *autoscalingv1beta1.ScalableRef, namespace string) (*ScalableRefResult, error) {
 	group := ref.APIGroup
 	if group == "" {
 		group = "apps"
@@ -68,19 +68,19 @@ func ResolveScalableRef(ctx context.Context, c client.Client, ref *autoscalingv1
 	key := types.NamespacedName{Name: ref.Name, Namespace: namespace}
 
 	switch ref.Kind {
-	case autoscalingv1alpha1.KindDeployment:
+	case autoscalingv1beta1.KindDeployment:
 		obj := &appsv1.Deployment{}
 		if err := c.Get(ctx, key, obj); err != nil {
 			return nil, err
 		}
 		return &ScalableRefResult{PodSpec: obj.Spec.Template.Spec, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
-	case autoscalingv1alpha1.KindStatefulSet:
+	case autoscalingv1beta1.KindStatefulSet:
 		obj := &appsv1.StatefulSet{}
 		if err := c.Get(ctx, key, obj); err != nil {
 			return nil, err
 		}
 		return &ScalableRefResult{PodSpec: obj.Spec.Template.Spec, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
-	case autoscalingv1alpha1.KindReplicaSet:
+	case autoscalingv1beta1.KindReplicaSet:
 		obj := &appsv1.ReplicaSet{}
 		if err := c.Get(ctx, key, obj); err != nil {
 			return nil, err

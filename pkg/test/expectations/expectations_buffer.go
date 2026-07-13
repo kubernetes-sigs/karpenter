@@ -24,34 +24,34 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 )
 
-func EventuallyExpectCapacityBufferReady(ctx context.Context, c client.Client, buffer *autoscalingv1alpha1.CapacityBuffer) {
+func EventuallyExpectCapacityBufferReady(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer) {
 	Eventually(func(g Gomega) {
-		cb := &autoscalingv1alpha1.CapacityBuffer{}
+		cb := &autoscalingv1beta1.CapacityBuffer{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
 		g.Expect(cond).ToNot(BeNil())
 		g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 	}).WithContext(ctx).WithTimeout(30 * time.Second).Should(Succeed())
 }
 
-func EventuallyExpectCapacityBufferProvisioned(ctx context.Context, c client.Client, buffer *autoscalingv1alpha1.CapacityBuffer) {
+func EventuallyExpectCapacityBufferProvisioned(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer) {
 	Eventually(func(g Gomega) {
-		cb := &autoscalingv1alpha1.CapacityBuffer{}
+		cb := &autoscalingv1beta1.CapacityBuffer{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1beta1.ProvisioningCondition)
 		g.Expect(cond).ToNot(BeNil())
 		g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 	}).WithContext(ctx).WithTimeout(2 * time.Minute).Should(Succeed())
 }
 
-func EventuallyExpectCapacityBufferReplicas(ctx context.Context, c client.Client, buffer *autoscalingv1alpha1.CapacityBuffer, replicas int32) {
+func EventuallyExpectCapacityBufferReplicas(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, replicas int32) {
 	Eventually(func(g Gomega) {
-		cb := &autoscalingv1alpha1.CapacityBuffer{}
+		cb := &autoscalingv1beta1.CapacityBuffer{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
 		g.Expect(cond).ToNot(BeNil())
 		g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		g.Expect(cb.Status.Replicas).ToNot(BeNil())
@@ -59,41 +59,41 @@ func EventuallyExpectCapacityBufferReplicas(ctx context.Context, c client.Client
 	}).WithContext(ctx).WithTimeout(30 * time.Second).Should(Succeed())
 }
 
-func EventuallyExpectCapacityBufferNotReady(ctx context.Context, c client.Client, buffer *autoscalingv1alpha1.CapacityBuffer, reason string) {
+func EventuallyExpectCapacityBufferNotReady(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, reason string) {
 	Eventually(func(g Gomega) {
-		cb := &autoscalingv1alpha1.CapacityBuffer{}
+		cb := &autoscalingv1beta1.CapacityBuffer{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition)
+		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
 		g.Expect(cond).ToNot(BeNil())
 		g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		g.Expect(cond.Reason).To(Equal(reason))
 	}).WithContext(ctx).WithTimeout(30 * time.Second).Should(Succeed())
 }
 
-func EventuallyExpectCapacityBufferNotProvisioned(ctx context.Context, c client.Client, buffer *autoscalingv1alpha1.CapacityBuffer) {
+func EventuallyExpectCapacityBufferNotProvisioned(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer) {
 	Eventually(func(g Gomega) {
-		cb := &autoscalingv1alpha1.CapacityBuffer{}
+		cb := &autoscalingv1beta1.CapacityBuffer{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1beta1.ProvisioningCondition)
 		g.Expect(cond).ToNot(BeNil())
 		g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 	}).WithContext(ctx).WithTimeout(30 * time.Second).Should(Succeed())
 }
 
-func EventuallyExpectCapacityBufferProvisionedWithReason(ctx context.Context, c client.Client, buffer *autoscalingv1alpha1.CapacityBuffer, reason string) {
+func EventuallyExpectCapacityBufferProvisionedWithReason(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, reason string) {
 	Eventually(func(g Gomega) {
-		cb := &autoscalingv1alpha1.CapacityBuffer{}
+		cb := &autoscalingv1beta1.CapacityBuffer{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
-		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1alpha1.ProvisioningCondition)
+		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1beta1.ProvisioningCondition)
 		g.Expect(cond).ToNot(BeNil())
 		g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		g.Expect(cond.Reason).To(Equal(reason))
 	}).WithContext(ctx).WithTimeout(2 * time.Minute).Should(Succeed())
 }
 
-func EventuallyExpectCapacityBufferGenerationUpdated(ctx context.Context, c client.Client, buffer *autoscalingv1alpha1.CapacityBuffer, minGeneration int64) {
+func EventuallyExpectCapacityBufferGenerationUpdated(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, minGeneration int64) {
 	Eventually(func(g Gomega) {
-		cb := &autoscalingv1alpha1.CapacityBuffer{}
+		cb := &autoscalingv1beta1.CapacityBuffer{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
 		g.Expect(cb.Status.PodTemplateGeneration).ToNot(BeNil())
 		g.Expect(*cb.Status.PodTemplateGeneration).To(BeNumerically(">=", minGeneration))

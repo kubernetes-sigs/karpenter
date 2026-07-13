@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -461,7 +461,7 @@ var _ = Describe("Helpers", func() {
 
 	Context("SetCondition", func() {
 		It("should add a new condition", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{}
+			cb := &autoscalingv1beta1.CapacityBuffer{}
 			cb.SetCondition("TestCond", metav1.ConditionTrue, "TestReason", "test message")
 
 			Expect(cb.Status.Conditions).To(HaveLen(1))
@@ -472,7 +472,7 @@ var _ = Describe("Helpers", func() {
 		})
 
 		It("should update an existing condition", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{}
+			cb := &autoscalingv1beta1.CapacityBuffer{}
 			cb.SetCondition("TestCond", metav1.ConditionFalse, "FirstReason", "first")
 			cb.SetCondition("TestCond", metav1.ConditionTrue, "SecondReason", "second")
 
@@ -483,7 +483,7 @@ var _ = Describe("Helpers", func() {
 		})
 
 		It("should support multiple condition types", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{}
+			cb := &autoscalingv1beta1.CapacityBuffer{}
 			cb.SetCondition("CondA", metav1.ConditionTrue, "A", "a")
 			cb.SetCondition("CondB", metav1.ConditionFalse, "B", "b")
 
@@ -491,7 +491,7 @@ var _ = Describe("Helpers", func() {
 		})
 
 		It("should set observed generation", func() {
-			cb := &autoscalingv1alpha1.CapacityBuffer{}
+			cb := &autoscalingv1beta1.CapacityBuffer{}
 			cb.Generation = 7
 			cb.SetCondition("TestCond", metav1.ConditionTrue, "R", "m")
 
