@@ -38,7 +38,7 @@ type NodeSelectorRequirement struct {
 	//nolint:kubeapilinter
 	// Represents a key's relationship to a set of values.
 	// Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
-	// +kubebuilder:validation:Enum:=Gte;Lte
+	// +kubebuilder:validation:Enum:=In;NotIn;Exists;DoesNotExist;Gt;Lt;Gte;Lte
 	// +required
 	Operator corev1.NodeSelectorOperator `json:"operator,omitempty"`
 	//nolint:kubeapilinter
