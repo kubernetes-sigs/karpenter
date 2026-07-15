@@ -41,14 +41,14 @@ func (in *Budget) DeepCopyInto(out *Budget) {
 		*out = new(string)
 		**out = **in
 	}
-	if in.Duration != nil {
-		in, out := &in.Duration, &out.Duration
-		*out = new(metav1.Duration)
-		**out = **in
-	}
 	if in.TimeZone != nil {
 		in, out := &in.TimeZone, &out.TimeZone
 		*out = new(string)
+		**out = **in
+	}
+	if in.Duration != nil {
+		in, out := &in.Duration, &out.Duration
+		*out = new(metav1.Duration)
 		**out = **in
 	}
 }

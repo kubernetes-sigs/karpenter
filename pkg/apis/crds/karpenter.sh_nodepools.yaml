@@ -129,14 +129,23 @@ spec:
                             description: |-
                               Schedule specifies when a budget begins being active, following
                               the upstream cronjob syntax. If omitted, the budget is always active.
+                              The schedule is interpreted in the time zone specified by TimeZone,
+                              defaulting to UTC. Specifying a time zone within the schedule itself
+                              (e.g. "TZ=America/New_York 0 2 * * *") is not supported.
                               This field is required if Duration is set.
                             pattern: ^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$
                             type: string
                           timeZone:
                             description: |-
-                              timeZone specifies the timezone the Schedule is evaluated against.
-                              If not specified, this will default to the UTC.
-                              See https://en.wikipedia.org/wiki/List_of_tz_database_time_zones for valid time zones.
+                              TimeZone specifies the time zone in which the Schedule is interpreted,
+                              as a name from the IANA Time Zone Database (e.g. "America/New_York").
+                              If omitted, the schedule is interpreted in UTC.
+                              Daylight saving time transitions follow the upstream CronJob behavior: a schedule
+                              hit that falls in a skipped hour does not occur, and a schedule hit that falls in
+                              a repeated hour occurs at both offsets.
+                              This field may only be set if Schedule is set.
+                            maxLength: 63
+                            minLength: 1
                             type: string
                         required:
                           - nodes
@@ -147,7 +156,7 @@ spec:
                       x-kubernetes-validations:
                         - message: '''schedule'' must be set with ''duration'''
                           rule: self.all(x, has(x.schedule) == has(x.duration))
-                        - message: '''timeZone'' can only be set when ''schedule'' is set'
+                        - message: '''timeZone'' cannot be set without ''schedule'''
                           rule: self.all(x, !has(x.timeZone) || has(x.schedule))
                     consolidateAfter:
                       description: |-
