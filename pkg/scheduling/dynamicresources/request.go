@@ -299,6 +299,7 @@ func validateFirstAvailableRequest(
 	return parent, nil
 }
 
+//nolint:gocyclo
 func buildRequestData(
 	ctx context.Context,
 	kubeClient client.Client,

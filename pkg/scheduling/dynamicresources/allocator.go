@@ -712,6 +712,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 // or for parent requests), and device slots. Devices are iterated lazily from the current pools
 // and template devices rather than from a prebuilt candidate list, so pool re-filtering during
 // requirement tightening is automatically reflected in subsequent iterations.
+// nolint:gocyclo
 func (a *allocator) dfs(claimIdx, reqIdx, subReqIdx, slotIdx int) bool {
 	select {
 	case <-a.ctx.Done():
