@@ -101,6 +101,7 @@ type Queue struct {
 	cluster             *state.Cluster
 	clock               clock.Clock
 	provisioner         *provisioning.Provisioner
+	backoff             *NodePoolBackoff
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
@@ -117,8 +118,15 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		cluster:             cluster,
 		clock:               clock,
 		provisioner:         provisioner,
+		backoff:             NewNodePoolBackoff(clock),
 	}
 	return queue
+}
+
+// NodePoolBackoff returns the shared per-NodePool drift back-off tracker. The Drift method reads
+// it during candidate selection while the Queue is the authoritative writer (on command outcome).
+func (q *Queue) NodePoolBackoff() *NodePoolBackoff {
+	return q.backoff
 }
 
 func (q *Queue) Name() string {
@@ -176,8 +184,44 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 		log.FromContext(ctx).V(1).Info("command succeeded")
 		cmd.Succeeded = true
 	}
+	// Record the outcome against per-NodePool drift back-off. A successful drift replacement
+	// resets the pool; an unrecoverable failure (ICE, timeout) arms/escalates its back-off.
+	q.observeDriftOutcome(ctx, cmd, cmd.Succeeded)
 	q.CompleteCommand(cmd)
 	return reconcile.Result{}, nil
+}
+
+// observeDriftOutcome updates the per-NodePool drift back-off tracker for a completed drift
+// command. It is a no-op for non-drift commands, so consolidation/emptiness never touch drift
+// back-off state. Per the single-NodePool-per-command invariant, the key is the command's
+// candidate NodePool.
+func (q *Queue) observeDriftOutcome(ctx context.Context, cmd *Command, succeeded bool) {
+	if q.backoff == nil {
+		return
+	}
+	nodePool, ok := driftNodePool(cmd)
+	if !ok {
+		return
+	}
+	if succeeded {
+		q.backoff.Reset(nodePool)
+		return
+	}
+	q.backoff.Fail(nodePool)
+	level, until := q.backoff.Snapshot(nodePool)
+	log.FromContext(ctx).V(1).Info("backing off drift disruption for nodepool", "NodePool", nodePool, "level", level, "until", until)
+}
+
+// driftNodePool returns the NodePool a drift command targets, or false when the command is not a
+// drift command or has no identifiable NodePool.
+func driftNodePool(cmd *Command) (string, bool) {
+	if cmd == nil || cmd.Reason() != v1.DisruptionReasonDrifted || len(cmd.Candidates) == 0 {
+		return "", false
+	}
+	if cmd.Candidates[0].NodePool == nil {
+		return "", false
+	}
+	return cmd.Candidates[0].NodePool.Name, true
 }
 
 // waitOrTerminate will wait until launched nodeclaims are ready.
@@ -337,6 +381,9 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	if err := q.createReplacementNodeClaims(ctx, cmd); err != nil {
 		// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 		// we don't want to disrupt workloads with no way to provision new nodes for them.
+		// The command never enters the queue, so no success/failure will be observed later; arm
+		// drift back-off here so a launch failure is treated like any other unrecoverable failure.
+		q.observeDriftOutcome(ctx, cmd, false)
 		return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", err), "command-id", cmd.ID)
 	}
 	// IMPORTANT
