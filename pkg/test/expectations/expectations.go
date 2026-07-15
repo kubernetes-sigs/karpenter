@@ -661,9 +661,7 @@ func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 		Expect(ok).To(BeTrue(), "no device allocation for instance type %q in claim %s", instanceTypeName, key)
 
 		// The API server requires each DeviceRequestAllocationResult.Request to name a real request in the claim. The
-		// allocator metadata only carries the ordered devices, not their owning request, but the allocator allocates
-		// requests in spec order, so we reconstruct the request name by consuming each request's device count in order.
-		requestNames := requestNamesForDevices(claim, len(devices))
+		// allocator records the owning (sub-)request on each device.
 		results := make([]resourcev1.DeviceRequestAllocationResult, len(devices))
 		for i, device := range devices {
 			poolName := device.DeviceID.Pool.Value()
@@ -671,7 +669,7 @@ func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 				poolName = test.NodeLocalPoolName(device.DeviceID.Driver.Value(), binding.Node.Name)
 			}
 			results[i] = resourcev1.DeviceRequestAllocationResult{
-				Request: requestNames[i],
+				Request: device.RequestName.String(),
 				Driver:  device.DeviceID.Driver.Value(),
 				Pool:    poolName,
 				Device:  device.DeviceID.Device.Value(),
@@ -705,38 +703,6 @@ func resolvedClaimName(pod *corev1.Pod, pc *corev1.PodResourceClaim) (string, bo
 		}
 	}
 	return "", false
-}
-
-// requestNamesForDevices maps each of the deviceCount allocated devices (in allocation order) to the name of the claim
-// request that owns it. Requests are consumed in spec order: an ExactCount request claims its Count devices; an All
-// request (and any leftover devices) claim the remainder. This mirrors the allocator's request-ordered DFS so the
-// reconstructed request names are valid for API server validation.
-// TODO: Consider storing the associated request in ResourceClaimAllocationMetadata to avoid reverse engineering the
-// order. This isn't currently done since it would only be useful for integration tests.
-func requestNamesForDevices(claim *resourcev1.ResourceClaim, deviceCount int) []string {
-	names := make([]string, 0, deviceCount)
-	for _, req := range claim.Spec.Devices.Requests {
-		if len(names) >= deviceCount {
-			break
-		}
-		count := 1
-		if req.Exactly != nil {
-			switch {
-			case req.Exactly.AllocationMode == resourcev1.DeviceAllocationModeAll:
-				count = deviceCount - len(names) // claim all remaining devices
-			case req.Exactly.Count > 0:
-				count = int(req.Exactly.Count)
-			}
-		}
-		for i := 0; i < count && len(names) < deviceCount; i++ {
-			names = append(names, req.Name)
-		}
-	}
-	// Fallback: if requests didn't account for every device (shouldn't happen), pad with the last request name.
-	for len(names) < deviceCount && len(claim.Spec.Devices.Requests) > 0 {
-		names = append(names, claim.Spec.Devices.Requests[len(claim.Spec.Devices.Requests)-1].Name)
-	}
-	return names
 }
 
 func ExpectNodeClaimDeployedAndStateUpdated(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, *corev1.Node) {

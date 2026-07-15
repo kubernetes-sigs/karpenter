@@ -19,6 +19,7 @@ package dynamicresources
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -31,16 +32,66 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
-// RequestKey identifies a specific request within a claim.
-type RequestKey struct {
-	ClaimIndex   int
-	RequestIndex int
+// deviceRequestAccessor abstracts the common fields between each type of DeviceRequest.
+type deviceRequestAccessor interface {
+	DeviceClassName() string
+	Selectors() []resourcev1.DeviceSelector
+	AllocationMode() resourcev1.DeviceAllocationMode
+	Count() int64
+	Capacity() *resourcev1.CapacityRequirements
+}
+
+type exactRequestAccessor struct {
+	req *resourcev1.ExactDeviceRequest
+}
+
+func (a exactRequestAccessor) DeviceClassName() string {
+	return a.req.DeviceClassName
+}
+func (a exactRequestAccessor) Selectors() []resourcev1.DeviceSelector {
+	return a.req.Selectors
+}
+func (a exactRequestAccessor) AllocationMode() resourcev1.DeviceAllocationMode {
+	return a.req.AllocationMode
+}
+func (a exactRequestAccessor) Count() int64 {
+	return a.req.Count
+}
+func (a exactRequestAccessor) Capacity() *resourcev1.CapacityRequirements {
+	return a.req.Capacity
+}
+
+type subRequestAccessor struct {
+	sub *resourcev1.DeviceSubRequest
+}
+
+func (a subRequestAccessor) DeviceClassName() string {
+	return a.sub.DeviceClassName
+}
+func (a subRequestAccessor) Selectors() []resourcev1.DeviceSelector {
+	return a.sub.Selectors
+}
+func (a subRequestAccessor) AllocationMode() resourcev1.DeviceAllocationMode {
+	return a.sub.AllocationMode
+}
+func (a subRequestAccessor) Count() int64 {
+	return a.sub.Count
+}
+func (a subRequestAccessor) Capacity() *resourcev1.CapacityRequirements {
+	return a.sub.Capacity
 }
 
 // RequestData holds the parsed and validated metadata for a single device request.
 type RequestData struct {
-	// Name is the request name from the claim spec.
-	Name string
+	// Name identifies this request. For Exactly requests, Parent is set and Sub is empty.
+	// For FirstAvailable sub-requests, Parent is the top-level request name and Sub is
+	// the sub-request's own name.
+	Name RequestName
+
+	// SubRequests holds the ordered alternatives for a FirstAvailable request.
+	// nil for Exactly requests and for sub-request entries.
+	SubRequests []RequestData
+
 	// Class is the resolved DeviceClass for this request.
 	Class *resourcev1.DeviceClass
 	// NumDevices is the number of devices to allocate (for ExactCount mode).
@@ -109,11 +160,19 @@ func ValidateClaimRequest(
 	// Validate requests.
 	for i := range claim.Spec.Devices.Requests {
 		req := &claim.Spec.Devices.Requests[i]
-		if req.Exactly == nil {
-			// FirstAvailable (subrequests) are not yet supported.
-			return nil, fmt.Errorf("claim %q request %q: only Exactly requests are supported", claim.Name, req.Name)
+
+		var rd *RequestData
+		var err error
+		switch {
+		case req.Exactly != nil:
+			rd, err = validateExactRequest(ctx, kubeClient, claim.Name, req.Name, req.Exactly, pools, templateDevicesByIT, celCache)
+
+		case len(req.FirstAvailable) > 0:
+			rd, err = validateFirstAvailableRequest(ctx, kubeClient, claim.Name, req.Name, req.FirstAvailable, pools, templateDevicesByIT, celCache)
+
+		default:
+			return nil, fmt.Errorf("claim %q request %q: only Exactly and FirstAvailable requests are supported", claim.Name, req.Name)
 		}
-		rd, err := validateExactRequest(ctx, kubeClient, claim.Name, req.Name, req.Exactly, pools, templateDevicesByIT, celCache)
 		if err != nil {
 			return nil, err
 		}
@@ -123,10 +182,21 @@ func ValidateClaimRequest(
 	// Compute the base device total: ExactCount requests contribute NumDevices,
 	// All-mode requests contribute their in-cluster device count (len(AllDevices)).
 	// This base total is constant regardless of instance type.
+	// For FirstAvailable, we use the min across sub-requests. Because this can pass while
+	// no combination of sub-request selections actually fits, the per-claim check runs
+	// during the DFS.
 	var baseTotalDevices int
 	for _, req := range data.Requests {
-		baseTotalDevices += req.NumDevices
-		baseTotalDevices += len(req.AllDevices)
+		if len(req.SubRequests) > 0 {
+			minDevices := math.MaxInt
+			for _, sub := range req.SubRequests {
+				minDevices = min(minDevices, sub.NumDevices+len(sub.AllDevices))
+			}
+			baseTotalDevices += minDevices
+		} else {
+			baseTotalDevices += req.NumDevices
+			baseTotalDevices += len(req.AllDevices)
+		}
 	}
 	maxDevices := int(resourcev1.AllocationResultsMaxSize)
 	if baseTotalDevices > maxDevices {
@@ -138,20 +208,42 @@ func ValidateClaimRequest(
 	// Collect all unique instance type IDs across All-mode requests.
 	allITs := sets.New[InstanceTypeID]()
 	for _, req := range data.Requests {
-		for itID := range req.AllTemplateDevicesByIT {
-			allITs.Insert(itID)
+		if len(req.SubRequests) > 0 {
+			for _, sub := range req.SubRequests {
+				for itID := range sub.AllTemplateDevicesByIT {
+					allITs.Insert(itID)
+				}
+			}
+		} else {
+			for itID := range req.AllTemplateDevicesByIT {
+				allITs.Insert(itID)
+			}
 		}
 	}
 	var prunedCount int
 	for itID := range allITs {
 		var templateCount int
 		for _, req := range data.Requests {
-			templateCount += len(req.AllTemplateDevicesByIT[itID])
+			if len(req.SubRequests) > 0 {
+				minForReq := math.MaxInt
+				for _, sub := range req.SubRequests {
+					minForReq = min(minForReq, len(sub.AllTemplateDevicesByIT[itID]))
+				}
+				templateCount += minForReq
+			} else {
+				templateCount += len(req.AllTemplateDevicesByIT[itID])
+			}
 		}
 		if baseTotalDevices+templateCount > maxDevices {
 			prunedCount += 1
 			for i := range data.Requests {
-				delete(data.Requests[i].AllTemplateDevicesByIT, itID)
+				if len(data.Requests[i].SubRequests) > 0 {
+					for j := range data.Requests[i].SubRequests {
+						delete(data.Requests[i].SubRequests[j].AllTemplateDevicesByIT, itID)
+					}
+				} else {
+					delete(data.Requests[i].AllTemplateDevicesByIT, itID)
+				}
 			}
 		}
 	}
@@ -166,7 +258,6 @@ func ValidateClaimRequest(
 	return data, nil
 }
 
-//nolint:gocyclo
 func validateExactRequest(
 	ctx context.Context,
 	kubeClient client.Client,
@@ -177,20 +268,61 @@ func validateExactRequest(
 	templateDevicesByIT map[InstanceTypeID][]DeviceWithID,
 	celCache *dracel.Cache,
 ) (*RequestData, error) {
+	rd, err := buildRequestData(ctx, kubeClient, claimName, requestName, exactRequestAccessor{req}, pools, templateDevicesByIT, celCache)
+	if err != nil {
+		return nil, err
+	}
+	return rd, nil
+}
+
+func validateFirstAvailableRequest(
+	ctx context.Context,
+	kubeClient client.Client,
+	claimName string,
+	parentName string,
+	subRequests []resourcev1.DeviceSubRequest,
+	pools []*Pool,
+	templateDevicesByIT map[InstanceTypeID][]DeviceWithID,
+	celCache *dracel.Cache,
+) (*RequestData, error) {
+	parent := &RequestData{Name: RequestName{Parent: parentName}, SubRequests: make([]RequestData, 0, len(subRequests))}
+	for i := range subRequests {
+		rd, err := buildRequestData(ctx, kubeClient, claimName, subRequests[i].Name, subRequestAccessor{&subRequests[i]}, pools, templateDevicesByIT, celCache)
+		if err != nil {
+			return nil, err
+		}
+		rd.Name = RequestName{Parent: parentName, Sub: rd.Name.Parent}
+
+		parent.SubRequests = append(parent.SubRequests, *rd)
+	}
+
+	return parent, nil
+}
+
+func buildRequestData(
+	ctx context.Context,
+	kubeClient client.Client,
+	claimName string,
+	requestName string,
+	req deviceRequestAccessor,
+	pools []*Pool,
+	templateDevicesByIT map[InstanceTypeID][]DeviceWithID,
+	celCache *dracel.Cache,
+) (*RequestData, error) {
 	class := &resourcev1.DeviceClass{}
-	if err := kubeClient.Get(ctx, types.NamespacedName{Name: req.DeviceClassName}, class); err != nil {
-		return nil, fmt.Errorf("claim %q request %q: DeviceClass %q not found: %w", claimName, requestName, req.DeviceClassName, err)
+	if err := kubeClient.Get(ctx, types.NamespacedName{Name: req.DeviceClassName()}, class); err != nil {
+		return nil, fmt.Errorf("claim %q request %q: DeviceClass %q not found: %w", claimName, requestName, req.DeviceClassName(), err)
 	}
 
 	// Combine selectors from class and request.
 	var selectors []resourcev1.DeviceSelector
 	for _, s := range class.Spec.Selectors {
 		if s.CEL == nil {
-			return nil, fmt.Errorf("claim %q request %q: DeviceClass %q has unsupported selector type (only CEL is supported)", claimName, requestName, req.DeviceClassName)
+			return nil, fmt.Errorf("claim %q request %q: DeviceClass %q has unsupported selector type (only CEL is supported)", claimName, requestName, class.Name)
 		}
 		selectors = append(selectors, s)
 	}
-	for _, s := range req.Selectors {
+	for _, s := range req.Selectors() {
 		if s.CEL == nil {
 			return nil, fmt.Errorf("claim %q request %q: unsupported selector type (only CEL is supported)", claimName, requestName)
 		}
@@ -206,18 +338,18 @@ func validateExactRequest(
 	}
 
 	rd := &RequestData{
-		Name:           requestName,
+		Name:           RequestName{Parent: requestName},
 		Class:          class,
 		Selectors:      selectors,
-		NumDevices:     int(req.Count),
+		NumDevices:     int(req.Count()),
 		AllocationMode: resourcev1.DeviceAllocationModeExactCount,
 	}
 
-	if req.Capacity != nil {
-		rd.CapacityRequests = req.Capacity.Requests
+	if req.Capacity() != nil {
+		rd.CapacityRequests = req.Capacity().Requests
 	}
 
-	if req.AllocationMode == resourcev1.DeviceAllocationModeAll {
+	if req.AllocationMode() == resourcev1.DeviceAllocationModeAll {
 		rd.AllocationMode = resourcev1.DeviceAllocationModeAll
 		rd.NumDevices = 0
 		// Pre-compute eligible in-cluster devices.

@@ -460,10 +460,26 @@ func (a *allocator) restoreAllocatingCounters(device cloudprovider.Device, poolK
 // lower-bound check: if even the minimum total consumption exceeds available
 // budget, no DFS path can succeed. This is only done for AllMode requests
 // as their eligible devices (both in-cluster and template) are pre-computed.
+// For FirstAvailable, at least one sub-request per request needs to be feasible.
 func (a *allocator) countersFeasible() bool {
 	for _, cd := range a.claimData {
 		for _, rd := range cd.Requests {
-			if rd.AllocationMode == resourcev1.DeviceAllocationModeAll {
+			if len(rd.SubRequests) > 0 {
+				anyFeasible := false
+				for i := range rd.SubRequests {
+					if rd.SubRequests[i].AllocationMode != resourcev1.DeviceAllocationModeAll {
+						anyFeasible = true
+						break
+					}
+					if a.allModeCountersFeasible(&rd.SubRequests[i]) {
+						anyFeasible = true
+						break
+					}
+				}
+				if !anyFeasible {
+					return false
+				}
+			} else if rd.AllocationMode == resourcev1.DeviceAllocationModeAll {
 				if !a.allModeCountersFeasible(&rd) {
 					return false
 				}
