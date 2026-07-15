@@ -54,24 +54,9 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
 			Name:      "pods_updated_total",
-			Help:      "Number of pod deletion cost annotations updated in total. Labeled by result (updated, skipped_unchanged, error). The error label counts per-pod patch failures only; per-node list-fetch failures are counted separately on nodes_errored_total.",
+			Help:      "Number of pod deletion cost annotations updated in total. Labeled by result (updated, skipped_unchanged, error). The error label counts per-pod patch failures.",
 		},
 		[]string{resultLabel},
-	)
-	// nodesErroredTotal counts nodes whose pod-list fetch failed in a reconcile
-	// cycle, so the controller never attempted to patch that node's pods. Kept
-	// as a separate counter (not another result-label on pods_updated_total) so
-	// operators can distinguish a flaky apiserver-list path from a flaky
-	// per-pod patch path.
-	nodesErroredTotal = opmetrics.NewPrometheusCounter(
-		crmetrics.Registry,
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: podDeletionCostSubsystem,
-			Name:      "nodes_errored_total",
-			Help:      "Number of nodes whose pod-list fetch failed during pod deletion cost reconcile. Per-pod patch failures are counted on pods_updated_total{result=error} instead.",
-		},
-		[]string{},
 	)
 	rankingDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,

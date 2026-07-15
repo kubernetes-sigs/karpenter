@@ -82,29 +82,15 @@ const (
 // podPatchStats aggregates per-pod patch outcomes across a single reconcile.
 // Carried by value through helpers so the outer reconcile can fold per-iteration
 // stats with += and emit metrics once at the end.
-//
-// nodeErrors counts nodes whose pod-list fetch failed (so we never even
-// attempted to patch their pods). podErrors counts individual per-pod patch
-// failures. The two are kept separate so the emitted metrics can distinguish a
-// flaky apiserver-list from a flaky pod-patch path; a single hiccup that drops
-// one node's list looks very different from N per-pod patch failures.
-//
-// Since RankNodes now pre-fetches per-node pods once and caches them on
-// NodeRank.Pods, a per-node fetch failure is currently caught upstream in
-// RankNodes and fails the whole reconcile; nodeErrors thus stays at 0 in
-// practice today. It is kept on the struct for future changes (e.g. lazy
-// per-node re-fetch) so the split-counter shape does not have to be reworked.
 type podPatchStats struct {
-	updated    int
-	skipped    int
-	nodeErrors int
-	podErrors  int
+	updated   int
+	skipped   int
+	podErrors int
 }
 
 func (s *podPatchStats) add(other podPatchStats) {
 	s.updated += other.updated
 	s.skipped += other.skipped
-	s.nodeErrors += other.nodeErrors
 	s.podErrors += other.podErrors
 }
 
@@ -151,14 +137,12 @@ func UpdatePodDeletionCosts(ctx context.Context, kubeClient client.Client, nodeR
 	podsUpdatedTotal.Add(float64(totals.updated), map[string]string{resultLabel: "updated"})
 	podsUpdatedTotal.Add(float64(totals.skipped), map[string]string{resultLabel: "skipped_unchanged"})
 	podsUpdatedTotal.Add(float64(totals.podErrors), map[string]string{resultLabel: "error"})
-	nodesErroredTotal.Add(float64(totals.nodeErrors), noLabels)
 
-	if totals.updated > 0 || totals.podErrors > 0 || totals.nodeErrors > 0 {
+	if totals.updated > 0 || totals.podErrors > 0 {
 		log.FromContext(ctx).WithValues(
 			"updated", totals.updated,
 			"skipped", totals.skipped,
 			"podErrors", totals.podErrors,
-			"nodeErrors", totals.nodeErrors,
 		).V(1).Info("pod deletion cost annotation update completed")
 	}
 	return aggErr
