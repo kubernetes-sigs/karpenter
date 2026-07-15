@@ -22,10 +22,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -736,6 +738,109 @@ var _ = Describe("Ranking", func() {
 			Expect(node0Rank).To(Equal(math.MinInt32))
 			Expect(node1Rank).To(Equal(math.MinInt32))
 			Expect(node2Rank).To(BeNumerically(">", math.MinInt32))
+		})
+
+		// Group A predicate: hasNonRSOwnedPods routes nodes hosting bare pods,
+		// StatefulSet-owned pods, or pods with any other non-RS/Job/DaemonSet
+		// owner to Group A. Job-owned and DaemonSet-owned pods (plus
+		// kube-system pods) must NOT trigger Group A. These are direct-helper
+		// checks because the reconcile-path annotation value doesn't
+		// distinguish Group A from Group A: both land at math.MinInt32.
+		DescribeTable("should _Edge_ classify non-RS-owned pods as Group A",
+			func(ownerRef *metav1.OwnerReference, expectGroupA bool) {
+				nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+					Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+				})
+				ExpectApplied(ctx, env.Client, nodePool)
+				for i := range nodeClaims {
+					ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				}
+
+				// Node 0: pod under test with the owner-ref variant.
+				podOpts := test.PodOptions{NodeName: nodes[0].Name}
+				if ownerRef != nil {
+					podOpts.OwnerReferences = []metav1.OwnerReference{*ownerRef}
+				}
+				ExpectApplied(ctx, env.Client, test.Pod(podOpts))
+
+				// Node 1: RS-owned control pod so Group C is populated and we can
+				// assert node 0 is classified DIFFERENTLY (rather than the
+				// no-nodes-partition-cleanly-still-passes false positive).
+				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name}))
+
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+				var stateNodes []*state.StateNode
+				for n := range cluster.Nodes() {
+					stateNodes = append(stateNodes, n)
+				}
+
+				ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(ranks).To(HaveLen(2))
+
+				var node0Rank int
+				for _, r := range ranks {
+					if r.Node.Node.Name == nodes[0].Name {
+						node0Rank = r.Rank
+					}
+				}
+				if expectGroupA {
+					Expect(node0Rank).To(Equal(math.MinInt32), "expected Group A (math.MinInt32) for non-RS-owned pod")
+				} else {
+					Expect(node0Rank).To(BeNumerically(">", math.MinInt32), "expected Group B/C rank (>MinInt32) for RS/Job/DaemonSet-owned or system pod")
+				}
+			},
+			Entry("bare pod (no owner references)", (*metav1.OwnerReference)(nil), true),
+			Entry("StatefulSet-owned pod",
+				&metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: types.UID("sts-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
+				true,
+			),
+			Entry("Job-owned pod is NOT Group A",
+				&metav1.OwnerReference{APIVersion: "batch/v1", Kind: "Job", Name: "job", UID: types.UID("job-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
+				false,
+			),
+			Entry("DaemonSet-owned pod is NOT Group A",
+				&metav1.OwnerReference{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "ds", UID: types.UID("ds-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
+				false,
+			),
+		)
+
+		It("should _Edge_ exclude kube-system bare pods from Group A", func() {
+			// hasNonRSOwnedPods explicitly skips kube-system, since system
+			// components (coredns, kube-proxy) are legitimately unowned and
+			// should not push their host node into Group A.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// Node 0: kube-system bare pod (unowned).
+			ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system"},
+				NodeName:   nodes[0].Name,
+			}))
+			// Node 1: RS-owned control.
+			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name}))
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(2))
+			for _, r := range ranks {
+				Expect(r.Rank).To(BeNumerically(">", math.MinInt32), "no node should reach Group A when the only unowned pod is in kube-system")
+			}
 		})
 	})
 
