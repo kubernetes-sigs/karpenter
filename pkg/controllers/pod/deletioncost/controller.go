@@ -145,6 +145,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	// (e.g. a rare taint bounce) still fire fast.
 	nodeRanks = filterNoOpNodes(nodeRanks)
 	nodeRanks = capNodeRanks(nodeRanks, maxNodesPerCycle)
+	// nodesRanked tracks the count that actually enters UpdatePodDeletionCosts
+	// — i.e. after filterNoOpNodes drops no-op nodes and capNodeRanks bounds
+	// the per-cycle mutations. Reporting the pre-filter partition size here
+	// would overstate work done on quiescent clusters.
+	nodesRanked.Set(float64(len(nodeRanks)), noLabels)
 
 	if err := UpdatePodDeletionCosts(ctx, c.kubeClient, nodeRanks); err != nil {
 		return reconciler.Result{}, fmt.Errorf("updating pod deletion costs, %w", err)

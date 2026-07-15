@@ -124,7 +124,6 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 		result = append(result, NodeRank{Node: node, HasDoNotDisrupt: true, Pods: nodePods[node.Name()]})
 	}
 
-	nodesRanked.Set(float64(len(result)), noLabels)
 	log.FromContext(ctx).V(1).WithValues(
 		"totalNodes", len(result),
 		"disruptedBlockedNodes", len(disruptedBlocked),
