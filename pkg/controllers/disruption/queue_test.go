@@ -100,7 +100,7 @@ var _ = Describe("Queue", func() {
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -134,7 +134,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -159,7 +159,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -190,7 +190,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -260,7 +260,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -313,7 +313,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -357,7 +357,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -394,7 +394,7 @@ var _ = Describe("Queue", func() {
 			}}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -403,7 +403,7 @@ var _ = Describe("Queue", func() {
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 			cmd2 := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -455,6 +455,81 @@ var _ = Describe("Queue", func() {
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
+		})
+		Context("Drift back-off", func() {
+			It("should back off the NodePool of a drift command that fails unrecoverably", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+				stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+				nct := scheduling.NewNodeClaimTemplate(nodePool)
+				nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+				cmd := &disruption.Command{
+					Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+					CreationTimestamp: env.Clock.Now(),
+					ID:                uuid.New(),
+					Results:           scheduling.Results{},
+					Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+					Replacements:      []*disruption.Replacement{{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}}},
+				}
+				Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeFalse())
+
+				// Step past the command timeout so the replacement never initializes -> unrecoverable failure.
+				env.Clock.Step(11 * time.Minute)
+				ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeTrue())
+			})
+			It("should reset a NodePool's back-off when a drift command succeeds", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+				stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+				// Pre-arm back-off so we can observe it being reset on success.
+				queue.NodePoolBackoff().Fail(nodePool.Name)
+				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeTrue())
+
+				// A delete-only drift command (no replacements) completes successfully on reconcile.
+				cmd := &disruption.Command{
+					Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+					CreationTimestamp: env.Clock.Now(),
+					ID:                uuid.New(),
+					Results:           scheduling.Results{},
+					Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+					Replacements:      nil,
+				}
+				Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+				ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
+
+				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeFalse())
+			})
+			It("should not touch drift back-off for non-drift (consolidation) commands", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+				stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+				// The pool is backed off from a prior drift failure.
+				queue.NodePoolBackoff().Fail(nodePool.Name)
+				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeTrue())
+
+				// A successful emptiness (consolidation) command for the same pool must not reset drift back-off.
+				consolidation := disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+				cmd := &disruption.Command{
+					Method:            disruption.NewEmptiness(consolidation),
+					CreationTimestamp: env.Clock.Now(),
+					ID:                uuid.New(),
+					Results:           scheduling.Results{},
+					Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+					Replacements:      nil,
+				}
+				Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+				ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
+
+				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeTrue())
+			})
 		})
 		Context("CalculateRetryDuration", func() {
 			DescribeTable("should calculate correct timeout based on queue length",
