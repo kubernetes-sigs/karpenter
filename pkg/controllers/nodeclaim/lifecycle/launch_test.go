@@ -22,10 +22,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -93,6 +95,33 @@ var _ = Describe("Launch", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
+	It("should emit InsufficientCapacityError events for the pods nominated to the nodeclaim", func() {
+		recorder.Reset()
+		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
+		nodeClaim := test.NodeClaim()
+		pod := test.Pod()
+		scheduledPod := test.Pod(test.PodOptions{NodeName: "scheduled-node"})
+		ExpectApplied(ctx, env.Client, nodeClaim, pod, scheduledPod)
+		cluster.UpdatePodToNodeClaimMapping(map[string][]*corev1.Pod{nodeClaim.Name: {pod, scheduledPod}})
+
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
+
+		var podEventNames []string
+		recorder.ForEachEvent(func(evt events.Event) {
+			if evt.Reason != events.InsufficientCapacityError {
+				return
+			}
+			if p, ok := evt.InvolvedObject.(*corev1.Pod); ok {
+				podEventNames = append(podEventNames, p.Name)
+				Expect(evt.Message).To(ContainSubstring(nodeClaim.Name))
+				Expect(evt.Message).To(ContainSubstring("all instance types were unavailable"))
+			}
+		})
+		// The event should only be emitted for the pod that is still unscheduled
+		Expect(podEventNames).To(ConsistOf(pod.Name))
 	})
 	It("should delete the nodeclaim if NodeClassNotReady is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("nodeClass isn't ready"))
