@@ -7914,20 +7914,25 @@ var _ = Describe("Allocator", func() {
 		})
 
 		It("should restore tightened topology requirements when a sub-request backtracks", func() {
-			// This exercises the topology-requirement backtrack path not constraint pins. Zone-a has 1 GPU,
-			// zone-b has 1 GPU; the NodeClaim spans both zones. prefer-2 slot 0 picks a zonal device, which
-			// tightens requirements to that zone and re-filters pools down to it; slot 1 then finds no second
-			// device in that zone (the other zone is filtered out), so prefer-2 fails. Backtracking restores the
-			// broad two-zone requirements and the full pool set, so fallback-1 can allocate a single device.
+			// Exercises the topology-requirement snapshot restore, not constraint pins. Zone-a has 1 GPU (model A),
+			// zone-b has 1 GPU (model B); the NodeClaim spans both zones. prefer-2 selects only model==A, so slot 0
+			// picks gpu-a0, tightening requirements to zone-a and re-filtering pools down to pool-zone-a; slot 1 finds
+			// no second model==A device there, so prefer-2 fails. fallback-1 selects only model==B, whose sole match gpu-b0
+			// lives in zone-b — reachable ONLY if the backtrack restored the broad two-zone requirements and the
+			// full pool set.
 			inClusterSlices = []dynamicresources.ResourceSlice{
 				makeAPISlice("s-a", "gpu.example.com", "pool-zone-a",
 					withZoneSelector("us-west-2a"),
-					withAPIDevices("gpu-a0"),
+					withAPIDevicesWithAttrs(deviceWithAttrs("gpu-a0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"model": {StringValue: ptr.To("A")},
+					})),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s-b", "gpu.example.com", "pool-zone-b",
 					withZoneSelector("us-west-2b"),
-					withAPIDevices("gpu-b0"),
+					withAPIDevicesWithAttrs(deviceWithAttrs("gpu-b0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"model": {StringValue: ptr.To("B")},
+					})),
 					withGeneration(1, 1),
 				),
 			}
@@ -7944,8 +7949,16 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("c1", resourcev1.DeviceRequest{
 				Name: "gpu-req",
 				FirstAvailable: []resourcev1.DeviceSubRequest{
-					{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
-					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+					// prefer-2 matches only gpu-a0 (zone-a) → pins zone-a, then fails for lack of a 2nd zone-a device.
+					{Name: "prefer-2", DeviceClassName: "gpu", Count: 2,
+						Selectors: []resourcev1.DeviceSelector{
+							{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "A"`}},
+						}},
+					// fallback-1 matches only gpu-b0 (zone-b) → succeeds ONLY if the zone-a pin was restored.
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1,
+						Selectors: []resourcev1.DeviceSelector{
+							{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "B"`}},
+						}},
 				},
 			})
 
@@ -7954,12 +7967,14 @@ var _ = Describe("Allocator", func() {
 			Expect(result).ToNot(BeNil())
 			result.Allocation.Commit(ctx)
 
-			// fallback-1 wins with a single device; the snapshot restore let it see the full pool set.
+			// fallback-1 must win with gpu-b0 (zone-b) — proving the snapshot restore reopened the zone-a-filtered
+			// pool set. A leaked (unrestored) zone-a pin would make gpu-b0 unreachable and this allocation fail.
 			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
 			Expect(meta).ToNot(BeNil())
 			devices := meta.Devices[unique.Make("it-1")]
 			Expect(devices).To(HaveLen(1))
 			Expect(devices[0].RequestName.String()).To(Equal("gpu-req/fallback-1"))
+			Expect(devices[0].DeviceID.Device.Value()).To(Equal("gpu-b0"))
 		})
 
 		It("should handle constraints scoped to specific sub-request", func() {
@@ -8385,13 +8400,15 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1),
 					func(s *resourcev1.ResourceSlice) {
-						// gpu-0 has full headroom; gpu-1 is nearly exhausted (only 10Gi left of 80Gi).
+						// gpu-0 has 50Gi total (fully free); gpu-1 has 80Gi total but is nearly exhausted below.
+						// gpu-0's headroom is deliberately tight: it fits the fallback's 30Gi only if the failed
+						// All-mode attempt's 30Gi deduction is unwound. A leaked deduction leaves just 20Gi free.
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-0",
 								AllowMultipleAllocations: ptr.To(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
-									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+									"gpu.example.com/vram": {Value: resource.MustParse("50Gi")},
 								},
 							},
 							resourcev1.Device{
@@ -8418,14 +8435,17 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("c1", resourcev1.DeviceRequest{
 				Name: "gpu-req",
 				FirstAvailable: []resourcev1.DeviceSubRequest{
-					// all-gpus: All mode requesting 30Gi from every matching device. gpu-0 fits (deducted), but
-					// gpu-1 has only 10Gi left → the sub-request fails and must unwind gpu-0's 30Gi deduction.
+					// all-gpus: All mode requesting 30Gi from every matching device. gpu-0 fits (30Gi deducted,
+					// 20Gi left), but gpu-1 has only 10Gi left → the sub-request fails and must unwind gpu-0's
+					// 30Gi deduction via restoreAllocatingCapacity.
 					{Name: "all-gpus", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll,
 						Capacity: &resourcev1.CapacityRequirements{Requests: map[resourcev1.QualifiedName]resource.Quantity{
 							"gpu.example.com/vram": resource.MustParse("30Gi"),
 						}}},
-					// fallback-small: 1 device wanting 30Gi. Only gpu-0 has room (gpu-1 still has 10Gi). If
-					// all-gpus leaked its gpu-0 deduction, gpu-0 would show 30Gi used and this could misreport.
+					// fallback-small: 1 device wanting 30Gi. gpu-1 has only 10Gi, so gpu-0 is the sole candidate.
+					// It fits ONLY if all-gpus' 30Gi was restored (50Gi free ≥ 30Gi). If the deduction leaked,
+					// gpu-0 has just 20Gi free < 30Gi, no device fits, and Allocate fails — making the leak fatal
+					// and observable rather than a silent residue the per-allocation ConsumedCapacity can't see.
 					{Name: "fallback-small", DeviceClassName: "gpu", Count: 1,
 						Capacity: &resourcev1.CapacityRequirements{Requests: map[resourcev1.QualifiedName]resource.Quantity{
 							"gpu.example.com/vram": resource.MustParse("30Gi"),
