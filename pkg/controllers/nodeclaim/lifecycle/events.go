@@ -20,10 +20,14 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/util/flowcontrol"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
+
+// InsufficientCapacityErrorPodRateLimiter is a pointer so it rate-limits across events
+var InsufficientCapacityErrorPodRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 
 func InsufficientCapacityErrorEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
 	return events.Event{
@@ -32,6 +36,17 @@ func InsufficientCapacityErrorEvent(nodeClaim *v1.NodeClaim, err error) events.E
 		Reason:         events.InsufficientCapacityError,
 		Message:        fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, truncateMessage(err.Error())),
 		DedupeValues:   []string{string(nodeClaim.UID)},
+	}
+}
+
+func InsufficientCapacityErrorPodEvent(pod *corev1.Pod, nodeClaim *v1.NodeClaim, err error) events.Event {
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.InsufficientCapacityError,
+		Message:        fmt.Sprintf("NodeClaim %s nominated for this pod failed to launch: %s", nodeClaim.Name, truncateMessage(err.Error())),
+		DedupeValues:   []string{string(pod.UID)},
+		RateLimiter:    InsufficientCapacityErrorPodRateLimiter,
 	}
 }
 
