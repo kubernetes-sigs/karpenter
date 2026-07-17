@@ -125,7 +125,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return client.ObjectKeyFromObject(p), nil
 	})
 
-	results, err := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods)
+	results, err := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods, nil)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("scheduling pods, %w", err)
 	}

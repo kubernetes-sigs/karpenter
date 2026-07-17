@@ -437,7 +437,7 @@ func (r Results) TruncateInstanceTypes(ctx context.Context, maxInstanceTypes int
 }
 
 //nolint:gocyclo
-func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
+func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod, attemptCounts map[types.UID]int) (Results, error) {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
@@ -458,7 +458,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		}
 	}
 
-	q := NewQueue(pods, s.cachedPodData)
+	q := NewQueue(pods, s.cachedPodData, attemptCounts)
 
 	startTime := s.clock.Now()
 	for {

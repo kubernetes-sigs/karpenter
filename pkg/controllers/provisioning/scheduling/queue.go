@@ -33,9 +33,11 @@ type Queue struct {
 	lastLen map[types.UID]int
 }
 
-// NewQueue constructs a new queue given the input pods, sorting them to optimize for bin-packing into nodes.
-func NewQueue(pods []*v1.Pod, podData map[types.UID]*PodData) *Queue {
-	sort.Slice(pods, byCPUAndMemoryDescending(pods, podData))
+// NewQueue constructs a new queue given the input pods, sorting them to ensure fairness
+// across scheduling loops. Pods with fewer prior scheduling attempts are evaluated first,
+// with CPU/memory descending as a tiebreaker within the same attempt count for bin-packing.
+func NewQueue(pods []*v1.Pod, podData map[types.UID]*PodData, attemptCounts map[types.UID]int) *Queue {
+	sort.Slice(pods, byAttemptsThenCPUAndMemory(pods, podData, attemptCounts))
 	return &Queue{
 		pods:    pods,
 		lastLen: map[types.UID]int{},
@@ -67,6 +69,19 @@ func (q *Queue) Push(pod *v1.Pod) {
 
 func (q *Queue) List() []*v1.Pod {
 	return q.pods
+}
+
+func byAttemptsThenCPUAndMemory(pods []*v1.Pod, podData map[types.UID]*PodData, attemptCounts map[types.UID]int) func(i int, j int) bool {
+	if len(attemptCounts) == 0 {
+		return byCPUAndMemoryDescending(pods, podData)
+	}
+	return func(i, j int) bool {
+		ci, cj := attemptCounts[pods[i].UID], attemptCounts[pods[j].UID]
+		if ci != cj {
+			return ci < cj
+		}
+		return byCPUAndMemoryDescending(pods, podData)(i, j)
+	}
 }
 
 func byCPUAndMemoryDescending(pods []*v1.Pod, podData map[types.UID]*PodData) func(i int, j int) bool {

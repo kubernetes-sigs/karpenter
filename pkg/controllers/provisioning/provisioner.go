@@ -89,6 +89,9 @@ type Provisioner struct {
 	cm                         *pretty.ChangeMonitor
 	clock                      clock.Clock
 	deviceAllocationController *deviceallocation.Controller
+	// attemptCounts tracks how many scheduling loops each pod has been evaluated in.
+	// Used to ensure fairness: pods with fewer attempts are scheduled first.
+	attemptCounts map[types.UID]int
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
@@ -105,6 +108,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		cm:                         pretty.NewChangeMonitor(),
 		clock:                      clock,
 		deviceAllocationController: deviceAllocationController,
+		attemptCounts:              make(map[types.UID]int),
 	}
 	return p
 }
@@ -415,10 +419,21 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	results, err := s.Solve(timeoutCtx, pods)
+	results, err := s.Solve(timeoutCtx, pods, p.attemptCounts)
 	// context errors are ignored because we want to finish provisioning for what has already been scheduled
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return scheduler.Results{}, err
+	}
+	// Update attempt counts: increment for all pods in this batch, then prune
+	// entries for pods no longer pending to prevent memory leaks.
+	pendingUIDs := sets.New(lo.Map(pods, func(po *corev1.Pod, _ int) types.UID { return po.UID })...)
+	for _, po := range pods {
+		p.attemptCounts[po.UID]++
+	}
+	for uid := range p.attemptCounts {
+		if !pendingUIDs.Has(uid) {
+			delete(p.attemptCounts, uid)
+		}
 	}
 	results = results.TruncateInstanceTypes(ctx, scheduler.MaxInstanceTypes)
 	reservedOfferingErrors := results.ReservedOfferingErrors()
