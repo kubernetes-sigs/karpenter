@@ -271,11 +271,11 @@ func (i *InstanceType) groupOfferingsByOverride() []AllocatableOfferings {
 func (i *InstanceType) computeAllocatable(capacityOverride corev1.ResourceList, overheadOverride *InstanceTypeOverhead) corev1.ResourceList {
 	capacity := i.Capacity
 	if len(capacityOverride) > 0 {
-		capacity = resources.Merge(i.Capacity, capacityOverride)
+		capacity = lo.Assign(i.Capacity, capacityOverride)
 	}
 	overhead := i.Overhead.Total()
 	if overheadOverride != nil {
-		overhead = resources.Merge(overhead, overheadOverride.Total())
+		overhead = lo.Assign(overhead, overheadOverride.Total())
 	}
 	allocatable := resources.Subtract(capacity, overhead)
 
