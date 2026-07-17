@@ -172,54 +172,13 @@ var _ = Describe("Instance Type", func() {
 		Expect(groups[0].Allocatable[extendedResource]).To(BeZero())
 		Expect(groups[0].Offerings).To(HaveLen(2)) // two base offerings
 
-		// Override allocatable: has extended resource, reduced memory due to overhead override (max of base and override)
+		// Override allocatable: has extended resource, reduced memory due to overhead override (replaces base)
 		Expect(groups[1].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
 		expectedOverrideMem := resource.MustParse("13Gi")
 		Expect(groups[1].Allocatable.Memory().Value()).To(BeNumerically("==", expectedOverrideMem.Value()))
 		slotQty := groups[1].Allocatable[extendedResource]
 		Expect(slotQty.Value()).To(BeNumerically("==", 12))
 		Expect(groups[1].Offerings).To(HaveLen(2)) // two override offerings
-	})
-	It("should not reduce overhead when base overhead is greater than override", func() {
-		extendedResource := v1.ResourceName("test.com/extended-slots")
-		it := cloudprovider.InstanceType{
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("4"),
-				v1.ResourceMemory: resource.MustParse("16Gi"),
-				v1.ResourcePods:   resource.MustParse("110"),
-			},
-			Overhead: &cloudprovider.InstanceTypeOverhead{
-				KubeReserved: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("100m"),
-					v1.ResourceMemory: resource.MustParse("5Gi"),
-				},
-			},
-			Offerings: []*cloudprovider.Offering{
-				{Available: true},
-				{
-					Available:        true,
-					CapacityOverride: v1.ResourceList{extendedResource: resource.MustParse("8")},
-					OverheadOverride: &cloudprovider.InstanceTypeOverhead{
-						SystemReserved: v1.ResourceList{v1.ResourceMemory: resource.MustParse("3Gi")},
-					},
-				},
-			},
-		}
-		groups := it.AllocatableOfferingsList()
-		Expect(groups).To(HaveLen(2))
-
-		// Base allocatable: memory = 16Gi - 5Gi = 11Gi
-		Expect(groups[0].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
-		expectedBaseMem := resource.MustParse("11Gi")
-		Expect(groups[0].Allocatable.Memory().Value()).To(BeNumerically("==", expectedBaseMem.Value()))
-
-		// Override allocatable: override overhead (3Gi) is less than base (5Gi), so base is preserved
-		// memory = 16Gi - 5Gi = 11Gi (NOT 16Gi - 3Gi = 13Gi)
-		Expect(groups[1].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
-		expectedOverrideMem := resource.MustParse("11Gi")
-		Expect(groups[1].Allocatable.Memory().Value()).To(BeNumerically("==", expectedOverrideMem.Value()))
-		slotQty := groups[1].Allocatable[extendedResource]
-		Expect(slotQty.Value()).To(BeNumerically("==", 8))
 	})
 	Context("AdjustedPrice", func() {
 		DescribeTable("should adjust price based overlay values",
