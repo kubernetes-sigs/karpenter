@@ -271,11 +271,16 @@ func (i *InstanceType) groupOfferingsByOverride() []AllocatableOfferings {
 func (i *InstanceType) computeAllocatable(capacityOverride corev1.ResourceList, overheadOverride *InstanceTypeOverhead) corev1.ResourceList {
 	capacity := i.Capacity
 	if len(capacityOverride) > 0 {
-		capacity = resources.Merge(i.Capacity, capacityOverride)
+		capacity = lo.Assign(i.Capacity, capacityOverride)
 	}
 	overhead := i.Overhead.Total()
 	if overheadOverride != nil {
-		overhead = resources.Merge(overhead, overheadOverride.Total())
+		overheadOverrideTotal := overheadOverride.Total()
+		for resource, overrideQuantity := range overheadOverrideTotal {
+			if baseQuantity, exists := overhead[resource]; !exists || overrideQuantity.Cmp(baseQuantity) > 0 {
+				overhead[resource] = overrideQuantity
+			}
+		}
 	}
 	allocatable := resources.Subtract(capacity, overhead)
 
@@ -478,8 +483,8 @@ type Offering struct {
 	// existing keys are replaced. If nil, the offering uses the base capacity as-is.
 	CapacityOverride corev1.ResourceList
 	// OverheadOverride specifies overhead overrides for this offering.
-	// Values are merged with the instance type's base overhead — new keys are added,
-	// existing keys are replaced. If nil, the offering uses the base overhead as-is.
+	// For each resource, the maximum of the base overhead and the override value is used,
+	// ensuring overhead can only increase (never decrease). If nil, the offering uses the base overhead as-is.
 	OverheadOverride *InstanceTypeOverhead
 
 	priceOverlayApplied bool
