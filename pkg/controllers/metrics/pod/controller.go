@@ -370,8 +370,9 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 	cond, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
 		return c.Type == corev1.PodScheduled
 	})
+	scheduled := ok && cond.Status == corev1.ConditionTrue
 	if pod.Status.Phase == corev1.PodPending {
-		if !ok || cond.Status != corev1.ConditionTrue {
+		if !scheduled {
 			// If the podScheduled condition does not exist, or it exists and is not set to true, we emit pod_current_unbound_time_seconds metric.
 			PodUnboundTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
 				podName:      pod.Name,
@@ -393,8 +394,9 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 		c.unscheduledPods.Insert(key)
 		return
 	}
-	if c.unscheduledPods.Has(key) && ok && cond.Status == corev1.ConditionTrue {
-		// Delete the unbound metric since the pod is now bound
+	// A pod can also become bound or terminal without PodScheduled ever reaching True (status-patch race).
+	if c.unscheduledPods.Has(key) && (scheduled || pod.Spec.NodeName != "" || podutils.IsTerminal(pod)) {
+		// The pod is no longer waiting to be bound, so delete the unbound metrics
 		PodUnboundTimeSeconds.Delete(map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
@@ -404,9 +406,13 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 			podNamespace: pod.Namespace,
 		})
 
-		PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
-		if !schedulableTime.IsZero() {
-			PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+		// Only observe the bound duration if PodScheduled actually transitioned to True -- otherwise
+		// cond.LastTransitionTime isn't a bind time and the metric would take bogus or negative values.
+		if scheduled {
+			PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+			if !schedulableTime.IsZero() {
+				PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+			}
 		}
 		c.unscheduledPods.Delete(key)
 	}
