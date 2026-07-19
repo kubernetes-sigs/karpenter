@@ -33,9 +33,47 @@ type Queue struct {
 	lastLen map[types.UID]int
 }
 
+func byFairnessCPUAndMemory(
+	pods []*v1.Pod,
+	podData map[types.UID]*PodData,
+	fairness *FairnessState,
+) func(i, j int) bool {
+
+	return func(i, j int) bool {
+		lhsPod := pods[i]
+		rhsPod := pods[j]
+
+		lhsAttempts := fairness.Attempts(lhsPod.UID)
+		rhsAttempts := fairness.Attempts(rhsPod.UID)
+
+		if lhsAttempts != rhsAttempts {
+			return lhsAttempts > rhsAttempts
+		}
+
+		lhs := podData[lhsPod.UID].Requests
+		rhs := podData[rhsPod.UID].Requests
+
+		cpuCmp := resources.Cmp(lhs[v1.ResourceCPU], rhs[v1.ResourceCPU])
+		if cpuCmp != 0 {
+			return cpuCmp > 0
+		}
+
+		memCmp := resources.Cmp(lhs[v1.ResourceMemory], rhs[v1.ResourceMemory])
+		if memCmp != 0 {
+			return memCmp > 0
+		}
+
+		if lhsPod.CreationTimestamp != rhsPod.CreationTimestamp {
+			return lhsPod.CreationTimestamp.Before(&rhsPod.CreationTimestamp)
+		}
+
+		return lhsPod.UID < rhsPod.UID
+	}
+}
+
 // NewQueue constructs a new queue given the input pods, sorting them to optimize for bin-packing into nodes.
-func NewQueue(pods []*v1.Pod, podData map[types.UID]*PodData) *Queue {
-	sort.Slice(pods, byCPUAndMemoryDescending(pods, podData))
+func NewQueue(pods []*v1.Pod, podData map[types.UID]*PodData, fairness *FairnessState) *Queue {
+	sort.Slice(pods, byFairnessCPUAndMemory(pods, podData, fairness))
 	return &Queue{
 		pods:    pods,
 		lastLen: map[types.UID]int{},

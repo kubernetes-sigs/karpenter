@@ -137,6 +137,7 @@ func NewScheduler(
 	clock clock.Clock,
 	volumeReqsByPod map[types.UID][]scheduling.Requirements,
 	allocator *dynamicresources.Allocator,
+	fairness *FairnessState,
 	opts ...Options,
 ) *Scheduler {
 	minValuesPolicy := option.Resolve(opts...).minValuesPolicy
@@ -192,6 +193,7 @@ func NewScheduler(
 		allocator:               allocator,
 		instanceTypes:           instanceTypes,
 		cachedResourceClaims:    map[types.NamespacedName]*resourcev1.ResourceClaim{},
+		fairness:                fairness,
 	}
 
 	npByName := lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) {
@@ -256,6 +258,7 @@ type Scheduler struct {
 	instanceTypes map[string][]*cloudprovider.InstanceType
 	// cachedResourceClaims memoizes ResourceClaim lookups for the duration of a single scheduling loop.
 	cachedResourceClaims map[types.NamespacedName]*resourcev1.ResourceClaim
+	fairness             *FairnessState
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -458,7 +461,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		}
 	}
 
-	q := NewQueue(pods, s.cachedPodData)
+	q := NewQueue(pods, s.cachedPodData, s.fairness)
 
 	startTime := s.clock.Now()
 	for {
@@ -484,9 +487,11 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 			}
 			// Update the cached podData since the pod was relaxed, and it could have changed its requirement set
 			s.updateCachedPodData(ctx, pod)
+			s.fairness.Increment(pod.UID)
 			q.Push(pod)
 		} else {
 			delete(podErrors, pod)
+			s.fairness.Delete(pod.UID)
 		}
 	}
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
