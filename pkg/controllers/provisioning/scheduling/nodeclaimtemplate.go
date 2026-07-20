@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
@@ -126,16 +125,6 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 			i.Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityTypes...))
 		}
 
-		if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {
-			i.Annotations = lo.Assign(i.Annotations, map[string]string{
-				v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
-			})
-		}
-		if foundCapacityOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); foundCapacityOverlay {
-			i.Annotations = lo.Assign(i.Annotations, map[string]string{
-				v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
-			})
-		}
 	}
 
 	// We'll assign any labels with known, concrete values at NodeClaim creation time. This includes any labels from the

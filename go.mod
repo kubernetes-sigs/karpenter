@@ -8,6 +8,7 @@ require (
 	github.com/awslabs/operatorpkg v0.0.0-20260708223819-4da4c353c5fa
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
+	github.com/google/cel-go v0.26.0
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936
 	github.com/google/uuid v1.6.0
 	github.com/imdario/mergo v0.3.16

@@ -63,7 +63,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	garbageCollectionController = nodeclaimgarbagecollection.NewController(env.Clock, env.Client, cloudProvider)
-	nodeClaimController = nodeclaimlifcycle.NewController(env.Clock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil)
+	nodeClaimController = nodeclaimlifcycle.NewController(env.Clock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil, nil)
 })
 
 var _ = AfterSuite(func() {

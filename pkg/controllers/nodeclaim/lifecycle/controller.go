@@ -78,7 +78,7 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, nodePoolState *nodepoolhealth.State, registrationHooks []cloudprovider.NodeLifecycleHook) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, nodePoolState *nodepoolhealth.State, registrationHooks []cloudprovider.NodeLifecycleHook, store overlayStore) *Controller {
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
@@ -86,7 +86,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 		nodePoolState: nodePoolState,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Hour, time.Minute), recorder: recorder, clock: clk},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Hour, time.Minute), recorder: recorder, clock: clk, store: store},
 		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, npState: nodePoolState, registrationHooks: registrationHooks, clock: clk},
 		initialization: &Initialization{kubeClient: kubeClient, clock: clk},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, npState: nodePoolState},
