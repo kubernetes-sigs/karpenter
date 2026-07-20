@@ -31,6 +31,7 @@ const (
 	// provisioning/scheduling
 	FailedScheduling          = "FailedScheduling"
 	NoCompatibleInstanceTypes = "NoCompatibleInstanceTypes"
+	NoCapacity                = "NoCapacity"
 	Nominated                 = "Nominated"
 
 	// node/health
