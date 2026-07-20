@@ -49,6 +49,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -302,11 +303,7 @@ func ExpectFinalizersRemovedFromList(ctx context.Context, c client.Client, objec
 	for _, list := range objectLists {
 		Expect(c.List(ctx, list)).To(Succeed())
 		Expect(meta.EachListItem(list, func(o runtime.Object) error {
-			obj := o.(client.Object)
-			stored := obj.DeepCopyObject().(client.Object)
-			obj.SetFinalizers([]string{})
-			Expect(client.IgnoreNotFound(c.Patch(ctx, obj, client.MergeFrom(stored)))).To(Succeed())
-			return nil
+			return client.IgnoreNotFound(removeFinalizersWithRetry(ctx, c, o.(client.Object)))
 		})).To(Succeed())
 	}
 }
@@ -314,11 +311,22 @@ func ExpectFinalizersRemovedFromList(ctx context.Context, c client.Client, objec
 func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...client.Object) {
 	GinkgoHelper()
 	for _, obj := range objs {
-		Expect(client.IgnoreNotFound(c.Get(ctx, client.ObjectKeyFromObject(obj), obj))).To(Succeed())
+		Expect(client.IgnoreNotFound(removeFinalizersWithRetry(ctx, c, obj))).To(Succeed())
+	}
+}
+
+// removeFinalizersWithRetry clears finalizers on obj, re-fetching and retrying
+// on conflict. This makes the helper safe to call concurrently with controller
+// reconciles that may be updating the same object.
+func removeFinalizersWithRetry(ctx context.Context, c client.Client, obj client.Object) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+			return err
+		}
 		stored := obj.DeepCopyObject().(client.Object)
 		obj.SetFinalizers([]string{})
-		Expect(client.IgnoreNotFound(c.Patch(ctx, obj, client.MergeFrom(stored)))).To(Succeed())
-	}
+		return c.Patch(ctx, obj, client.MergeFrom(stored))
+	})
 }
 
 func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
