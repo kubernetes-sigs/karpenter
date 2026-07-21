@@ -72,6 +72,20 @@ var (
 			CapacityTypeLabel,
 		},
 	)
+	PodsDisruptedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: PodSubsystem,
+			Name:      "disrupted_total",
+			Help:      "Number of pods disrupted in total by Karpenter. Labeled by reason the pod was disrupted and the owning nodepool.",
+		},
+		[]string{
+			ReasonLabel,
+			NodePoolLabel,
+			CapacityTypeLabel,
+		},
+	)
 	NodesCreatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{

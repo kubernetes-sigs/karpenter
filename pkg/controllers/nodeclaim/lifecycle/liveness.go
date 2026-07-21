@@ -37,6 +37,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 )
 
 type Liveness struct {
@@ -155,5 +156,14 @@ func (l *Liveness) deleteNodeClaimForTimeout(ctx context.Context, timeout time.D
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	})
+	if pods, err := nodeutils.GetReschedulablePods(ctx, l.kubeClient, nodeClaim.Status.NodeName); err != nil {
+		log.FromContext(ctx).Error(err, "failed getting reschedulable pods for timed out nodeclaim")
+	} else {
+		metrics.PodsDisruptedTotal.Add(float64(len(pods)), map[string]string{
+			metrics.ReasonLabel:       timeout.reason,
+			metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+		})
+	}
 	return nil
 }

@@ -114,6 +114,15 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1.CapacityTypeLabelKey],
 		})
+		if pods, err := nodeutils.GetReschedulablePods(ctx, c.kubeClient, nodeClaims[i].Status.NodeName); err != nil {
+			log.FromContext(ctx).Error(err, "failed getting reschedulable pods for garbage collected nodeclaim")
+		} else {
+			metrics.PodsDisruptedTotal.Add(float64(len(pods)), map[string]string{
+				metrics.ReasonLabel:       "garbage_collected",
+				metrics.NodePoolLabel:     nodeClaims[i].Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1.CapacityTypeLabelKey],
+			})
+		}
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconciler.Result{}, err

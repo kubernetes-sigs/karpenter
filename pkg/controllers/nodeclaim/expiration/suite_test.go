@@ -100,6 +100,28 @@ var _ = Describe("Expiration", func() {
 				metrics.NodePoolLabel: nodePool.Name,
 			})
 		})
+		It("should fire a karpenter_pods_disrupted_total metric when expired with pods", func() {
+			nodeClaim.Status.NodeName = node.Name
+			pod := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+
+			// step forward to make the node expired
+			fakeClock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel:   metrics.ExpiredReason,
+				metrics.NodePoolLabel: nodePool.Name,
+			})
+			ExpectMetricCounterValue(metrics.PodsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel:   metrics.ExpiredReason,
+				metrics.NodePoolLabel: nodePool.Name,
+			})
+		})
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
 			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeSpot
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
