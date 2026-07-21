@@ -108,7 +108,7 @@ var _ = Describe("Expiration", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 
 			// step forward to make the node expired
-			fakeClock.Step(60 * time.Second)
+			env.Clock.Step(60 * time.Second)
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
