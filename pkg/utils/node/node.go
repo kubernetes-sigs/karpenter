@@ -244,4 +244,3 @@ func GetReschedulablePods(ctx context.Context, kubeClient client.Client, nodeNam
 	}
 	return pods, nil
 }
-

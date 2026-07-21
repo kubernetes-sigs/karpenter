@@ -35,8 +35,8 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // Expiration is a nodeclaim controller that deletes expired nodeclaims based on expireAfter
