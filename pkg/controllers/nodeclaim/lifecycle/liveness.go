@@ -161,7 +161,7 @@ func (l *Liveness) deleteNodeClaimForTimeout(ctx context.Context, timeout time.D
 		log.FromContext(ctx).Error(err, "failed getting reschedulable pods for timed out nodeclaim")
 	} else {
 		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(pods)), map[string]string{
-			metrics.ReasonLabel:       timeout.reason,
+			metrics.ReasonLabel:       reason,
 			metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 		})
