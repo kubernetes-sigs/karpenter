@@ -20,13 +20,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
 
 // Providers can override individual performance thresholds without patching the
-// tests, via per-test-case JSON (KARPENTER_PERF_THRESHOLDS_FILE or inline
-// KARPENTER_PERF_THRESHOLDS), keyed by "<testCase>/<phase>", e.g.
+// tests, via per-test-case JSON in the KARPENTER_PERF_THRESHOLDS environment
+// variable, keyed by "<testCase>/<phase>", e.g.
 //   {"basic/scaleOut": {"memory_mb": 400, "cpu_cores": 1.2, "total_time_minutes": 3}}
 // An override wins for the metric it sets; otherwise the inline base default is
 // used.
@@ -47,26 +48,19 @@ var (
 	overridesErr  error
 )
 
-// loadOverrides parses the override table once. KARPENTER_PERF_THRESHOLDS_FILE
-// (a path) takes precedence over KARPENTER_PERF_THRESHOLDS (inline JSON). When
-// neither is set the table is empty and all thresholds use their defaults.
+// loadOverrides parses the override table once from the KARPENTER_PERF_THRESHOLDS
+// environment variable. When it is unset the table is empty and all thresholds
+// use their defaults.
 func loadOverrides() (map[string]thresholdOverride, error) {
 	overridesOnce.Do(func() {
-		var raw []byte
-		if path, ok := os.LookupEnv("KARPENTER_PERF_THRESHOLDS_FILE"); ok && path != "" {
-			raw, overridesErr = os.ReadFile(path)
-			if overridesErr != nil {
-				overridesErr = fmt.Errorf("reading KARPENTER_PERF_THRESHOLDS_FILE %q: %w", path, overridesErr)
-				return
-			}
-		} else if inline, ok := os.LookupEnv("KARPENTER_PERF_THRESHOLDS"); ok && inline != "" {
-			raw = []byte(inline)
-		}
-		if len(raw) == 0 {
+		inline, ok := os.LookupEnv("KARPENTER_PERF_THRESHOLDS")
+		if !ok || inline == "" {
 			overrides = map[string]thresholdOverride{}
 			return
 		}
-		if overridesErr = json.Unmarshal(raw, &overrides); overridesErr != nil {
+		dec := json.NewDecoder(strings.NewReader(inline))
+		dec.DisallowUnknownFields()
+		if overridesErr = dec.Decode(&overrides); overridesErr != nil {
 			overridesErr = fmt.Errorf("parsing performance threshold overrides: %w", overridesErr)
 		}
 	})
