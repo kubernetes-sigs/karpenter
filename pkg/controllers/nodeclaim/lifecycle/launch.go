@@ -33,7 +33,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/metrics"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -97,6 +97,15 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 				metrics.ConsolidationPolicyLabel: "",
 				metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 			})
+			if pods, err := nodeutils.ReschedulablePods(ctx, l.kubeClient, nodeClaim.Status.NodeName); err != nil {
+				log.FromContext(ctx).Error(err, "failed getting reschedulable pods for failed nodeclaim")
+			} else {
+				metrics.PodsDisruptionInitiatedTotal.Add(float64(len(pods)), map[string]string{
+					metrics.ReasonLabel:       "insufficient_capacity",
+					metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+					metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				})
+			}
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
 			log.FromContext(ctx).Error(err, "failed launching nodeclaim")
@@ -110,6 +119,15 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 				metrics.ConsolidationPolicyLabel: "",
 				metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 			})
+			if pods, err := nodeutils.ReschedulablePods(ctx, l.kubeClient, nodeClaim.Status.NodeName); err != nil {
+				log.FromContext(ctx).Error(err, "failed getting reschedulable pods for failed nodeclaim")
+			} else {
+				metrics.PodsDisruptionInitiatedTotal.Add(float64(len(pods)), map[string]string{
+					metrics.ReasonLabel:       "nodeclass_not_ready",
+					metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+					metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				})
+			}
 			return nil, nil
 		default:
 			var createError *cloudprovider.CreateError

@@ -35,8 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -158,5 +157,14 @@ func (l *Liveness) deleteNodeClaimForTimeout(ctx context.Context, timeout time.D
 		metrics.ConsolidationPolicyLabel: "",
 		metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 	})
+	if pods, err := nodeutils.ReschedulablePods(ctx, l.kubeClient, nodeClaim.Status.NodeName); err != nil {
+		log.FromContext(ctx).Error(err, "failed getting reschedulable pods for timed out nodeclaim")
+	} else {
+		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(pods)), map[string]string{
+			metrics.ReasonLabel:       timeout.reason,
+			metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+		})
+	}
 	return nil
 }
