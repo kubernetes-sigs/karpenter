@@ -59,6 +59,8 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+	Expect(env.Client.DeleteAllOf(ctx, &autoscalingv1beta1.CapacityBuffer{}, client.InNamespace("default"))).To(Succeed())
+	Expect(env.Client.DeleteAllOf(ctx, &v1.PodTemplate{}, client.InNamespace("default"))).To(Succeed())
 })
 
 var _ = AfterSuite(func() {
@@ -583,7 +585,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectApplied(ctx, env.Client, pt, cb)
 			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
 
-			Expect(cache.GetAll()).To(HaveLen(3))
+			Expect(cache.GetAll(ctx)).To(HaveLen(3))
 		})
 
 		It("should remove the cache entry when resolution fails with NotFound", func() {
@@ -605,14 +607,14 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
 			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
-			Expect(cache.GetAll()).To(HaveLen(2))
+			Expect(cache.GetAll(ctx)).To(HaveLen(2))
 
 			// Delete the referenced template so resolution now fails with NotFound.
 			// The buffer is no longer ready for provisioning, so its stale entry
 			// must be dropped from the cache.
 			ExpectDeleted(ctx, env.Client, pt)
 			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
-			Expect(cache.GetAll()).To(BeEmpty())
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
 		})
 
 		It("should not touch the cache when a buffer has neither ref set", func() {
@@ -628,7 +630,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectApplied(ctx, env.Client, cb)
 			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
 
-			Expect(cache.GetAll()).To(BeEmpty())
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
 		})
 	})
 

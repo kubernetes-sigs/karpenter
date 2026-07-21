@@ -27,7 +27,6 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
@@ -177,9 +176,6 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
-		if err := mgr.Add(virtualpods.NewCacheWarmer(virtualPodCache)); err != nil {
-			log.FromContext(ctx).Error(err, "failed to add virtual pod cache warmer")
-		}
 		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p, virtualPodCache))
 		if !options.FromContext(ctx).DisableClusterStateObservability {
 			// Emit the standard operator_status_condition_* metrics for CapacityBuffer.

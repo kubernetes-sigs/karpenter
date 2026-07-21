@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +38,11 @@ type Cache struct {
 	capacityBufferToPods map[string][]*corev1.Pod
 	// mutex protects capacityBufferToPods
 	mutex sync.RWMutex
+	// hydrateMu serializes the one-time lazy hydration
+	hydrateMu sync.Mutex
+	// warmed is the lock-free fast path for GetAll. It flips to true only AFTER
+	// hydration has populated the cache.
+	warmed atomic.Bool
 }
 
 // UpdateEntry refreshes the cached virtual pods for a buffer using an
@@ -60,7 +66,7 @@ func (v *Cache) RemoveEntry(namespace, name string) {
 	delete(v.capacityBufferToPods, bufferKey(namespace, name))
 }
 
-func (v *Cache) HydrateCache(ctx context.Context) error {
+func (v *Cache) hydrateCache(ctx context.Context) error {
 	buffers, err := listBuffersReadyForProvisioning(ctx, v.kubeClient)
 	if err != nil {
 		return err
@@ -85,7 +91,8 @@ func (v *Cache) HydrateCache(ctx context.Context) error {
 // GetAll returns a snapshot of every cached virtual pod. The returned pod
 // objects are NOT deep copied, for performance; callers MUST treat them as
 // read-only and never mutate them.
-func (v *Cache) GetAll() []*corev1.Pod {
+func (v *Cache) GetAll(ctx context.Context) []*corev1.Pod {
+	v.ensureHydrated(ctx)
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
 	ans := make([]*corev1.Pod, 0)
@@ -95,45 +102,32 @@ func (v *Cache) GetAll() []*corev1.Pod {
 	return ans
 }
 
+// ensureHydrated performs the one-time lazy hydration of the cache.
+func (v *Cache) ensureHydrated(ctx context.Context) {
+	if v.warmed.Load() {
+		return
+	}
+	v.hydrateMu.Lock()
+	defer v.hydrateMu.Unlock()
+	// Re-check under the lock: another caller may have hydrated while we blocked.
+	if v.warmed.Load() {
+		return
+	}
+	if err := v.hydrateCache(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "failed to hydrate virtual pod cache")
+		return
+	}
+	// Only mark warmed after the cache is populated so the fast path above never
+	// hands back an empty cache.
+	v.warmed.Store(true)
+}
+
 func NewVirtualPodCache(kubeClient client.Client) *Cache {
 	return &Cache{
 		kubeClient:           kubeClient,
 		capacityBufferToPods: map[string][]*corev1.Pod{},
 		mutex:                sync.RWMutex{},
 	}
-}
-
-// CacheWarmer hydrates the virtual pod cache during the manager's warmup phase.
-// controller-runtime runs warmup runnables after informer caches have synced but
-// before any leader-elected runnable, and it blocks until warmup completes.
-// Registering the warmer therefore guarantees the cache is populated before the
-// provisioner or disruption controllers ever read from it, closing the
-// provisioning cold-start window without racing controller reconciles.
-type CacheWarmer struct {
-	cache *Cache
-}
-
-var _ interface {
-	Warmup(context.Context) error
-} = (*CacheWarmer)(nil)
-
-// NewCacheWarmer returns a manager.Runnable that hydrates the given cache during
-// manager warmup.
-func NewCacheWarmer(cache *Cache) *CacheWarmer {
-	return &CacheWarmer{cache: cache}
-}
-
-func (w *CacheWarmer) Warmup(ctx context.Context) error {
-	if err := w.cache.HydrateCache(ctx); err != nil {
-		log.FromContext(ctx).Error(err, "failed to hydrate virtual pod cache during warmup")
-	}
-	return nil
-}
-
-// Start is a no-op. The cache is populated in Warmup; Start exists only to
-// satisfy manager.Runnable so the warmer can be registered with the manager.
-func (w *CacheWarmer) Start(_ context.Context) error {
-	return nil
 }
 
 // bufferKey builds the map key that identifies a CapacityBuffer's cache entry.

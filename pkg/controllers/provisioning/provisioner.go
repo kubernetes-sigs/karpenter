@@ -219,7 +219,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	// run PVC topology checks on synthetic pods or pollute cluster state with
 	// their "decisions". Gated by the feature flag.
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
-		pods = append(pods, p.virtualPodCache.GetAll()...)
+		pods = append(pods, p.virtualPodCache.GetAll(ctx)...)
 	}
 	return pods, nil
 }
