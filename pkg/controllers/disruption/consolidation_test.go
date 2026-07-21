@@ -3540,6 +3540,172 @@ var _ = Describe("Consolidation", func() {
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
+		It("can delete nodes when a pending pod from another NodePool with incompatible taints exists", func() {
+			// NodePool A has taint nodepool=a:NoSchedule, NodePool B has taint nodepool=b:NoSchedule.
+			// A pending pod tolerates only nodepool=a — it should not block consolidation of NodePool B's node.
+			nodepoolA := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{{Key: "nodepool", Value: "a", Effect: corev1.TaintEffectNoSchedule}},
+						},
+					},
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+						Budgets:             []v1.Budget{{Nodes: "100%"}},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
+					},
+				},
+			})
+			nodepoolB := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{{Key: "nodepool", Value: "b", Effect: corev1.TaintEffectNoSchedule}},
+						},
+					},
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+						Budgets:             []v1.Budget{{Nodes: "100%"}},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
+					},
+				},
+			})
+			nodeclaimB, nodeB := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodepoolB.Name,
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeB.Spec.Taints = append(nodeB.Spec.Taints, corev1.Taint{Key: "nodepool", Value: "b", Effect: corev1.TaintEffectNoSchedule})
+			nodeclaimB.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+			// pending pod that only tolerates NodePool A's taint — incompatible with NodePool B
+			pendingPod := test.UnschedulablePod(test.PodOptions{
+				Tolerations: []corev1.Toleration{{Key: "nodepool", Value: "a", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual}},
+			})
+
+			ExpectApplied(ctx, env.Client, nodepoolA, nodepoolB, nodeclaimB, nodeB, pendingPod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodeB}, []*v1.NodeClaim{nodeclaimB})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// pending pod from NodePool A must not block deletion of NodePool B's empty node
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeclaimB)
+
+			ExpectNotFound(ctx, env.Client, nodeclaimB, nodeB)
+
+			// pending pod is still pending
+			pendingPod = ExpectPodExists(ctx, env.Client, pendingPod.Name, pendingPod.Namespace)
+			Expect(pendingPod.Spec.NodeName).To(BeEmpty())
+		})
+		It("can delete nodes when a pod from a draining node in another NodePool with incompatible taints exists", func() {
+			// Same cross-NodePool setup, but the incompatible pod is on a deleting (draining) node from NodePool A.
+			nodepoolA := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{{Key: "nodepool", Value: "a", Effect: corev1.TaintEffectNoSchedule}},
+						},
+					},
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+						Budgets:             []v1.Budget{{Nodes: "100%"}},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
+					},
+				},
+			})
+			nodepoolB := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{{Key: "nodepool", Value: "b", Effect: corev1.TaintEffectNoSchedule}},
+						},
+					},
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+						Budgets:             []v1.Budget{{Nodes: "100%"}},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
+					},
+				},
+			})
+
+			// NodePool A's node is being deleted (draining)
+			nodeclaimA, nodeA := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodepoolA.Name,
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeA.Spec.Taints = append(nodeA.Spec.Taints, corev1.Taint{Key: "nodepool", Value: "a", Effect: corev1.TaintEffectNoSchedule})
+
+			// NodePool B's node is idle and consolidatable
+			nodeclaimB, nodeB := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodepoolB.Name,
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeB.Spec.Taints = append(nodeB.Spec.Taints, corev1.Taint{Key: "nodepool", Value: "b", Effect: corev1.TaintEffectNoSchedule})
+			nodeclaimB.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+			// pod on the draining NodePool A node — tolerates only nodepool=a, not nodepool=b
+			drainingPod := test.Pod(test.PodOptions{
+				Tolerations: []corev1.Toleration{{Key: "nodepool", Value: "a", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual}},
+			})
+
+			ExpectApplied(ctx, env.Client, nodepoolA, nodepoolB, nodeclaimA, nodeA, nodeclaimB, nodeB, drainingPod)
+			ExpectManualBinding(ctx, env.Client, drainingPod, nodeA)
+
+			// Initialize nodeA before marking it for deletion so the cluster state reflects it as deleting
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodeA, nodeB}, []*v1.NodeClaim{nodeclaimA, nodeclaimB})
+
+			// Mark NodePool A's nodeclaim as deleting
+			Expect(env.Client.Delete(ctx, nodeclaimA)).To(Succeed())
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeA))
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeclaimA))
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// the pod on the draining NodePool A node must not block deletion of NodePool B's empty node
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeclaimB)
+
+			ExpectNotFound(ctx, env.Client, nodeclaimB, nodeB)
+		})
 	})
 	Context("TTL", func() {
 		var nodeClaims []*v1.NodeClaim
