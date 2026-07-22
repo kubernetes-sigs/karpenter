@@ -35,6 +35,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -88,6 +89,15 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	})
+	if pods, err := nodeutils.GetReschedulablePods(ctx, c.kubeClient, nodeClaim.Status.NodeName); err != nil {
+		log.FromContext(ctx).Error(err, "failed getting reschedulable pods for expired nodeclaim")
+	} else {
+		metrics.PodsDisruptedTotal.Add(float64(len(pods)), map[string]string{
+			metrics.ReasonLabel:       strings.ToLower(metrics.ExpiredReason),
+			metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+		})
+	}
 	// We sleep here after the delete operation since we want to ensure that we are able to read our own writes so that
 	// we avoid duplicating metrics and log lines due to quick re-queues.
 	// USE CAUTION when determining whether to increase this timeout or remove this line

@@ -225,3 +225,22 @@ func NodeClaimEventHandler(c client.Client) handler.EventHandler {
 		})
 	})
 }
+
+// GetReschedulablePods grabs all pods currently bound to the passed nodeName and filters by IsReschedulable
+func GetReschedulablePods(ctx context.Context, kubeClient client.Client, nodeName string) ([]*corev1.Pod, error) {
+	if nodeName == "" {
+		return nil, nil
+	}
+	var podList corev1.PodList
+	if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
+		return nil, fmt.Errorf("listing pods, %w", err)
+	}
+	var pods []*corev1.Pod
+	for i := range podList.Items {
+		p := &podList.Items[i]
+		if pod.IsReschedulable(p) {
+			pods = append(pods, p)
+		}
+	}
+	return pods, nil
+}

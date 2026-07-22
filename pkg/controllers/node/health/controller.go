@@ -176,6 +176,15 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
 	})
+	if pods, err := nodeutils.GetReschedulablePods(ctx, c.kubeClient, node.Name); err != nil {
+		log.FromContext(ctx).Error(err, "failed getting reschedulable pods for unhealthy node")
+	} else {
+		metrics.PodsDisruptedTotal.Add(float64(len(pods)), map[string]string{
+			metrics.ReasonLabel:       metrics.UnhealthyReason,
+			metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+		})
+	}
 	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
 		Condition:                 pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
