@@ -31,5 +31,9 @@ func TestContextWithLogger(t zaptest.TestingT) context.Context {
 		zap.AddCaller(),
 		zap.Development(),
 	)
-	return log.IntoContext(context.Background(), zapr.NewLogger(zaptest.NewLogger(t, opts)))
+
+	// Wrap the existing zaptest.TestingT with a suppressor for any panics that occur due to logging after test completion.
+	safeT := newSafeTestingT(t)
+	zapLogger := zaptest.NewLogger(safeT, opts)
+	return log.IntoContext(context.Background(), zapr.NewLogger(zapLogger))
 }
