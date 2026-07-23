@@ -525,6 +525,26 @@ spec:
                   x-kubernetes-list-map-keys:
                     - type
                   x-kubernetes-list-type: map
+                nodeClaimConditions:
+                  description: NodeClaimConditions contains summary of nodeclaim conditions with this nodepool
+                  items:
+                    description: NodeClaimConditions is a summary of nodeclaim conditions with this nodepool
+                    properties:
+                      conditionType:
+                        description: conditionType is the type of the condition
+                        type: string
+                      count:
+                        description: count is the number of nodeclaims in this nodepool with this condition
+                        format: int64
+                        type: integer
+                    required:
+                      - conditionType
+                      - count
+                    type: object
+                  type: array
+                  x-kubernetes-list-map-keys:
+                    - conditionType
+                  x-kubernetes-list-type: map
                 nodeClassObservedGeneration:
                   description: |-
                     NodeClassObservedGeneration represents the observed nodeClass generation for referenced nodeClass. If this does not match
