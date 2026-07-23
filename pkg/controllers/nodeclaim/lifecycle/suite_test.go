@@ -41,6 +41,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -57,6 +58,7 @@ var (
 	nodeClaimController *nodeclaimlifecycle.Controller
 	env                 *test.Environment
 	cloudProvider       *fake.CloudProvider
+	cluster             *state.Cluster
 	recorder            *test.EventRecorder
 	npState             *nodepoolhealth.State
 )
@@ -85,8 +87,9 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 
 	cloudProvider = fake.NewCloudProvider()
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	npState = nodepoolhealth.NewState()
-	nodeClaimController = nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, npState, nil)
+	nodeClaimController = nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider, recorder, cluster, npState, nil)
 })
 
 var _ = AfterSuite(func() {
@@ -97,6 +100,7 @@ var _ = AfterEach(func() {
 	env.Clock.SetTime(time.Now())
 	ExpectCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
+	cluster.Reset()
 })
 
 var _ = Describe("Finalizer", func() {

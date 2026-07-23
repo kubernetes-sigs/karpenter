@@ -558,6 +558,19 @@ func (c *Cluster) PodNodeClaimMapping(podKey types.NamespacedName) string {
 	return ""
 }
 
+// NominatedPodsForNodeClaim returns the keys of the pods that were simulated to schedule against the given nodeClaim
+// during the most recent scheduling decision for each pod
+func (c *Cluster) NominatedPodsForNodeClaim(nodeClaimName string) []types.NamespacedName {
+	var podKeys []types.NamespacedName
+	c.podToNodeClaim.Range(func(k, v any) bool {
+		if v.(string) == nodeClaimName {
+			podKeys = append(podKeys, k.(types.NamespacedName))
+		}
+		return true
+	})
+	return podKeys
+}
+
 // PodSchedulingSuccessTimeRegistrationHealthyCheck returns when Karpenter first thought it could schedule a pod in its scheduling simulation.
 // This returns 0, false if the pod was never considered in scheduling as a pending pod.
 func (c *Cluster) PodSchedulingSuccessTimeRegistrationHealthyCheck(podKey types.NamespacedName) time.Time {
