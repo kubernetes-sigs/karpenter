@@ -170,6 +170,10 @@ func driverFromSC(ctx context.Context, kubeClient client.Client, storageClassNam
 func driverFromVolume(ctx context.Context, kubeClient client.Client, volumeName string) (string, error) {
 	var pv v1.PersistentVolume
 	if err := kubeClient.Get(ctx, client.ObjectKey{Name: volumeName}, &pv); err != nil {
+		if errors.IsNotFound(err) {
+			log.FromContext(ctx).WithValues("PersistentVolume", volumeName).V(1).Info("failed tracking CSI volume limits, PersistentVolume not found; ignoring volume")
+			return "", nil
+		}
 		return "", err
 	}
 	if pv.Spec.CSI != nil {
