@@ -273,3 +273,46 @@ var _ = Describe("Budgets", func() {
 		})
 	})
 })
+
+var _ = Describe("DriftPolicy Validation", func() {
+	var nodePool *NodePool
+
+	BeforeEach(func() {
+		nodePool = test.NodePool()
+	})
+
+	It("should allow a valid topologyKey", func() {
+		nodePool.Spec.Disruption.DriftPolicy = &DriftPolicy{
+			TopologyKey: "topology.kubernetes.io/zone",
+		}
+		Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+	})
+
+	It("should allow a valid topologyKey with maxConcurrentPerDomain", func() {
+		nodePool.Spec.Disruption.DriftPolicy = &DriftPolicy{
+			TopologyKey:            "topology.kubernetes.io/zone",
+			MaxConcurrentPerDomain: "3",
+		}
+		Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+	})
+
+	It("should allow a percentage maxConcurrentPerDomain", func() {
+		nodePool.Spec.Disruption.DriftPolicy = &DriftPolicy{
+			TopologyKey:            "topology.kubernetes.io/zone",
+			MaxConcurrentPerDomain: "50%",
+		}
+		Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+	})
+
+	It("should reject an invalid topologyKey", func() {
+		nodePool.Spec.Disruption.DriftPolicy = &DriftPolicy{
+			TopologyKey: "INVALID KEY WITH SPACES",
+		}
+		Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
+	})
+
+	It("should allow nil DriftPolicy", func() {
+		nodePool.Spec.Disruption.DriftPolicy = nil
+		Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+	})
+})
