@@ -393,7 +393,10 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 		c.unscheduledPods.Insert(key)
 		return
 	}
-	if c.unscheduledPods.Has(key) && ok && cond.Status == corev1.ConditionTrue {
+	if !c.unscheduledPods.Has(key) {
+		return
+	}
+	if ok && cond.Status == corev1.ConditionTrue {
 		// Delete the unbound metric since the pod is now bound
 		PodUnboundTimeSeconds.Delete(map[string]string{
 			podName:      pod.Name,
@@ -408,6 +411,20 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 		if !schedulableTime.IsZero() {
 			PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 		}
+		c.unscheduledPods.Delete(key)
+	} else if pod.Spec.NodeName != "" || podutils.IsTerminal(pod) {
+		// The pod moved on (bound or terminal) without PodScheduled ever reaching True -- this can
+		// happen due to a kubelet/scheduler status-patch race (see #3120). Clear the unbound metric
+		// so it doesn't grow indefinitely, but skip the bound-duration observation since there's no
+		// valid PodScheduled transition timestamp to measure from.
+		PodUnboundTimeSeconds.Delete(map[string]string{
+			podName:      pod.Name,
+			podNamespace: pod.Namespace,
+		})
+		PodProvisioningUnboundTimeSeconds.Delete(map[string]string{
+			podName:      pod.Name,
+			podNamespace: pod.Namespace,
+		})
 		c.unscheduledPods.Delete(key)
 	}
 }

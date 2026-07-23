@@ -206,6 +206,79 @@ var _ = Describe("Pod Metrics", func() {
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_bound_duration_seconds", map[string]string{})
 		Expect(found).To(BeTrue())
 	})
+	It("should delete unbound time metrics if the pod goes terminal without PodScheduled ever reaching True", func() {
+		p := test.Pod()
+		p.Status.Phase = corev1.PodPending
+
+		env.Clock.Step(1 * time.Hour)
+		cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{}, map[string][]*corev1.Pod{"n1": {p}}, map[string][]*corev1.Pod{"nc1": {p}})
+
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+		_, found := FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		// Simulate the kubelet/scheduler race from #3120: the pod goes straight to a terminal
+		// phase without PodScheduled ever transitioning to True.
+		p.Status.Phase = corev1.PodFailed
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, LastTransitionTime: metav1.Now()}}
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+	})
+	It("should delete unbound time metrics if the pod becomes bound (NodeName set) without PodScheduled ever reaching True", func() {
+		// NodeName is immutable after creation, so it must be set upfront -- Phase starts Pending
+		// since the initial unbound-emit path only checks phase, not NodeName.
+		p := test.Pod(test.PodOptions{NodeName: "test-node"})
+		p.Status.Phase = corev1.PodPending
+
+		env.Clock.Step(1 * time.Hour)
+		cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{}, map[string][]*corev1.Pod{"n1": {p}}, map[string][]*corev1.Pod{"nc1": {p}})
+
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+		_, found := FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		// Pod transitions to Running (implying it's bound) but PodScheduled is still stuck at
+		// False -- same race as #3120, different symptom (non-terminal instead of terminal).
+		p.Status.Phase = corev1.PodRunning
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, LastTransitionTime: metav1.Now()}}
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+	})
 	It("should update the pod startup and unstarted time metrics", func() {
 		p := test.Pod()
 		p.Status.Phase = corev1.PodPending
