@@ -212,12 +212,20 @@ func (c *Controller) awaitDrain(
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
-	// If the nodeclaim exists, check if minDrainTime has elapsed. If it hasn't we should requeue.
+	// If the nodeclaim exists, check if the effective drain time has elapsed. If it hasn't we should requeue.
 	// This check helps to ensure that we drain pods scheduled to the Node immediately after we taint it, which
 	// can occur when the scheduler has not seen the taint yet.
+	//
+	// We use max(MinDrainTime, maxPodTerminationGracePeriodSeconds) as the effective drain time to avoid
+	// terminating the EC2 instance while preStop hooks are still executing. IsWaitingEviction() is a pure
+	// etcd/API check (deletionTimestamp set) — it returns false as soon as eviction is accepted, but the
+	// kubelet may still be running the preStop hook for the pod's full terminationGracePeriodSeconds.
+	// Calling cloudProvider.Delete() (EC2 TerminateInstances) before preStop hooks complete causes
+	// FailedPreStopHook + ttrpc: closed errors.
 	if nodeClaim != nil {
 		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained)
-		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < MinDrainTime) {
+		effectiveDrainTime := c.effectiveDrainTime(ctx, node)
+		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < effectiveDrainTime) {
 			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
 	}
@@ -226,6 +234,28 @@ func (c *Controller) awaitDrain(
 		nodeClaim.StatusConditions(status.WithClock(c.clock)).SetTrue(v1.ConditionTypeDrained)
 	}
 	return reconcile.Result{}, nil
+}
+
+// effectiveDrainTime returns the minimum time to wait after all pods have been evicted before
+// proceeding to instance termination. It is computed as max(MinDrainTime, maxPodTerminationGracePeriodSeconds)
+// across all pods still on the node (deletionTimestamp set). This ensures the EC2 instance is not
+// terminated while preStop hooks are still executing.
+func (c *Controller) effectiveDrainTime(ctx context.Context, node *corev1.Node) time.Duration {
+	pods, err := nodeutils.GetPods(ctx, c.kubeClient, node)
+	if err != nil {
+		return MinDrainTime
+	}
+	effective := MinDrainTime
+	for _, p := range pods {
+		if p.DeletionTimestamp == nil || p.Spec.TerminationGracePeriodSeconds == nil {
+			continue
+		}
+		podGrace := time.Duration(*p.Spec.TerminationGracePeriodSeconds) * time.Second
+		if podGrace > effective {
+			effective = podGrace
+		}
+	}
+	return effective
 }
 
 // awaitVolumeDetachment will continue to requeue until all volume attachments associated with the node have been
