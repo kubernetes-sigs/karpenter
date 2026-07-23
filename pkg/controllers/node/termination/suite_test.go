@@ -870,6 +870,44 @@ var _ = Describe("Termination", func() {
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
+		It("should not finish draining until pod terminationGracePeriodSeconds has passed", func() {
+			// Pods with terminationGracePeriodSeconds > MinDrainTime should cause the controller
+			// to wait for the full TGPS before proceeding to instance termination.
+			// This prevents EC2 TerminateInstances being called while preStop hooks are still running.
+			tgps := int64(30)
+			pod := test.Pod(test.PodOptions{
+				NodeName:                      node.Name,
+				ObjectMeta:                    metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+				TerminationGracePeriodSeconds: lo.ToPtr(tgps),
+			})
+			ExpectApplied(ctx, env.Client, node, nodeClaim, pod)
+			// Simulate pod already being in terminating state (deletionTimestamp set)
+			// as it would be after eviction API accepts the request
+			ExpectDeletionTimestampSet(ctx, env.Client, pod)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
+			// First reconcile: taint and start draining
+			// Pod has deletionTimestamp so Drain() returns nil (IsWaitingEviction=false)
+			// but effectiveDrainTime = max(MinDrainTime=5s, TGPS=30s) = 30s
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+
+			// Should still requeue - 30s have not passed yet
+			env.Clock.Step(termination.MinDrainTime)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsTrue()).To(BeFalse())
+
+			// After pod's full TGPS has elapsed, drain completes and instance can be terminated
+			env.Clock.Step(time.Duration(tgps) * time.Second)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsTrue()).To(BeTrue())
+
+			ExpectDeleted(ctx, env.Client, pod)
+			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
 		Context("VolumeAttachments", func() {
 			It("should wait for volume attachments", func() {
 				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
