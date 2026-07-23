@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -731,6 +732,43 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	})
+	It("should update budget metrics across a schedule boundary when there are no candidates", func() {
+		now := env.Clock.Now().UTC()
+		env.Clock.SetTime(time.Date(now.Year(), now.Month(), now.Day()+1, 11, 0, 0, 0, time.UTC))
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{
+			{Nodes: "2"},
+			{Nodes: "0", Schedule: new("0 12 * * *"), Duration: &metav1.Duration{Duration: time.Hour}},
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		cluster.MarkForDeletion(nodeClaims[0].Status.ProviderID)
+
+		ExpectSingletonReconciled(ctx, disruptionController)
+		for _, reason := range allKnownDisruptionReasons {
+			labels := map[string]string{metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: strings.ToLower(string(reason))}
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 2, labels)
+			ExpectMetricGaugeValue(disruption.NodePoolNodesConsumingBudgets, 1, labels)
+		}
+
+		env.Clock.Step(90 * time.Minute)
+		ExpectSingletonReconciled(ctx, disruptionController)
+		for _, reason := range allKnownDisruptionReasons {
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 0, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: strings.ToLower(string(reason)),
+			})
+		}
+	})
+	It("should delete budget metrics for deleted nodepools", func() {
+		ExpectSingletonReconciled(ctx, disruptionController)
+		_, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{metrics.NodePoolLabel: nodePool.Name})
+		Expect(found).To(BeTrue())
+
+		ExpectDeleted(ctx, env.Client, nodePool)
+		ExpectSingletonReconciled(ctx, disruptionController)
+		for _, name := range []string{"karpenter_nodepools_allowed_disruptions", "karpenter_nodepools_nodes_consuming_budgets"} {
+			_, found = FindMetricWithLabelValues(name, map[string]string{metrics.NodePoolLabel: nodePool.Name})
+			Expect(found).To(BeFalse())
+		}
 	})
 	It("should not consider nodes that are not managed as part of disruption count", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}

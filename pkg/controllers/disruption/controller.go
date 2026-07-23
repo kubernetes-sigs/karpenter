@@ -34,6 +34,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -66,6 +67,8 @@ type Controller struct {
 	methods       []Method
 	mu            sync.Mutex
 	lastRun       map[string]time.Time
+
+	budgetMetricNodePools sets.Set[string]
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
@@ -153,11 +156,14 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
+	nodes := c.cluster.DeepCopyNodes()
+	c.updateBudgetMetrics(ctx, nodes)
+
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process while it progresses in memory.
 	// If Karpenter restarts or fails with an error during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates that are not in the orchestration queue before continuing.
 	// Reboot bypasses the queue, so preserve its DisruptionReason during drain.
-	outdatedNodes := lo.Reject(c.cluster.DeepCopyNodes(), func(s *state.StateNode, _ int) bool {
+	outdatedNodes := lo.Reject(nodes, func(s *state.StateNode, _ int) bool {
 		return c.queue.HasAny(s.ProviderID()) || s.MarkedForDeletion() || s.RebootInProgress()
 	})
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
@@ -265,6 +271,30 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 			log.FromContext(ctx).V(1).Info("abnormal time between runs", "name", name, "time_since", timeSince)
 		}
 	}
+}
+
+// updateBudgetMetrics emits the budget gauges for every nodepool and reason on each pass, independent of whether
+// a reason has candidates, so they stay current across budget schedule boundaries.
+func (c *Controller) updateBudgetMetrics(ctx context.Context, nodes []*state.StateNode) {
+	nodePools, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed listing nodepools")
+		return
+	}
+	for _, reason := range lo.Uniq(lo.Map(c.methods, func(m Method, _ int) v1.DisruptionReason { return m.Reason() })) {
+		numNodes, disrupting := NodePoolStatsFromNodes(nodes, reason)
+		for _, np := range nodePools {
+			labels := map[string]string{metrics.NodePoolLabel: np.Name, metrics.ReasonLabel: strings.ToLower(string(reason))}
+			NodePoolAllowedDisruptions.Set(float64(np.MustGetAllowedDisruptions(c.clock, numNodes[np.Name], reason)), labels)
+			NodePoolNodesConsumingBudgets.Set(float64(disrupting[np.Name]), labels)
+		}
+	}
+	current := sets.New(lo.Map(nodePools, func(np *v1.NodePool, _ int) string { return np.Name })...)
+	for name := range c.budgetMetricNodePools.Difference(current) {
+		NodePoolAllowedDisruptions.DeletePartialMatch(map[string]string{metrics.NodePoolLabel: name})
+		NodePoolNodesConsumingBudgets.DeletePartialMatch(map[string]string{metrics.NodePoolLabel: name})
+	}
+	c.budgetMetricNodePools = current
 }
 
 // logInvalidBudgets will log if there are any invalid schedules detected
