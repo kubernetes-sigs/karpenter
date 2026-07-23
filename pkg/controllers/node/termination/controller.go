@@ -327,7 +327,7 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 		return volumeAttachments, nil
 	}
 	// Create list of non-drain-able Pods associated with Node
-	pods, err := nodeutils.GetPods(ctx, kubeClient, node)
+	pods, err := nodeutils.GetPods(ctx, kubeClient, node.Name)
 	if err != nil {
 		return nil, err
 	}

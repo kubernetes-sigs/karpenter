@@ -56,15 +56,15 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
 
 			// Performance assertions - hostname spreading may require more nodes
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("hostNameSpreading/scaleOut", 5*time.Minute)),
 				"Total scale-out time should be less than 5 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("hostNameSpreading/scaleOut", 0.38)),
 				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("hostNameSpreading/scaleOut", 0.40)),
 				"Average memory utilization should be greater than 55%")
-			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", 680+MemoryOverheadMB()),
+			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("hostNameSpreading/scaleOut", 680)),
 				"Karpenter controller P95 memory should be less than 680 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.15+CPUOverheadCores()),
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("hostNameSpreading/scaleOut", 1.15)),
 				"Karpenter controller avg CPU should be less than 1.15 cores during scale-out")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
@@ -86,13 +86,13 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
 
 			// Consolidation assertions
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("hostNameSpreading/consolidation", 0.38)),
 				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("hostNameSpreading/consolidation", 0.40)),
 				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", 575+MemoryOverheadMB()),
+			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("hostNameSpreading/consolidation", 575)),
 				"Karpenter controller P95 memory should be less than 575 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", 1.00+CPUOverheadCores()),
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("hostNameSpreading/consolidation", 1.00)),
 				"Karpenter controller avg CPU should be less than 1.00 cores during consolidation")
 
 		})

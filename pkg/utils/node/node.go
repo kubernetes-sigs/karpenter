@@ -103,12 +103,17 @@ func IgnoreDuplicateNodeClaimError(err error) error {
 	return nil
 }
 
-// GetPods grabs all pods that are currently bound to the passed nodes
-func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
+// GetPods grabs all pods that are currently bound to the passed node names.
+// Empty node names are skipped so callers operating on un-registered NodeClaims
+// don't accidentally match unscheduled pods via the "spec.nodeName" field selector.
+func GetPods(ctx context.Context, kubeClient client.Client, nodeNames ...string) ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
-	for _, node := range nodes {
+	for _, nodeName := range nodeNames {
+		if nodeName == "" {
+			continue
+		}
 		var podList corev1.PodList
-		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
 			return nil, fmt.Errorf("listing pods, %w", err)
 		}
 		for i := range podList.Items {
@@ -150,9 +155,23 @@ func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (
 	return nodeClaims[0], nil
 }
 
+// ReschedulablePods returns all pods bound to the named nodes that satisfy the
+// pod.IsReschedulable criteria (active or stateful-set-terminating, not owned by
+// a DaemonSet, not a mirror pod). This mirrors disruption.Candidate.reschedulablePods
+// so per-disruption-reason metrics across queue/expiration/health/GC controllers
+// count pods consistently.
+func ReschedulablePods(ctx context.Context, kubeClient client.Client, nodeNames ...string) ([]*corev1.Pod, error) {
+	pods, err := GetPods(ctx, kubeClient, nodeNames...)
+	if err != nil {
+		return nil, err
+	}
+	return lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }), nil
+}
+
 // GetCurrentlyReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
 func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, clk clock.Clock, recorder events.Recorder, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
-	pods, err := GetPods(ctx, kubeClient, nodes...)
+	nodeNames := lo.Map(nodes, func(n *corev1.Node, _ int) string { return n.Name })
+	pods, err := GetPods(ctx, kubeClient, nodeNames...)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}

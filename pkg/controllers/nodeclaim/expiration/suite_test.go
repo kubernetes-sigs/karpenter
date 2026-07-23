@@ -84,6 +84,7 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 		metrics.NodeClaimsDisruptedTotal.Reset()
+		metrics.PodsDisruptionInitiatedTotal.Reset()
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
@@ -110,6 +111,40 @@ var _ = Describe("Expiration", func() {
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel:   metrics.ExpiredReason,
+				metrics.NodePoolLabel: nodePool.Name,
+			})
+		})
+		It("should fire karpenter_pods_disruption_initiated_total by the count of reschedulable pods on the node when expired", func() {
+			// Bind 2 reschedulable pods to the node and 1 DaemonSet-owned pod (excluded).
+			nodeClaim.Status.NodeName = node.Name
+			isController := true
+			pod1 := test.Pod(test.PodOptions{NodeName: node.Name})
+			pod2 := test.Pod(test.PodOptions{NodeName: node.Name})
+			daemonsetPod := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1",
+						Kind:       "DaemonSet",
+						Name:       "ds",
+						UID:        "ds-uid",
+						Controller: &isController,
+					}},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod1, pod2, daemonsetPod)
+
+			// step forward to make the node expired
+			env.Clock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel:   metrics.ExpiredReason,
+				metrics.NodePoolLabel: nodePool.Name,
+			})
+			ExpectMetricCounterValue(metrics.PodsDisruptionInitiatedTotal, 2, map[string]string{
 				metrics.ReasonLabel:   metrics.ExpiredReason,
 				metrics.NodePoolLabel: nodePool.Name,
 			})
