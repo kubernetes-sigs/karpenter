@@ -33,9 +33,47 @@ type Queue struct {
 	lastLen map[types.UID]int
 }
 
+func byFairnessCPUAndMemory(
+	pods []*v1.Pod,
+	podData map[types.UID]*PodData,
+	fairness *FairnessState,
+) func(i, j int) bool {
+
+	return func(i, j int) bool {
+		lhsPod := pods[i]
+		rhsPod := pods[j]
+
+		lhsAttempts := fairness.Attempts(lhsPod.UID)
+		rhsAttempts := fairness.Attempts(rhsPod.UID)
+
+		if lhsAttempts != rhsAttempts {
+			return lhsAttempts > rhsAttempts
+		}
+
+		lhs := podData[lhsPod.UID].Requests
+		rhs := podData[rhsPod.UID].Requests
+
+		cpuCmp := resources.Cmp(lhs[v1.ResourceCPU], rhs[v1.ResourceCPU])
+		if cpuCmp != 0 {
+			return cpuCmp > 0
+		}
+
+		memCmp := resources.Cmp(lhs[v1.ResourceMemory], rhs[v1.ResourceMemory])
+		if memCmp != 0 {
+			return memCmp > 0
+		}
+
+		if lhsPod.CreationTimestamp != rhsPod.CreationTimestamp {
+			return lhsPod.CreationTimestamp.Before(&rhsPod.CreationTimestamp)
+		}
+
+		return lhsPod.UID < rhsPod.UID
+	}
+}
+
 // NewQueue constructs a new queue given the input pods, sorting them to optimize for bin-packing into nodes.
-func NewQueue(pods []*v1.Pod, podData map[types.UID]*PodData) *Queue {
-	sort.Slice(pods, byCPUAndMemoryDescending(pods, podData))
+func NewQueue(pods []*v1.Pod, podData map[types.UID]*PodData, fairness *FairnessState) *Queue {
+	sort.Slice(pods, byFairnessCPUAndMemory(pods, podData, fairness))
 	return &Queue{
 		pods:    pods,
 		lastLen: map[types.UID]int{},
@@ -67,42 +105,4 @@ func (q *Queue) Push(pod *v1.Pod) {
 
 func (q *Queue) List() []*v1.Pod {
 	return q.pods
-}
-
-func byCPUAndMemoryDescending(pods []*v1.Pod, podData map[types.UID]*PodData) func(i int, j int) bool {
-	return func(i, j int) bool {
-		lhsPod := pods[i]
-		rhsPod := pods[j]
-
-		lhs := podData[lhsPod.UID].Requests
-		rhs := podData[rhsPod.UID].Requests
-
-		cpuCmp := resources.Cmp(lhs[v1.ResourceCPU], rhs[v1.ResourceCPU])
-		if cpuCmp < 0 {
-			// LHS has less CPU, so it should be sorted after
-			return false
-		} else if cpuCmp > 0 {
-			return true
-		}
-		memCmp := resources.Cmp(lhs[v1.ResourceMemory], rhs[v1.ResourceMemory])
-
-		if memCmp < 0 {
-			return false
-		} else if memCmp > 0 {
-			return true
-		}
-
-		// If all else is equal, give a consistent ordering. This reduces the number of NominatePod events as we
-		// de-duplicate those based on identical content.
-
-		// unfortunately creation timestamp only has a 1-second resolution, so we would still re-order pods created
-		// during a deployment scale-up if we only looked at creation time
-		if lhsPod.CreationTimestamp != rhsPod.CreationTimestamp {
-			return lhsPod.CreationTimestamp.Before(&rhsPod.CreationTimestamp)
-		}
-
-		// pod UIDs aren't in any order, but since we first sort by creation time this only serves to consistently order
-		// pods created within the same second
-		return lhsPod.UID < rhsPod.UID
-	}
 }
