@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
@@ -47,11 +47,11 @@ var _ = Describe("buildVirtualPods", func() {
 			Expect(p.Name).To(Equal("capacity-buffer-web-" + itoa(idx)))
 			Expect(p.Namespace).To(Equal("default"))
 			Expect(string(p.UID)).To(Equal("uid-web-" + itoa(idx)))
-			Expect(p.Annotations[autoscalingv1alpha1.FakePodAnnotationKey]).To(Equal("true"))
-			Expect(p.Labels[autoscalingv1alpha1.BufferNameLabel]).To(Equal("web"))
-			Expect(p.Labels[autoscalingv1alpha1.BufferNamespaceLabel]).To(Equal("default"))
+			Expect(p.Annotations[autoscalingv1beta1.FakePodAnnotationKey]).To(Equal("true"))
+			Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("web"))
+			Expect(p.Labels[autoscalingv1beta1.BufferNamespaceLabel]).To(Equal("default"))
 			Expect(p.Spec.Priority).ToNot(BeNil())
-			Expect(*p.Spec.Priority).To(Equal(autoscalingv1alpha1.VirtualPodPriority))
+			Expect(*p.Spec.Priority).To(Equal(autoscalingv1beta1.VirtualPodPriority))
 			Expect(p.Spec.NodeName).To(BeEmpty())
 
 			hasUnschedulable := false
@@ -97,10 +97,10 @@ var _ = Describe("bufferKeyOf", func() {
 			Name:      "virt",
 			Namespace: "default",
 			Annotations: map[string]string{
-				autoscalingv1alpha1.FakePodAnnotationKey: autoscalingv1alpha1.FakePodAnnotationValue,
+				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
 			},
 			Labels: map[string]string{
-				autoscalingv1alpha1.BufferNameLabel: "my-buffer",
+				autoscalingv1beta1.BufferNameLabel: "my-buffer",
 			},
 		}}
 		Expect(bufferKeyOf(pod)).To(Equal(""))
@@ -111,10 +111,10 @@ var _ = Describe("bufferKeyOf", func() {
 			Name:      "virt",
 			Namespace: "default",
 			Annotations: map[string]string{
-				autoscalingv1alpha1.FakePodAnnotationKey: autoscalingv1alpha1.FakePodAnnotationValue,
+				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
 			},
 			Labels: map[string]string{
-				autoscalingv1alpha1.BufferNamespaceLabel: "default",
+				autoscalingv1beta1.BufferNamespaceLabel: "default",
 			},
 		}}
 		Expect(bufferKeyOf(pod)).To(Equal(""))
@@ -125,11 +125,11 @@ var _ = Describe("bufferKeyOf", func() {
 			Name:      "virt",
 			Namespace: "default",
 			Annotations: map[string]string{
-				autoscalingv1alpha1.FakePodAnnotationKey: autoscalingv1alpha1.FakePodAnnotationValue,
+				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
 			},
 			Labels: map[string]string{
-				autoscalingv1alpha1.BufferNameLabel:      "my-buffer",
-				autoscalingv1alpha1.BufferNamespaceLabel: "default",
+				autoscalingv1beta1.BufferNameLabel:      "my-buffer",
+				autoscalingv1beta1.BufferNamespaceLabel: "default",
 			},
 		}}
 		Expect(bufferKeyOf(pod)).To(Equal("default/my-buffer"))
@@ -270,7 +270,7 @@ var _ = Describe("IsVirtualPod", func() {
 
 	It("should return true for virtual pod", func() {
 		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-			Annotations: map[string]string{autoscalingv1alpha1.FakePodAnnotationKey: "true"},
+			Annotations: map[string]string{autoscalingv1beta1.FakePodAnnotationKey: "true"},
 		}}
 		Expect(IsVirtualPod(p)).To(BeTrue())
 	})
@@ -287,7 +287,7 @@ var _ = Describe("classifyBufferPods", func() {
 	It("should bucket virtual pods by buffer namespace/name across existing and new nodes", func() {
 		cbA := readyBuffer("a", 3)
 		cbB := readyBuffer("b", 2)
-		buffers := map[string]*autoscalingv1alpha1.CapacityBuffer{"default/a": cbA, "default/b": cbB}
+		buffers := map[string]*autoscalingv1beta1.CapacityBuffer{"default/a": cbA, "default/b": cbB}
 		spec := corev1.PodSpec{}
 
 		aPods := buildVirtualPods(cbA, spec)
@@ -312,14 +312,14 @@ var _ = Describe("classifyBufferPods", func() {
 		results := scheduler.Results{
 			ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{realPod}}},
 		}
-		summary := classifyBufferPods(results, map[string]*autoscalingv1alpha1.CapacityBuffer{})
+		summary := classifyBufferPods(results, map[string]*autoscalingv1beta1.CapacityBuffer{})
 		Expect(summary).To(BeEmpty())
 	})
 
 	It("should distinguish buffers with the same name in different namespaces", func() {
 		cbA := readyBufferInNamespace("buffer", "ns-a", 2)
 		cbB := readyBufferInNamespace("buffer", "ns-b", 3)
-		buffers := map[string]*autoscalingv1alpha1.CapacityBuffer{
+		buffers := map[string]*autoscalingv1beta1.CapacityBuffer{
 			"ns-a/buffer": cbA,
 			"ns-b/buffer": cbB,
 		}
@@ -435,44 +435,44 @@ var _ = Describe("listBuffersReadyForProvisioning", func() {
 		cb := readyScalableRefBuffer("scalable", 3)
 		Expect(cb.Status.PodTemplateRef).To(BeNil())
 
-		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		buffers := filterReadyBuffers([]*autoscalingv1beta1.CapacityBuffer{cb})
 		Expect(buffers).To(HaveLen(1))
 		Expect(buffers[0].Name).To(Equal("scalable"))
 	})
 
 	It("should exclude buffers with neither PodTemplateRef nor ScalableRef", func() {
-		cb := &autoscalingv1alpha1.CapacityBuffer{
+		cb := &autoscalingv1beta1.CapacityBuffer{
 			ObjectMeta: metav1.ObjectMeta{Name: "orphan", Namespace: "default"},
-			Spec:       autoscalingv1alpha1.CapacityBufferSpec{Replicas: lo.ToPtr(int32(2))},
-			Status: autoscalingv1alpha1.CapacityBufferStatus{
+			Spec:       autoscalingv1beta1.CapacityBufferSpec{Replicas: lo.ToPtr(int32(2))},
+			Status: autoscalingv1beta1.CapacityBufferStatus{
 				Replicas: lo.ToPtr(int32(2)),
 				Conditions: []metav1.Condition{{
-					Type:   autoscalingv1alpha1.ReadyForProvisioningCondition,
+					Type:   autoscalingv1beta1.ReadyForProvisioningCondition,
 					Status: metav1.ConditionTrue,
 					Reason: "Resolved",
 				}},
 			},
 		}
-		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		buffers := filterReadyBuffers([]*autoscalingv1beta1.CapacityBuffer{cb})
 		Expect(buffers).To(BeEmpty())
 	})
 
 	It("should exclude buffers with zero replicas", func() {
 		cb := readyScalableRefBuffer("zero", 0)
-		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		buffers := filterReadyBuffers([]*autoscalingv1beta1.CapacityBuffer{cb})
 		Expect(buffers).To(BeEmpty())
 	})
 
 	It("should exclude buffers without ReadyForProvisioning condition", func() {
 		cb := readyScalableRefBuffer("notready", 3)
 		cb.Status.Conditions[0].Status = metav1.ConditionFalse
-		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		buffers := filterReadyBuffers([]*autoscalingv1beta1.CapacityBuffer{cb})
 		Expect(buffers).To(BeEmpty())
 	})
 
 	It("should include podTemplateRef buffers with Status.PodTemplateRef set", func() {
 		cb := readyBuffer("ptref", 2)
-		buffers := filterReadyBuffers([]*autoscalingv1alpha1.CapacityBuffer{cb})
+		buffers := filterReadyBuffers([]*autoscalingv1beta1.CapacityBuffer{cb})
 		Expect(buffers).To(HaveLen(1))
 	})
 })
@@ -491,10 +491,10 @@ var _ = Describe("buildVirtualPods with scalableRef buffer", func() {
 			idx := i + 1
 			Expect(p.Name).To(Equal("capacity-buffer-scalable-app-" + itoa(idx)))
 			Expect(p.Namespace).To(Equal("default"))
-			Expect(p.Annotations[autoscalingv1alpha1.FakePodAnnotationKey]).To(Equal("true"))
-			Expect(p.Labels[autoscalingv1alpha1.BufferNameLabel]).To(Equal("scalable-app"))
-			Expect(p.Labels[autoscalingv1alpha1.BufferNamespaceLabel]).To(Equal("default"))
-			Expect(*p.Spec.Priority).To(Equal(autoscalingv1alpha1.VirtualPodPriority))
+			Expect(p.Annotations[autoscalingv1beta1.FakePodAnnotationKey]).To(Equal("true"))
+			Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("scalable-app"))
+			Expect(p.Labels[autoscalingv1beta1.BufferNamespaceLabel]).To(Equal("default"))
+			Expect(*p.Spec.Priority).To(Equal(autoscalingv1beta1.VirtualPodPriority))
 		}
 	})
 })
@@ -618,10 +618,10 @@ var _ = Describe("filterVirtualPodMapping", func() {
 
 // filterReadyBuffers mirrors the filtering logic of listBuffersReadyForProvisioning
 // without needing a real kube client.
-func filterReadyBuffers(items []*autoscalingv1alpha1.CapacityBuffer) []*autoscalingv1alpha1.CapacityBuffer {
-	var out []*autoscalingv1alpha1.CapacityBuffer
+func filterReadyBuffers(items []*autoscalingv1beta1.CapacityBuffer) []*autoscalingv1beta1.CapacityBuffer {
+	var out []*autoscalingv1beta1.CapacityBuffer
 	for _, cb := range items {
-		if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition) {
+		if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition) {
 			continue
 		}
 		if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
@@ -635,25 +635,25 @@ func filterReadyBuffers(items []*autoscalingv1alpha1.CapacityBuffer) []*autoscal
 	return out
 }
 
-func readyScalableRefBuffer(name string, replicas int32) *autoscalingv1alpha1.CapacityBuffer {
-	return &autoscalingv1alpha1.CapacityBuffer{
+func readyScalableRefBuffer(name string, replicas int32) *autoscalingv1beta1.CapacityBuffer {
+	return &autoscalingv1beta1.CapacityBuffer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID("uid-" + name),
 		},
-		Spec: autoscalingv1alpha1.CapacityBufferSpec{
-			ScalableRef: &autoscalingv1alpha1.ScalableRef{
+		Spec: autoscalingv1beta1.CapacityBufferSpec{
+			ScalableRef: &autoscalingv1beta1.ScalableRef{
 				APIGroup: "apps",
 				Kind:     "Deployment",
 				Name:     name + "-deploy",
 			},
 			Percentage: lo.ToPtr(int32(20)),
 		},
-		Status: autoscalingv1alpha1.CapacityBufferStatus{
+		Status: autoscalingv1beta1.CapacityBufferStatus{
 			Replicas: lo.ToPtr(replicas),
 			Conditions: []metav1.Condition{{
-				Type:   autoscalingv1alpha1.ReadyForProvisioningCondition,
+				Type:   autoscalingv1beta1.ReadyForProvisioningCondition,
 				Status: metav1.ConditionTrue,
 				Reason: "Resolved",
 			}},
@@ -669,22 +669,22 @@ func makeExistingNode(providerID string) *scheduler.ExistingNode {
 	return &scheduler.ExistingNode{StateNode: sn}
 }
 
-func readyBuffer(name string, replicas int32) *autoscalingv1alpha1.CapacityBuffer {
-	return &autoscalingv1alpha1.CapacityBuffer{
+func readyBuffer(name string, replicas int32) *autoscalingv1beta1.CapacityBuffer {
+	return &autoscalingv1beta1.CapacityBuffer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID("uid-" + name),
 		},
-		Spec: autoscalingv1alpha1.CapacityBufferSpec{
-			PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: name + "-template"},
+		Spec: autoscalingv1beta1.CapacityBufferSpec{
+			PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: name + "-template"},
 			Replicas:       lo.ToPtr(replicas),
 		},
-		Status: autoscalingv1alpha1.CapacityBufferStatus{
+		Status: autoscalingv1beta1.CapacityBufferStatus{
 			Replicas:       lo.ToPtr(replicas),
-			PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: name + "-template"},
+			PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: name + "-template"},
 			Conditions: []metav1.Condition{{
-				Type:   autoscalingv1alpha1.ReadyForProvisioningCondition,
+				Type:   autoscalingv1beta1.ReadyForProvisioningCondition,
 				Status: metav1.ConditionTrue,
 				Reason: "Resolved",
 			}},
@@ -692,22 +692,22 @@ func readyBuffer(name string, replicas int32) *autoscalingv1alpha1.CapacityBuffe
 	}
 }
 
-func readyBufferInNamespace(name, namespace string, replicas int32) *autoscalingv1alpha1.CapacityBuffer {
-	return &autoscalingv1alpha1.CapacityBuffer{
+func readyBufferInNamespace(name, namespace string, replicas int32) *autoscalingv1beta1.CapacityBuffer {
+	return &autoscalingv1beta1.CapacityBuffer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 			UID:       types.UID("uid-" + namespace + "-" + name),
 		},
-		Spec: autoscalingv1alpha1.CapacityBufferSpec{
-			PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: name + "-template"},
+		Spec: autoscalingv1beta1.CapacityBufferSpec{
+			PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: name + "-template"},
 			Replicas:       lo.ToPtr(replicas),
 		},
-		Status: autoscalingv1alpha1.CapacityBufferStatus{
+		Status: autoscalingv1beta1.CapacityBufferStatus{
 			Replicas:       lo.ToPtr(replicas),
-			PodTemplateRef: &autoscalingv1alpha1.LocalObjectRef{Name: name + "-template"},
+			PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: name + "-template"},
 			Conditions: []metav1.Condition{{
-				Type:   autoscalingv1alpha1.ReadyForProvisioningCondition,
+				Type:   autoscalingv1beta1.ReadyForProvisioningCondition,
 				Status: metav1.ConditionTrue,
 				Reason: "Resolved",
 			}},

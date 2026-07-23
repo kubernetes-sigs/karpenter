@@ -55,6 +55,20 @@ func (id *DeviceID) String() string {
 	return fmt.Sprintf("%s%s/%s/%s", lo.Ternary(id.Template, "virtual/", ""), id.Driver.Value(), id.Pool.Value(), id.Device.Value())
 }
 
+// RequestName identifies a device request within a claim. For Exactly requests,
+// only Parent is set. For FirstAvailable sub-requests, both Parent and Sub are set.
+type RequestName struct {
+	Parent string
+	Sub    string
+}
+
+func (n RequestName) String() string {
+	if n.Sub != "" {
+		return n.Parent + "/" + n.Sub
+	}
+	return n.Parent
+}
+
 // NodeClaim abstracts over existing nodes, pre-initialized nodes, and in-flight NodeClaims
 // for the allocator. This allows the allocator to work uniformly regardless of the NodeClaim's
 // lifecycle phase.

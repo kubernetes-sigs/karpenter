@@ -582,17 +582,14 @@ func ExpectResourceClaimsProcessed(ctx context.Context, c client.Client, pod *co
 	ExpectApplied(ctx, c, pod)
 }
 
-// ExpectDeviceAllocationReconciled reconciles the deviceallocation controller across every ResourceClaim currently on
-// the cluster. The first call triggers the controller's hydration (which otherwise blocks AllocatedDevices, and thus
-// the provisioner's DRA path); subsequent calls refresh the tracked allocation state to reflect claims allocated in a
-// prior provisioning run. envtest has no running controller manager, so tests must drive this explicitly before a
-// provisioning round that relies on the in-cluster allocated-device set.
+// ExpectDeviceAllocationReconciled hydrates the deviceallocation controller (unblocking AllocatedDevices) and reconciles
+// every ResourceClaim currently on the cluster. In production, hydration is triggered by a manager runnable after cache
+// sync; in envtest there is no running controller manager, so tests must call this explicitly before a provisioning
+// round that relies on the in-cluster allocated-device set.
 func ExpectDeviceAllocationReconciled(ctx context.Context, c client.Client, controller *deviceallocation.Controller) {
 	GinkgoHelper()
-	// The controller hydrates on its first Reconcile (guarded by sync.Once), which lists all claims and unblocks
-	// AllocatedDevices. Reconciling a non-existent key is sufficient to trigger hydration without double-closing the
-	// hydration channel, and is a no-op for tracking state when the claim is absent.
-	ExpectReconciled(ctx, controller, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "device-allocation-hydration-trigger"}})
+	// Hydrate is guarded by sync.Once internally, so calling it multiple times is safe.
+	controller.Hydrate(ctx)
 	// Reconcile every existing claim to pick up allocation-status changes committed by prior provisioning runs.
 	claimList := &resourcev1.ResourceClaimList{}
 	Expect(c.List(ctx, claimList)).To(Succeed())
@@ -664,9 +661,7 @@ func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 		Expect(ok).To(BeTrue(), "no device allocation for instance type %q in claim %s", instanceTypeName, key)
 
 		// The API server requires each DeviceRequestAllocationResult.Request to name a real request in the claim. The
-		// allocator metadata only carries the ordered devices, not their owning request, but the allocator allocates
-		// requests in spec order, so we reconstruct the request name by consuming each request's device count in order.
-		requestNames := requestNamesForDevices(claim, len(devices))
+		// allocator records the owning (sub-)request on each device.
 		results := make([]resourcev1.DeviceRequestAllocationResult, len(devices))
 		for i, device := range devices {
 			poolName := device.DeviceID.Pool.Value()
@@ -674,7 +669,7 @@ func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 				poolName = test.NodeLocalPoolName(device.DeviceID.Driver.Value(), binding.Node.Name)
 			}
 			results[i] = resourcev1.DeviceRequestAllocationResult{
-				Request: requestNames[i],
+				Request: device.RequestName.String(),
 				Driver:  device.DeviceID.Driver.Value(),
 				Pool:    poolName,
 				Device:  device.DeviceID.Device.Value(),
@@ -708,38 +703,6 @@ func resolvedClaimName(pod *corev1.Pod, pc *corev1.PodResourceClaim) (string, bo
 		}
 	}
 	return "", false
-}
-
-// requestNamesForDevices maps each of the deviceCount allocated devices (in allocation order) to the name of the claim
-// request that owns it. Requests are consumed in spec order: an ExactCount request claims its Count devices; an All
-// request (and any leftover devices) claim the remainder. This mirrors the allocator's request-ordered DFS so the
-// reconstructed request names are valid for API server validation.
-// TODO: Consider storing the associated request in ResourceClaimAllocationMetadata to avoid reverse engineering the
-// order. This isn't currently done since it would only be useful for integration tests.
-func requestNamesForDevices(claim *resourcev1.ResourceClaim, deviceCount int) []string {
-	names := make([]string, 0, deviceCount)
-	for _, req := range claim.Spec.Devices.Requests {
-		if len(names) >= deviceCount {
-			break
-		}
-		count := 1
-		if req.Exactly != nil {
-			switch {
-			case req.Exactly.AllocationMode == resourcev1.DeviceAllocationModeAll:
-				count = deviceCount - len(names) // claim all remaining devices
-			case req.Exactly.Count > 0:
-				count = int(req.Exactly.Count)
-			}
-		}
-		for i := 0; i < count && len(names) < deviceCount; i++ {
-			names = append(names, req.Name)
-		}
-	}
-	// Fallback: if requests didn't account for every device (shouldn't happen), pad with the last request name.
-	for len(names) < deviceCount && len(claim.Spec.Devices.Requests) > 0 {
-		names = append(names, claim.Spec.Devices.Requests[len(claim.Spec.Devices.Requests)-1].Name)
-	}
-	return names
 }
 
 func ExpectNodeClaimDeployedAndStateUpdated(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, *corev1.Node) {

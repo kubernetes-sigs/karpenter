@@ -14,7 +14,7 @@ set -euo pipefail
 
 # get the latest version
 KWOK_REPO=kubernetes-sigs/kwok
-KWOK_RELEASE=v0.5.2
+KWOK_RELEASE=v0.6.0
 # make a base directory for multi-base kustomization
 HOME_DIR=$(mktemp -d)
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )

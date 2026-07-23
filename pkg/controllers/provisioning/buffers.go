@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/apps"
 )
@@ -38,15 +38,15 @@ import (
 // validation and don't pollute cluster state with synthetic decisions.
 // listBuffersReadyForProvisioning returns all CapacityBuffers whose
 // ReadyForProvisioning condition is True and whose desired replica count is > 0.
-func (p *Provisioner) listBuffersReadyForProvisioning(ctx context.Context) ([]*autoscalingv1alpha1.CapacityBuffer, error) {
-	list := &autoscalingv1alpha1.CapacityBufferList{}
+func (p *Provisioner) listBuffersReadyForProvisioning(ctx context.Context) ([]*autoscalingv1beta1.CapacityBuffer, error) {
+	list := &autoscalingv1beta1.CapacityBufferList{}
 	if err := p.kubeClient.List(ctx, list); err != nil {
 		return nil, err
 	}
-	out := make([]*autoscalingv1alpha1.CapacityBuffer, 0, len(list.Items))
+	out := make([]*autoscalingv1beta1.CapacityBuffer, 0, len(list.Items))
 	for i := range list.Items {
 		cb := &list.Items[i]
-		if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition) {
+		if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition) {
 			continue
 		}
 		if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
@@ -89,7 +89,7 @@ func (p *Provisioner) appendVirtualPods(ctx context.Context, pods []*corev1.Pod)
 // resolveVirtualPodSpec fetches the pod spec for a buffer using the shared
 // workload resolution utilities. Reads from spec (not status) to avoid stale
 // references when users switch between podTemplateRef and scalableRef.
-func (p *Provisioner) resolveVirtualPodSpec(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (corev1.PodSpec, error) {
+func (p *Provisioner) resolveVirtualPodSpec(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (corev1.PodSpec, error) {
 	switch {
 	case cb.Spec.PodTemplateRef != nil:
 		result, err := apps.ResolvePodTemplateRef(ctx, p.kubeClient, cb.Spec.PodTemplateRef.Name, cb.Namespace)
@@ -111,7 +111,7 @@ func (p *Provisioner) resolveVirtualPodSpec(ctx context.Context, cb *autoscaling
 // buildVirtualPods materializes N identical placeholder pods for a buffer using
 // the given pod spec. Deterministic names and UIDs let downstream components
 // associate results back to the owning buffer without additional bookkeeping.
-func buildVirtualPods(cb *autoscalingv1alpha1.CapacityBuffer, spec corev1.PodSpec) []*corev1.Pod {
+func buildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec) []*corev1.Pod {
 	if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
 		return nil
 	}
@@ -119,7 +119,7 @@ func buildVirtualPods(cb *autoscalingv1alpha1.CapacityBuffer, spec corev1.PodSpe
 	out := make([]*corev1.Pod, 0, count)
 	// Strip anything that would make the scheduler call the API server.
 	strippedSpec := sanitizeVirtualPodSpec(spec)
-	strippedSpec.Priority = lo.ToPtr(autoscalingv1alpha1.VirtualPodPriority)
+	strippedSpec.Priority = lo.ToPtr(autoscalingv1beta1.VirtualPodPriority)
 
 	for i := 1; i <= count; i++ {
 		pod := &corev1.Pod{
@@ -128,11 +128,11 @@ func buildVirtualPods(cb *autoscalingv1alpha1.CapacityBuffer, spec corev1.PodSpe
 				Namespace: cb.Namespace,
 				UID:       types.UID(fmt.Sprintf("%s-%d", cb.UID, i)),
 				Annotations: map[string]string{
-					autoscalingv1alpha1.FakePodAnnotationKey: autoscalingv1alpha1.FakePodAnnotationValue,
+					autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
 				},
 				Labels: map[string]string{
-					autoscalingv1alpha1.BufferNameLabel:      cb.Name,
-					autoscalingv1alpha1.BufferNamespaceLabel: cb.Namespace,
+					autoscalingv1beta1.BufferNameLabel:      cb.Name,
+					autoscalingv1beta1.BufferNamespaceLabel: cb.Namespace,
 				},
 				CreationTimestamp: metav1.NewTime(time.Now()),
 			},
@@ -221,7 +221,7 @@ func IsVirtualPod(pod *corev1.Pod) bool {
 	if pod == nil || pod.Annotations == nil {
 		return false
 	}
-	return pod.Annotations[autoscalingv1alpha1.FakePodAnnotationKey] == autoscalingv1alpha1.FakePodAnnotationValue
+	return pod.Annotations[autoscalingv1beta1.FakePodAnnotationKey] == autoscalingv1beta1.FakePodAnnotationValue
 }
 
 // bufferKeyOf returns "namespace/name" for the buffer a virtual pod belongs to,
@@ -230,8 +230,8 @@ func bufferKeyOf(pod *corev1.Pod) string {
 	if !IsVirtualPod(pod) {
 		return ""
 	}
-	ns := pod.Labels[autoscalingv1alpha1.BufferNamespaceLabel]
-	name := pod.Labels[autoscalingv1alpha1.BufferNameLabel]
+	ns := pod.Labels[autoscalingv1beta1.BufferNamespaceLabel]
+	name := pod.Labels[autoscalingv1beta1.BufferNameLabel]
 	if ns == "" || name == "" {
 		return ""
 	}
@@ -258,7 +258,7 @@ func (p *Provisioner) updateBufferProvisioningStatus(ctx context.Context, result
 	if len(buffers) == 0 {
 		return nil
 	}
-	byKey := map[string]*autoscalingv1alpha1.CapacityBuffer{}
+	byKey := map[string]*autoscalingv1beta1.CapacityBuffer{}
 	for _, cb := range buffers {
 		byKey[cb.Namespace+"/"+cb.Name] = cb
 	}
@@ -286,12 +286,12 @@ func (p *Provisioner) updateBufferProvisioningStatus(ctx context.Context, result
 // listAllBuffers returns every CapacityBuffer; unlike listBuffersReadyForProvisioning
 // we also want to observe buffers that are NotReady so we can set their
 // Provisioning condition to False with the appropriate reason.
-func (p *Provisioner) listAllBuffers(ctx context.Context) ([]*autoscalingv1alpha1.CapacityBuffer, error) {
-	list := &autoscalingv1alpha1.CapacityBufferList{}
+func (p *Provisioner) listAllBuffers(ctx context.Context) ([]*autoscalingv1beta1.CapacityBuffer, error) {
+	list := &autoscalingv1beta1.CapacityBufferList{}
 	if err := p.kubeClient.List(ctx, list); err != nil {
 		return nil, err
 	}
-	out := make([]*autoscalingv1alpha1.CapacityBuffer, 0, len(list.Items))
+	out := make([]*autoscalingv1beta1.CapacityBuffer, 0, len(list.Items))
 	for i := range list.Items {
 		out = append(out, &list.Items[i])
 	}
@@ -302,11 +302,11 @@ func (p *Provisioner) listAllBuffers(ctx context.Context) ([]*autoscalingv1alpha
 // provisioner should write for the given buffer, or nil if the controller
 // hasn't yet marked it ReadyForProvisioning (in which case we leave the status
 // alone rather than racing the controller).
-func computeProvisioningCondition(cb *autoscalingv1alpha1.CapacityBuffer, s *bufferProvisioningStatus) *metav1.Condition {
+func computeProvisioningCondition(cb *autoscalingv1beta1.CapacityBuffer, s *bufferProvisioningStatus) *metav1.Condition {
 	now := metav1.Now()
-	if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1alpha1.ReadyForProvisioningCondition) {
+	if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition) {
 		return &metav1.Condition{
-			Type:               autoscalingv1alpha1.ProvisioningCondition,
+			Type:               autoscalingv1beta1.ProvisioningCondition,
 			Status:             metav1.ConditionFalse,
 			Reason:             "NotReadyForProvisioning",
 			Message:            "Buffer is not ReadyForProvisioning",
@@ -316,7 +316,7 @@ func computeProvisioningCondition(cb *autoscalingv1alpha1.CapacityBuffer, s *buf
 	}
 	if cb.Status.Replicas == nil || *cb.Status.Replicas == 0 {
 		return &metav1.Condition{
-			Type:               autoscalingv1alpha1.ProvisioningCondition,
+			Type:               autoscalingv1beta1.ProvisioningCondition,
 			Status:             metav1.ConditionFalse,
 			Reason:             "BufferEmpty",
 			Message:            "Buffer has zero desired replicas",
@@ -331,7 +331,7 @@ func computeProvisioningCondition(cb *autoscalingv1alpha1.CapacityBuffer, s *buf
 	}
 	if s.requiresNewClaim > 0 || s.failed > 0 {
 		return &metav1.Condition{
-			Type:               autoscalingv1alpha1.ProvisioningCondition,
+			Type:               autoscalingv1beta1.ProvisioningCondition,
 			Status:             metav1.ConditionFalse,
 			Reason:             "RequiresNewCapacity",
 			Message:            fmt.Sprintf("%d/%d virtual pods required new capacity, %d failed", s.requiresNewClaim, s.desiredReplicas, s.failed),
@@ -341,7 +341,7 @@ func computeProvisioningCondition(cb *autoscalingv1alpha1.CapacityBuffer, s *buf
 	}
 	if s.existing == s.desiredReplicas && s.desiredReplicas > 0 {
 		return &metav1.Condition{
-			Type:               autoscalingv1alpha1.ProvisioningCondition,
+			Type:               autoscalingv1beta1.ProvisioningCondition,
 			Status:             metav1.ConditionTrue,
 			Reason:             "FitsExistingCapacity",
 			Message:            fmt.Sprintf("All %d virtual pods fit on existing capacity", s.desiredReplicas),
@@ -381,7 +381,7 @@ func bufferPodCountsFromResults(results scheduler.Results) map[string]int {
 
 // classifyBufferPods walks Schedule()'s Results and buckets virtual pods by
 // owning buffer (keyed by "namespace/name"). Real (non-virtual) pods are ignored.
-func classifyBufferPods(results scheduler.Results, buffers map[string]*autoscalingv1alpha1.CapacityBuffer) map[string]*bufferProvisioningStatus {
+func classifyBufferPods(results scheduler.Results, buffers map[string]*autoscalingv1beta1.CapacityBuffer) map[string]*bufferProvisioningStatus {
 	out := map[string]*bufferProvisioningStatus{}
 
 	for _, existing := range results.ExistingNodes {
@@ -400,7 +400,7 @@ func classifyBufferPods(results scheduler.Results, buffers map[string]*autoscali
 	return out
 }
 
-func countVirtualPods(pods []*corev1.Pod, buffers map[string]*autoscalingv1alpha1.CapacityBuffer, out map[string]*bufferProvisioningStatus, inc func(*bufferProvisioningStatus)) {
+func countVirtualPods(pods []*corev1.Pod, buffers map[string]*autoscalingv1beta1.CapacityBuffer, out map[string]*bufferProvisioningStatus, inc func(*bufferProvisioningStatus)) {
 	for _, pod := range pods {
 		key := bufferKeyOf(pod)
 		if key == "" {
@@ -410,7 +410,7 @@ func countVirtualPods(pods []*corev1.Pod, buffers map[string]*autoscalingv1alpha
 	}
 }
 
-func ensureStatus(key string, buffers map[string]*autoscalingv1alpha1.CapacityBuffer, out map[string]*bufferProvisioningStatus) *bufferProvisioningStatus {
+func ensureStatus(key string, buffers map[string]*autoscalingv1beta1.CapacityBuffer, out map[string]*bufferProvisioningStatus) *bufferProvisioningStatus {
 	s, ok := out[key]
 	if !ok {
 		s = &bufferProvisioningStatus{}

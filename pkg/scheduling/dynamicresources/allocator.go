@@ -134,10 +134,12 @@ type ResourceClaimAllocationMetadata struct {
 }
 
 // DeviceAllocationResult pairs a device ID with the capacity consumed by this specific allocation.
-// ConsumedCapacity is nil for exclusive (non-multi-allocatable) devices.
+// ConsumedCapacity is nil for exclusive (non-multi-allocatable) devices. RequestName is the claim
+// request that owns this allocation.
 type DeviceAllocationResult struct {
 	DeviceID         DeviceID
 	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+	RequestName      RequestName
 }
 
 type AllocatedDeviceState struct {
@@ -160,7 +162,7 @@ func NewAllocator(
 	if deletingPodUIDs == nil {
 		deletingPodUIDs = sets.New[types.UID]()
 	}
-	return &Allocator{
+	a := &Allocator{
 		allocationTracker:       NewAllocationTracker(allocatedState),
 		attributeBindings:       attributeBindings,
 		kubeClient:              kubeClient,
@@ -169,6 +171,12 @@ func NewAllocator(
 		claimAllocationMetadata: make(map[ResourceClaimID]*ResourceClaimAllocationMetadata),
 		deletingPodUIDs:         deletingPodUIDs,
 	}
+	// Pre-initialize shared counter budgets for all pools. This ensures InitRemainingCounters is
+	// never called during parallel Allocate() calls, keeping the tracker read-only under concurrency.
+	for _, pool := range GatherPools(inClusterSlices, scheduling.NewRequirements(), "") {
+		a.allocationTracker.InitRemainingCounters(pool)
+	}
+	return a
 }
 
 // AllocationResult contains the output of a successful Allocate() call.
@@ -215,6 +223,9 @@ type allocation struct {
 	// templateCapacityConsumptionByIT holds per-IT consumed capacity for template multi-allocatable
 	// devices. Subtracted from the tracker's remaining budget on Commit().
 	templateCapacityConsumptionByIT map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+	// templateCounterTotalsByIT holds the total counter budgets for template pools that were computed
+	// locally during Allocate(). Written to the tracker on Commit() to keep Allocate() read-only.
+	templateCounterTotalsByIT map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter
 }
 
 func (a *allocation) Commit(ctx context.Context) {
@@ -528,11 +539,12 @@ type allocator struct {
 	snapshots []backtrackSnapshot
 }
 
-// matchKey is used to cache CEL selector evaluation results per (device, claim, request) tuple.
+// matchKey is used to cache CEL selector evaluation results per (device, claim, request, sub-request) tuple.
 type matchKey struct {
-	DeviceID     DeviceID
-	ClaimIndex   int
-	RequestIndex int
+	DeviceID        DeviceID
+	ClaimIndex      int
+	RequestIndex    int
+	SubRequestIndex int // -1 for Exactly requests
 }
 
 // backtrackSnapshot captures the incremental requirements and pool set at a point during the DFS,
@@ -547,6 +559,7 @@ type deviceAllocationMetadata struct {
 	claimIndex       int
 	deviceWithID     DeviceWithID
 	consumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+	requestName      RequestName
 }
 
 // allocate runs a per-instance-type DFS over in-cluster and template devices.
@@ -565,6 +578,8 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 	capacityConsumptionByIT := make(map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity)
 	// templateCapacityConsumptionByIT tracks per-IT consumed capacity for template multi-allocatable devices.
 	templateCapacityConsumptionByIT := make(map[InstanceTypeID]map[DeviceID]map[resourcev1.QualifiedName]resource.Quantity)
+	// templateCounterTotalsByIT tracks template counter budgets computed locally, for deferred init in Commit().
+	templateCounterTotalsByIT := make(map[InstanceTypeID]map[PoolKey]map[string]map[string]resourcev1.Counter)
 
 	// Snapshot initial state for restoration between IT attempts.
 	initialPools := a.pools
@@ -603,12 +618,15 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			continue
 		}
 
-		if a.dfs(0, 0, 0) {
+		if a.dfs(0, 0, -1, 0) {
 			survivingITs = append(survivingITs, itID)
 			counterConsumptionByIT[itID] = a.allocatingCounters
 			templateCounterConsumptionByIT[itID] = a.templateAllocatingCounters
 			capacityConsumptionByIT[itID] = a.allocatingCapacity
 			templateCapacityConsumptionByIT[itID] = a.templateAllocatingCapacity
+			if a.templateRemainingCounters != nil && a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), itID) == nil {
+				templateCounterTotalsByIT[itID] = a.templateRemainingCounters
+			}
 			// Definsive nils to prevents future regressions where allocatingCounters / templateAllocatingCounters is re-used
 			a.allocatingCounters = nil
 			a.templateAllocatingCounters = nil
@@ -639,6 +657,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 				meta.Devices[itID] = append(meta.Devices[itID], DeviceAllocationResult{
 					DeviceID:         da.deviceWithID.ID,
 					ConsumedCapacity: da.consumedCapacity,
+					RequestName:      da.requestName,
 				})
 			}
 			// Update the baseline requirements for subsequent instance type simulations based on the contributed requirements
@@ -684,15 +703,17 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			templateCounterConsumptionByIT:  templateCounterConsumptionByIT,
 			capacityConsumptionByIT:         capacityConsumptionByIT,
 			templateCapacityConsumptionByIT: templateCapacityConsumptionByIT,
+			templateCounterTotalsByIT:       templateCounterTotalsByIT,
 		},
 	}, nil
 }
 
-// dfs runs the depth-first search over claims, requests, and device slots. Devices are
-// iterated lazily from the current pools and template devices rather than from a prebuilt
-// candidate list, so pool re-filtering during requirement tightening is automatically
-// reflected in subsequent iterations.
-func (a *allocator) dfs(claimIdx, reqIdx, slotIdx int) bool {
+// dfs runs the depth-first search over claims, requests, sub-requests (-1 for Exactly requests
+// or for parent requests), and device slots. Devices are iterated lazily from the current pools
+// and template devices rather than from a prebuilt candidate list, so pool re-filtering during
+// requirement tightening is automatically reflected in subsequent iterations.
+// nolint:gocyclo
+func (a *allocator) dfs(claimIdx, reqIdx, subReqIdx, slotIdx int) bool {
 	select {
 	case <-a.ctx.Done():
 		return false
@@ -708,18 +729,62 @@ func (a *allocator) dfs(claimIdx, reqIdx, slotIdx int) bool {
 
 	// Advance past completed requests/claims.
 	if reqIdx >= len(cd.Requests) {
-		return a.dfs(claimIdx+1, 0, 0)
+		return a.dfs(claimIdx+1, 0, -1, 0)
 	}
-	rd := &cd.Requests[reqIdx]
-	numSlots := a.numSlots(rd)
-	if slotIdx >= numSlots {
-		return a.dfs(claimIdx, reqIdx+1, 0)
+	// Resolve the effective request: top-level for Exactly/parent, sub-request for FirstAvailable.
+	var rd *RequestData
+	if subReqIdx < 0 {
+		rd = &cd.Requests[reqIdx]
+	} else {
+		rd = &cd.Requests[reqIdx].SubRequests[subReqIdx]
 	}
 
-	if rd.AllocationMode == resourcev1.DeviceAllocationModeAll {
-		return a.dfsAllMode(claimIdx, reqIdx, slotIdx, cd, rd)
+	// Parent-level FirstAvailable: begin sub-request iteration.
+	if subReqIdx < 0 && len(rd.SubRequests) > 0 {
+		return a.dfsFirstAvailable(claimIdx, reqIdx, rd)
 	}
-	return a.dfsExactCount(claimIdx, reqIdx, slotIdx, cd, rd)
+
+	numSlots := a.numSlots(rd)
+	// All-mode requires at least one device to be satisfiable
+	if rd.AllocationMode == resourcev1.DeviceAllocationModeAll && numSlots == 0 {
+		return false
+	}
+	// Per-claim device limit must not exceed AllocationResultsMaxSize. This will only ever fire for a
+	// claim containing a FirstAvailable request. As the upfront validation is the min across sub-requests,
+	// or a lower bound.
+	if slotIdx == 0 && a.claimDeviceCount(claimIdx)+numSlots > int(resourcev1.AllocationResultsMaxSize) {
+		return false
+	}
+	if slotIdx >= numSlots {
+		return a.dfs(claimIdx, reqIdx+1, -1, 0)
+	}
+	if rd.AllocationMode == resourcev1.DeviceAllocationModeAll {
+		return a.dfsAllMode(claimIdx, reqIdx, subReqIdx, slotIdx, cd, rd)
+	}
+	return a.dfsExactCount(claimIdx, reqIdx, subReqIdx, slotIdx, cd, rd)
+}
+
+// claimDeviceCount returns the number of devices currently allocated for the given claim along the
+// active DFS path.
+func (a *allocator) claimDeviceCount(claimIdx int) int {
+	count := 0
+	for i := range a.allocatedDevicesMetadata {
+		if a.allocatedDevicesMetadata[i].claimIndex == claimIdx {
+			count++
+		}
+	}
+	return count
+}
+
+// dfsFirstAvailable iterates sub-requests in priority order for a FirstAvailable request. The first
+// sub-request whose subtree leads to a complete solution wins.
+func (a *allocator) dfsFirstAvailable(claimIdx, reqIdx int, rd *RequestData) bool {
+	for subIdx := range rd.SubRequests {
+		if a.dfs(claimIdx, reqIdx, subIdx, 0) {
+			return true
+		}
+	}
+	return false
 }
 
 // numSlots returns the number of device slots to fill for a request.
@@ -732,7 +797,7 @@ func (a *allocator) numSlots(rd *RequestData) int {
 
 // dfsExactCount handles a single slot for an ExactCount request by iterating devices from
 // the current pools (in-cluster) and, if enabled, template devices.
-func (a *allocator) dfsExactCount(claimIdx, reqIdx, slotIdx int, cd *ClaimData, rd *RequestData) bool {
+func (a *allocator) dfsExactCount(claimIdx, reqIdx, subReqIdx, slotIdx int, cd *ClaimData, rd *RequestData) bool {
 	// In-cluster devices from pools (reflects current pool state after any requirement tightening).
 	for _, pool := range a.pools {
 		if pool.Incomplete {
@@ -743,14 +808,14 @@ func (a *allocator) dfsExactCount(claimIdx, reqIdx, slotIdx int, cd *ClaimData, 
 			if exhausted && len(d.ConsumesCounters) > 0 {
 				continue
 			}
-			if a.tryDevice(claimIdx, reqIdx, slotIdx, cd, rd, d) {
+			if a.tryDevice(claimIdx, reqIdx, subReqIdx, slotIdx, cd, rd, d) {
 				return true
 			}
 		}
 	}
 	// Template devices for the current instance type.
 	for _, d := range a.templateDevicesByIT[a.itID] {
-		if a.tryDevice(claimIdx, reqIdx, slotIdx, cd, rd, d) {
+		if a.tryDevice(claimIdx, reqIdx, subReqIdx, slotIdx, cd, rd, d) {
 			return true
 		}
 	}
@@ -759,18 +824,18 @@ func (a *allocator) dfsExactCount(claimIdx, reqIdx, slotIdx int, cd *ClaimData, 
 
 // dfsAllMode handles a single slot for an All-mode request. Each slot maps to a specific
 // predetermined device: in-cluster devices first, then template devices.
-func (a *allocator) dfsAllMode(claimIdx, reqIdx, slotIdx int, cd *ClaimData, rd *RequestData) bool {
+func (a *allocator) dfsAllMode(claimIdx, reqIdx, subReqIdx, slotIdx int, cd *ClaimData, rd *RequestData) bool {
 	inClusterCount := len(rd.AllDevices)
 	if slotIdx < inClusterCount {
 		d := rd.AllDevices[slotIdx]
-		return a.tryDevice(claimIdx, reqIdx, slotIdx, cd, rd, d)
+		return a.tryDevice(claimIdx, reqIdx, subReqIdx, slotIdx, cd, rd, d)
 	}
 	// Template device slot.
 	templateIdx := slotIdx - inClusterCount
 	templateDevices := rd.AllTemplateDevicesByIT[a.itID]
 	if templateIdx < len(templateDevices) {
 		d := templateDevices[templateIdx]
-		return a.tryDevice(claimIdx, reqIdx, slotIdx, cd, rd, d)
+		return a.tryDevice(claimIdx, reqIdx, subReqIdx, slotIdx, cd, rd, d)
 	}
 	return false
 }
@@ -780,7 +845,7 @@ func (a *allocator) dfsAllMode(claimIdx, reqIdx, slotIdx int, cd *ClaimData, rd 
 //
 //nolint:gocyclo
 func (a *allocator) tryDevice(
-	claimIdx, reqIdx, slotIdx int,
+	claimIdx, reqIdx, subReqIdx, slotIdx int,
 	cd *ClaimData,
 	rd *RequestData,
 	dw DeviceWithID,
@@ -814,11 +879,9 @@ func (a *allocator) tryDevice(
 				remainingCounterSets = a.templateRemainingCounters[poolKey]
 			}
 		} else {
-			pool := a.poolsByKey[poolKey]
-			if pool == nil {
+			if a.poolsByKey[poolKey] == nil {
 				return false
 			}
-			a.allocationTracker.InitRemainingCounters(pool)
 			remainingCounterSets = a.allocationTracker.RemainingCounters[poolKey]
 		}
 		if !a.checkCounters(dw.Device, poolKey, remainingCounterSets, deviceID.Template) {
@@ -827,7 +890,7 @@ func (a *allocator) tryDevice(
 	}
 
 	// 2. Selector match?
-	mk := matchKey{DeviceID: deviceID, ClaimIndex: claimIdx, RequestIndex: reqIdx}
+	mk := matchKey{DeviceID: deviceID, ClaimIndex: claimIdx, RequestIndex: reqIdx, SubRequestIndex: subReqIdx}
 	matched, cached := a.deviceMatchesRequest[mk]
 	if !cached {
 		var err error
@@ -879,6 +942,7 @@ func (a *allocator) tryDevice(
 		claimIndex:       claimIdx,
 		deviceWithID:     dw,
 		consumedCapacity: consumed,
+		requestName:      rd.Name,
 	})
 	if dw.AllowMultipleAllocations {
 		// Ensures a multi-allocatable device has a allocating capacity map, even if it has no capacity dimensions.
@@ -892,7 +956,7 @@ func (a *allocator) tryDevice(
 	a.deductAllocatingCounters(dw.Device, PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}, deviceID.Template)
 
 	// Recurse.
-	if a.dfs(claimIdx, reqIdx, slotIdx+1) {
+	if a.dfs(claimIdx, reqIdx, subReqIdx, slotIdx+1) {
 		return true
 	}
 
@@ -947,8 +1011,9 @@ func (a *allocator) buildPoolIndex() {
 }
 
 // buildTemplateCounters returns the remaining counter budgets for the current IT's template pool.
-// On first access for a (NodeClaim, IT) pair, it computes the total from SharedCounters and
-// initializes the tracker. Subsequent calls return the tracker's reference directly.
+// If a prior pod's Commit() has already initialized the tracker entry, the tracker's reference is
+// returned (with prior deductions reflected). Otherwise, totals are computed locally — the tracker
+// write is deferred to Commit() to keep Allocate() read-only on the shared tracker.
 func (a *allocator) buildTemplateCounters() map[PoolKey]map[string]map[string]resourcev1.Counter {
 	if remaining := a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), a.itID); remaining != nil {
 		return remaining
@@ -961,8 +1026,7 @@ func (a *allocator) buildTemplateCounters() map[PoolKey]map[string]map[string]re
 	if totals == nil {
 		return nil
 	}
-	a.allocationTracker.InitTemplateRemainingCounters(a.nodeClaim.ID(), a.itID, totals)
-	return a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), a.itID)
+	return totals
 }
 
 // computeTemplateTotals extracts the total SharedCounters budget from template slices.

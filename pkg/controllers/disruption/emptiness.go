@@ -50,16 +50,12 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	}
 	// A node hosting virtual buffer pods is not empty — the provisioner placed
 	// buffer capacity here intentionally. Deleting it would trigger immediate
-	// re-provisioning (pointless churn). This is the only disruption path that
-	// checks HasBufferPods; single/multi-node consolidation naturally accounts
-	// for buffer pods via SimulateScheduling (which calls GetPendingPods, injecting
-	// virtual pods into the pending set — any replacement must fit them too).
+	// re-provisioning (pointless churn).
 	if e.cluster.HasBufferPods(c.ProviderID()) {
 		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("Node %q has buffer pods", c.Node.Name))...)
 		return false
 	}
-	// return true if there are no pods and the nodeclaim is consolidatable
-	return len(c.reschedulablePods) == 0 && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
+	return c.IsEmpty() && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
 // ComputeCommand generates a disruption command given candidates
@@ -69,12 +65,12 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 	if e.IsConsolidated() {
 		return []Command{}, nil
 	}
-	candidates = e.sortCandidates(candidates)
+	candidates = e.sortCandidates(ctx, candidates)
 
 	empty := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
 	for _, candidate := range candidates {
-		if len(candidate.reschedulablePods) > 0 {
+		if !candidate.IsEmpty() {
 			continue
 		}
 		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
@@ -99,7 +95,8 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 	}
 
 	cmd := Command{
-		Candidates: empty,
+		Candidates:          empty,
+		PoolDisruptionCosts: computePoolDisruptionCosts(empty),
 	}
 	validCmd, err := e.validator.Validate(ctx, cmd, commandValidationDelay)
 	if err != nil {

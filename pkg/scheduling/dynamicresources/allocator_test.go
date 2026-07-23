@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -2616,6 +2617,22 @@ var _ = Describe("Allocator", func() {
 			Expect(result.InstanceTypes).To(HaveLen(2))
 		})
 
+		It("should fail when an All-mode request matches zero devices", func() {
+			// Only NIC devices exist; the All-mode request targets the gpu class, which
+			// matches nothing. Upstream requires at least one device for All mode, so this
+			// request is unsatisfiable rather than a trivial success with an empty set.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "nic.example.com", "nic-pool", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("nic-0")),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", allRequest("req-1", "gpu"))
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
 		It("should fail when an already-allocated device is in the all set", func() {
 			inClusterSlices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
@@ -4180,12 +4197,11 @@ var _ = Describe("Allocator", func() {
 			Expect(err.Error()).To(ContainSubstring("unsupported selector"))
 		})
 
-		It("should return error for FirstAvailable request", func() {
+		It("should return error when request has neither Exactly nor FirstAvailable", func() {
 			alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
 			nc := makeNodeClaimWithTemplates(
 				makeTemplate("gpu.example.com", "pool-a", "tgpu-0"),
 			)
-			// A request with no Exactly field (FirstAvailable).
 			claim := &resourcev1.ResourceClaim{
 				ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
 				Spec: resourcev1.ResourceClaimSpec{
@@ -4199,7 +4215,7 @@ var _ = Describe("Allocator", func() {
 
 			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("only Exactly requests"))
+			Expect(err.Error()).To(ContainSubstring("only Exactly and FirstAvailable requests are supported"))
 		})
 
 		It("should return error for unsupported constraint type", func() {
@@ -7328,6 +7344,1592 @@ var _ = Describe("Allocator", func() {
 			r2, err := alloc.Allocate(ctx, nc2, []*resourcev1.ResourceClaim{claim2})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(r2).ToNot(BeNil())
+		})
+	})
+
+	Describe("FirstAvailable DFS", func() {
+		var inClusterSlices []dynamicresources.ResourceSlice
+
+		BeforeEach(func() {
+			ExpectApplied(ctx, env.Client,
+				&resourcev1.DeviceClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "nic"},
+					Spec: resourcev1.DeviceClassSpec{
+						Selectors: []resourcev1.DeviceSelector{
+							{CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "nic.example.com"`}},
+						},
+					},
+				},
+			)
+		})
+
+		It("should allocate using the first satisfiable sub-request", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.InstanceTypes).To(HaveLen(1))
+		})
+
+		It("should fall back to lower-priority sub-request when higher fails", func() {
+			// Only 2 GPUs available — sub-request 0 (count=4) fails, sub-request 1 (count=2) succeeds.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+					{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.InstanceTypes).To(HaveLen(1))
+		})
+
+		It("should fail when no sub-request is satisfiable", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+					{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+				},
+			})
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should select different sub-requests for different instance types", func() {
+			// IT "big" has 4 GPUs (satisfies sub-request 0), IT "small" has 2 GPUs (only satisfies sub-request 1).
+			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
+				"big":   {makeTemplate("gpu.example.com", "pool-big", "gpu-0", "gpu-1", "gpu-2", "gpu-3")},
+				"small": {makeTemplate("gpu.example.com", "pool-small", "gpu-0", "gpu-1")},
+			})
+			alloc := dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+					{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			// Both instance types should survive — each satisfies a different sub-request.
+			Expect(result.InstanceTypes).To(HaveLen(2))
+		})
+
+		It("should handle FirstAvailable with selectors distinguishing sub-requests", func() {
+			// Two classes of devices in the pool, selectors distinguish them.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevicesWithAttrs(
+						deviceWithAttrs("a100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"model": {StringValue: ptr.To("A100")},
+						}),
+						deviceWithAttrs("h100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"model": {StringValue: ptr.To("H100")},
+						}),
+					)),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// Prefer 2 A100s (impossible — only 1), fall back to 1 H100.
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-a100", DeviceClassName: "gpu", Count: 2,
+						Selectors: []resourcev1.DeviceSelector{
+							{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "A100"`}},
+						}},
+					{Name: "fallback-h100", DeviceClassName: "gpu", Count: 1,
+						Selectors: []resourcev1.DeviceSelector{
+							{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "H100"`}},
+						}},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.InstanceTypes).To(HaveLen(1))
+		})
+
+		It("should handle FirstAvailable interacting with multiple claims", func() {
+			// 4 GPUs. Claim 1 wants 3 (prefer-3 sub-request succeeds). Claim 2 wants 2 (prefer-2 fails, fallback-1 succeeds).
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2", "gpu-3")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim1 := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-3", DeviceClassName: "gpu", Count: 3},
+				},
+			})
+			claim2 := makeClaim("c2", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1, claim2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should backtrack across claims when sub-request consumes too much capacity", func() {
+			// 3 GPUs. Claim 1 has prefer-3 and fallback-1. Claim 2 needs 1.
+			// If claim 1 takes prefer-3 (all 3 GPUs), claim 2 fails. Backtracking should retry
+			// claim 1 with fallback-1, leaving room for claim 2.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim1 := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-3", DeviceClassName: "gpu", Count: 3},
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+				},
+			})
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1, claim2})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should still exercise the fallback loop for a SECOND FirstAvailable request in a claim", func() {
+			// Two FA requests. The first (gpu-req) wins on its preferred sub-request; the second (nic-req)
+			// must fall back. This guards subReqIdx being reset to -1 when the DFS advances to reqIdx+1:
+			// if a stale sub-request index leaked from gpu-req, nic-req would resolve to a fixed sub-request
+			// and skip dfsFirstAvailable entirely — its prefer-2 would then run against only 1 NIC and fail.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+				makeAPISlice("s2", "nic.example.com", "nic-pool", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("nic-0")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1",
+				resourcev1.DeviceRequest{
+					Name: "gpu-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
+						{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+					},
+				},
+				resourcev1.DeviceRequest{
+					Name: "nic-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-2", DeviceClassName: "nic", Count: 2}, // fails: only 1 NIC
+						{Name: "fallback-1", DeviceClassName: "nic", Count: 1},
+					},
+				},
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			got := map[string]string{}
+			for _, d := range meta.Devices[unique.Make("it-1")] {
+				got[d.DeviceID.Device.Value()] = d.RequestName.String()
+			}
+			// gpu-req wins its preferred sub-request; nic-req must fall back to its single NIC.
+			Expect(got).To(Equal(map[string]string{
+				"gpu-0": "gpu-req/prefer-2",
+				"gpu-1": "gpu-req/prefer-2",
+				"nic-0": "nic-req/fallback-1",
+			}))
+		})
+
+		It("should keep the IT alive when a later All-mode sub-request is counter-feasible", func() {
+			// countersFeasible() FirstAvailable branch: when sub-requests are all All-mode, the pre-DFS
+			// lower-bound check must set anyFeasible=true as soon as ONE sub-request fits the counter budget
+			// (partitionable_devices.go, the a.allModeCountersFeasible(&rd.SubRequests[i]) arm). Here sub-0's
+			// All-mode over the "gpu" class needs 2×40Gi > 40Gi budget (infeasible), but sub-1's All-mode over
+			// the "nic" class consumes nothing from gpu-slices (feasible) — so the IT must NOT be pruned.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("40Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-gpus", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+						deviceConsumingCounter("gpu-1", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+					),
+				),
+				makeAPISlice("s-nics", "nic.example.com", "nic-pool", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("nic-0", "nic-1")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "dev-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "all-gpu", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll},
+					{Name: "all-nic", DeviceClassName: "nic", AllocationMode: resourcev1.DeviceAllocationModeAll},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			// all-gpu is counter-infeasible (2×40Gi > 40Gi) → DFS falls to all-nic, which allocates both NICs.
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			got := map[string]string{}
+			for _, d := range meta.Devices[unique.Make("it-1")] {
+				got[d.DeviceID.Device.Value()] = d.RequestName.String()
+			}
+			Expect(got).To(Equal(map[string]string{
+				"nic-0": "dev-req/all-nic",
+				"nic-1": "dev-req/all-nic",
+			}))
+		})
+
+		It("should restore consumed capacity after a multi-slot sub-request fails mid-fill", func() {
+			// PA × consumable-capacity deduct→restore path. One multi-allocatable device with 40Gi vram.
+			// prefer-2 asks for 2 slots each consuming 30Gi: slot 0 succeeds (deducts 30Gi, 10Gi left), slot 1
+			// needs another 30Gi > 10Gi and fails → the whole prefer-2 attempt unwinds. fallback-1 then asks
+			// for a single 30Gi slot, which MUST see the full 40Gi restored (not the leftover 10Gi).
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			cap30 := map[resourcev1.QualifiedName]resource.Quantity{"gpu.example.com/vram": resource.MustParse("30Gi")}
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-2", DeviceClassName: "gpu", Count: 2, Capacity: &resourcev1.CapacityRequirements{Requests: cap30}},
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1, Capacity: &resourcev1.CapacityRequirements{Requests: cap30}},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			// If capacity from the failed prefer-2 slot-0 leaked, only 10Gi would remain and fallback-1's 30Gi
+			// request would fail. Exactly one device, recorded under fallback-1, consuming the restored 30Gi.
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].DeviceID.Device.Value()).To(Equal("gpu-0"))
+			Expect(devices[0].RequestName.String()).To(Equal("gpu-req/fallback-1"))
+			Expect(devices[0].ConsumedCapacity).To(HaveKeyWithValue(
+				resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("30Gi"),
+			))
+		})
+
+		It("should backtrack a sub-request across claims when capacity (not device count) is short", func() {
+			// Cross-claim fallback driven by consumable-capacity shortage. One multi-allocatable device,
+			// 40Gi vram. Claim 1's prefer-1 fully succeeds consuming 30Gi; claim 2 then needs 30Gi but only
+			// 10Gi remains → claim 2 fails, forcing backtrack into claim 1's dfsFirstAvailable. Claim 1's
+			// fallback-1 consumes only 10Gi, leaving 30Gi so claim 2 fits. This restores a fully-populated
+			// sub-request subtree (the deduct happened, the device committed) before retrying.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			big := map[resourcev1.QualifiedName]resource.Quantity{"gpu.example.com/vram": resource.MustParse("30Gi")}
+			small := map[resourcev1.QualifiedName]resource.Quantity{"gpu.example.com/vram": resource.MustParse("10Gi")}
+			claim1 := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-big", DeviceClassName: "gpu", Count: 1, Capacity: &resourcev1.CapacityRequirements{Requests: big}},
+					{Name: "fallback-small", DeviceClassName: "gpu", Count: 1, Capacity: &resourcev1.CapacityRequirements{Requests: small}},
+				},
+			})
+			claim2 := makeClaim("c2", exactRequestWithCapacity("req-1", "gpu", 1, big))
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1, claim2})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			// Claim 1 must have backtracked to fallback-small (10Gi) to leave room for claim 2's 30Gi.
+			meta1 := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta1).ToNot(BeNil())
+			d1 := meta1.Devices[unique.Make("it-1")]
+			Expect(d1).To(HaveLen(1))
+			Expect(d1[0].RequestName.String()).To(Equal("gpu-req/fallback-small"))
+			Expect(d1[0].ConsumedCapacity).To(HaveKeyWithValue(
+				resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("10Gi"),
+			))
+		})
+
+		It("should handle mixed Exactly and FirstAvailable requests in the same claim", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1",
+				exactRequest("exact-req", "gpu", 1),
+				resourcev1.DeviceRequest{
+					Name: "fa-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
+						{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+					},
+				},
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			// 3 GPUs: exact-req takes 1, fa-req's prefer-2 sub-request takes the remaining 2. The Exactly
+			// request records a plain (unqualified) name; the FirstAvailable sub-request records the qualified form.
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(3))
+			var names []string
+			for _, d := range devices {
+				names = append(names, d.RequestName.String())
+			}
+			Expect(names).To(ConsistOf("exact-req", "fa-req/prefer-2", "fa-req/prefer-2"))
+		})
+
+		It("should handle FirstAvailable with different DeviceClasses per sub-request", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "nic.example.com", "nic-pool", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("nic-0", "nic-1")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// Prefer GPU (no GPUs available → fails), fall back to NIC.
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "device-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-gpu", DeviceClassName: "gpu", Count: 1},
+					{Name: "fallback-nic", DeviceClassName: "nic", Count: 1},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.InstanceTypes).To(HaveLen(1))
+		})
+
+		It("should handle constraints scoped to parent name applying to all sub-requests", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevicesWithAttrs(
+						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+						}),
+						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+						}),
+						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+						}),
+					)),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// Constraint on parent "gpu-req" means it applies to all sub-requests.
+			// Prefer 3 same-zone GPUs (only 2 in zone-a → fails), fallback to 2 (succeeds: zone-a).
+			claim := makeClaimWithConstraints("c1",
+				[]resourcev1.DeviceConstraint{
+					{Requests: []string{"gpu-req"}, MatchAttribute: ptr.To(resourcev1.FullyQualifiedName("gpu.example.com/zone"))},
+				},
+				resourcev1.DeviceRequest{
+					Name: "gpu-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-3", DeviceClassName: "gpu", Count: 3},
+						{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+					},
+				},
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			// The parent-scoped same-zone constraint must apply to prefer-3, forcing the fallback: only 2 of
+			// the 3 GPUs share a zone (zone-a), so prefer-3 cannot satisfy same-zone and fallback-2 wins with
+			// exactly the two zone-a devices. Pinning device identity + name catches a regression that drops
+			// the constraint on the FA path (which would let prefer-3 grab all 3 cross-zone GPUs and succeed).
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			got := map[string]string{}
+			for _, d := range meta.Devices[unique.Make("it-1")] {
+				got[d.DeviceID.Device.Value()] = d.RequestName.String()
+			}
+			Expect(got).To(Equal(map[string]string{
+				"gpu-0": "gpu-req/fallback-2",
+				"gpu-1": "gpu-req/fallback-2",
+			}))
+		})
+
+		It("should reset a constraint pin from a failed sub-request before the winning sub-request needs a different value", func() {
+			// The parent-scoped same-zone constraint spans both sub-requests. The preferred sub-request can
+			// only ever touch zone-a (its model==A selector matches solely gpu-0), so it pins zone-a and then
+			// fails for lack of a second zone-a device. The winning fallback sub-request selects the zone-b
+			// devices and requires them to share zone-b. This distinguishes the pin values: if the zone-a pin
+			// from prefer-2's failed attempt leaked (Remove not unwinding it), fallback-2's zone-b devices
+			// would be rejected by the still-pinned zone-a and the whole allocation would fail. The earlier
+			// parent-scoped test cannot catch this because its fallback reuses the same zone the pin held.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevicesWithAttrs(
+						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"model":                {StringValue: ptr.To("A")},
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+						}),
+						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"model":                {StringValue: ptr.To("B")},
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+						}),
+						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"model":                {StringValue: ptr.To("B")},
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+						}),
+					)),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaimWithConstraints("c1",
+				[]resourcev1.DeviceConstraint{
+					{Requests: []string{"gpu-req"}, MatchAttribute: ptr.To(resourcev1.FullyQualifiedName("gpu.example.com/zone"))},
+				},
+				resourcev1.DeviceRequest{
+					Name: "gpu-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						// Only gpu-0 (zone-a) matches model==A → pins zone-a, then fails (needs a 2nd zone-a).
+						{Name: "prefer-2", DeviceClassName: "gpu", Count: 2,
+							Selectors: []resourcev1.DeviceSelector{
+								{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "A"`}},
+							}},
+						// gpu-1 and gpu-2 (both zone-b) match model==B → succeed only if the zone-a pin was cleared.
+						{Name: "fallback-2", DeviceClassName: "gpu", Count: 2,
+							Selectors: []resourcev1.DeviceSelector{
+								{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "B"`}},
+							}},
+					},
+				},
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			// fallback-2 must win with exactly the two zone-b devices, proving the zone-a pin reset.
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			got := map[string]string{}
+			for _, d := range meta.Devices[unique.Make("it-1")] {
+				got[d.DeviceID.Device.Value()] = d.RequestName.String()
+			}
+			Expect(got).To(Equal(map[string]string{
+				"gpu-1": "gpu-req/fallback-2",
+				"gpu-2": "gpu-req/fallback-2",
+			}))
+		})
+
+		It("should restore tightened topology requirements when a sub-request backtracks", func() {
+			// Exercises the topology-requirement snapshot restore, not constraint pins. Zone-a has 1 GPU (model A),
+			// zone-b has 1 GPU (model B); the NodeClaim spans both zones. prefer-2 selects only model==A, so slot 0
+			// picks gpu-a0, tightening requirements to zone-a and re-filtering pools down to pool-zone-a; slot 1 finds
+			// no second model==A device there, so prefer-2 fails. fallback-1 selects only model==B, whose sole match gpu-b0
+			// lives in zone-b — reachable ONLY if the backtrack restored the broad two-zone requirements and the
+			// full pool set.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s-a", "gpu.example.com", "pool-zone-a",
+					withZoneSelector("us-west-2a"),
+					withAPIDevicesWithAttrs(deviceWithAttrs("gpu-a0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"model": {StringValue: ptr.To("A")},
+					})),
+					withGeneration(1, 1),
+				),
+				makeAPISlice("s-b", "gpu.example.com", "pool-zone-b",
+					withZoneSelector("us-west-2b"),
+					withAPIDevicesWithAttrs(deviceWithAttrs("gpu-b0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"model": {StringValue: ptr.To("B")},
+					})),
+					withGeneration(1, 1),
+				),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := &fakeNodeClaim{
+				id:         unique.Make("test-nc"),
+				nodePoolID: unique.Make("test-np"),
+				requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
+				),
+				instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-1")},
+				resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
+			}
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					// prefer-2 matches only gpu-a0 (zone-a) → pins zone-a, then fails for lack of a 2nd zone-a device.
+					{Name: "prefer-2", DeviceClassName: "gpu", Count: 2,
+						Selectors: []resourcev1.DeviceSelector{
+							{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "A"`}},
+						}},
+					// fallback-1 matches only gpu-b0 (zone-b) → succeeds ONLY if the zone-a pin was restored.
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1,
+						Selectors: []resourcev1.DeviceSelector{
+							{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "B"`}},
+						}},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			// fallback-1 must win with gpu-b0 (zone-b) — proving the snapshot restore reopened the zone-a-filtered
+			// pool set. A leaked (unrestored) zone-a pin would make gpu-b0 unreachable and this allocation fail.
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].RequestName.String()).To(Equal("gpu-req/fallback-1"))
+			Expect(devices[0].DeviceID.Device.Value()).To(Equal("gpu-b0"))
+		})
+
+		It("should handle constraints scoped to specific sub-request", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevicesWithAttrs(
+						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+						}),
+						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+						}),
+					)),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// Constraint only applies to "gpu-req/prefer-2" sub-request.
+			// prefer-2 (count=2 same-zone) fails — only 1 per zone.
+			// fallback-1 (count=1, no same-zone constraint) succeeds.
+			claim := makeClaimWithConstraints("c1",
+				[]resourcev1.DeviceConstraint{
+					{Requests: []string{"gpu-req/prefer-2"}, MatchAttribute: ptr.To(resourcev1.FullyQualifiedName("gpu.example.com/zone"))},
+				},
+				resourcev1.DeviceRequest{
+					Name: "gpu-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
+						{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+					},
+				},
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			// The qualified constraint applies ONLY to prefer-2: with one GPU per zone, prefer-2 (count=2
+			// same-zone) is unsatisfiable, so fallback-1 (unconstrained, count=1) wins with a single device.
+			// Asserting exactly 1 device named gpu-req/fallback-1 catches two regressions the design warns
+			// about: the constraint being ignored on prefer-2 (which would let it win with 2 cross-zone GPUs),
+			// or the qualified constraint wrongly bleeding onto fallback-1.
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].RequestName.String()).To(Equal("gpu-req/fallback-1"))
+		})
+
+		It("should carry a FirstAvailable sub-request's pinned value into a different constrained request", func() {
+			// A parent-scoped constraint spans BOTH a FirstAvailable request (gpu-req) and a plain Exactly
+			// request (pin-req). The value pinned by whichever gpu-req sub-request is selected must constrain
+			// pin-req's device — exercising appliesTo() across the request boundary, not just within one FA
+			// request's sub-requests. gpu-0 (zone-a) is the only model==A device, so prefer-a (model==A,
+			// count=1) selects it and pins zone-a. pin-req (no selector, count=1) then iterates devices in
+			// order: gpu-1 comes first but is zone-b, so the shared-zone constraint must REJECT it and fall
+			// through to the zone-a gpu-2. gpu-1 is deliberately placed first (and made zone-b) so that a
+			// constraint that failed to reach pin-req would grab gpu-1 — making the assertion below fail. This
+			// is what proves the FA-selected pin actually crosses into pin-req rather than being trivially
+			// satisfied by iteration order.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevicesWithAttrs(
+						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"model":                {StringValue: ptr.To("A")},
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+						}),
+						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"model":                {StringValue: ptr.To("B")},
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+						}),
+						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+							"model":                {StringValue: ptr.To("B")},
+							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+						}),
+					)),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// Constraint spans the FA parent "gpu-req" and the Exactly "pin-req": all their devices share a zone.
+			claim := makeClaimWithConstraints("c1",
+				[]resourcev1.DeviceConstraint{
+					{Requests: []string{"gpu-req", "pin-req"}, MatchAttribute: ptr.To(resourcev1.FullyQualifiedName("gpu.example.com/zone"))},
+				},
+				resourcev1.DeviceRequest{
+					Name: "gpu-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						// Only gpu-0 (zone-a) is model==A → selects gpu-0, pinning zone-a for the whole constraint.
+						{Name: "prefer-a", DeviceClassName: "gpu", Count: 1,
+							Selectors: []resourcev1.DeviceSelector{
+								{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "A"`}},
+							}},
+						{Name: "fallback-b", DeviceClassName: "gpu", Count: 1,
+							Selectors: []resourcev1.DeviceSelector{
+								{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "B"`}},
+							}},
+					},
+				},
+				exactRequest("pin-req", "gpu", 1),
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			// gpu-req/prefer-a takes the zone-a model-A device (gpu-0); the shared-zone constraint then forces
+			// pin-req past the earlier zone-b gpu-1 onto the zone-a gpu-2.
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			got := map[string]string{}
+			for _, d := range meta.Devices[unique.Make("it-1")] {
+				got[d.DeviceID.Device.Value()] = d.RequestName.String()
+			}
+			Expect(got).To(Equal(map[string]string{
+				"gpu-0": "gpu-req/prefer-a",
+				"gpu-2": "pin-req",
+			}))
+		})
+
+		It("should handle FirstAvailable with template devices", func() {
+			nc := makeNodeClaimWithTemplates(makeTemplate("gpu.example.com", "pool-a", "gpu-0", "gpu-1", "gpu-2"))
+			alloc := dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+					{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			Expect(result.InstanceTypes).To(HaveLen(1))
+		})
+
+		It("should handle multiple FirstAvailable requests in the same claim", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2", "gpu-3")),
+				makeAPISlice("s2", "nic.example.com", "nic-pool", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("nic-0", "nic-1")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1",
+				resourcev1.DeviceRequest{
+					Name: "gpu-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+						{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+					},
+				},
+				resourcev1.DeviceRequest{
+					Name: "nic-req",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-2", DeviceClassName: "nic", Count: 2},
+						{Name: "fallback-1", DeviceClassName: "nic", Count: 1},
+					},
+				},
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should correctly commit FirstAvailable allocation metadata", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+					{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(2))
+			// prefer-4 fails (only 2 GPUs) → fallback-2 wins. Each allocated device records the qualified
+			// "parent/sub" request name so the API-server binding can name the selected sub-request.
+			for _, d := range devices {
+				Expect(d.RequestName.Parent).To(Equal("gpu-req"))
+				Expect(d.RequestName.Sub).To(Equal("fallback-2"))
+				Expect(d.RequestName.String()).To(Equal("gpu-req/fallback-2"))
+			}
+		})
+
+		It("should not leak state between sub-request attempts", func() {
+			// 4 GPUs. Sub-request 0 wants 5 (fails). Sub-request 1 wants 4 (should still see all 4 devices available).
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2", "gpu-3")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-5", DeviceClassName: "gpu", Count: 5},
+					{Name: "fallback-4", DeviceClassName: "gpu", Count: 4},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should handle FirstAvailable with All-mode sub-request", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// All-mode sub-request: allocate all matching GPUs.
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "all-gpus", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			Expect(meta.Devices[unique.Make("it-1")]).To(HaveLen(3))
+		})
+
+		It("should fall back from All-mode to ExactCount when All-mode matches zero devices", func() {
+			// Only NIC devices exist — the All-mode "all-gpus" sub-request matches zero
+			// devices. Upstream requires at least one device for All mode, so the sub-request
+			// must FAIL (not succeed with an empty allocation) and fall through to the NIC.
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "nic.example.com", "nic-pool", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("nic-0")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "device-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "all-gpus", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll},
+					{Name: "fallback-nic", DeviceClassName: "nic", Count: 1},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			// The fallback NIC sub-request must win: exactly one device allocated (nic-0).
+			// If the empty All-mode sub-request had incorrectly locked in, this would be 0.
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			Expect(meta.Devices[unique.Make("it-1")]).To(HaveLen(1))
+			Expect(meta.Devices[unique.Make("it-1")][0].DeviceID.Device.Value()).To(Equal("nic-0"))
+		})
+
+		It("should prune ITs where no sub-request is satisfiable", func() {
+			// IT "big" has 4 GPUs (satisfies prefer-4). IT "tiny" has 1 GPU (no sub-request works).
+			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
+				"big":  {makeTemplate("gpu.example.com", "pool-big", "gpu-0", "gpu-1", "gpu-2", "gpu-3")},
+				"tiny": {makeTemplate("gpu.example.com", "pool-tiny", "gpu-0")},
+			})
+			alloc := dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+					{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			// Only "big" IT survives.
+			Expect(result.InstanceTypes).To(HaveLen(1))
+			Expect(result.InstanceTypes[0].Value()).To(Equal("big"))
+		})
+
+		// Exercises the countersFeasible() FirstAvailable branch added in the DFS-extension commit
+		// (partitionable_devices.go): for a FirstAvailable request whose sub-requests are ALL All-mode,
+		// the lower-bound counter check must find at least one sub-request feasible, else the whole IT
+		// is pruned before the DFS runs. Here every All-mode sub-request would consume more counter
+		// budget than exists, so anyFeasible stays false and countersFeasible() returns false.
+		It("should prune when all All-mode sub-requests are counter-infeasible", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("40Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+						deviceConsumingCounter("gpu-1", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+					),
+				),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// Both sub-requests are All-mode over the gpu class: allocating "all" gpus consumes
+			// 2×40Gi = 80Gi, but the shared counter budget is only 40Gi — neither alternative can fit.
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "all-a", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll},
+					{Name: "all-b", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll},
+				},
+			})
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
+		// Companion to the pruning test: when a NON-All-mode (ExactCount) sub-request is present,
+		// countersFeasible() short-circuits to anyFeasible=true (the pre-DFS lower-bound check only
+		// applies to All-mode), so the request is NOT pruned and the ExactCount fallback can satisfy it
+		// within the counter budget.
+		It("should not prune a FirstAvailable request with a feasible ExactCount sub-request", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("40Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+						deviceConsumingCounter("gpu-1", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+					),
+				),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// all-gpus (All-mode) needs 80Gi > 40Gi budget and would prune on its own, but the ExactCount
+			// fallback for a single 40Gi device fits — anyFeasible=true keeps the request alive, and the
+			// DFS falls through to the fallback.
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "all-gpus", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll},
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].RequestName.String()).To(Equal("gpu-req/fallback-1"))
+		})
+
+		It("should restore shared counter budget when a sub-request backtracks", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("40Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+						deviceConsumingCounter("gpu-1", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+					),
+				),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					// prefer-2 needs 2 devices, each consuming the full 40Gi counter budget → only 1 fits, fails.
+					{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
+					// fallback-1 needs 1 device → fits on the restored budget.
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].RequestName.String()).To(Equal("gpu-req/fallback-1"))
+		})
+
+		It("should restore consumed capacity when an All-mode sub-request over-allocates and backtracks", func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						// gpu-0 has 50Gi total (fully free); gpu-1 has 80Gi total but is nearly exhausted below.
+						// gpu-0's headroom is deliberately tight: it fits the fallback's 30Gi only if the failed
+						// All-mode attempt's 30Gi deduction is unwound. A leaked deduction leaves just 20Gi free.
+						s.Spec.Devices = append(s.Spec.Devices,
+							resourcev1.Device{
+								Name:                     "gpu-0",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {Value: resource.MustParse("50Gi")},
+								},
+							},
+							resourcev1.Device{
+								Name:                     "gpu-1",
+								AllowMultipleAllocations: ptr.To(true),
+								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+								},
+							},
+						)
+					},
+				),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					// gpu-1 already has 70Gi consumed → only 10Gi remains, less than the 30Gi All-mode wants.
+					deviceID("gpu.example.com", "pool-a", "gpu-1").DeviceID: {
+						"gpu.example.com/vram": resource.MustParse("70Gi"),
+					},
+				},
+			}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					// all-gpus: All mode requesting 30Gi from every matching device. gpu-0 fits (30Gi deducted,
+					// 20Gi left), but gpu-1 has only 10Gi left → the sub-request fails and must unwind gpu-0's
+					// 30Gi deduction via restoreAllocatingCapacity.
+					{Name: "all-gpus", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll,
+						Capacity: &resourcev1.CapacityRequirements{Requests: map[resourcev1.QualifiedName]resource.Quantity{
+							"gpu.example.com/vram": resource.MustParse("30Gi"),
+						}}},
+					// fallback-small: 1 device wanting 30Gi. gpu-1 has only 10Gi, so gpu-0 is the sole candidate.
+					// It fits ONLY if all-gpus' 30Gi was restored (50Gi free ≥ 30Gi). If the deduction leaked,
+					// gpu-0 has just 20Gi free < 30Gi, no device fits, and Allocate fails — making the leak fatal
+					// and observable rather than a silent residue the per-allocation ConsumedCapacity can't see.
+					{Name: "fallback-small", DeviceClassName: "gpu", Count: 1,
+						Capacity: &resourcev1.CapacityRequirements{Requests: map[resourcev1.QualifiedName]resource.Quantity{
+							"gpu.example.com/vram": resource.MustParse("30Gi"),
+						}}},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].RequestName.String()).To(Equal("gpu-req/fallback-small"))
+			Expect(devices[0].DeviceID.Device.Value()).To(Equal("gpu-0"))
+			// The winning fallback recorded exactly 30Gi on gpu-0 — no residue from the unwound All-mode attempt.
+			Expect(devices[0].ConsumedCapacity).To(HaveKeyWithValue(
+				resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("30Gi"),
+			))
+		})
+
+		// Device-limit enforcement across sub-requests (AllocationResultsMaxSize = 32). The upfront check
+		// in ValidateClaimRequest uses the MIN device count across sub-requests (a feasibility floor), and
+		// the authoritative per-claim check runs during the DFS — so a claim that only fits by choosing a
+		// smaller sub-request is accepted, not rejected upfront.
+		It("should allow FirstAvailable requests that fit only by selecting smaller sub-requests", func() {
+			// 32 GPUs. Two FirstAvailable requests each offer {prefer-20, fallback-10}. The MIN upfront floor
+			// sums 10+10 = 20 <= 32 (accepted; worst-case max would sum 20+20 = 40 and wrongly reject). During
+			// the DFS: gpu-a takes its preferred 20 (guard 0+20 <= 32); gpu-b's prefer-20 is then rejected by
+			// the per-claim guard (20+20 = 40 > 32) and falls through to fallback-10 (20+10 = 30 <= 32). This
+			// converges without backtracking — the requests are sized to leave headroom, so gpu-a never has to
+			// abandon its preferred sub-request. It exercises the guard firing MID-claim (after a sibling has
+			// already consumed devices) and per-request-independent selection: one request keeps its preferred
+			// alternative while the other degrades.
+			names := make([]string, 32)
+			for i := range names {
+				names[i] = fmt.Sprintf("gpu-%d", i)
+			}
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices(names...)),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1",
+				resourcev1.DeviceRequest{
+					Name: "gpu-a",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-20", DeviceClassName: "gpu", Count: 20},
+						{Name: "fallback-10", DeviceClassName: "gpu", Count: 10},
+					},
+				},
+				resourcev1.DeviceRequest{
+					Name: "gpu-b",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-20", DeviceClassName: "gpu", Count: 20},
+						{Name: "fallback-10", DeviceClassName: "gpu", Count: 10},
+					},
+				},
+			)
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			// gpu-a keeps its preferred 20; gpu-b degrades to its 10-device fallback. Total 30.
+			Expect(devices).To(HaveLen(30))
+			var reqNames []string
+			for _, d := range devices {
+				reqNames = append(reqNames, d.RequestName.String())
+			}
+			Expect(lo.Count(reqNames, "gpu-a/prefer-20")).To(Equal(20))
+			Expect(lo.Count(reqNames, "gpu-b/fallback-10")).To(Equal(10))
+		})
+
+		It("should fall back to a smaller sub-request when the larger one exceeds the device limit", func() {
+			// A single FirstAvailable request whose first sub-request (40) exceeds AllocationResultsMaxSize
+			// (32). The DFS device-limit guard fails prefer-40 before it consumes any device and falls
+			// through to fallback-20, which fits.
+			names := make([]string, 40)
+			for i := range names {
+				names[i] = fmt.Sprintf("gpu-%d", i)
+			}
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices(names...)),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-40", DeviceClassName: "gpu", Count: 40},
+					{Name: "fallback-20", DeviceClassName: "gpu", Count: 20},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+			result.Allocation.Commit(ctx)
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(20))
+			for _, d := range devices {
+				Expect(d.RequestName.String()).To(Equal("gpu-req/fallback-20"))
+			}
+		})
+
+		It("should reject a claim whose smallest sub-request selection still exceeds the device limit", func() {
+			// Even the MIN floor exceeds the limit: two FirstAvailable requests each with a minimum of 20
+			// devices sum to 40 > 32, so no combination of sub-requests can fit. This is rejected upfront by
+			// the MIN-floor check (before the DFS), not silently accepted.
+			names := make([]string, 40)
+			for i := range names {
+				names[i] = fmt.Sprintf("gpu-%d", i)
+			}
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices(names...)),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1",
+				resourcev1.DeviceRequest{
+					Name: "gpu-a",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-24", DeviceClassName: "gpu", Count: 24},
+						{Name: "fallback-20", DeviceClassName: "gpu", Count: 20},
+					},
+				},
+				resourcev1.DeviceRequest{
+					Name: "gpu-b",
+					FirstAvailable: []resourcev1.DeviceSubRequest{
+						{Name: "prefer-24", DeviceClassName: "gpu", Count: 24},
+						{Name: "fallback-20", DeviceClassName: "gpu", Count: 20},
+					},
+				},
+			)
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exceeding maximum"))
+		})
+	})
+
+	// These tests close the "wrong-but-feasible" gap left by the FirstAvailable DFS tests above: those
+	// assert only feasibility (result length / err == nil), so an allocation that picked the wrong device
+	// or recorded the wrong owning (sub-)request would pass silently. Commit 4 added RequestName to
+	// DeviceAllocationResult (populated as rd.Name in tryDevice), so here we pin the exact
+	// DeviceID -> RequestName.String() mapping that the allocator committed.
+	Describe("FirstAvailable DFS — selected (sub-)request tracking", func() {
+		BeforeEach(func() {
+			ExpectApplied(ctx, env.Client,
+				&resourcev1.DeviceClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "nic"},
+					Spec: resourcev1.DeviceClassSpec{
+						Selectors: []resourcev1.DeviceSelector{
+							{CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "nic.example.com"`}},
+						},
+					},
+				},
+			)
+		})
+
+		// build returns the NodeClaim, in-cluster slices (nil when devices come from templates), and the
+		// claim. The body commits and asserts the exact device -> owning-(sub-)request mapping. Pinning both
+		// the device identity and the RequestName catches a wrong-but-feasible allocation (wrong device, or
+		// right device attributed to the wrong sub-request) that a length-only assertion would miss.
+		DescribeTable("records the winning (sub-)request name on each allocated device",
+			func(build func() (*fakeNodeClaim, []dynamicresources.ResourceSlice, *resourcev1.ResourceClaim), expected map[string]string) {
+				nc, slices, claim := build()
+				alloc := dynamicresources.NewAllocator(slices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+				result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result).ToNot(BeNil())
+				result.Allocation.Commit(ctx)
+
+				meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+				Expect(meta).ToNot(BeNil())
+				got := map[string]string{}
+				for _, d := range meta.Devices[unique.Make("it-1")] {
+					got[d.DeviceID.Device.Value()] = d.RequestName.String()
+				}
+				Expect(got).To(Equal(expected))
+			},
+			// The first (preferred) sub-request is satisfiable, so it wins outright. Every device must carry the
+			// qualified "parent/sub" name of that FIRST sub-request — not the bare parent, and not a fallback.
+			Entry("preferred sub-request selected (qualified)",
+				func() (*fakeNodeClaim, []dynamicresources.ResourceSlice, *resourcev1.ResourceClaim) {
+					slices := []dynamicresources.ResourceSlice{
+						makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+							withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+					}
+					claim := makeClaim("c1", resourcev1.DeviceRequest{
+						Name: "gpu-req",
+						FirstAvailable: []resourcev1.DeviceSubRequest{
+							{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
+							{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+						},
+					})
+					return makeNodeClaim("it-1"), slices, claim
+				},
+				map[string]string{"gpu-0": "gpu-req/prefer-2", "gpu-1": "gpu-req/prefer-2"},
+			),
+			// prefer-a100 needs 2 A100s but only 1 exists, so the selector-scoped sub-request fails and the
+			// fallback wins. The committed device must be the H100 (not the A100), attributed to fallback-h100.
+			// This also exercises the per-sub-request selector-match cache key (matchKey.SubRequestIndex).
+			Entry("selector picks the fallback sub-request",
+				func() (*fakeNodeClaim, []dynamicresources.ResourceSlice, *resourcev1.ResourceClaim) {
+					slices := []dynamicresources.ResourceSlice{
+						makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+							withGeneration(1, 1), withAPIDevicesWithAttrs(
+								deviceWithAttrs("a100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+									"model": {StringValue: ptr.To("A100")},
+								}),
+								deviceWithAttrs("h100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+									"model": {StringValue: ptr.To("H100")},
+								}),
+							)),
+					}
+					claim := makeClaim("c1", resourcev1.DeviceRequest{
+						Name: "gpu-req",
+						FirstAvailable: []resourcev1.DeviceSubRequest{
+							{Name: "prefer-a100", DeviceClassName: "gpu", Count: 2,
+								Selectors: []resourcev1.DeviceSelector{
+									{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "A100"`}},
+								}},
+							{Name: "fallback-h100", DeviceClassName: "gpu", Count: 1,
+								Selectors: []resourcev1.DeviceSelector{
+									{CEL: &resourcev1.CELDeviceSelector{Expression: `device.attributes["gpu.example.com"].model == "H100"`}},
+								}},
+						},
+					})
+					return makeNodeClaim("it-1"), slices, claim
+				},
+				map[string]string{"h100-0": "gpu-req/fallback-h100"},
+			),
+			// The preferred sub-request targets a DeviceClass with no available devices; the fallback targets a
+			// different class. The committed device must be the NIC, attributed to the fallback sub-request.
+			Entry("different device class fallback",
+				func() (*fakeNodeClaim, []dynamicresources.ResourceSlice, *resourcev1.ResourceClaim) {
+					slices := []dynamicresources.ResourceSlice{
+						makeAPISlice("s1", "nic.example.com", "nic-pool", withAllNodes(),
+							withGeneration(1, 1), withAPIDevices("nic-0", "nic-1")),
+					}
+					claim := makeClaim("c1", resourcev1.DeviceRequest{
+						Name: "device-req",
+						FirstAvailable: []resourcev1.DeviceSubRequest{
+							{Name: "prefer-gpu", DeviceClassName: "gpu", Count: 1},
+							{Name: "fallback-nic", DeviceClassName: "nic", Count: 1},
+						},
+					})
+					return makeNodeClaim("it-1"), slices, claim
+				},
+				map[string]string{"nic-0": "device-req/fallback-nic"},
+			),
+			// Template (in-flight) devices satisfy the preferred sub-request. Each committed device must carry
+			// the qualified sub-request name even though it was sourced from a template rather than a pool.
+			Entry("preferred sub-request selected from template devices",
+				func() (*fakeNodeClaim, []dynamicresources.ResourceSlice, *resourcev1.ResourceClaim) {
+					nc := makeNodeClaimWithTemplates(makeTemplate("gpu.example.com", "pool-a", "gpu-0", "gpu-1", "gpu-2"))
+					claim := makeClaim("c1", resourcev1.DeviceRequest{
+						Name: "gpu-req",
+						FirstAvailable: []resourcev1.DeviceSubRequest{
+							{Name: "prefer-2", DeviceClassName: "gpu", Count: 2},
+							{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+						},
+					})
+					return nc, nil, claim
+				},
+				map[string]string{"gpu-0": "gpu-req/prefer-2", "gpu-1": "gpu-req/prefer-2"},
+			),
+			// A plain Exactly request (no FirstAvailable) must record the bare parent name with an empty Sub, so
+			// RequestName.String() is unqualified. Both devices of the multi-device request share that one name.
+			Entry("plain Exactly request records the unqualified name",
+				func() (*fakeNodeClaim, []dynamicresources.ResourceSlice, *resourcev1.ResourceClaim) {
+					slices := []dynamicresources.ResourceSlice{
+						makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+							withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+					}
+					return makeNodeClaim("it-1"), slices, makeClaim("c1", exactRequest("req-1", "gpu", 2))
+				},
+				map[string]string{"gpu-0": "req-1", "gpu-1": "req-1"},
+			),
+			// Three sub-requests, MIDDLE wins: prefer-3 fails (only 2 GPUs), middle-2 succeeds, last-1 is never
+			// tried. Proves stop-on-first-success (not pick-best/pick-smallest) — a pick-best regression would
+			// choose last-1 (1 device); this pins exactly the two middle-2 devices.
+			Entry("three sub-requests, middle wins and later is not tried",
+				func() (*fakeNodeClaim, []dynamicresources.ResourceSlice, *resourcev1.ResourceClaim) {
+					slices := []dynamicresources.ResourceSlice{
+						makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+							withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+					}
+					claim := makeClaim("c1", resourcev1.DeviceRequest{
+						Name: "gpu-req",
+						FirstAvailable: []resourcev1.DeviceSubRequest{
+							{Name: "prefer-3", DeviceClassName: "gpu", Count: 3},
+							{Name: "middle-2", DeviceClassName: "gpu", Count: 2},
+							{Name: "last-1", DeviceClassName: "gpu", Count: 1},
+						},
+					})
+					return makeNodeClaim("it-1"), slices, claim
+				},
+				map[string]string{"gpu-0": "gpu-req/middle-2", "gpu-1": "gpu-req/middle-2"},
+			),
+			// Three sub-requests, LAST wins: fall-through past TWO consecutive failures (prefer-4, middle-3)
+			// to last-2. Proves the priority loop continues past more than one failure.
+			Entry("three sub-requests, falls through two failures to the last",
+				func() (*fakeNodeClaim, []dynamicresources.ResourceSlice, *resourcev1.ResourceClaim) {
+					slices := []dynamicresources.ResourceSlice{
+						makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+							withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+					}
+					claim := makeClaim("c1", resourcev1.DeviceRequest{
+						Name: "gpu-req",
+						FirstAvailable: []resourcev1.DeviceSubRequest{
+							{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+							{Name: "middle-3", DeviceClassName: "gpu", Count: 3},
+							{Name: "last-2", DeviceClassName: "gpu", Count: 2},
+						},
+					})
+					return makeNodeClaim("it-1"), slices, claim
+				},
+				map[string]string{"gpu-0": "gpu-req/last-2", "gpu-1": "gpu-req/last-2"},
+			),
+		)
+
+		It("selects a different sub-request per instance type and records the matching name", func() {
+			// IT "big" has 4 GPUs (prefer-4 wins), IT "small" has 2 GPUs (prefer-4 fails, fallback-2 wins).
+			// A regression that recorded a single sub-request name for all ITs would pass the existing
+			// length-only test but fail here, since each IT's devices must carry its own winning sub-request.
+			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
+				"big":   {makeTemplate("gpu.example.com", "pool-big", "gpu-0", "gpu-1", "gpu-2", "gpu-3")},
+				"small": {makeTemplate("gpu.example.com", "pool-small", "gpu-0", "gpu-1")},
+			})
+			alloc := dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-4", DeviceClassName: "gpu", Count: 4},
+					{Name: "fallback-2", DeviceClassName: "gpu", Count: 2},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.InstanceTypes).To(HaveLen(2))
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+
+			bigDevices := meta.Devices[unique.Make("big")]
+			Expect(bigDevices).To(HaveLen(4))
+			for _, d := range bigDevices {
+				Expect(d.RequestName.String()).To(Equal("gpu-req/prefer-4"))
+			}
+			smallDevices := meta.Devices[unique.Make("small")]
+			Expect(smallDevices).To(HaveLen(2))
+			for _, d := range smallDevices {
+				Expect(d.RequestName.String()).To(Equal("gpu-req/fallback-2"))
+			}
+		})
+
+		It("records the sub-request name on every device of an All-mode sub-request", func() {
+			// The single sub-request is All-mode, so every matching GPU is allocated. All three devices must
+			// carry the same qualified sub-request name — covering the multi-device All-mode recording path.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "all-gpus", DeviceClassName: "gpu", AllocationMode: resourcev1.DeviceAllocationModeAll},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(3))
+			for _, d := range devices {
+				Expect(d.RequestName.Parent).To(Equal("gpu-req"))
+				Expect(d.RequestName.Sub).To(Equal("all-gpus"))
+				Expect(d.RequestName.String()).To(Equal("gpu-req/all-gpus"))
+			}
+		})
+
+		It("records the fallback name after cross-claim backtracking unwinds the preferred sub-request", func() {
+			// Same topology as the feasibility-only cross-claim backtrack test, but pins the RECORDED name.
+			// 3 GPUs; claim1 prefer-3/fallback-1, claim2 needs 1. prefer-3 grabs all 3 → claim2 fails → backtrack
+			// to fallback-1. Claim1's committed device must be recorded as gpu-req/fallback-1, NOT a stale
+			// gpu-req/prefer-3 — catching a metadata-truncation bug on unwind that a length/err check would miss.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim1 := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-3", DeviceClassName: "gpu", Count: 3},
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1},
+				},
+			})
+			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1, claim2})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			meta1 := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta1).ToNot(BeNil())
+			d1 := meta1.Devices[unique.Make("it-1")]
+			Expect(d1).To(HaveLen(1))
+			Expect(d1[0].RequestName.String()).To(Equal("gpu-req/fallback-1"))
+		})
+
+		It("co-records ConsumedCapacity and the qualified sub-request name on a multi-alloc FA device", func() {
+			// Closes the "wrong-but-feasible" gap for capacity by asserting BOTH the consumed capacity AND
+			// the qualified RequestName on the same device. prefer-2 needs 2 devices but only 1 exists →
+			// fallback-1 wins on the single multi-allocatable device, consuming 16Gi and recording gpu-req/fallback-1.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+						})
+					},
+				),
+			}
+			alloc := dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {},
+				},
+			}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			// prefer-2 wants 2 slots × 50Gi = 100Gi > 80Gi budget on the single multi-allocatable device
+			// (both slots would land on gpu-0), so it fails. fallback-1 wants a single 16Gi slot, which fits.
+			cap50 := map[resourcev1.QualifiedName]resource.Quantity{"gpu.example.com/vram": resource.MustParse("50Gi")}
+			cap16 := map[resourcev1.QualifiedName]resource.Quantity{"gpu.example.com/vram": resource.MustParse("16Gi")}
+			claim := makeClaim("c1", resourcev1.DeviceRequest{
+				Name: "gpu-req",
+				FirstAvailable: []resourcev1.DeviceSubRequest{
+					{Name: "prefer-2", DeviceClassName: "gpu", Count: 2, Capacity: &resourcev1.CapacityRequirements{Requests: cap50}},
+					{Name: "fallback-1", DeviceClassName: "gpu", Count: 1, Capacity: &resourcev1.CapacityRequirements{Requests: cap16}},
+				},
+			})
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			result.Allocation.Commit(ctx)
+
+			meta := alloc.ResourceClaimAllocationMetadataForClaim(types.NamespacedName{Namespace: "default", Name: "c1"})
+			Expect(meta).ToNot(BeNil())
+			devices := meta.Devices[unique.Make("it-1")]
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].DeviceID.Device.Value()).To(Equal("gpu-0"))
+			Expect(devices[0].RequestName.String()).To(Equal("gpu-req/fallback-1"))
+			Expect(devices[0].ConsumedCapacity).To(HaveKeyWithValue(
+				resourcev1.QualifiedName("gpu.example.com/vram"), resource.MustParse("16Gi"),
+			))
 		})
 	})
 })

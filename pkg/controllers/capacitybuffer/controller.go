@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	autoscalingv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1alpha1"
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/utils/apps"
 )
@@ -66,7 +66,7 @@ func (c *Controller) Name() string {
 	return "capacitybuffer"
 }
 
-func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
 	stored := cb.DeepCopy()
@@ -104,7 +104,7 @@ func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1alpha1.Capa
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
-		For(&autoscalingv1alpha1.CapacityBuffer{}).
+		For(&autoscalingv1beta1.CapacityBuffer{}).
 		Watches(
 			&v1.PodTemplate{},
 			handler.EnqueueRequestsFromMapFunc(c.podTemplateToBuffers),
@@ -117,7 +117,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object) []reconcile.Request {
-	buffers := &autoscalingv1alpha1.CapacityBufferList{}
+	buffers := &autoscalingv1beta1.CapacityBufferList{}
 	if err := c.kubeClient.List(ctx, buffers, client.InNamespace(obj.GetNamespace())); err != nil {
 		return nil
 	}
@@ -138,7 +138,7 @@ func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object
 // updates status conditions. Returns (true, nil) on success, (false, nil) for
 // customer-induced errors (not found, unsupported kind), or (false, err) for
 // unexpected failures that should be retried.
-func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscalingv1alpha1.CapacityBuffer) (bool, error) {
+func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (bool, error) {
 	var podSpec *v1.PodSpec
 	var candidates []int32
 
@@ -149,7 +149,7 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 			return false, handleResolveError(cb, err, ReasonPodTemplateNotFound)
 		}
 		podSpec = &result.PodSpec
-		cb.Status.PodTemplateRef = &autoscalingv1alpha1.LocalObjectRef{Name: result.Name}
+		cb.Status.PodTemplateRef = &autoscalingv1beta1.LocalObjectRef{Name: result.Name}
 		cb.Status.PodTemplateGeneration = &result.Generation
 
 	case cb.Spec.ScalableRef != nil:
@@ -165,40 +165,55 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 		}
 
 	default:
-		cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed, "Neither podTemplateRef nor scalableRef is set")
+		cb.SetCondition(autoscalingv1beta1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed, "Neither podTemplateRef nor scalableRef is set")
 		return false, nil
 	}
 
 	// Compute replicas from all applicable constraints.
 	replicas := computeReplicas(cb, podSpec, candidates)
-	cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
+	cb.SetCondition(autoscalingv1beta1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
 	cb.Status.Replicas = &replicas
 	return true, nil
 }
 
-func computeReplicas(cb *autoscalingv1alpha1.CapacityBuffer, podSpec *v1.PodSpec, candidates []int32) int32 {
+// computeReplicas derives the desired buffer replica count from the configured
+// constraints, following Cluster Autoscaler's semantics:
+//   - replicas and percentage are combined by taking the MAX of the two.
+//   - limits act as an upper bound (MIN) on that value.
+//   - if neither replicas nor percentage is set, limits alone determine how many
+//     units fit within the resource limits.
+//
+// candidates holds the percentage-derived replica count (if percentage is set);
+// the fixed replicas value is added here.
+func computeReplicas(cb *autoscalingv1beta1.CapacityBuffer, podSpec *v1.PodSpec, candidates []int32) int32 {
 	if cb.Spec.Replicas != nil {
 		candidates = append(candidates, *cb.Spec.Replicas)
 	}
+
+	// desired is the max of replicas and percentage. hasSizeConstraint is false
+	// when neither is set, in which case limits alone determine the count.
+	hasSizeConstraint := len(candidates) > 0
+	desired := lo.Max(candidates)
+
 	if cb.Spec.Limits != nil && podSpec != nil {
 		if limitReplicas, ok := calculateLimitReplicas(v1.ResourceList(cb.Spec.Limits), podSpec); ok {
-			candidates = append(candidates, limitReplicas)
+			if hasSizeConstraint {
+				return lo.Min([]int32{desired, limitReplicas})
+			}
+			return limitReplicas
 		}
 	}
-	if len(candidates) == 0 {
-		return 0
-	}
-	return lo.Min(candidates)
+	return desired
 }
 
 // handleResolveError sets the ReadyForProvisioning condition to False and returns
 // nil for NotFound (customer error) or the original error for everything else (retry).
-func handleResolveError(cb *autoscalingv1alpha1.CapacityBuffer, err error, notFoundReason string) error {
+func handleResolveError(cb *autoscalingv1beta1.CapacityBuffer, err error, notFoundReason string) error {
 	reason := ReasonResolutionFailed
 	if errors.IsNotFound(err) {
 		reason = notFoundReason
 	}
-	cb.SetCondition(autoscalingv1alpha1.ReadyForProvisioningCondition, metav1.ConditionFalse, reason, err.Error())
+	cb.SetCondition(autoscalingv1beta1.ReadyForProvisioningCondition, metav1.ConditionFalse, reason, err.Error())
 	if errors.IsNotFound(err) {
 		return nil
 	}

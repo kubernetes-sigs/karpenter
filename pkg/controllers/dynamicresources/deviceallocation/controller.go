@@ -118,9 +118,7 @@ func NewController(kubeClient client.Client) *Controller {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	c.hydrationOnce.Do(func() {
-		c.Hydrate(ctx)
-	})
+	c.Hydrate(ctx)
 
 	claim := &resourcev1.ResourceClaim{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, claim, client.UnsafeDisableDeepCopy); err != nil {
@@ -135,13 +133,15 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 }
 
 func (c *Controller) Hydrate(ctx context.Context) {
-	// SAFETY: This list hits the informer cache, and should not error since it's already guaranteed to be synced.
-	claimList := &resourcev1.ResourceClaimList{}
-	lo.Must0(c.kubeClient.List(ctx, claimList, client.UnsafeDisableDeepCopy))
-	for i := range claimList.Items {
-		c.reconcileClaim(ctx, client.ObjectKeyFromObject(&claimList.Items[i]), &claimList.Items[i])
-	}
-	close(c.hydrationCh)
+	c.hydrationOnce.Do(func() {
+		// SAFETY: This list hits the informer cache, and should not error since it's already guaranteed to be synced.
+		claimList := &resourcev1.ResourceClaimList{}
+		lo.Must0(c.kubeClient.List(ctx, claimList, client.UnsafeDisableDeepCopy))
+		for i := range claimList.Items {
+			c.reconcileClaim(ctx, client.ObjectKeyFromObject(&claimList.Items[i]), &claimList.Items[i])
+		}
+		close(c.hydrationCh)
+	})
 }
 
 //nolint:gocyclo
@@ -297,6 +297,12 @@ func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) Device
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	if err := m.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		c.Hydrate(ctx)
+		return nil
+	})); err != nil {
+		return fmt.Errorf("adding hydration runnable, %w", err)
+	}
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("dynamicresources.deviceallocation").
 		For(&resourcev1.ResourceClaim{}).
