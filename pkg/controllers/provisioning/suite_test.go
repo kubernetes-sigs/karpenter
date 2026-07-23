@@ -3248,6 +3248,29 @@ var _ = Describe("Provisioning", func() {
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					ExpectNotScheduled(ctx, env.Client, pod)
 				})
+
+				It("should not schedule when pod volume topology narrows zones below minValues", func() {
+					// The instance type offers all three zones, but the pod's volume topology narrows the
+					// NodeClaim requirements to a single zone, which can't satisfy minValues=3
+					cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{multiZoneInstanceType("instance-type-1", "test-zone-1", "test-zone-2", "test-zone-3")}
+
+					storageClass := test.StorageClass(test.StorageClassOptions{
+						Zones:             []string{"test-zone-1"},
+						VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+					})
+					persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
+					ExpectApplied(ctx, env.Client, nodePool, storageClass, persistentVolumeClaim)
+					pod := test.UnschedulablePod(test.PodOptions{
+						PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					ExpectNotScheduled(ctx, env.Client, pod)
+				})
 			})
 
 			Context("with MinValuesPolicy set to BestEffort", func() {
@@ -3307,6 +3330,42 @@ var _ = Describe("Provisioning", func() {
 							Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
 
 							MinValues: new(2),
+						}))
+				})
+
+				It("should relax minValues when pod volume topology narrows zones below minValues", func() {
+					// The instance type offers all three zones, but the pod's volume topology narrows the
+					// NodeClaim requirements to a single zone. minValues must be relaxed against the narrowed
+					// requirements, otherwise the NodeClaim is created with one zone value and minValues=3,
+					// which fails CRD validation
+					cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{multiZoneInstanceType("instance-type-1", "test-zone-1", "test-zone-2", "test-zone-3")}
+
+					storageClass := test.StorageClass(test.StorageClassOptions{
+						Zones:             []string{"test-zone-1"},
+						VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+					})
+					persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
+					ExpectApplied(ctx, env.Client, nodePool, storageClass, persistentVolumeClaim)
+					pod := test.UnschedulablePod(test.PodOptions{
+						PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					nodeClaim := cloudProvider.CreateCalls[0]
+					Expect(node.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-1"))
+					Expect(node.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
+					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
+						v1.NodeSelectorRequirementWithMinValues{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+
+							MinValues: new(1),
 						}))
 				})
 			})
@@ -3436,6 +3495,24 @@ func ExpectNodeClaimRequests(nodeClaim *v1.NodeClaim, resources corev1.ResourceL
 		v := nodeClaim.Spec.Resources.Requests[name]
 		Expect(v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
 	}
+}
+
+func multiZoneInstanceType(name string, zones ...string) *cloudprovider.InstanceType {
+	return fake.NewInstanceType(name,
+		fake.WithArchitecture(v1.ArchitectureArm64),
+		fake.WithOperatingSystems(string(corev1.Linux)),
+		fake.WithResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("4"),
+			corev1.ResourceMemory: resource.MustParse("4Gi"),
+		}),
+		fake.WithOfferings(lo.Map(zones, func(zone string, _ int) cloudprovider.Offering {
+			return cloudprovider.Offering{
+				Available:    true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: zone}),
+				Price:        0.52,
+			}
+		})...),
+	)
 }
 
 func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources corev1.ResourceList) []*cloudprovider.InstanceType {
