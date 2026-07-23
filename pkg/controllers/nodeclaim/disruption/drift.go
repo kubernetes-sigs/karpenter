@@ -25,7 +25,6 @@ import (
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1 "k8s.io/api/core/v1"
@@ -48,7 +47,7 @@ type Drift struct {
 	instanceTypeNotFoundCheckCache *cache.Cache
 }
 
-func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim, transitions *transitionLogger) (reconcile.Result, error) {
 	clockOpt := status.WithClock(d.clock)
 	hasDriftedCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted) != nil
 
@@ -57,7 +56,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue() {
 		_ = nodeClaim.StatusConditions(clockOpt).Clear(v1.ConditionTypeDrifted)
 		if hasDriftedCondition {
-			log.FromContext(ctx).V(1).Info("removing drift status condition, isn't launched")
+			transitions.Record("removing drift status condition, isn't launched")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -69,14 +68,14 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	if driftedReason == "" {
 		if hasDriftedCondition {
 			_ = nodeClaim.StatusConditions(clockOpt).Clear(v1.ConditionTypeDrifted)
-			log.FromContext(ctx).V(1).Info("removing drifted status condition, not drifted")
+			transitions.Record("removing drifted status condition, not drifted")
 		}
 		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 	// 3. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
 	nodeClaim.StatusConditions(clockOpt).SetTrueWithReason(v1.ConditionTypeDrifted, string(driftedReason), string(driftedReason))
 	if !hasDriftedCondition {
-		log.FromContext(ctx).V(1).WithValues("reason", string(driftedReason)).Info("marking drifted")
+		transitions.Record("marking drifted", "reason", string(driftedReason))
 	}
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil

@@ -17,12 +17,16 @@ limitations under the License.
 package disruption_test
 
 import (
+	"strings"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -95,6 +99,30 @@ var _ = Describe("Underutilized", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
+	})
+	It("should not log marking consolidatable again when reconciling against a stale NodeClaim", func() {
+		// A reconcile can run against a stale informer cache after a prior reconcile
+		// already persisted the Consolidatable condition; it must not log the transition again.
+		var messages []string
+		logCtx := log.IntoContext(ctx, funcr.New(func(_, args string) { messages = append(messages, args) }, funcr.Options{Verbosity: 1}))
+		countMarkingLogs := func() int {
+			return lo.CountBy(messages, func(m string) bool { return strings.Contains(m, "marking consolidatable") })
+		}
+
+		stale := ExpectExists(ctx, env.Client, nodeClaim).DeepCopy()
+		_, err := nodeClaimDisruptionController.Reconcile(logCtx, ExpectExists(ctx, env.Client, nodeClaim))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(countMarkingLogs()).To(Equal(1))
+		marked := ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(marked.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
+
+		// The stale copy predates the patch, so it's missing the condition and carries an old resourceVersion.
+		// The reconcile re-applies the condition, but its patch must fail the optimistic lock
+		// without emitting a duplicate log or writing anything to the API server.
+		_, err = nodeClaimDisruptionController.Reconcile(logCtx, stale)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(countMarkingLogs()).To(Equal(1))
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).ResourceVersion).To(Equal(marked.ResourceVersion))
 	})
 	It("should mark NodeClaims as consolidatable based on the nodeclaim initialized time", func() {
 		// set the lastPodEvent as zero, so it's like no pods have scheduled
