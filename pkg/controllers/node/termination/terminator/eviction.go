@@ -31,9 +31,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -94,16 +94,22 @@ type Queue struct {
 	sync.Mutex
 
 	source chan event.TypedGenericEvent[*corev1.Pod]
-	set    sets.Set[QueueKey]
+	// items maps each enqueued pod to its node's terminationGracePeriod deadline.
+	// The reconciler decides evict vs force-delete per reconcile from that deadline
+	// plus the pod's own grace period — no upfront per-pod mode. A nil value means
+	// "no deadline; always evict".
+	items map[QueueKey]*time.Time
 
+	clock      clock.Clock
 	kubeClient client.Client
 	recorder   events.Recorder
 }
 
-func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
+func NewQueue(clk clock.Clock, kubeClient client.Client, recorder events.Recorder) *Queue {
 	return &Queue{
 		source:     make(chan event.TypedGenericEvent[*corev1.Pod], 10000),
-		set:        sets.New[QueueKey](),
+		items:      map[QueueKey]*time.Time{},
+		clock:      clk,
 		kubeClient: kubeClient,
 		recorder:   recorder,
 	}
@@ -136,38 +142,101 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
 
-// Add adds pods to the Queue
-func (q *Queue) Add(pods ...*corev1.Pod) {
+// Add enqueues pods for drain. The queue decides per reconcile whether to
+// evict (respecting PDB) or force-delete based on whether the pod's grace
+// period would extend past nodeTerminationTime; pass nil to disable the
+// force-delete path entirely. Re-adding a pod keeps the earlier of the
+// existing and new deadlines — a later Add can tighten the deadline but never
+// push it out or clear it, so an in-flight force-delete cannot be downgraded.
+func (q *Queue) Add(nodeTerminationTime *time.Time, pods ...*corev1.Pod) {
 	q.Lock()
 	defer q.Unlock()
 
 	for _, pod := range pods {
 		qk := NewQueueKey(pod)
-		if !q.set.Has(qk) {
-			q.set.Insert(qk)
+		existing, enqueued := q.items[qk]
+		q.items[qk] = earlier(existing, nodeTerminationTime)
+		if !enqueued {
 			q.source <- event.TypedGenericEvent[*corev1.Pod]{Object: pod}
 		}
 	}
+}
+
+// earlier returns the earlier of a and b, treating nil as "no deadline" (+∞).
+// Returns nil only when both are nil.
+func earlier(a, b *time.Time) *time.Time {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	if a.Before(*b) {
+		return a
+	}
+	return b
 }
 
 func (q *Queue) Has(pod *corev1.Pod) bool {
 	q.Lock()
 	defer q.Unlock()
 
-	return q.set.Has(NewQueueKey(pod))
+	_, ok := q.items[NewQueueKey(pod)]
+	return ok
 }
 
 func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, q.Name())
 
-	if !q.Has(pod) {
+	q.Lock()
+	nodeTerminationTime, ok := q.items[NewQueueKey(pod)]
+	q.Unlock()
+	if !ok {
 		//This is a different pod than the one the queue, we should exit without evicting
 		//This race happens when a pod is replaced with one that has the same namespace and name
 		//but a different UID after the original pod is added to the queue but before the
 		//controller can reconcile on it
 		return reconcile.Result{}, nil
 	}
-	// Evict the pod
+
+	if q.needsForceDelete(pod, nodeTerminationTime) {
+		return q.forceDelete(ctx, pod, nodeTerminationTime)
+	}
+	// Pod is terminal (Failed/Succeeded) or terminating so drop the queue entry.
+	// Reconcile won't fire again once the pod is gone, so this is our only chance to clean up.
+	if !podutils.IsActive(pod) {
+		q.complete(pod)
+		return reconcile.Result{}, nil
+	}
+	// Active but not evictable (do-not-disrupt). Stay enqueued under the queue's exponential backoff.
+	// The next reconcile picks the right path when the
+	// annotation clears or the deadline crosses needsForceDelete's threshold.
+	if !podutils.IsEvictable(pod, q.clock, q.recorder) {
+		return reconcile.Result{Requeue: true}, nil
+	}
+	return q.evict(ctx, pod)
+}
+
+// needsForceDelete reports whether the pod should be force-deleted now: its
+// grace period would (or already does) extend past nodeTerminationTime if
+// allowed to run on its own. Re-evaluated on every reconcile, so a pod stuck
+// on a PDB upgrades to force-delete naturally once the deadline passes.
+func (q *Queue) needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time) bool {
+	if nodeTerminationTime == nil {
+		return false
+	}
+	if podutils.IsTerminating(pod) {
+		return podutils.IsPodEligibleForForcedEviction(pod, nodeTerminationTime)
+	}
+	if pod.Spec.TerminationGracePeriodSeconds == nil {
+		return false
+	}
+	deleteTime := nodeTerminationTime.Add(time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second * -1)
+	return q.clock.Now().After(deleteTime)
+}
+
+// evict removes a pod via the Kubernetes eviction subresource, respecting PDBs.
+func (q *Queue) evict(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		pod,
 		&policyv1.Eviction{
@@ -191,6 +260,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L160
 			// 409 - The pod exists, but it is not the same pod that we initiated the eviction on
 			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L318
+			q.complete(pod)
 			return reconcile.Result{}, nil
 		}
 		// The pod exists and is the same pod, we need to continue
@@ -213,11 +283,49 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	reason := evictionReason(ctx, pod, q.kubeClient)
 	q.recorder.Publish(terminatorevents.EvictPod(pod, reason))
 	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: reason})
+	q.complete(pod)
+	return reconcile.Result{}, nil
+}
 
+// forceDelete removes a pod via kubeClient.Delete with a grace period clamped
+// to the node's remaining terminationGracePeriod. PDBs and the
+// do-not-disrupt annotation are bypassed: the node is being forcefully
+// terminated and the pod's full grace period would otherwise extend past it.
+func (q *Queue) forceDelete(ctx context.Context, pod *corev1.Pod, nodeTerminationTime *time.Time) (reconcile.Result, error) {
+	// Clamp the grace period to the node's remaining terminationGracePeriod, with a minimum of 1s
+	// to prevent a force-deletion from etcd (gracePeriodSeconds=0), which would violate at-most-one
+	// pod semantics. The node's terminationGracePeriod may already have elapsed by the time we reconcile.
+	gracePeriodSeconds := lo.ToPtr(max(int64(lo.FromPtr(nodeTerminationTime).Sub(q.clock.Now()).Seconds()), 1))
+	q.recorder.Publish(terminatorevents.DisruptPodDelete(pod, gracePeriodSeconds, nodeTerminationTime))
+	if err := q.kubeClient.Delete(ctx, pod, &client.DeleteOptions{
+		GracePeriodSeconds: gracePeriodSeconds,
+		Preconditions: &metav1.Preconditions{
+			UID: new(pod.UID),
+		},
+	}); err != nil {
+		if apierrors.IsNotFound(err) {
+			q.complete(pod)
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, fmt.Errorf("force-deleting pod, %w", err)
+	}
+	log.FromContext(ctx).WithValues(
+		"namespace", pod.Namespace,
+		"name", pod.Name,
+		"pod.terminationGracePeriodSeconds", lo.FromPtr(pod.Spec.TerminationGracePeriodSeconds),
+		"delete.gracePeriodSeconds", lo.FromPtr(gracePeriodSeconds),
+		"nodeclaim.terminationTime", lo.FromPtr(nodeTerminationTime),
+	).V(1).Info("deleting pod")
+	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: evictionReason(ctx, pod, q.kubeClient)})
+	q.complete(pod)
+	return reconcile.Result{}, nil
+}
+
+// complete removes the pod from the queue.
+func (q *Queue) complete(pod *corev1.Pod) {
 	q.Lock()
 	defer q.Unlock()
-	q.set.Delete(NewQueueKey(pod))
-	return reconcile.Result{}, nil
+	delete(q.items, NewQueueKey(pod))
 }
 
 func evictionReason(ctx context.Context, pod *corev1.Pod, kubeClient client.Client) string {
