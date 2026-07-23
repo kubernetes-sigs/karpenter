@@ -706,6 +706,24 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	})
+	It("should update budget metrics for all reasons on reconcile even when there are no candidates", func() {
+		// An active schedule blocks all disruptions. None of the nodes are disruption candidates, so no
+		// disruption method evaluates this nodepool, but the gauges must still reflect the schedule.
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{
+			{Nodes: "2"},
+			{Nodes: "0", Schedule: lo.ToPtr("* * * * *"), Duration: &metav1.Duration{Duration: time.Hour}},
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectSingletonReconciled(ctx, disruptionController)
+		for _, reason := range allKnownDisruptionReasons {
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 0, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
+			})
+			ExpectMetricGaugeValue(disruption.NodePoolNodesConsumingBudgets, 0, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
+			})
+		}
+	})
 	It("should not consider nodes that are not managed as part of disruption count", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 		ExpectApplied(ctx, env.Client, nodePool)
