@@ -111,13 +111,22 @@ EOF
 
 # Create num_partitions
 # In v0.7.0+, kwok is configured via a kwok.yaml ConfigMap instead of CLI args.
+selector_path=/options/manageNodesWithLabelSelector
 for ((i=0; i<PARTITION_COUNT; i++))
 do
   SUB_LET_DIR=$HOME_DIR/${alphabet[i]}
   mkdir ${SUB_LET_DIR}
 
-  sed "s/manageNodesWithLabelSelector: ''/manageNodesWithLabelSelector: 'kwok-partition=${alphabet[i]}'/" \
-    "${BASE}/kwok.yaml" > "${SUB_LET_DIR}/kwok.yaml"
+  partition_patch=$(cat <<EOF
+[
+  {"op":"test","path":"${selector_path}","value":""},
+  {"op":"replace","path":"${selector_path}","value":"kwok-partition=${alphabet[i]}"}
+]
+EOF
+)
+  kubectl patch --local --type=json -f "${BASE}/kwok.yaml" \
+    -p "${partition_patch}" \
+    -o yaml > "${SUB_LET_DIR}/kwok.yaml"
 
 cat <<EOF > "${SUB_LET_DIR}/kustomization.yaml"
   apiVersion: kustomize.config.k8s.io/v1beta1
