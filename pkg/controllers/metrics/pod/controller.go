@@ -268,8 +268,8 @@ func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 	_, scheduled := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
 		return c.Type == corev1.PodScheduled && c.Status == corev1.ConditionTrue
 	})
-	// If we've made a decision on this pod or the pod is already bound, delete the metric idempotently and return
-	if decisionTime := c.cluster.PodSchedulingDecisionTime(nn); !decisionTime.IsZero() || scheduled {
+	// If we've made a decision on this pod, the pod is already bound, or the pod is terminal, delete the metric idempotently and return
+	if decisionTime := c.cluster.PodSchedulingDecisionTime(nn); !decisionTime.IsZero() || scheduled || pod.Spec.NodeName != "" || podutils.IsTerminal(pod) {
 		PodSchedulingUndecidedTimeSeconds.Delete(map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,

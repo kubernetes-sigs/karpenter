@@ -535,6 +535,50 @@ var _ = Describe("Pod Metrics", func() {
 		})
 		Expect(found).To(BeFalse())
 	})
+	It("should delete provisioning undecided metrics when the pod has a NodeName but PodScheduled condition is not True", func() {
+		p := test.Pod(test.PodOptions{NodeName: "test-node"})
+		p.Status.Phase = corev1.PodPending
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", LastTransitionTime: metav1.Now()}}
+		ExpectApplied(ctx, env.Client, p)
+
+		cluster.AckPods(p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+		env.Clock.Step(1 * time.Hour)
+
+		// Even though we ACK'd the pod, the metric should not be emitted because the pod is already bound (has NodeName)
+		_, found := FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+	})
+	It("should delete provisioning undecided metrics when the pod is terminal without PodScheduled condition being True", func() {
+		p := test.Pod()
+		p.Status.Phase = corev1.PodPending
+		ExpectApplied(ctx, env.Client, p)
+
+		cluster.AckPods(p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+		env.Clock.Step(1 * time.Hour)
+
+		_, found := FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		// Pod goes directly to Failed phase without PodScheduled condition being True
+		p.Status.Phase = corev1.PodFailed
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", LastTransitionTime: metav1.Now()}}
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+	})
 	It("should delete the pod state metric on pod delete", func() {
 		p := test.Pod()
 		ExpectApplied(ctx, env.Client, p)
