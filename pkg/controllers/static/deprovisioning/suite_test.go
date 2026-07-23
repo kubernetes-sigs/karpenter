@@ -767,6 +767,255 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 				)
 			})
 		})
+		Context("Deprovisioning Priority Annotation", func() {
+			It("should prioritize unresolved nodeclaims by priority annotation", func() {
+				nodePool := test.StaticNodePool()
+				nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+
+				// Create 3 unresolved NodeClaims with different priorities
+				unresolvedNodeClaim1 := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
+						Annotations: map[string]string{
+							"karpenter.sh/deprovisioning-priority": "10", // Lower priority
+						},
+					},
+					Status: v1.NodeClaimStatus{},
+				})
+				unresolvedNodeClaim1.Status.ProviderID = ""
+
+				unresolvedNodeClaim2 := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
+						Annotations: map[string]string{
+							"karpenter.sh/deprovisioning-priority": "100", // Higher priority - should be deleted first
+						},
+					},
+					Status: v1.NodeClaimStatus{},
+				})
+				unresolvedNodeClaim2.Status.ProviderID = ""
+
+				unresolvedNodeClaim3 := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
+						Annotations: map[string]string{
+							"karpenter.sh/deprovisioning-priority": "50", // Medium priority
+						},
+					},
+					Status: v1.NodeClaimStatus{},
+				})
+				unresolvedNodeClaim3.Status.ProviderID = ""
+
+				ExpectApplied(ctx, env.Client, nodePool, unresolvedNodeClaim1, unresolvedNodeClaim2, unresolvedNodeClaim3)
+
+				// Force Cluster State Update
+				cluster.UpdateNodeClaim(unresolvedNodeClaim1)
+				cluster.UpdateNodeClaim(unresolvedNodeClaim2)
+				cluster.UpdateNodeClaim(unresolvedNodeClaim3)
+
+				ExpectStateNodePoolCount(cluster, nodePool.Name, 3, 0, 0)
+
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+				Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+
+				// Should keep only 1 NodeClaim
+				remainingNodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
+				activeNodeClaims := lo.Filter(remainingNodeClaims.Items, func(nc v1.NodeClaim, _ int) bool {
+					return nc.DeletionTimestamp.IsZero()
+				})
+				Expect(activeNodeClaims).To(HaveLen(1))
+				// Should keep the one with lowest priority (10)
+				Expect(activeNodeClaims[0].Name).To(Equal(unresolvedNodeClaim1.Name))
+			})
+
+			It("should prioritize empty nodes by priority annotation", func() {
+				nodePool := test.StaticNodePool()
+				nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+
+				nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							v1.NodeInitializedLabelKey:     "true",
+							corev1.LabelInstanceTypeStable: "stable.instance",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("10"),
+							corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						},
+					},
+				})
+
+				// Set different priorities
+				nodeClaims[0].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "25",
+				}
+				nodeClaims[1].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "100", // Highest - delete first
+				}
+				nodeClaims[2].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "50",
+				}
+
+				ExpectApplied(ctx, env.Client, nodePool)
+				for i := range 3 {
+					ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				}
+
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
+				Expect(cluster.Nodes()).To(HaveLen(3))
+				ExpectStateNodePoolCount(cluster, nodePool.Name, 3, 0, 0)
+
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+				Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+
+				remainingNodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
+				activeNodeClaims := lo.Filter(remainingNodeClaims.Items, func(nc v1.NodeClaim, _ int) bool {
+					return nc.DeletionTimestamp.IsZero()
+				})
+				Expect(activeNodeClaims).To(HaveLen(1))
+				// Should keep the one with lowest priority (25)
+				Expect(activeNodeClaims[0].Name).To(Equal(nodeClaims[0].Name))
+			})
+
+			It("should respect do-not-disrupt before priority annotation on non-empty nodes", func() {
+				nodePool := test.StaticNodePool()
+				nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+
+				nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							v1.NodeInitializedLabelKey:     "true",
+							corev1.LabelInstanceTypeStable: "stable.instance",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("10"),
+							corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						},
+					},
+				})
+
+				// Node 0: High priority but with do-not-disrupt pod (should be kept)
+				nodeClaims[0].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "100",
+				}
+				pod0 := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							v1.DoNotDisruptAnnotationKey: "true",
+						},
+					},
+					NodeName: nodes[0].Name,
+				})
+
+				// Node 1: Medium priority, no do-not-disrupt
+				nodeClaims[1].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "50",
+				}
+				pod1 := test.Pod(test.PodOptions{
+					NodeName: nodes[1].Name,
+				})
+
+				// Node 2: Low priority, no do-not-disrupt (should be deleted)
+				nodeClaims[2].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "10",
+				}
+				pod2 := test.Pod(test.PodOptions{
+					NodeName: nodes[2].Name,
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool)
+				for i := range 3 {
+					ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				}
+				ExpectApplied(ctx, env.Client, pod0, pod1, pod2)
+
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
+				Expect(cluster.Nodes()).To(HaveLen(3))
+				ExpectStateNodePoolCount(cluster, nodePool.Name, 3, 0, 0)
+
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+				Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+
+				remainingNodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
+				activeNodeClaims := lo.Filter(remainingNodeClaims.Items, func(nc v1.NodeClaim, _ int) bool {
+					return nc.DeletionTimestamp.IsZero()
+				})
+				Expect(activeNodeClaims).To(HaveLen(1))
+				// Should keep node 0 (has do-not-disrupt), despite having highest priority annotation
+				Expect(activeNodeClaims[0].Name).To(Equal(nodeClaims[0].Name))
+			})
+
+			It("should use priority to break ties among nodes without do-not-disrupt", func() {
+				nodePool := test.StaticNodePool()
+				nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+
+				nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							v1.NodeInitializedLabelKey:     "true",
+							corev1.LabelInstanceTypeStable: "stable.instance",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("10"),
+							corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						},
+					},
+				})
+
+				// All nodes have regular pods (no do-not-disrupt)
+				nodeClaims[0].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "10", // Lowest - should be kept
+				}
+				nodeClaims[1].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "50",
+				}
+				nodeClaims[2].Annotations = map[string]string{
+					"karpenter.sh/deprovisioning-priority": "100", // Highest - delete first
+				}
+
+				ExpectApplied(ctx, env.Client, nodePool)
+				for i := range 3 {
+					pod := test.Pod(test.PodOptions{
+						NodeName: nodes[i].Name,
+					})
+					ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i], pod)
+				}
+
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
+				Expect(cluster.Nodes()).To(HaveLen(3))
+				ExpectStateNodePoolCount(cluster, nodePool.Name, 3, 0, 0)
+
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+				Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+
+				remainingNodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
+				activeNodeClaims := lo.Filter(remainingNodeClaims.Items, func(nc v1.NodeClaim, _ int) bool {
+					return nc.DeletionTimestamp.IsZero()
+				})
+				Expect(activeNodeClaims).To(HaveLen(1))
+				// Should keep node with lowest priority (10)
+				Expect(activeNodeClaims[0].Name).To(Equal(nodeClaims[0].Name))
+			})
+		})
 		Context("Helper Functions", func() {
 			Describe("hasNodePoolReplicaOrStatusChanged", func() {
 				It("should detect replica changes", func() {
