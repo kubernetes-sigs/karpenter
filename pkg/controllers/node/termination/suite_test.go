@@ -908,6 +908,38 @@ var _ = Describe("Termination", func() {
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
+		It("should not requeue drain past the nodeclaim's terminationGracePeriod even if pod TGPS is longer", func() {
+			// A pod's terminationGracePeriodSeconds can exceed the nodeclaim's own terminationGracePeriod
+			// (e.g. spot interruption with a short deadline). In that case the node's deadline must win -
+			// we should not requeue drain past nodeTerminationTime just because a pod's TGPS is larger.
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 20 * time.Second}
+			nodeClaim.Annotations = map[string]string{
+				v1.NodeClaimTerminationTimestampAnnotationKey: env.Clock.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339),
+			}
+			pod := test.Pod(test.PodOptions{
+				NodeName:                      node.Name,
+				ObjectMeta:                    metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(600)),
+			})
+			ExpectApplied(ctx, env.Client, node, nodeClaim, pod)
+			ExpectDeletionTimestampSet(ctx, env.Client, pod)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
+			// First reconcile: taint and start draining
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+
+			// Even though pod TGPS (600s) is far larger than MinDrainTime, effectiveDrainTime must be
+			// clamped to the nodeclaim's terminationGracePeriod (20s), not the pod's TGPS.
+			env.Clock.Step(20 * time.Second)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsTrue()).To(BeTrue())
+
+			ExpectDeleted(ctx, env.Client, pod)
+			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
 		Context("VolumeAttachments", func() {
 			It("should wait for volume attachments", func() {
 				va := test.VolumeAttachment(test.VolumeAttachmentOptions{

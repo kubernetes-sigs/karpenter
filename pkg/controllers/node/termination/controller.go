@@ -222,9 +222,13 @@ func (c *Controller) awaitDrain(
 	// kubelet may still be running the preStop hook for the pod's full terminationGracePeriodSeconds.
 	// Calling cloudProvider.Delete() (EC2 TerminateInstances) before preStop hooks complete causes
 	// FailedPreStopHook + ttrpc: closed errors.
+	//
+	// This is clamped to nodeTerminationTime when set, so we never requeue past the nodeclaim's own
+	// terminationGracePeriod deadline (mirrors the clamp terminator.DeleteExpiringPods already does
+	// for the pod delete grace period).
 	if nodeClaim != nil {
 		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained)
-		effectiveDrainTime := c.effectiveDrainTime(ctx, node)
+		effectiveDrainTime := c.effectiveDrainTime(ctx, node, nodeTerminationTime)
 		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < effectiveDrainTime) {
 			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
@@ -240,7 +244,11 @@ func (c *Controller) awaitDrain(
 // proceeding to instance termination. It is computed as max(MinDrainTime, maxPodTerminationGracePeriodSeconds)
 // across all pods still on the node (deletionTimestamp set). This ensures the EC2 instance is not
 // terminated while preStop hooks are still executing.
-func (c *Controller) effectiveDrainTime(ctx context.Context, node *corev1.Node) time.Duration {
+//
+// If nodeTerminationTime is set, the result is clamped so it never exceeds the time remaining until
+// nodeTerminationTime - the nodeclaim's terminationGracePeriod always takes priority, matching the
+// existing invariant documented on awaitDrain.
+func (c *Controller) effectiveDrainTime(ctx context.Context, node *corev1.Node, nodeTerminationTime *time.Time) time.Duration {
 	pods, err := nodeutils.GetPods(ctx, c.kubeClient, node)
 	if err != nil {
 		return MinDrainTime
@@ -253,6 +261,11 @@ func (c *Controller) effectiveDrainTime(ctx context.Context, node *corev1.Node) 
 		podGrace := time.Duration(*p.Spec.TerminationGracePeriodSeconds) * time.Second
 		if podGrace > effective {
 			effective = podGrace
+		}
+	}
+	if nodeTerminationTime != nil {
+		if remaining := nodeTerminationTime.Sub(c.clock.Now()); remaining < effective {
+			return max(remaining, 0)
 		}
 	}
 	return effective
