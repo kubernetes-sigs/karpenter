@@ -18,6 +18,7 @@ package dynamicresources
 
 import (
 	"fmt"
+	"math"
 
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -56,19 +57,33 @@ func (a *allocator) checkCapacity(device cloudprovider.Device, deviceID DeviceID
 		)
 	}
 	for name, qty := range consumed {
-		total := device.Capacity[name].Value
-		var used resource.Quantity
-		for _, src := range sources {
-			if q, ok := src[name]; ok {
-				used.Add(q)
-			}
-		}
-		used.Add(qty)
-		if used.Cmp(total) > 0 {
+		if !capacityFits(name, qty, device.Capacity[name].Value, sources) {
 			return nil, false
 		}
 	}
 	return consumed, true
+}
+
+// capacityFits reports whether the requested qty plus the persisted sources for a
+// single capacity dimension stays within total. It fails closed on any negative
+// quantity (total, qty, or a source): a negative value (for example an anomalous
+// ConsumedCapacity ingested from a ResourceClaim status without validation) would
+// offset the used total and over-admit the device.
+func capacityFits(name resourcev1.QualifiedName, qty, total resource.Quantity, sources []map[resourcev1.QualifiedName]resource.Quantity) bool {
+	if total.Sign() < 0 || qty.Sign() < 0 {
+		return false
+	}
+	var used resource.Quantity
+	for _, src := range sources {
+		if q, ok := src[name]; ok {
+			if q.Sign() < 0 {
+				return false
+			}
+			used.Add(q)
+		}
+	}
+	used.Add(qty)
+	return used.Cmp(total) <= 0
 }
 
 // deductAllocatingCapacity adds consumed capacity to the DFS-local allocating state.
@@ -303,6 +318,12 @@ func computeConsumedCapacity(
 			}
 		}
 		c := calculateConsumedCapacity(requestedVal, cap)
+		// Consumed capacity must never be negative: a negative request with no
+		// policy, or a negative RequestPolicy.Default for an empty request, would
+		// otherwise be stored as a negative "credit" and over-admit the device.
+		if c.Sign() < 0 {
+			return nil, fmt.Errorf("consumed capacity for dimension %s is negative", name)
+		}
 		if violatesPolicy(c, cap.RequestPolicy) {
 			return nil, fmt.Errorf("capacity request violates policy for dimension %s", name)
 		}
@@ -388,7 +409,14 @@ func fillEmptyRequest(capacity resourcev1.DeviceCapacity) resource.Quantity {
 // If requestedVal < Min, returns Min.
 // If Step is specified, rounds up to the nearest Min + N*Step.
 // If no Step is specified and requestedVal >= Min, it returns requestedVal as is.
-// Note: equivalent to upstream roundUpRange in k8s.io/dynamic-resource-allocation
+// Based on upstream roundUpRange in k8s.io/dynamic-resource-allocation, with
+// overflow and representability guards. The rounding is done in int64, and
+// Quantity.Value() truncates values outside the int64 range (and rounds a
+// fractional value away from zero), so if the request, Min or Step exceeds the
+// int64 magnitude the existing Value()-based path handles, the Step is not
+// positive, or the final Min + N*Step would overflow, the request is returned
+// unchanged so the exact policy and capacity comparisons (violatesPolicy,
+// checkCapacity) reject it rather than using a truncated or wrapped value.
 func roundUpRange(requestedVal *resource.Quantity, validRange *resourcev1.CapacityRequestPolicyRange) resource.Quantity {
 	if requestedVal.Cmp(*validRange.Min) < 0 {
 		return validRange.Min.DeepCopy()
@@ -396,13 +424,25 @@ func roundUpRange(requestedVal *resource.Quantity, validRange *resourcev1.Capaci
 	if validRange.Step == nil {
 		return requestedVal.DeepCopy()
 	}
+	// Guard every operand before projecting it with Value(), which truncates
+	// out-of-range quantities. Anything not safely representable is returned
+	// unchanged for the exact comparisons downstream to reject.
+	if requestedVal.CmpInt64(math.MaxInt64) > 0 ||
+		validRange.Min.Sign() < 0 || validRange.Min.CmpInt64(math.MaxInt64) > 0 ||
+		validRange.Step.Sign() <= 0 || validRange.Step.CmpInt64(math.MaxInt64) > 0 {
+		return requestedVal.DeepCopy()
+	}
 	requestedInt64 := requestedVal.Value()
-	step := validRange.Step.Value()
 	min := validRange.Min.Value()
+	step := validRange.Step.Value()
 	added := requestedInt64 - min
 	n := added / step
 	if added%step != 0 {
 		n++
+	}
+	// Detect, rather than wrap, an overflow of the final Min + N*Step.
+	if n > (math.MaxInt64-min)/step {
+		return requestedVal.DeepCopy()
 	}
 	return *resource.NewQuantity(min+step*n, resource.BinarySI)
 }
@@ -425,6 +465,11 @@ func violatesPolicy(consumedVal resource.Quantity, policy *resourcev1.CapacityRe
 	if policy == nil {
 		return false
 	}
+	// A structurally malformed range is a violation even when the consumed value
+	// matches Default, so the Default short-circuit below cannot mask it.
+	if policy.ValidRange != nil && invalidRange(*policy.ValidRange) {
+		return true
+	}
 	if policy.Default != nil && consumedVal.Cmp(*policy.Default) == 0 {
 		return false
 	}
@@ -443,14 +488,31 @@ func violateValidRange(val resource.Quantity, validRange resourcev1.CapacityRequ
 		return true
 	}
 	if validRange.Step != nil {
-		requestedInt64 := val.Value()
+		// A malformed range, or a value not representable as int64, is a violation
+		// (fail-closed) rather than dereferencing a nil Min or ignoring the step.
+		if invalidRange(validRange) || val.CmpInt64(math.MaxInt64) > 0 {
+			return true
+		}
 		step := validRange.Step.Value()
 		min := validRange.Min.Value()
-		if (requestedInt64-min)%step != 0 {
+		if (val.Value()-min)%step != 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// invalidRange reports whether the range itself is malformed, independent of any
+// particular value: a Step paired with a nil, negative, or non-int64-representable
+// Min, or a non-positive or non-representable Step. A range with no Step is not
+// malformed here, since the modulo grid is only defined when Step is set.
+func invalidRange(validRange resourcev1.CapacityRequestPolicyRange) bool {
+	if validRange.Step == nil {
+		return false
+	}
+	return validRange.Min == nil ||
+		validRange.Step.Sign() <= 0 || validRange.Step.CmpInt64(math.MaxInt64) > 0 ||
+		validRange.Min.Sign() < 0 || validRange.Min.CmpInt64(math.MaxInt64) > 0
 }
 
 // Note: equivalent to upstream violateValidValues in k8s.io/dynamic-resource-allocation
