@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -181,6 +182,16 @@ func DefaultFeatureGates() FeatureGates {
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	gateMap := map[string]bool{}
 	gates := DefaultFeatureGates()
+
+	var kept []string
+	for _, pair := range strings.Split(gateStr, ",") {
+		if k, v, found := strings.Cut(pair, "="); found && strings.TrimSpace(v) == "" {
+			fmt.Fprintf(os.Stderr, "WARNING: ignoring feature gate %q with empty value, falling back to its default; this usually means the Helm chart rendered an unset value (e.g. helm upgrade --reuse-values dropping new chart defaults)\n", strings.TrimSpace(k))
+			continue
+		}
+		kept = append(kept, pair)
+	}
+	gateStr = strings.Join(kept, ",")
 
 	// Parses feature gates with the upstream mechanism. This is meant to be used with flag directly but this enables
 	// simple merging with environment vars.
