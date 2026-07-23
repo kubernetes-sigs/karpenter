@@ -228,7 +228,11 @@ func (c *Controller) awaitDrain(
 	// for the pod delete grace period).
 	if nodeClaim != nil {
 		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained)
-		effectiveDrainTime := c.effectiveDrainTime(ctx, node, nodeTerminationTime)
+		pods, err := nodeutils.GetPods(ctx, c.kubeClient, node)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("listing pods, %w", err)
+		}
+		effectiveDrainTime := c.effectiveDrainTime(pods, nodeTerminationTime)
 		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < effectiveDrainTime) {
 			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
@@ -242,24 +246,19 @@ func (c *Controller) awaitDrain(
 
 // effectiveDrainTime returns the minimum time to wait after all pods have been evicted before
 // proceeding to instance termination. It is computed as max(MinDrainTime, maxPodTerminationGracePeriodSeconds)
-// across all pods still on the node (deletionTimestamp set). This ensures the EC2 instance is not
-// terminated while preStop hooks are still executing.
+// across terminating pods on the node. This ensures the EC2 instance is not terminated while
+// preStop hooks are still executing.
 //
 // If nodeTerminationTime is set, the result is clamped so it never exceeds the time remaining until
-// nodeTerminationTime - the nodeclaim's terminationGracePeriod always takes priority, matching the
+// nodeTerminationTime — the nodeclaim's terminationGracePeriod always takes priority, matching the
 // existing invariant documented on awaitDrain.
-func (c *Controller) effectiveDrainTime(ctx context.Context, node *corev1.Node, nodeTerminationTime *time.Time) time.Duration {
-	pods, err := nodeutils.GetPods(ctx, c.kubeClient, node)
-	if err != nil {
-		return MinDrainTime
-	}
+func (c *Controller) effectiveDrainTime(pods []*corev1.Pod, nodeTerminationTime *time.Time) time.Duration {
 	effective := MinDrainTime
 	for _, p := range pods {
 		if p.DeletionTimestamp == nil || p.Spec.TerminationGracePeriodSeconds == nil {
 			continue
 		}
-		podGrace := time.Duration(*p.Spec.TerminationGracePeriodSeconds) * time.Second
-		if podGrace > effective {
+		if podGrace := time.Duration(*p.Spec.TerminationGracePeriodSeconds) * time.Second; podGrace > effective {
 			effective = podGrace
 		}
 	}
