@@ -81,10 +81,12 @@ type NodeOverlaySpec struct {
 	// +optional
 	Price *string `json:"price,omitempty"`
 	//nolint:kubeapilinter
-	// Capacity adds extended resources only, and does not replace any existing resources.
-	// These extended resources are appended to the node's existing resource list.
-	// Note: This field does not modify or override standard resources like cpu, memory, ephemeral-storage, or pods.
-	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))"
+	// Capacity adds resources for scheduling simulation and does not replace any existing resources.
+	// These resources are appended to the node's existing resource list.
+	// Note: This field does not modify or override standard resources like memory, ephemeral-storage, or pods.
+	// CPU overlays are supported to calibrate simulations for cases where effective CPU differs from
+	// cloud instance metadata (for example, SMT-disabled nodes).
+	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['memory', 'ephemeral-storage', 'pods']))"
 	// +optional
 	Capacity corev1.ResourceList `json:"capacity,omitempty"`
 	//nolint:kubeapilinter
