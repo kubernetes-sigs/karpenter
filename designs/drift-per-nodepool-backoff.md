@@ -26,120 +26,20 @@ the first schedulable candidate.
 
 During a batched drift rollout, such as changing a shared AMI selector so that many
 NodePools drift at once, the drift controller repeatedly picks the globally oldest
-drifted candidate. The relevant selection logic sorts candidates strictly by the
-`Drifted` status condition's `LastTransitionTime`:
-
-```64:108:pkg/controllers/disruption/drift.go
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
-			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
-	})
-
-	emptyCandidates, nonEmptyCandidates := lo.FilterReject(candidates, func(c *Candidate, _ int) bool {
-		return len(c.reschedulablePods) == 0
-	})
-
-	// Prioritize empty candidates since we want them to get priority over non-empty candidates if the budget is constrained.
-	// ...
-	for _, candidate := range slices.Concat(emptyCandidates, nonEmptyCandidates) {
-		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
-			continue
-		}
-		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, nil, candidate)
-		// ...
-		cmd := Command{
-			Candidates:          []*Candidate{candidate},
-			Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
-			Results:             results,
-			PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-		}
-		return []Command{cmd}, nil
-	}
-	return []Command{}, nil
-```
-
-After a command is dispatched, the disruption controller requeues immediately, so
-this selection runs many rapid passes during a rollout:
-
-```166:183:pkg/controllers/disruption/controller.go
-	// Attempt different disruption methods. We'll only let one method perform an action
-	for _, m := range c.methods {
-		c.recordRun(fmt.Sprintf("%T", m))
-		success, err := c.disrupt(ctx, m)
-		if err != nil {
-			// ...
-		}
-		if success {
-			return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
-		}
-	}
-
-	// All methods did nothing, so return nothing to do
-	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
-```
+drifted candidate. After a command is dispatched, the disruption controller requeues
+immediately.
 
 Replacement orchestration is asynchronous, in the drift/disruption `Queue`. When a
 replacement fails unrecoverably (e.g. the replacement NodeClaim was deleted after an
 ICE, or the command timed out), the queue tears the command down and unmarks the
 candidate for deletion, returning it to the candidate pool unchanged — crucially,
-**with its original drift timestamp**:
-
-```142:181:pkg/controllers/disruption/queue.go
-func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	// ...
-	if err := q.waitOrTerminate(ctx, cmd); err != nil {
-		// If recoverable, re-queue and try again.
-		if !IsUnrecoverableError(err) {
-			return reconcile.Result{RequeueAfter: queueBaseDelay}, nil
-		}
-		// If the command failed, bail on the action.
-		// ...
-		log.FromContext(ctx).Error(multiErr, "failed terminating nodes while executing a disruption command")
-	} else {
-		log.FromContext(ctx).V(1).Info("command succeeded")
-		cmd.Succeeded = true
-	}
-	q.CompleteCommand(cmd)
-	return reconcile.Result{}, nil
-}
-```
-
-```413:424:pkg/controllers/disruption/queue.go
-// CompleteCommand fully clears the queue of all references of a hash/command
-func (q *Queue) CompleteCommand(cmd *Command) {
-	if !cmd.Succeeded {
-		q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...)
-	}
-	// Remove all candidates linked to the command
-	q.Lock()
-	defer q.Unlock()
-	for _, c := range cmd.Candidates {
-		delete(q.ProviderIDToCommand, c.ProviderID())
-	}
-}
-```
+**with its original drift timestamp**.
 
 **Why it starves.** Nothing about the failed candidate's candidacy changes: it is
 still the oldest, still within its NodePool's budget, and no longer in the queue. On
 the next (immediate) pass it is rebuilt, re-sorted oldest-first, and re-selected. A
 NodePool whose oldest candidates keep failing fast therefore monopolizes the single
 per-pass command forever, and younger NodePools are never serviced.
-
-Notably, there is a precedent in the codebase for per-NodePool fairness state kept in memory
-on a disruption method: `SingleNodeConsolidation.PreviouslyUnseenNodePools` tracks
-NodePools skipped due to a per-pass timeout and prioritizes them on the next pass:
-
-```37:51:pkg/controllers/disruption/singlenodeconsolidation.go
-// SingleNodeConsolidation evaluates one node at a time for consolidation.
-type SingleNodeConsolidation struct {
-	consolidation
-	PreviouslyUnseenNodePools sets.Set[string]
-	validator                 Validator
-}
-```
-
-This RFC follows the same pattern: a small, in-memory, per-NodePool state that
-influences candidate selection, with no persistence and no API surface.
 
 ## Goals
 
@@ -294,43 +194,6 @@ mutates back-off state, so there is no cleanup obligation on the abandon paths
 (`errCandidateDeleting`, unschedulable pods, simulation errors). The
 number of attempts a just-eligible pool makes before its next failure re-arms the
 window is naturally bounded by the pool's disruption budget.
-
-### Wiring / ownership
-
-The tracker must be updated by the `Queue` and read by the `Drift` method. Both are
-constructed in `pkg/controllers/controllers.go`:
-
-```97:105:pkg/controllers/controllers.go
-	deviceAllocationController := deviceallocation.NewController(kubeClient)
-
-	evictionQueue := terminator.NewQueue(kubeClient, recorder)
-	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
-	controllers := []controller.Controller{
-		p,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue, clusterCost),
-```
-
-Proposed approach: construct a single `*NodePoolBackoff` in `controllers.go` and
-inject it into both `disruption.NewQueue(...)` and `disruption.NewController(...)`.
-`NewController` threads it through `NewMethods` into `NewDrift`. This keeps a single
-shared instance and avoids the `Drift` method needing a back-reference to the
-`Queue`. The `Drift` struct gains a `backoff *NodePoolBackoff` field alongside its
-existing `clock`, `cluster`, etc.:
-
-```38:55:pkg/controllers/disruption/drift.go
-// Drift is a subreconciler that deletes drifted candidates.
-type Drift struct {
-	kubeClient  client.Client
-	cluster     *state.Cluster
-	provisioner *provisioning.Provisioner
-	recorder    events.Recorder
-	clock       clock.Clock
-}
-```
-
-The `Drift` method instance is created once (via `NewMethods` inside `NewController`)
-and persists for the controller's lifetime, so the shared tracker is stable across
-passes — the same property `PreviouslyUnseenNodePools` relies on.
 
 ## Detailed design
 
