@@ -201,7 +201,7 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*cor
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetPods(ctx, kubeClient, in.Node)
+	return nodeutils.GetPods(ctx, kubeClient, in.Node.Name)
 }
 
 // ValidateNodeDisruptable returns an error if the StateNode cannot be disrupted
