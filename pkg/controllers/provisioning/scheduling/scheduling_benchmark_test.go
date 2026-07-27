@@ -252,6 +252,7 @@ func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.
 		clock,
 		nil, // volumeReqsByPod
 		nil, // allocator
+		scheduling.NewFairnessState(),
 		opts...,
 	), nil
 }

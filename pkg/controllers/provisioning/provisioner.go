@@ -89,6 +89,7 @@ type Provisioner struct {
 	cm                         *pretty.ChangeMonitor
 	clock                      clock.Clock
 	deviceAllocationController *deviceallocation.Controller
+	fairness                   *scheduler.FairnessState
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
@@ -105,6 +106,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		cm:                         pretty.NewChangeMonitor(),
 		clock:                      clock,
 		deviceAllocationController: deviceAllocationController,
+		fairness:                   scheduler.NewFairnessState(),
 	}
 	return p
 }
@@ -344,7 +346,7 @@ func (p *Provisioner) NewScheduler(
 	}
 
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, p.fairness, opts...), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
