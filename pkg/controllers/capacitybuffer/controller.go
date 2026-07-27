@@ -148,7 +148,7 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 		if err != nil {
 			return false, handleResolveError(cb, err, ReasonPodTemplateNotFound)
 		}
-		podSpec = &result.PodSpec
+		podSpec = &result.PodTemplateSpec.Spec
 		cb.Status.PodTemplateRef = &autoscalingv1beta1.LocalObjectRef{Name: result.Name}
 		cb.Status.PodTemplateGeneration = &result.Generation
 
@@ -157,7 +157,7 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 		if err != nil {
 			return false, handleResolveError(cb, err, ReasonScalableRefNotFound)
 		}
-		podSpec = &result.PodSpec
+		podSpec = &result.PodTemplateSpec.Spec
 		cb.Status.PodTemplateRef = nil
 		cb.Status.PodTemplateGeneration = nil
 		if cb.Spec.Percentage != nil && result.ScalableReplicas > 0 {

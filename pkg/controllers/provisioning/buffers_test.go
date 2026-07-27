@@ -38,8 +38,9 @@ var _ = Describe("buildVirtualPods", func() {
 		spec := corev1.PodSpec{
 			Containers: []corev1.Container{{Name: "app", Image: "pause:v1"}},
 		}
+		templateLabels := map[string]string{"app": "my-app", "tier": "frontend"}
 
-		pods := buildVirtualPods(cb, spec)
+		pods := buildVirtualPods(cb, spec, templateLabels)
 		Expect(pods).To(HaveLen(3))
 
 		for i, p := range pods {
@@ -48,6 +49,8 @@ var _ = Describe("buildVirtualPods", func() {
 			Expect(p.Namespace).To(Equal("default"))
 			Expect(string(p.UID)).To(Equal("uid-web-" + itoa(idx)))
 			Expect(p.Annotations[autoscalingv1beta1.FakePodAnnotationKey]).To(Equal("true"))
+			Expect(p.Labels["app"]).To(Equal("my-app"))
+			Expect(p.Labels["tier"]).To(Equal("frontend"))
 			Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("web"))
 			Expect(p.Labels[autoscalingv1beta1.BufferNamespaceLabel]).To(Equal("default"))
 			Expect(p.Spec.Priority).ToNot(BeNil())
@@ -67,18 +70,40 @@ var _ = Describe("buildVirtualPods", func() {
 	It("should produce deterministic UIDs across calls", func() {
 		cb := readyBuffer("web", 2)
 		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
-		a := buildVirtualPods(cb, spec)
-		b := buildVirtualPods(cb, spec)
+		a := buildVirtualPods(cb, spec, nil)
+		b := buildVirtualPods(cb, spec, nil)
 		Expect(a).To(HaveLen(len(b)))
 		for i := range a {
 			Expect(a[i].UID).To(Equal(b[i].UID))
 		}
 	})
 
+	It("should let buffer labels take precedence over conflicting template labels", func() {
+		cb := readyBuffer("web", 1)
+		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
+		templateLabels := map[string]string{
+			autoscalingv1beta1.BufferNameLabel: "should-be-overridden",
+		}
+
+		pods := buildVirtualPods(cb, spec, templateLabels)
+		Expect(pods).To(HaveLen(1))
+		Expect(pods[0].Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("web"))
+	})
+
+	It("should handle nil template labels gracefully", func() {
+		cb := readyBuffer("web", 1)
+		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
+
+		pods := buildVirtualPods(cb, spec, nil)
+		Expect(pods).To(HaveLen(1))
+		Expect(pods[0].Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("web"))
+		Expect(pods[0].Labels[autoscalingv1beta1.BufferNamespaceLabel]).To(Equal("default"))
+	})
+
 	It("should return nil for zero replicas", func() {
 		cb := readyBuffer("web", 0)
 		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
-		Expect(buildVirtualPods(cb, spec)).To(BeNil())
+		Expect(buildVirtualPods(cb, spec, nil)).To(BeNil())
 	})
 })
 
@@ -290,8 +315,8 @@ var _ = Describe("classifyBufferPods", func() {
 		buffers := map[string]*autoscalingv1beta1.CapacityBuffer{"default/a": cbA, "default/b": cbB}
 		spec := corev1.PodSpec{}
 
-		aPods := buildVirtualPods(cbA, spec)
-		bPods := buildVirtualPods(cbB, spec)
+		aPods := buildVirtualPods(cbA, spec, nil)
+		bPods := buildVirtualPods(cbB, spec, nil)
 
 		results := scheduler.Results{
 			ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{aPods[0], aPods[1]}}},
@@ -325,8 +350,8 @@ var _ = Describe("classifyBufferPods", func() {
 		}
 		spec := corev1.PodSpec{}
 
-		aPods := buildVirtualPods(cbA, spec)
-		bPods := buildVirtualPods(cbB, spec)
+		aPods := buildVirtualPods(cbA, spec, nil)
+		bPods := buildVirtualPods(cbB, spec, nil)
 
 		results := scheduler.Results{
 			ExistingNodes: []*scheduler.ExistingNode{{Pods: []*corev1.Pod{aPods[0], bPods[0], bPods[1]}}},
@@ -391,8 +416,8 @@ var _ = Describe("bufferPodCountsFromResults", func() {
 		cbB := readyBuffer("b", 2)
 		spec := corev1.PodSpec{}
 
-		aPods := buildVirtualPods(cbA, spec)
-		bPods := buildVirtualPods(cbB, spec)
+		aPods := buildVirtualPods(cbA, spec, nil)
+		bPods := buildVirtualPods(cbB, spec, nil)
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real-pod", Namespace: "default"}}
 
 		nodeA := makeExistingNode("provider-a")
@@ -484,7 +509,7 @@ var _ = Describe("buildVirtualPods with scalableRef buffer", func() {
 			Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}},
 		}
 
-		pods := buildVirtualPods(cb, spec)
+		pods := buildVirtualPods(cb, spec, nil)
 		Expect(pods).To(HaveLen(2))
 
 		for i, p := range pods {
@@ -520,7 +545,7 @@ var _ = Describe("computeProvisioningCondition with scalableRef buffer", func() 
 var _ = Describe("filterVirtualPodErrors", func() {
 	It("should remove virtual pods from error map", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := buildVirtualPods(cb, corev1.PodSpec{}, nil)
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[*corev1.Pod]error{
@@ -536,7 +561,7 @@ var _ = Describe("filterVirtualPodErrors", func() {
 
 	It("should return empty map when all pods are virtual", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := buildVirtualPods(cb, corev1.PodSpec{}, nil)
 
 		input := map[*corev1.Pod]error{
 			virtualPods[0]: fmt.Errorf("err"),
@@ -569,7 +594,7 @@ var _ = Describe("filterVirtualPodErrors", func() {
 var _ = Describe("filterVirtualPodMapping", func() {
 	It("should remove virtual pods from pod slices", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := buildVirtualPods(cb, corev1.PodSpec{}, nil)
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[string][]*corev1.Pod{
@@ -584,7 +609,7 @@ var _ = Describe("filterVirtualPodMapping", func() {
 
 	It("should drop keys entirely when only virtual pods remain", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := buildVirtualPods(cb, corev1.PodSpec{}, nil)
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[string][]*corev1.Pod{
@@ -600,7 +625,7 @@ var _ = Describe("filterVirtualPodMapping", func() {
 
 	It("should return empty map when all pods are virtual", func() {
 		cb := readyBuffer("web", 2)
-		virtualPods := buildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := buildVirtualPods(cb, corev1.PodSpec{}, nil)
 
 		input := map[string][]*corev1.Pod{
 			"nodepool-a": {virtualPods[0], virtualPods[1]},

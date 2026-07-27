@@ -76,42 +76,44 @@ func (p *Provisioner) appendVirtualPods(ctx context.Context, pods []*corev1.Pod)
 		return pods
 	}
 	for _, cb := range buffers {
-		spec, err := p.resolveVirtualPodSpec(ctx, cb)
+		spec, labels, err := p.resolveVirtualPodSpec(ctx, cb)
 		if err != nil {
 			log.FromContext(ctx).WithValues("capacitybuffer", client.ObjectKeyFromObject(cb)).V(1).Info("skipping buffer", "reason", err.Error())
 			continue
 		}
-		pods = append(pods, buildVirtualPods(cb, spec)...)
+		pods = append(pods, buildVirtualPods(cb, spec, labels)...)
 	}
 	return pods
 }
 
-// resolveVirtualPodSpec fetches the pod spec for a buffer using the shared
-// workload resolution utilities. Reads from spec (not status) to avoid stale
-// references when users switch between podTemplateRef and scalableRef.
-func (p *Provisioner) resolveVirtualPodSpec(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (corev1.PodSpec, error) {
+// resolveVirtualPodSpec fetches the pod spec and template labels for a buffer
+// using the shared workload resolution utilities. Reads from spec (not status)
+// to avoid stale references when users switch between podTemplateRef and scalableRef.
+func (p *Provisioner) resolveVirtualPodSpec(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (corev1.PodSpec, map[string]string, error) {
 	switch {
 	case cb.Spec.PodTemplateRef != nil:
 		result, err := apps.ResolvePodTemplateRef(ctx, p.kubeClient, cb.Spec.PodTemplateRef.Name, cb.Namespace)
 		if err != nil {
-			return corev1.PodSpec{}, err
+			return corev1.PodSpec{}, nil, err
 		}
-		return result.PodSpec, nil
+		return result.PodTemplateSpec.Spec, result.PodTemplateSpec.Labels, nil
 	case cb.Spec.ScalableRef != nil:
 		result, err := apps.ResolveScalableRef(ctx, p.kubeClient, cb.Spec.ScalableRef, cb.Namespace)
 		if err != nil {
-			return corev1.PodSpec{}, err
+			return corev1.PodSpec{}, nil, err
 		}
-		return result.PodSpec, nil
+		return result.PodTemplateSpec.Spec, result.PodTemplateSpec.Labels, nil
 	default:
-		return corev1.PodSpec{}, fmt.Errorf("buffer %q has neither podTemplateRef nor scalableRef in spec", cb.Name)
+		return corev1.PodSpec{}, nil, fmt.Errorf("buffer %q has neither podTemplateRef nor scalableRef in spec", cb.Name)
 	}
 }
 
 // buildVirtualPods materializes N identical placeholder pods for a buffer using
 // the given pod spec. Deterministic names and UIDs let downstream components
 // associate results back to the owning buffer without additional bookkeeping.
-func buildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec) []*corev1.Pod {
+// Template labels are merged into the pod metadata so that inter-pod affinity
+// and anti-affinity selectors that reference template labels match correctly.
+func buildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec, templateLabels map[string]string) []*corev1.Pod {
 	if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
 		return nil
 	}
@@ -130,10 +132,10 @@ func buildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec
 				Annotations: map[string]string{
 					autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
 				},
-				Labels: map[string]string{
+				Labels: lo.Assign(templateLabels, map[string]string{
 					autoscalingv1beta1.BufferNameLabel:      cb.Name,
 					autoscalingv1beta1.BufferNamespaceLabel: cb.Namespace,
-				},
+				}),
 				CreationTimestamp: metav1.NewTime(time.Now()),
 			},
 			Spec: strippedSpec,
