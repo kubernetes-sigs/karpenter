@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -37,6 +38,8 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -311,6 +314,190 @@ var _ = Describe("Queue", func() {
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
 		})
+		It("should retain an initialized replacement and clean up an unused replacement when the command times out", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			nct2 := scheduling.NewNodeClaimTemplate(nodePool)
+			nct2.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements: []*disruption.Replacement{
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}},
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct2}},
+				},
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(Succeed())
+
+			initializedNodeClaim := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, initializedNodeClaim)).To(Succeed())
+			initializedNodeClaim, initializedNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, initializedNodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{initializedNode}, []*v1.NodeClaim{initializedNodeClaim})
+
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
+			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
+			ExpectExists(ctx, env.Client, nodeClaim1)
+
+			env.Clock.Step(11 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+			Expect(queue.IsEmpty()).To(BeTrue())
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			ExpectExists(ctx, env.Client, node1)
+			ExpectExists(ctx, env.Client, initializedNodeClaim)
+			ExpectExists(ctx, env.Client, initializedNode)
+			ExpectNotFound(ctx, env.Client, &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: cmd.Replacements[1].Name}})
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+		})
+		It("should not delete sources when an initialized replacement disappears", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			nct2 := scheduling.NewNodeClaimTemplate(nodePool)
+			nct2.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements: []*disruption.Replacement{
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}},
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct2}},
+				},
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(Succeed())
+
+			firstNodeClaim := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, firstNodeClaim)).To(Succeed())
+			firstNodeClaim, firstNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, firstNodeClaim)
+			secondNodeClaim := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[1].Name}, secondNodeClaim)).To(Succeed())
+			secondNodeClaim, secondNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, secondNodeClaim)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{firstNode}, []*v1.NodeClaim{firstNodeClaim})
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
+			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
+
+			ExpectDeleted(ctx, env.Client, firstNodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{secondNode}, []*v1.NodeClaim{secondNodeClaim})
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+			Expect(queue.IsEmpty()).To(BeTrue())
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			ExpectExists(ctx, env.Client, node1)
+			ExpectExists(ctx, env.Client, secondNodeClaim)
+			ExpectExists(ctx, env.Client, secondNode)
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+		})
+		It("should not delete sources when an initialized replacement node becomes not ready", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			nct2 := scheduling.NewNodeClaimTemplate(nodePool)
+			nct2.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements: []*disruption.Replacement{
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}},
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct2}},
+				},
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(Succeed())
+
+			firstNodeClaim := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, firstNodeClaim)).To(Succeed())
+			firstNodeClaim, firstNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, firstNodeClaim)
+			secondNodeClaim := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[1].Name}, secondNodeClaim)).To(Succeed())
+			secondNodeClaim, secondNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, secondNodeClaim)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{firstNode}, []*v1.NodeClaim{firstNodeClaim})
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
+			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
+
+			ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, firstNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{secondNode}, []*v1.NodeClaim{secondNodeClaim})
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+			Expect(queue.IsEmpty()).To(BeFalse())
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			ExpectExists(ctx, env.Client, node1)
+
+			env.Clock.Step(11 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+			Expect(queue.IsEmpty()).To(BeTrue())
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+		})
+		It("should retain an uninitialized replacement that is already workload-bearing", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements: []*disruption.Replacement{
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}},
+				},
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(Succeed())
+
+			replacementNodeClaim := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim)).To(Succeed())
+			replacementNodeClaim, replacementNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim)
+			workload := test.Pod()
+			ExpectApplied(ctx, env.Client, workload)
+			ExpectManualBinding(ctx, env.Client, workload, replacementNode)
+
+			env.Clock.Step(11 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+			Expect(queue.IsEmpty()).To(BeTrue())
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			ExpectExists(ctx, env.Client, node1)
+			ExpectExists(ctx, env.Client, replacementNodeClaim)
+			ExpectExists(ctx, env.Client, replacementNode)
+			ExpectExists(ctx, env.Client, workload)
+			replacementNode = ExpectNodeExists(ctx, env.Client, replacementNode.Name)
+			Expect(replacementNode.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+		})
 		It("should not wait for replacements when none are needed", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
@@ -435,6 +622,47 @@ var _ = Describe("Queue", func() {
 				Entry("very large queue - 80000 commands (capped)", 80000, 1*time.Hour),        // min(80000*80ms, 1hr) = 1hr
 				Entry("extremely large queue - 100000 commands (capped)", 100000, 1*time.Hour), // min(100000*80ms, 1hr) = 1hr
 			)
+		})
+	})
+	Context("StartCommand", func() {
+		It("should clean up a partial replacement launch and unmark source nodes", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			failingClient := &failNthNodeClaimCreateClient{Client: env.Client, failAt: 2}
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
+			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner)
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			nct2 := scheduling.NewNodeClaimTemplate(nodePool)
+			nct2.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, failingProvisioner, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements: []*disruption.Replacement{
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}},
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct2}},
+				},
+			}
+
+			Expect(failingQueue.StartCommand(ctx, cmd)).ToNot(Succeed())
+			Expect(failingQueue.IsEmpty()).To(BeTrue())
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			ExpectExists(ctx, env.Client, node1)
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+
+			successfulNames := lo.Compact(lo.Map(cmd.Replacements, func(replacement *disruption.Replacement, _ int) string {
+				return replacement.Name
+			}))
+			Expect(successfulNames).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: successfulNames[0]}})
 		})
 	})
 })

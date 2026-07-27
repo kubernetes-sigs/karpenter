@@ -188,6 +188,26 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	// we're not going to turn a single node into multiple candidates
 	if len(results.NewNodeClaims) != 1 {
+		if len(results.NewNodeClaims) == maxMultiNodeMultiReplacements && options.FromContext(ctx).FeatureGates.MultiNodeMultiReplacement {
+			results.NewNodeClaims, err = prepareMultiNodeMultiReplacement(candidates, results.NewNodeClaims)
+			if err != nil {
+				outcome := multiNodeMultiReplacementOutcomeIneligible
+				if errors.Is(err, errMultiNodeMultiReplacementPrice) {
+					outcome = multiNodeMultiReplacementOutcomePrice
+				}
+				MultiNodeMultiReplacementEvaluationsTotal.Inc(map[string]string{outcomeLabel: outcome})
+				return Command{}, nil
+			}
+			MultiNodeMultiReplacementEvaluationsTotal.Inc(map[string]string{outcomeLabel: multiNodeMultiReplacementOutcomeAccepted})
+			cmd := Command{
+				Candidates:          candidates,
+				Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
+				Results:             results,
+				PoolDisruptionCosts: computePoolDisruptionCosts(candidates),
+			}
+			cmd.EmitCandidateEvents(c.recorder)
+			return cmd, nil
+		}
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Can't remove without creating %d candidates", len(results.NewNodeClaims)))...)
 		}

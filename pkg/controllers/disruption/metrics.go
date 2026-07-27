@@ -30,6 +30,11 @@ const (
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
 	policyLabel                  = "policy"
+	outcomeLabel                 = "outcome"
+
+	multiNodeMultiReplacementOutcomeAccepted   = "accepted"
+	multiNodeMultiReplacementOutcomeIneligible = "ineligible"
+	multiNodeMultiReplacementOutcomePrice      = "price"
 )
 
 func init() {
@@ -128,6 +133,16 @@ var (
 			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+	)
+	MultiNodeMultiReplacementEvaluationsTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "multi_node_multi_replacement_evaluations_total",
+			Help:      "Number of bounded multi-node multi-replacement evaluations. Labeled by a fixed outcome.",
+		},
+		[]string{outcomeLabel},
 	)
 	ConsolidationScoreHistogram = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,

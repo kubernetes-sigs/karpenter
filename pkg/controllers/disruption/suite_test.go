@@ -2306,3 +2306,16 @@ func (h *hangCreateClient) Create(_ context.Context, _ client.Object, _ ...clien
 	h.hasWaiter.Store(false)
 	return nil
 }
+
+type failNthNodeClaimCreateClient struct {
+	client.Client
+	createCount atomic.Int64
+	failAt      int64
+}
+
+func (f *failNthNodeClaimCreateClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if _, ok := obj.(*v1.NodeClaim); ok && f.createCount.Add(1) == f.failAt {
+		return fmt.Errorf("simulated nodeclaim creation failure")
+	}
+	return f.Client.Create(ctx, obj, opts...)
+}

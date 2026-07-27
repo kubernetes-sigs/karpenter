@@ -147,4 +147,6 @@ settings:
     # -- nodeRepair is ALPHA and is disabled by default.
     # Setting this to true will enable node repair.
     nodeRepair: false
-
+    # -- multiNodeMultiReplacement is ALPHA and is disabled by default.
+    # Setting this to true allows bounded multi-node consolidation into exactly two replacement NodeClaims.
+    multiNodeMultiReplacement: false

@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -119,6 +120,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	if len(candidates) < 2 {
 		return Command{}, nil, nil
 	}
+	boundedCandidateCount := lo.Clamp(max, 0, len(candidates))
 	min := 1
 	if len(candidates) <= max {
 		max = len(candidates) - 1
@@ -133,6 +135,29 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	// Set a timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
+
+	// The legacy binary search assumes that a failed m->1 attempt remains invalid as m grows. An m->2
+	// opportunity is not monotonic: two D64 nodes may require two replacements while three D64 nodes can
+	// validly consolidate into two D96 nodes. Probe the full bounded batch once before the legacy search.
+	if boundedCandidateCount >= minMultiNodeMultiReplacementSources && options.FromContext(ctx).FeatureGates.MultiNodeMultiReplacement {
+		cmd, err := m.computeConsolidation(timeoutCtx, candidates[:boundedCandidateCount]...)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
+				return Command{}, nil, nil
+			}
+			return Command{}, nil, err
+		}
+		if len(cmd.Replacements) == maxMultiNodeMultiReplacements {
+			if approved, perPool := m.evaluator.ApproveCommand(ctx, cmd); approved {
+				return cmd, perPool, nil
+			} else {
+				lastRejectedCmd = cmd
+				lastRejectedPerPool = perPool
+			}
+		}
+	}
+
 	for min <= max {
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
@@ -157,9 +182,13 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// required
 		validDecision := cmd.Decision() == DeleteDecision
 		if cmd.Decision() == ReplaceDecision {
-			cmd.Replacements[0], err = filterOutSameInstanceType(cmd.Replacements[0], candidatesToConsolidate)
-			// we check the error before the replacement instanceTypeOptions since we return nil for the replacement if we get an error
-			if err == nil && len(cmd.Replacements[0].InstanceTypeOptions) > 0 {
+			if len(cmd.Replacements) == 1 {
+				cmd.Replacements[0], err = filterOutSameInstanceType(cmd.Replacements[0], candidatesToConsolidate)
+			}
+			// Multi-replacement commands are already bounded and price-filtered by computeConsolidation.
+			if err == nil && len(cmd.Replacements) > 0 && lo.EveryBy(cmd.Replacements, func(replacement *Replacement) bool {
+				return replacement != nil && len(replacement.InstanceTypeOptions) > 0
+			}) {
 				validDecision = true
 			}
 		}

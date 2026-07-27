@@ -121,12 +121,13 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        new(true),
-					NodeRepair:              new(false),
-					SpotToSpotConsolidation: new(false),
-					NodeOverlay:             new(false),
-					StaticCapacity:          new(false),
-					CapacityBuffer:          new(false),
+					ReservedCapacity:          new(true),
+					NodeRepair:                new(false),
+					SpotToSpotConsolidation:   new(false),
+					MultiNodeMultiReplacement: new(false),
+					NodeOverlay:               new(false),
+					StaticCapacity:            new(false),
+					CapacityBuffer:            new(false),
 				},
 				IgnoreDRARequests: new(true),
 			}))
@@ -156,7 +157,7 @@ var _ = Describe("Options", func() {
 				"--batch-idle-duration", "5s",
 				"--preference-policy", "Ignore",
 				"--min-values-policy", "BestEffort",
-				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true",
+				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,MultiNodeMultiReplacement=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -180,12 +181,13 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyIgnore),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        new(false),
-					NodeRepair:              new(true),
-					SpotToSpotConsolidation: new(true),
-					NodeOverlay:             new(true),
-					StaticCapacity:          new(true),
-					CapacityBuffer:          new(true),
+					ReservedCapacity:          new(false),
+					NodeRepair:                new(true),
+					SpotToSpotConsolidation:   new(true),
+					MultiNodeMultiReplacement: new(true),
+					NodeOverlay:               new(true),
+					StaticCapacity:            new(true),
+					CapacityBuffer:            new(true),
 				},
 				IgnoreDRARequests: new(true),
 			}))
@@ -211,7 +213,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,MultiNodeMultiReplacement=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -239,12 +241,13 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyIgnore),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        new(false),
-					NodeRepair:              new(true),
-					SpotToSpotConsolidation: new(true),
-					NodeOverlay:             new(true),
-					StaticCapacity:          new(true),
-					CapacityBuffer:          new(true),
+					ReservedCapacity:          new(false),
+					NodeRepair:                new(true),
+					SpotToSpotConsolidation:   new(true),
+					MultiNodeMultiReplacement: new(true),
+					NodeOverlay:               new(true),
+					StaticCapacity:            new(true),
+					CapacityBuffer:            new(true),
 				},
 				IgnoreDRARequests: new(true),
 			}))
@@ -265,7 +268,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,MultiNodeMultiReplacement=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -300,12 +303,13 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        new(false),
-					NodeRepair:              new(true),
-					SpotToSpotConsolidation: new(true),
-					NodeOverlay:             new(true),
-					StaticCapacity:          new(true),
-					CapacityBuffer:          new(true),
+					ReservedCapacity:          new(false),
+					NodeRepair:                new(true),
+					SpotToSpotConsolidation:   new(true),
+					MultiNodeMultiReplacement: new(true),
+					NodeOverlay:               new(true),
+					StaticCapacity:            new(true),
+					CapacityBuffer:            new(true),
 				},
 				IgnoreDRARequests: new(true),
 			}))
@@ -337,6 +341,7 @@ var _ = Describe("Options", func() {
 			Entry("when ReservedCapacity is overridden", "ReservedCapacity"),
 			Entry("when NodeRepair is overridden", "NodeRepair"),
 			Entry("when SpotToSpotConsolidation is overridden", "SpotToSpotConsolidation"),
+			Entry("when MultiNodeMultiReplacement is overridden", "MultiNodeMultiReplacement"),
 			Entry("when NodeOverlay is overridden", "NodeOverlay"),
 			Entry("when StaticCapacity is overridden", "StaticCapacity"),
 			Entry("when CapacityBuffer is overridden", "CapacityBuffer"),
@@ -411,5 +416,6 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.StaticCapacity).To(Equal(optsB.FeatureGates.StaticCapacity))
 	Expect(optsA.FeatureGates.CapacityBuffer).To(Equal(optsB.FeatureGates.CapacityBuffer))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.FeatureGates.MultiNodeMultiReplacement).To(Equal(optsB.FeatureGates.MultiNodeMultiReplacement))
 	Expect(optsA.IgnoreDRARequests).To(Equal(optsB.IgnoreDRARequests))
 }
