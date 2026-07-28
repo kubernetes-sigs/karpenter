@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -30,7 +29,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 func BenchmarkNewTopology(b *testing.B) {
@@ -64,55 +62,5 @@ func BenchmarkNewTopology(b *testing.B) {
 	}
 }
 
-func BenchmarkForEachDomain(b *testing.B) {
-	cases := []struct {
-		domains     int
-		taintGroups int
-	}{
-		{100, 1}, {400, 1}, {1000, 1}, {400, 5}, {1000, 5},
-	}
-	// reject maens that pod tolerates no taint; tolerate means that pod tolerates every taint
-	for _, mode := range []struct {
-		name      string
-		tolerates bool
-	}{{"reject", false}, {"tolerate", true}} {
-		for _, tc := range cases {
-			b.Run(fmt.Sprintf("%s/vector=domains/d=%d/t=%d", mode.name, tc.domains, tc.taintGroups), func(b *testing.B) {
-				benchmarkForEachDomain(b, tc.domains, tc.taintGroups, mode.tolerates)
-			})
-		}
-	}
-}
-
-func benchmarkForEachDomain(b *testing.B, domains, taintGroupsPerDomain int, tolerates bool) {
-	dg := scheduling.NewTopologyDomainGroup()
-	for d := 0; d < domains; d++ {
-		domain := fmt.Sprintf("test-zone-%d", d)
-		for t := 0; t < taintGroupsPerDomain; t++ {
-			dg.Insert(domain, corev1.Taint{
-				Key:    fmt.Sprintf("bench.example.com/taint-%d", t),
-				Value:  "true",
-				Effect: corev1.TaintEffectNoSchedule,
-			})
-		}
-	}
-	pod := test.Pod()
-	if tolerates {
-		for t := 0; t < taintGroupsPerDomain; t++ {
-			pod.Spec.Tolerations = append(pod.Spec.Tolerations, corev1.Toleration{
-				Key:      fmt.Sprintf("bench.example.com/taint-%d", t),
-				Operator: corev1.TolerationOpExists,
-			})
-		}
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		count := 0
-		dg.ForEachDomain(pod, corev1.NodeInclusionPolicyHonor, func(domain string) {
-			count++
-		})
-		_ = count
-	}
-}
+// BenchmarkForEachDomain lives in topology_benchmark_test.go: constructing a TopologyDomainGroup requires the
+// package-private topologyNodePool producers, so the benchmark runs from inside the package.
