@@ -4065,6 +4065,7 @@ var _ = Describe("Consolidation", func() {
 			},
 			Entry("a NodePool budget becomes blocking", WithUnderutilizedBlockingBudget()),
 			Entry("a PDB becomes blocking", WithUnderutilizedBlockingPDB()),
+			Entry("source pod placement changes", WithUnderutilizedChurn()),
 			Entry("refreshed source pricing removes the aggregate savings", WithUnderutilizedSourcePrice(4)),
 		)
 		DescribeTable("can merge 3 nodes into 1", func(spotToSpot bool) {

@@ -38,8 +38,10 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock"
@@ -2318,4 +2320,29 @@ func (f *failNthNodeClaimCreateClient) Create(ctx context.Context, obj client.Ob
 		return fmt.Errorf("simulated nodeclaim creation failure")
 	}
 	return f.Client.Create(ctx, obj, opts...)
+}
+
+// failNodeTaintClient fails the taint patch for a single Node so that a command can partially fail while marking
+// its candidates as disrupted.
+type failNodeTaintClient struct {
+	client.Client
+	nodeName string
+}
+
+func (f *failNodeTaintClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*corev1.Node); ok && key.Name == f.nodeName {
+		return fmt.Errorf("simulated node taint failure")
+	}
+	return f.Client.Get(ctx, key, obj, opts...)
+}
+
+type conflictNodeClaimDeleteClient struct {
+	client.Client
+}
+
+func (c *conflictNodeClaimDeleteClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if _, ok := obj.(*v1.NodeClaim); ok {
+		return apierrors.NewConflict(schema.GroupResource{Group: coreapis.Group, Resource: "nodeclaims"}, obj.GetName(), fmt.Errorf("simulated cleanup conflict"))
+	}
+	return c.Client.Delete(ctx, obj, opts...)
 }

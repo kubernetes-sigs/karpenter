@@ -214,9 +214,6 @@ type Replacement struct {
 	*pscheduling.NodeClaim
 
 	Name string
-	// CreatedNodeClaim captures the API object returned by creation. Its resource version ensures cleanup
-	// only deletes a replacement that has not progressed to registration or initialization.
-	CreatedNodeClaim *v1.NodeClaim
 	// Use a bool track if a node has already been initialized so we can fire metrics for initialization once.
 	// This intentionally does not capture nodes that go initialized then go NotReady after as other pods can
 	// schedule to this node as well.

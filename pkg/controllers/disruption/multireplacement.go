@@ -33,8 +33,8 @@ import (
 )
 
 const (
-	minMultiNodeMultiReplacementSources = 3
-	maxMultiNodeMultiReplacements       = 2
+	multiNodeMultiReplacementSourceCount = 3
+	maxMultiNodeMultiReplacements        = 2
 )
 
 var (
@@ -47,7 +47,6 @@ func prepareMultiNodeMultiReplacement(candidates []*Candidate, nodeClaims []*psc
 		return nil, err
 	}
 
-	sourceInstanceType := candidates[0].instanceType.Name
 	sourceZone := candidates[0].zone
 	for _, nodeClaim := range nodeClaims {
 		nodeClaim.Requirements.Add(
@@ -55,9 +54,6 @@ func prepareMultiNodeMultiReplacement(candidates []*Candidate, nodeClaims []*psc
 			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, sourceZone),
 		)
 		nodeClaim.InstanceTypeOptions = nodeClaim.InstanceTypeOptions.Compatible(nodeClaim.Requirements)
-		nodeClaim.InstanceTypeOptions = filterInstanceTypes(nodeClaim.InstanceTypeOptions, func(instanceType *cloudprovider.InstanceType) bool {
-			return instanceType.Name != sourceInstanceType
-		})
 	}
 	if err := validateMultiNodeMultiReplacementBoundary(candidates, nodeClaims, true); err != nil {
 		return nil, err
@@ -67,8 +63,8 @@ func prepareMultiNodeMultiReplacement(candidates []*Candidate, nodeClaims []*psc
 
 //nolint:gocyclo
 func validateMultiNodeMultiReplacementBoundary(candidates []*Candidate, nodeClaims []*pscheduling.NodeClaim, requireReplacementConstraints bool) error {
-	if len(candidates) < minMultiNodeMultiReplacementSources {
-		return fmt.Errorf("%w, requires at least %d source nodes", errMultiNodeMultiReplacementIneligible, minMultiNodeMultiReplacementSources)
+	if len(candidates) != multiNodeMultiReplacementSourceCount {
+		return fmt.Errorf("%w, requires exactly %d source nodes", errMultiNodeMultiReplacementIneligible, multiNodeMultiReplacementSourceCount)
 	}
 	if len(nodeClaims) != maxMultiNodeMultiReplacements {
 		return fmt.Errorf("%w, requires exactly %d replacement nodeclaims", errMultiNodeMultiReplacementIneligible, maxMultiNodeMultiReplacements)
@@ -109,16 +105,6 @@ func validateMultiNodeMultiReplacementBoundary(candidates []*Candidate, nodeClai
 		}
 	}
 	return nil
-}
-
-func filterInstanceTypes(instanceTypes cloudprovider.InstanceTypes, keep func(*cloudprovider.InstanceType) bool) cloudprovider.InstanceTypes {
-	filtered := make(cloudprovider.InstanceTypes, 0, len(instanceTypes))
-	for _, instanceType := range instanceTypes {
-		if keep(instanceType) {
-			filtered = append(filtered, instanceType)
-		}
-	}
-	return filtered
 }
 
 type pricedInstanceTypePrefix struct {

@@ -191,14 +191,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		if len(results.NewNodeClaims) == maxMultiNodeMultiReplacements && options.FromContext(ctx).FeatureGates.MultiNodeMultiReplacement {
 			results.NewNodeClaims, err = prepareMultiNodeMultiReplacement(candidates, results.NewNodeClaims)
 			if err != nil {
-				outcome := multiNodeMultiReplacementOutcomeIneligible
-				if errors.Is(err, errMultiNodeMultiReplacementPrice) {
-					outcome = multiNodeMultiReplacementOutcomePrice
-				}
-				MultiNodeMultiReplacementEvaluationsTotal.Inc(map[string]string{outcomeLabel: outcome})
-				return Command{}, nil
+				return Command{}, nil //nolint:nilerr
 			}
-			MultiNodeMultiReplacementEvaluationsTotal.Inc(map[string]string{outcomeLabel: multiNodeMultiReplacementOutcomeAccepted})
 			cmd := Command{
 				Candidates:          candidates,
 				Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),

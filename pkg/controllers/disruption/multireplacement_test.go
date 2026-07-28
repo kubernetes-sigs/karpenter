@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-func TestFilterMultiNodeMultiReplacementByPrice(t *testing.T) {
+func TestFilterMultiNodeMultiReplacementByPrice(t *testing.T) { //nolint:gocyclo
 	leftCheap := multiReplacementInstanceType("left-cheap", 3)
 	leftExpensive := multiReplacementInstanceType("left-expensive", 6)
 	rightCheap := multiReplacementInstanceType("right-cheap", 4)
@@ -83,6 +83,24 @@ func TestFilterMultiNodeMultiReplacementByPrice(t *testing.T) {
 		_, err := filterMultiNodeMultiReplacementByPrice(nodeClaims, 10)
 		if !errors.Is(err, errMultiNodeMultiReplacementPrice) {
 			t.Fatalf("expected non-finite price rejection, got %v", err)
+		}
+	})
+
+	t.Run("allows two replacements of the homogeneous source type when aggregate cost decreases", func(t *testing.T) {
+		sourceType := multiReplacementInstanceType("source", 6)
+		nodeClaims := []*pscheduling.NodeClaim{
+			multiReplacementNodeClaim("pool", sourceType),
+			multiReplacementNodeClaim("pool", sourceType),
+		}
+		filtered, err := filterMultiNodeMultiReplacementByPrice(nodeClaims, 18)
+		if err != nil {
+			t.Fatalf("expected aggregate source-type savings to be accepted, got %v", err)
+		}
+		if len(filtered[0].InstanceTypeOptions) != 1 || len(filtered[1].InstanceTypeOptions) != 1 {
+			t.Fatalf("expected source instance type to remain available, got %v and %v",
+				instanceTypeNames(filtered[0].InstanceTypeOptions),
+				instanceTypeNames(filtered[1].InstanceTypeOptions),
+			)
 		}
 	})
 }
@@ -149,6 +167,7 @@ func TestValidateMultiNodeMultiReplacementBoundary(t *testing.T) {
 		{NodePool: nodePool, instanceType: sourceInstanceType, capacityType: v1.CapacityTypeOnDemand, zone: "test-zone-1"},
 		{NodePool: nodePool, instanceType: sourceInstanceType, capacityType: v1.CapacityTypeOnDemand, zone: "test-zone-1"},
 	}
+
 	replacements := []*pscheduling.NodeClaim{
 		multiReplacementNodeClaim(nodePool.Name, multiReplacementInstanceType("left", 3)),
 		multiReplacementNodeClaim(nodePool.Name, multiReplacementInstanceType("right", 4)),
@@ -157,9 +176,15 @@ func TestValidateMultiNodeMultiReplacementBoundary(t *testing.T) {
 		t.Fatalf("expected valid boundary, got %v", err)
 	}
 
-	t.Run("requires at least three sources", func(t *testing.T) {
+	t.Run("requires three sources", func(t *testing.T) {
 		if err := validateMultiNodeMultiReplacementBoundary(candidates[:2], replacements, true); !errors.Is(err, errMultiNodeMultiReplacementIneligible) {
 			t.Fatalf("expected source count rejection, got %v", err)
+		}
+	})
+	t.Run("rejects more than three sources", func(t *testing.T) {
+		tooMany := append(append([]*Candidate{}, candidates...), candidates[0])
+		if err := validateMultiNodeMultiReplacementBoundary(tooMany, replacements, true); !errors.Is(err, errMultiNodeMultiReplacementIneligible) {
+			t.Fatalf("expected upper source count rejection, got %v", err)
 		}
 	})
 	t.Run("requires homogeneous zones", func(t *testing.T) {

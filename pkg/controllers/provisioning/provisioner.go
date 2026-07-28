@@ -164,29 +164,18 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
-// CreateNodeClaims launches nodes passed into the function in parallel. It returns positional names for successfully
-// created NodeClaims as well as a multierr of any errors that occurred while launching nodes.
+// CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
+// names as well as a multierr of any errors that occurred while launching nodes
 func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) ([]string, error) {
-	createdNodeClaims, err := p.CreateNodeClaimsWithResults(ctx, nodeClaims, opts...)
-	return lo.Map(createdNodeClaims, func(nodeClaim *v1.NodeClaim, _ int) string {
-		if nodeClaim == nil {
-			return ""
-		}
-		return nodeClaim.Name
-	}), err
-}
-
-// CreateNodeClaimsWithResults launches nodes in parallel and returns the created API objects positionally.
-func (p *Provisioner) CreateNodeClaimsWithResults(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) ([]*v1.NodeClaim, error) {
 	// Create capacity and bind pods
 	errs := make([]error, len(nodeClaims))
-	createdNodeClaims := make([]*v1.NodeClaim, len(nodeClaims))
+	nodeClaimNames := make([]string, len(nodeClaims))
 	workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
-		if nodeClaim, err := p.create(ctx, nodeClaims[i], opts...); err != nil {
+		if name, err := p.Create(ctx, nodeClaims[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("creating node claim, %w", err)
 		} else {
-			createdNodeClaims[i] = nodeClaim
+			nodeClaimNames[i] = name
 		}
 
 		// Regardless of if we successfully created the NodeClaim or not, we should release the reservation. If the NodeClaim
@@ -197,7 +186,7 @@ func (p *Provisioner) CreateNodeClaimsWithResults(ctx context.Context, nodeClaim
 			p.cluster.NodePoolState.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
 		}
 	})
-	return createdNodeClaims, multierr.Combine(errs...)
+	return nodeClaimNames, multierr.Combine(errs...)
 }
 
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error) {
@@ -469,27 +458,19 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) (string, error) {
-	nodeClaim, err := p.create(ctx, n, opts...)
-	if err != nil {
-		return "", err
-	}
-	return nodeClaim.Name, nil
-}
-
-func (p *Provisioner) create(ctx context.Context, n *scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) (*v1.NodeClaim, error) {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.NodePoolName)))
 	options := option.Resolve(opts...)
 	latest := &v1.NodePool{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {
-		return nil, fmt.Errorf("getting current resource usage, %w", err)
+		return "", fmt.Errorf("getting current resource usage, %w", err)
 	}
 	if err := latest.Spec.Limits.ExceededBy(p.cluster.NodePoolResourcesFor(n.NodePoolName)); err != nil {
-		return nil, err
+		return "", err
 	}
 	nodeClaim := n.ToNodeClaim()
 
 	if err := p.kubeClient.Create(ctx, nodeClaim); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	// Update pod to nodeClaim mapping for newly created nodeClaims. We do
@@ -528,7 +509,7 @@ func (p *Provisioner) create(ctx context.Context, n *scheduler.NodeClaim, opts .
 			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
 		}
 	}
-	return nodeClaim, nil
+	return nodeClaim.Name, nil
 }
 
 func instanceTypeList(names []string) string {

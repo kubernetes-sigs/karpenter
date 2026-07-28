@@ -136,11 +136,10 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
 
-	// The legacy binary search assumes that a failed m->1 attempt remains invalid as m grows. An m->2
-	// opportunity is not monotonic: two D64 nodes may require two replacements while three D64 nodes can
-	// validly consolidate into two D96 nodes. Probe the full bounded batch once before the legacy search.
-	if boundedCandidateCount >= minMultiNodeMultiReplacementSources && options.FromContext(ctx).FeatureGates.MultiNodeMultiReplacement {
-		cmd, err := m.computeConsolidation(timeoutCtx, candidates[:boundedCandidateCount]...)
+	// The legacy binary search assumes that a failed m->1 attempt remains invalid as m grows. A 3-to-2
+	// opportunity is not monotonic, so probe the exact alpha MVP source count before the legacy search.
+	if boundedCandidateCount >= multiNodeMultiReplacementSourceCount && options.FromContext(ctx).FeatureGates.MultiNodeMultiReplacement {
+		cmd, err := m.computeConsolidation(timeoutCtx, candidates[:multiNodeMultiReplacementSourceCount]...)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
