@@ -65,6 +65,7 @@ var _ = Describe("Options", func() {
 		"PREFERENCE_POLICY",
 		"MIN_VALUES_POLICY",
 		"FEATURE_GATES",
+		"MULTI_NODE_CONSOLIDATION_MAX_CANDIDATES",
 	}
 
 	BeforeEach(func() {
@@ -412,4 +413,5 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.CapacityBuffer).To(Equal(optsB.FeatureGates.CapacityBuffer))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
 	Expect(optsA.IgnoreDRARequests).To(Equal(optsB.IgnoreDRARequests))
+	Expect(optsA.MultiNodeConsolidationMaxCandidates).To(Equal(optsB.MultiNodeConsolidationMaxCandidates))
 }

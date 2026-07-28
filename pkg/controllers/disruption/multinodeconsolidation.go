@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -76,9 +77,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		disruptionBudgetMapping[candidate.NodePool.Name]--
 	}
 
-	// Only consider a maximum batch of 100 NodeClaims to save on computation.
-	// This could be further configurable in the future.
-	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
+	maxParallel := lo.Clamp(len(disruptableCandidates), 0, options.FromContext(ctx).MultiNodeConsolidationMaxCandidates)
 
 	cmd, perPoolResults, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
 	if err != nil {
