@@ -18,6 +18,7 @@ package prediction
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -51,12 +52,12 @@ var _ = Describe("Store", func() {
 			"container1": {corev1.ResourceCPU: resource.MustParse("200m")},
 		}}
 
-		store.Set(source, target, pred1)
+		store.Set(source, target, pred1, time.Now())
 		retrieved, ok := store.Get("default", "Deployment", "app")
 		Expect(ok).To(BeTrue())
 		Expect(retrieved).To(Equal(pred1))
 
-		store.Set(source, target, pred2)
+		store.Set(source, target, pred2, time.Now())
 		retrieved, ok = store.Get("default", "Deployment", "app")
 		Expect(ok).To(BeTrue())
 		Expect(retrieved).To(Equal(pred2))
@@ -73,8 +74,8 @@ var _ = Describe("Store", func() {
 			"container1": {corev1.ResourceCPU: resource.MustParse("200m")},
 		}}
 
-		store.Set(source, target1, pred1)
-		store.Set(source, target2, pred2)
+		store.Set(source, target1, pred1, time.Now())
+		store.Set(source, target2, pred2, time.Now())
 
 		_, ok := store.Get("default", "Deployment", "app1")
 		Expect(ok).To(BeFalse())
@@ -91,7 +92,7 @@ var _ = Describe("Store", func() {
 			"c": {corev1.ResourceCPU: resource.MustParse("100m")},
 		}}
 
-		store.Set(source, target, pred)
+		store.Set(source, target, pred, time.Now())
 		store.Delete(source)
 
 		_, ok := store.Get("default", "Deployment", "app")
@@ -99,5 +100,101 @@ var _ = Describe("Store", func() {
 
 		// Deleting again should not panic
 		Expect(func() { store.Delete(source) }).NotTo(Panic())
+	})
+
+	Context("Tie-Breaking", func() {
+		It("should use the earliest-created source's prediction", func() {
+			target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+			older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
+			newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
+			predOlder := &Prediction{Containers: map[string]corev1.ResourceList{
+				"c": {corev1.ResourceCPU: resource.MustParse("500m")},
+			}}
+			predNewer := &Prediction{Containers: map[string]corev1.ResourceList{
+				"c": {corev1.ResourceCPU: resource.MustParse("800m")},
+			}}
+
+			t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+			t2 := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+
+			// Set newer first, then older — older should win regardless of insertion order
+			store.Set(newer, target, predNewer, t2)
+			store.Set(older, target, predOlder, t1)
+
+			retrieved, ok := store.Get("default", "Deployment", "app")
+			Expect(ok).To(BeTrue())
+			Expect(retrieved).To(Equal(predOlder))
+		})
+
+		It("should break ties by lexicographically smallest name when timestamps are equal", func() {
+			target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+			sourceA := types.NamespacedName{Namespace: "default", Name: "vpa-alpha"}
+			sourceB := types.NamespacedName{Namespace: "default", Name: "vpa-beta"}
+			predA := &Prediction{Containers: map[string]corev1.ResourceList{
+				"c": {corev1.ResourceCPU: resource.MustParse("500m")},
+			}}
+			predB := &Prediction{Containers: map[string]corev1.ResourceList{
+				"c": {corev1.ResourceCPU: resource.MustParse("800m")},
+			}}
+
+			ts := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+
+			store.Set(sourceB, target, predB, ts)
+			store.Set(sourceA, target, predA, ts)
+
+			retrieved, ok := store.Get("default", "Deployment", "app")
+			Expect(ok).To(BeTrue())
+			Expect(retrieved).To(Equal(predA))
+		})
+
+		It("should promote next-strongest on delete of the winner", func() {
+			target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+			older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
+			newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
+			predOlder := &Prediction{Containers: map[string]corev1.ResourceList{
+				"c": {corev1.ResourceCPU: resource.MustParse("500m")},
+			}}
+			predNewer := &Prediction{Containers: map[string]corev1.ResourceList{
+				"c": {corev1.ResourceCPU: resource.MustParse("800m")},
+			}}
+
+			t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+			t2 := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+
+			store.Set(older, target, predOlder, t1)
+			store.Set(newer, target, predNewer, t2)
+
+			// Older wins initially
+			retrieved, ok := store.Get("default", "Deployment", "app")
+			Expect(ok).To(BeTrue())
+			Expect(retrieved).To(Equal(predOlder))
+
+			// Delete the winner — newer should be promoted
+			store.Delete(older)
+			retrieved, ok = store.Get("default", "Deployment", "app")
+			Expect(ok).To(BeTrue())
+			Expect(retrieved).To(Equal(predNewer))
+		})
+
+		It("should remove target entirely when all contenders are deleted", func() {
+			target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+			source1 := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
+			source2 := types.NamespacedName{Namespace: "default", Name: "vpa-2"}
+			pred := &Prediction{Containers: map[string]corev1.ResourceList{
+				"c": {corev1.ResourceCPU: resource.MustParse("100m")},
+			}}
+
+			t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+			t2 := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+
+			store.Set(source1, target, pred, t1)
+			store.Set(source2, target, pred, t2)
+
+			store.Delete(source1)
+			store.Delete(source2)
+
+			_, ok := store.Get("default", "Deployment", "app")
+			Expect(ok).To(BeFalse())
+		})
 	})
 })

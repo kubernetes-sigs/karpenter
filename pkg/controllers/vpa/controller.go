@@ -38,10 +38,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
 )
 
-func init() {
-	utilruntime.Must(vpav1.AddToScheme(scheme.Scheme))
-}
-
 // Controller periodically lists VerticalPodAutoscaler objects and maintains a prediction
 // cache of post-recreation resources for VPA-managed pods. It uses a singleton (polling)
 // pattern rather than an informer to gracefully tolerate VPA CRD not being installed.
@@ -54,6 +50,7 @@ type Controller struct {
 }
 
 func NewController(kubeClient client.Client, store *prediction.Store) *Controller {
+	utilruntime.Must(vpav1.AddToScheme(scheme.Scheme))
 	return &Controller{
 		kubeClient: kubeClient,
 		store:      store,
@@ -98,7 +95,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			Namespace: vpa.Namespace,
 			Kind:      vpa.Spec.TargetRef.Kind,
 			Name:      vpa.Spec.TargetRef.Name,
-		}, p)
+		}, p, vpa.CreationTimestamp.Time)
 	}
 
 	// Clean up predictions for deleted VPAs

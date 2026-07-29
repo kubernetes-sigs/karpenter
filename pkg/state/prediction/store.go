@@ -17,7 +17,9 @@ limitations under the License.
 package prediction
 
 import (
+	"sort"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,49 +38,115 @@ type Prediction struct {
 	Containers map[string]corev1.ResourceList
 }
 
+// targetEntry pairs a prediction with metadata about its source for tie-breaking.
+type targetEntry struct {
+	prediction *Prediction
+	source     types.NamespacedName
+	createdAt  time.Time
+}
+
 // Store is a thread-safe cache of predictions, indexed for O(1) lookup
-// by target workload.
+// by target workload. When multiple sources target the same workload,
+// the store uses VPA's tie-breaking semantics (earliest creation time wins,
+// then lexicographically smallest name) to determine which prediction is active.
 type Store struct {
 	mu sync.RWMutex
-	// byTarget indexes predictions by the workload they apply to.
-	byTarget map[TargetKey]*Prediction
+	// byTarget indexes all contending predictions by the workload they apply to.
+	// Entries are sorted by strength (strongest first).
+	byTarget map[TargetKey][]targetEntry
 	// bySource maps the prediction source identity to its TargetKey, for deletion cleanup.
 	bySource map[types.NamespacedName]TargetKey
 }
 
 func NewStore() *Store {
 	return &Store{
-		byTarget: make(map[TargetKey]*Prediction),
+		byTarget: make(map[TargetKey][]targetEntry),
 		bySource: make(map[types.NamespacedName]TargetKey),
 	}
 }
 
-func (s *Store) Set(source types.NamespacedName, target TargetKey, p *Prediction) {
+// Set stores a prediction from the given source for the given target.
+// If the source previously targeted a different workload, the old entry is removed.
+func (s *Store) Set(source types.NamespacedName, target TargetKey, p *Prediction, createdAt time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// If this source previously targeted a different workload, remove it from the old target.
 	if prev, ok := s.bySource[source]; ok && prev != target {
-		delete(s.byTarget, prev)
+		s.removeEntry(prev, source)
 	}
 
-	s.byTarget[target] = p
 	s.bySource[source] = target
+
+	entries := s.byTarget[target]
+	found := false
+	for i := range entries {
+		if entries[i].source == source {
+			entries[i].prediction = p
+			entries[i].createdAt = createdAt
+			found = true
+			break
+		}
+	}
+	if !found {
+		entries = append(entries, targetEntry{
+			prediction: p,
+			source:     source,
+			createdAt:  createdAt,
+		})
+	}
+	if len(entries) > 1 {
+		sort.Slice(entries, func(i, j int) bool {
+			return stronger(entries[i], entries[j])
+		})
+	}
+	s.byTarget[target] = entries
 }
 
+// Delete removes the prediction from the given source. If other sources target
+// the same workload, the next-strongest is automatically promoted.
 func (s *Store) Delete(source types.NamespacedName) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if target, ok := s.bySource[source]; ok {
-		delete(s.byTarget, target)
+		s.removeEntry(target, source)
 		delete(s.bySource, source)
 	}
 }
 
+// Get returns the active (strongest) prediction for the given target.
 func (s *Store) Get(namespace, targetKind, targetName string) (*Prediction, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	p, ok := s.byTarget[TargetKey{Namespace: namespace, Kind: targetKind, Name: targetName}]
-	return p, ok
+	entries := s.byTarget[TargetKey{Namespace: namespace, Kind: targetKind, Name: targetName}]
+	if len(entries) == 0 {
+		return nil, false
+	}
+	return entries[0].prediction, true
+}
+
+// removeEntry removes the entry for the given source from the target's list.
+// If the list becomes empty, the target key is removed from the map.
+func (s *Store) removeEntry(target TargetKey, source types.NamespacedName) {
+	entries := s.byTarget[target]
+	for i := range entries {
+		if entries[i].source == source {
+			entries = append(entries[:i], entries[i+1:]...)
+			break
+		}
+	}
+	if len(entries) == 0 {
+		delete(s.byTarget, target)
+	} else {
+		s.byTarget[target] = entries
+	}
+}
+
+func stronger(a, b targetEntry) bool {
+	if !a.createdAt.Equal(b.createdAt) {
+		return a.createdAt.Before(b.createdAt)
+	}
+	return a.source.String() < b.source.String()
 }
