@@ -19,7 +19,6 @@ package disruption
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -35,7 +34,7 @@ var SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 
 const SingleNodeConsolidationType = "single"
 
-// SingleNodeConsolidation is the consolidation controller that performs single-node consolidation.
+// SingleNodeConsolidation evaluates one node at a time for consolidation.
 type SingleNodeConsolidation struct {
 	consolidation
 	PreviouslyUnseenNodePools sets.Set[string]
@@ -84,10 +83,9 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 			constrainedByBudgets = true
 			continue
 		}
-		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
-		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
-		// can find their nodes disrupted here.
-		if len(candidate.reschedulablePods) == 0 {
+		// Skip candidates whose best-case score (delete ratio) cannot pass the
+		// threshold. A DELETE is the upper bound; if it fails, no REPLACE will pass.
+		if !s.evaluator.CanPassThreshold(candidate) {
 			continue
 		}
 
@@ -98,6 +96,10 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 			continue
 		}
 		if cmd.Decision() == NoOpDecision {
+			continue
+		}
+		// Score the move: Balanced pools may reject; other policies pass through.
+		if approved, _ := s.evaluator.ApproveCommand(ctx, cmd); !approved {
 			continue
 		}
 		if _, err = s.validator.Validate(ctx, cmd, commandValidationDelay); err != nil {
@@ -135,15 +137,9 @@ func (s *SingleNodeConsolidation) ConsolidationType() string {
 	return SingleNodeConsolidationType
 }
 
-// sortCandidates interweaves candidates from different nodepools and prioritizes nodepools
-// that timed out in previous runs
+// SortCandidates applies the consolidation sort, then interweaves by NodePool.
 func (s *SingleNodeConsolidation) SortCandidates(ctx context.Context, candidates []*Candidate) []*Candidate {
-
-	// First sort by disruption cost as the base ordering
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].DisruptionCost < candidates[j].DisruptionCost
-	})
-
+	candidates = s.sortCandidates(ctx, candidates)
 	return s.shuffleCandidates(ctx, lo.GroupBy(candidates, func(c *Candidate) string { return c.NodePool.Name }))
 }
 

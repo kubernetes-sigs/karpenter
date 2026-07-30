@@ -65,69 +65,169 @@ var _ = Describe("Constraints", func() {
 		Describe("direct comparison (concrete attribute values)", func() {
 			It("should accept the first device and pin its value", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
 			})
 
 			It("should accept a second device with the same attribute value", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
 			})
 
 			It("should reject a device with a different attribute value", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
 			})
 
 			It("should reject a device missing the attribute", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeFalse())
 			})
 
 			It("should only apply to named requests when requestNames is set", func() {
 				c := newConstraint("req-a")
 				// req-b is not in the constraint's request set — should be accepted
-				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeTrue())
 				// req-a should pin
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
 			})
 
 			It("should apply to all requests when requestNames is empty", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
+			})
+
+			It("should apply to sub-requests when requestNames contains the parent", func() {
+				c := newConstraint("gpu")
+				rn := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				Expect(c.Add(rn, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(rn, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
+			})
+
+			It("should apply to sub-requests when requestNames contains the qualified name", func() {
+				c := newConstraint("gpu/a100")
+				rn := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				Expect(c.Add(rn, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(rn, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
+			})
+
+			It("should skip sub-requests when requestNames contains a different qualified name", func() {
+				c := newConstraint("gpu/h100")
+				rn := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				// Non-matching — constraint skipped, both accepted without pinning.
+				Expect(c.Add(rn, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(rn, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeTrue())
+				Expect(c.AllocatedDeviceIDs).To(BeEmpty())
+			})
+
+			It("should allow interleaved matching and non-matching sub-request Adds", func() {
+				c := newConstraint("gpu/a100")
+				matchingRN := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				nonMatchingRN := dynamicresources.RequestName{Parent: "gpu", Sub: "h100"}
+
+				Expect(c.Add(nonMatchingRN, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.AllocatedDeviceIDs).To(BeEmpty())
+
+				Expect(c.Add(matchingRN, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.AllocatedDeviceIDs).To(HaveLen(1))
+
+				Expect(c.Add(nonMatchingRN, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeTrue())
+				Expect(c.AllocatedDeviceIDs).To(HaveLen(1))
+
+				Expect(c.Add(matchingRN, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
+			})
+
+			It("should enforce constraint across different sub-requests under parent match", func() {
+				c := newConstraint("gpu")
+				rnA100 := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				rnH100 := dynamicresources.RequestName{Parent: "gpu", Sub: "h100"}
+
+				Expect(c.Add(rnA100, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				// Same value from a different sub-request — accepted (same parent constraint).
+				Expect(c.Add(rnH100, deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
+			})
+
+			It("should reject across different sub-requests when values conflict under parent match", func() {
+				c := newConstraint("gpu")
+				rnA100 := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				rnH100 := dynamicresources.RequestName{Parent: "gpu", Sub: "h100"}
+
+				Expect(c.Add(rnA100, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(rnH100, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
 			})
 		})
 
 		Describe("backtracking via Remove()", func() {
 			It("should allow a different value after removing all devices", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
-				c.Remove("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				c.Remove(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)
 				// Pin is cleared — a different zone should now be accepted
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-east-1a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-east-1a"), devA)).To(BeTrue())
 			})
 
 			It("should maintain the pin after removing only one of two devices", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
-				c.Remove("req-b", deviceWithZone("dev-b", "us-west-2a"), devB)
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
+				c.Remove(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-west-2a"), devB)
 				// Pin still holds from dev-a — different zone should be rejected
-				Expect(c.Add("req-c", deviceWithZone("dev-c", "us-east-1a"), devC)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-c"}, deviceWithZone("dev-c", "us-east-1a"), devC)).To(BeFalse())
 				// Same zone should still be accepted
-				Expect(c.Add("req-c", deviceWithZone("dev-c", "us-west-2a"), devC)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-c"}, deviceWithZone("dev-c", "us-west-2a"), devC)).To(BeTrue())
 			})
 
 			It("should be a no-op for non-matching request names", func() {
 				c := newConstraint("req-a")
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
 				// Remove for a request not in the constraint's set — should not affect state.
-				c.Remove("req-b", deviceWithZone("dev-b", "us-west-2a"), devB)
+				c.Remove(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-west-2a"), devB)
 				// Pin from req-a should still hold.
-				Expect(c.Add("req-a", deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
-				Expect(c.Add("req-a", deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
+			})
+
+			It("should be a no-op for non-matching sub-request names", func() {
+				c := &dynamicresources.MatchAttributeConstraint{
+					RequestNames:  sets.New[string]("gpu/h100"),
+					AttributeName: attrZone,
+				}
+				nonMatchingRN := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				matchingRN := dynamicresources.RequestName{Parent: "gpu", Sub: "h100"}
+
+				Expect(c.Add(nonMatchingRN, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.AllocatedDeviceIDs).To(BeEmpty())
+				Expect(c.AttributeValue).To(BeNil())
+
+				c.Remove(nonMatchingRN, deviceWithZone("dev-a", "us-west-2a"), devA)
+				Expect(c.AllocatedDeviceIDs).To(BeEmpty())
+
+				Expect(c.Add(matchingRN, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.AllocatedDeviceIDs).To(HaveLen(1))
+				Expect(c.AttributeValue).ToNot(BeNil())
+				Expect(*c.AttributeValue.StringValue).To(Equal("us-west-2a"))
+			})
+
+			It("should handle Remove correctly after interleaved matching/non-matching sub-request Adds", func() {
+				c := &dynamicresources.MatchAttributeConstraint{
+					RequestNames:  sets.New[string]("gpu/a100"),
+					AttributeName: attrZone,
+				}
+				matchingRN := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				nonMatchingRN := dynamicresources.RequestName{Parent: "gpu", Sub: "h100"}
+
+				Expect(c.Add(matchingRN, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.AllocatedDeviceIDs).To(HaveLen(1))
+
+				c.Remove(nonMatchingRN, deviceWithZone("dev-a", "us-west-2a"), devA)
+				Expect(c.AllocatedDeviceIDs).To(HaveLen(1))
+				Expect(c.AttributeValue).ToNot(BeNil())
+
+				c.Remove(matchingRN, deviceWithZone("dev-a", "us-west-2a"), devA)
+				Expect(c.AllocatedDeviceIDs).To(BeEmpty())
+				Expect(c.AttributeValue).To(BeNil())
 			})
 		})
 
@@ -159,47 +259,47 @@ var _ = Describe("Constraints", func() {
 
 			It("should accept two bound devices that both lack the attribute", func() {
 				c := newConstraintWithBindings()
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithoutZone("dev-b"), devB)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithoutZone("dev-b"), devB)).To(BeTrue())
 			})
 
 			It("should reject the first device if it has no binding entries", func() {
 				c := newConstraintWithBindings()
 				// devC is not in any binding group for attrZone.
-				Expect(c.Add("req-c", deviceWithoutZone("dev-c"), devC)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-c"}, deviceWithoutZone("dev-c"), devC)).To(BeFalse())
 			})
 
 			It("should reject unbound devices that lack the attribute", func() {
 				c := newConstraintWithBindings()
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
-				Expect(c.Add("req-c", deviceWithoutZone("dev-c"), devC)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-c"}, deviceWithoutZone("dev-c"), devC)).To(BeFalse())
 			})
 
 			It("should not use bindings when concrete values are present", func() {
 				c := newConstraintWithBindings()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-east-1a"), devB)).To(BeFalse())
 			})
 
 			It("should reject concrete values after binding was established", func() {
 				c := newConstraintWithBindings()
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeFalse())
 			})
 
 			It("should reject binding fallback after concrete value was established", func() {
 				c := newConstraintWithBindings()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithoutZone("dev-b"), devB)).To(BeFalse())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithoutZone("dev-b"), devB)).To(BeFalse())
 			})
 
 			It("should reset evaluation path on full backtrack", func() {
 				c := newConstraintWithBindings()
 				// Establish via binding.
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
-				c.Remove("req-a", deviceWithoutZone("dev-a"), devA)
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				c.Remove(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)
 				// After full backtrack, concrete path should be accepted.
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
 			})
 
 			It("should accept a third bound device via transitivity", func() {
@@ -219,42 +319,79 @@ var _ = Describe("Constraints", func() {
 						InstanceTypeID: itID,
 					},
 				}
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithoutZone("dev-b"), devB)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithoutZone("dev-b"), devB)).To(BeTrue())
 				// devC is transitively bound to devA via devB.
-				Expect(c.Add("req-c", deviceWithoutZone("dev-c"), devC)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-c"}, deviceWithoutZone("dev-c"), devC)).To(BeTrue())
 			})
 
 			It("should allow re-establishing via binding after full backtrack from binding", func() {
 				c := newConstraintWithBindings()
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
-				c.Remove("req-a", deviceWithoutZone("dev-a"), devA)
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				c.Remove(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)
 				// Full backtrack — re-enter via binding path.
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithoutZone("dev-b"), devB)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithoutZone("dev-b"), devB)).To(BeTrue())
 			})
 
 			It("should clear UsedBinding flag on Reset allowing switch to concrete path", func() {
 				c := newConstraintWithBindings()
-				Expect(c.Add("req-a", deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
 				Expect(c.UsedBinding).To(BeTrue())
 				c.Reset()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+			})
+
+			It("should use binding fallback when reached via parent-match sub-request", func() {
+				// Constraint scoped to "gpu" (parent). Sub-request {Parent: "gpu", Sub: "a100"}
+				// should match via parent and still reach the binding fallback path.
+				c := &dynamicresources.MatchAttributeConstraint{
+					RequestNames:  sets.New[string]("gpu"),
+					AttributeName: attrZone,
+					AttributeBindingFallback: &dynamicresources.AttributeBindingFallback{
+						Bindings:       bindings,
+						NodePool:       "pool-a",
+						InstanceTypeID: itID,
+					},
+				}
+				rn := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				Expect(c.Add(rn, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.UsedBinding).To(BeTrue())
+				Expect(c.Add(rn, deviceWithoutZone("dev-b"), devB)).To(BeTrue())
+				Expect(c.AllocatedDeviceIDs).To(HaveLen(2))
+			})
+
+			It("should skip binding fallback for non-matching sub-request", func() {
+				// Constraint scoped to "gpu/h100". Sub-request {Parent: "gpu", Sub: "a100"}
+				// does not match — appliesTo returns false, so binding is never consulted.
+				c := &dynamicresources.MatchAttributeConstraint{
+					RequestNames:  sets.New[string]("gpu/h100"),
+					AttributeName: attrZone,
+					AttributeBindingFallback: &dynamicresources.AttributeBindingFallback{
+						Bindings:       bindings,
+						NodePool:       "pool-a",
+						InstanceTypeID: itID,
+					},
+				}
+				nonMatchingRN := dynamicresources.RequestName{Parent: "gpu", Sub: "a100"}
+				Expect(c.Add(nonMatchingRN, deviceWithoutZone("dev-a"), devA)).To(BeTrue())
+				Expect(c.UsedBinding).To(BeFalse())
+				Expect(c.AllocatedDeviceIDs).To(BeEmpty())
 			})
 		})
 
 		Describe("Reset()", func() {
 			It("should clear pinned attribute value and allow re-pinning to a different value", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
 				c.Reset()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-east-1a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-east-1a"), devA)).To(BeTrue())
 			})
 
 			It("should clear all mutable state", func() {
 				c := newConstraint()
-				Expect(c.Add("req-a", deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
-				Expect(c.Add("req-b", deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-a"}, deviceWithZone("dev-a", "us-west-2a"), devA)).To(BeTrue())
+				Expect(c.Add(dynamicresources.RequestName{Parent: "req-b"}, deviceWithZone("dev-b", "us-west-2a"), devB)).To(BeTrue())
 				c.Reset()
 				Expect(c.AllocatedDeviceIDs).To(BeNil())
 				Expect(c.AttributeValue).To(BeNil())

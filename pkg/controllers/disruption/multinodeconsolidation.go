@@ -53,7 +53,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	if m.IsConsolidated() {
 		return []Command{}, nil
 	}
-	candidates = m.sortCandidates(candidates)
+	candidates = m.sortCandidates(ctx, candidates)
 
 	// In order, filter out all candidates that would violate the budget.
 	// Since multi-node consolidation relies on the ordering of
@@ -71,12 +71,6 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 			constrainedByBudgets = true
 			continue
 		}
-		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
-		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
-		// can find their nodes disrupted here.
-		if len(candidate.reschedulablePods) == 0 {
-			continue
-		}
 		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 		disruptableCandidates = append(disruptableCandidates, candidate)
 		disruptionBudgetMapping[candidate.NodePool.Name]--
@@ -86,7 +80,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
 
-	cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
+	cmd, perPoolResults, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
 	if err != nil {
 		return []Command{}, err
 	}
@@ -99,6 +93,11 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 			m.markConsolidated()
 		}
 		return []Command{}, nil
+	}
+
+	// Emit balanced scoring events per NodePool
+	if perPoolResults != nil {
+		m.evaluator.EmitMultiNodeEvents(ctx, cmd, perPoolResults, true)
 	}
 
 	if cmd, err = m.validator.Validate(ctx, cmd, commandValidationDelay); err != nil {
@@ -115,10 +114,10 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
 // NodeClaims are sorted by increasing disruption order which correlates to likelihood of being able to consolidate the node
 // nolint:gocyclo
-func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
+func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, map[string]ScoreResult, error) {
 	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
-		return Command{}, nil
+		return Command{}, nil, nil
 	}
 	min := 1
 	if len(candidates) <= max {
@@ -126,6 +125,11 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	}
 
 	lastSavedCommand := Command{}
+	var lastSavedPerPool map[string]ScoreResult
+	// Defer rejection events until search completes to avoid log2(N) * pools
+	// duplicate emissions.
+	var lastRejectedCmd Command
+	var lastRejectedPerPool map[string]ScoreResult
 	// Set a timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
@@ -141,13 +145,13 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
 				if lastSavedCommand.Candidates == nil {
 					log.FromContext(ctx).V(1).Info("failed to find a multi-node consolidation after timeout", "last_batch_size", (min+max)/2)
-					return Command{}, nil
+					return Command{}, nil, nil
 				}
 				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")
-				return lastSavedCommand, nil
+				return lastSavedCommand, lastSavedPerPool, nil
 
 			}
-			return Command{}, err
+			return Command{}, nil, err
 		}
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
@@ -159,6 +163,16 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 				validDecision = true
 			}
 		}
+		// Score the move: Balanced pools may reject; other policies pass through.
+		if validDecision {
+			if approved, perPool := m.evaluator.ApproveCommand(ctx, cmd); !approved {
+				validDecision = false
+				lastRejectedCmd = cmd
+				lastRejectedPerPool = perPool
+			} else if perPool != nil {
+				lastSavedPerPool = perPool
+			}
+		}
 		if validDecision {
 			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
@@ -167,7 +181,13 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			max = mid - 1
 		}
 	}
-	return lastSavedCommand, nil
+	// If binary search found no valid command and balanced scoring rejected at
+	// least one iteration, emit rejection metrics once using the final (smallest
+	// failing window) results rather than at every iteration.
+	if lastSavedCommand.Candidates == nil && lastRejectedPerPool != nil {
+		m.evaluator.EmitMultiNodeEvents(ctx, lastRejectedCmd, lastRejectedPerPool, false)
+	}
+	return lastSavedCommand, lastSavedPerPool, nil
 }
 
 // filterOutSameInstanceType filters out instance types that are more expensive than the cheapest instance type that is being

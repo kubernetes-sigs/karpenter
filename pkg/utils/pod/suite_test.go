@@ -244,3 +244,53 @@ var _ = Describe("IsDisruptable", func() {
 		Expect(pod.IsDisruptable(p, fakeClock, nil)).To(BeTrue())
 	})
 })
+
+var _ = Describe("HasDRARequirements", func() {
+	It("should return false when the pod references no ResourceClaims", func() {
+		p := &corev1.Pod{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "app"}},
+			},
+		}
+		Expect(pod.HasDRARequirements(p)).To(BeFalse())
+	})
+
+	It("should return true when a pod-level ResourceClaim is referenced", func() {
+		p := &corev1.Pod{
+			Spec: corev1.PodSpec{
+				ResourceClaims: []corev1.PodResourceClaim{{Name: "gpu-claim"}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		}
+		Expect(pod.HasDRARequirements(p)).To(BeTrue())
+	})
+
+	It("should return true when a container consumes a ResourceClaim", func() {
+		p := &corev1.Pod{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{
+					Name: "app",
+					Resources: corev1.ResourceRequirements{
+						Claims: []corev1.ResourceClaim{{Name: "gpu-claim"}},
+					},
+				}},
+			},
+		}
+		Expect(pod.HasDRARequirements(p)).To(BeTrue())
+	})
+
+	It("should return true when an init container consumes a ResourceClaim", func() {
+		p := &corev1.Pod{
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Name: "init",
+					Resources: corev1.ResourceRequirements{
+						Claims: []corev1.ResourceClaim{{Name: "gpu-claim"}},
+					},
+				}},
+				Containers: []corev1.Container{{Name: "app"}},
+			},
+		}
+		Expect(pod.HasDRARequirements(p)).To(BeTrue())
+	})
+})

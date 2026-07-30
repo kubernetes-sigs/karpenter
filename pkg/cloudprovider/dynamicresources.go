@@ -46,6 +46,9 @@ type ResourceSliceTemplate struct {
 	// Devices is the list of expected devices in this slice.
 	Devices []Device
 	// SharedCounters is the list of expected counter sets in this slice.
+	// A ResourceSliceTemplate with SharedCounters must not also contain Devices —
+	// these are mutually exclusive. If both are set, the devices will be silently
+	// ignored during pool gathering.
 	SharedCounters []resourcev1.CounterSet
 }
 

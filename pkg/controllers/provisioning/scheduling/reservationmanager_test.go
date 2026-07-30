@@ -69,33 +69,30 @@ var _ = Describe("ReservationManager", func() {
 		}
 		// Create hardcoded instance types with reserved offerings
 		instanceTypes = []*cloudprovider.InstanceType{
-			fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "small-reserved",
-				Resources: corev1.ResourceList{
+			fake.NewInstanceType("small-reserved",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("2"),
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 					corev1.ResourcePods:   resource.MustParse("10"),
-				},
-				Offerings: []*cloudprovider.Offering{threeCapacityOffering},
-			}),
-			fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "medium-reserved",
-				Resources: corev1.ResourceList{
+				}),
+				fake.WithOfferings(*threeCapacityOffering),
+			),
+			fake.NewInstanceType("medium-reserved",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("4"),
 					corev1.ResourceMemory: resource.MustParse("8Gi"),
 					corev1.ResourcePods:   resource.MustParse("20"),
-				},
-				Offerings: []*cloudprovider.Offering{twoCapacityOffering},
-			}),
-			fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "large-reserved",
-				Resources: corev1.ResourceList{
+				}),
+				fake.WithOfferings(*twoCapacityOffering),
+			),
+			fake.NewInstanceType("large-reserved",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("8"),
 					corev1.ResourceMemory: resource.MustParse("16Gi"),
 					corev1.ResourcePods:   resource.MustParse("40"),
-				},
-				Offerings: []*cloudprovider.Offering{oneCapacityOffering},
-			}),
+				}),
+				fake.WithOfferings(*oneCapacityOffering),
+			),
 		}
 
 		// Extract offerings from instance types

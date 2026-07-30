@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -84,12 +85,12 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client))
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
-	controller = static.NewController(env.Client, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, env.Clock)
+	controller = static.NewController(env.Client, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, env.Clock, deviceallocation.NewController(env.Client))
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 })
 
@@ -123,7 +124,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// Create controller with failing client
-			failingController := static.NewController(&failingClient{Client: env.Client}, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, env.Clock)
+			failingController := static.NewController(&failingClient{Client: env.Client}, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, env.Clock, deviceallocation.NewController(env.Client))
 
 			result, err := failingController.Reconcile(ctx, nodePool)
 			Expect(err).To(HaveOccurred())

@@ -141,6 +141,108 @@ var _ = Describe("Integration", func() {
 				g.Expect(daemonSetPods[0].Spec.NodeName).To(Equal(nodeList.Items[0].Name))
 			}).Should(Succeed())
 		})
+		It("should correctly account for host ports of uncached daemonset pods targeting different instance types", func() {
+			// Two DaemonSets with different host ports target different architectures. Workload pods
+			// requesting those same ports should schedule on the opposite architecture where there's
+			// no conflict. This requires correct per-instance-type grouping of daemon overhead.
+			// NOTE: requires provider to offer both amd64 and arm64 instance types.
+
+			// DaemonSets require this label so they won't schedule on system nodes.
+			// Since only Karpenter-provisioned nodes have this label, no real DaemonSet
+			// pods exist initially, forcing Karpenter to use PodForDaemonSet.
+			nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{"testing/karpenter-node": "true"})
+			// Prevent disruption from deleting nodes before DaemonSet pods schedule
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
+			ds1 := test.DaemonSet(test.DaemonSetOptions{
+				PodOptions: test.PodOptions{
+					NodeSelector: map[string]string{"testing/karpenter-node": "true"},
+					NodeRequirements: []corev1.NodeSelectorRequirement{{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					}},
+					HostPorts: []int32{8000},
+				},
+			})
+			ds2 := test.DaemonSet(test.DaemonSetOptions{
+				PodOptions: test.PodOptions{
+					NodeSelector: map[string]string{"testing/karpenter-node": "true"},
+					NodeRequirements: []corev1.NodeSelectorRequirement{{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"arm64"},
+					}},
+					HostPorts: []int32{9000},
+				},
+			})
+
+			// Pod requesting port 8000 must go to arm64 (where DaemonSet has port 9000, no conflict)
+			dep1 := test.Deployment(test.DeploymentOptions{
+				Replicas: 1,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ds-hostport-8000"}},
+					HostPorts:  []int32{8000},
+					NodeRequirements: []corev1.NodeSelectorRequirement{{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"arm64"},
+					}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
+					},
+				},
+			})
+			// Pod requesting port 9000 must go to amd64 (where DaemonSet has port 8000, no conflict)
+			dep2 := test.Deployment(test.DeploymentOptions{
+				Replicas: 1,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ds-hostport-9000"}},
+					HostPorts:  []int32{9000},
+					NodeRequirements: []corev1.NodeSelectorRequirement{{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
+					},
+				},
+			})
+
+			env.ExpectCreated(nodeClass, nodePool, ds1, ds2, dep1, dep2)
+
+			// Wait for both workload pods to be running.
+			Eventually(func(g Gomega) {
+				g.Expect(env.Monitor.RunningPods(labels.SelectorFromSet(map[string]string{"app": "ds-hostport-8000"}))).To(HaveLen(1))
+				g.Expect(env.Monitor.RunningPods(labels.SelectorFromSet(map[string]string{"app": "ds-hostport-9000"}))).To(HaveLen(1))
+			}).Should(Succeed())
+
+			// Verify that both DaemonSet pods are also running.
+			ds1Selector := labels.SelectorFromSet(ds1.Spec.Selector.MatchLabels)
+			ds2Selector := labels.SelectorFromSet(ds2.Spec.Selector.MatchLabels)
+			Eventually(func(g Gomega) {
+				g.Expect(env.Monitor.RunningPods(ds1Selector)).To(HaveLen(1))
+				g.Expect(env.Monitor.RunningPods(ds2Selector)).To(HaveLen(1))
+			}).Should(Succeed())
+
+			// Verify no FailedScheduling events from Karpenter on any test pods.
+			allTestPods := env.Monitor.RunningPods(ds1Selector)
+			allTestPods = append(allTestPods, env.Monitor.RunningPods(ds2Selector)...)
+			allTestPods = append(allTestPods, env.Monitor.RunningPods(labels.SelectorFromSet(map[string]string{"app": "ds-hostport-8000"}))...)
+			allTestPods = append(allTestPods, env.Monitor.RunningPods(labels.SelectorFromSet(map[string]string{"app": "ds-hostport-9000"}))...)
+			testPodNames := lo.SliceToMap(allTestPods, func(p *corev1.Pod) (string, bool) { return p.Name, true })
+			eventList := &corev1.EventList{}
+			Expect(env.Client.List(env, eventList, client.InNamespace("default"))).To(Succeed())
+			var failedPods []string
+			for _, event := range eventList.Items {
+				if event.Reason == "FailedScheduling" && event.Source.Component == "karpenter" {
+					if testPodNames[event.InvolvedObject.Name] {
+						failedPods = append(failedPods, event.InvolvedObject.Name)
+					}
+				}
+			}
+			Expect(failedPods).To(BeEmpty(), "pods had FailedScheduling events from Karpenter: %v", failedPods)
+		})
 	})
 	Describe("CRD Hash", func() {
 		It("should have NodePool hash", func() {

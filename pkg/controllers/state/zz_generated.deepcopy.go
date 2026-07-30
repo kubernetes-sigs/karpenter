@@ -113,6 +113,13 @@ func (in *StateNode) DeepCopyInto(out *StateNode) {
 			(*out)[key] = outVal
 		}
 	}
+	if in.podDisruptionCosts != nil {
+		in, out := &in.podDisruptionCosts, &out.podDisruptionCosts
+		*out = make(map[types.NamespacedName]float64, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	if in.hostPortUsage != nil {
 		in, out := &in.hostPortUsage, &out.hostPortUsage
 		*out = new(scheduling.HostPortUsage)

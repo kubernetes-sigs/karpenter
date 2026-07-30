@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -147,8 +148,8 @@ func deviceID(device string) cloudprovider.DeviceID {
 }
 
 // collectDevices drains an iterator into a map for test assertions.
-func collectDevices(seq iter.Seq2[cloudprovider.DeviceID, deviceallocation.Metadata]) map[cloudprovider.DeviceID]deviceallocation.Metadata {
-	m := make(map[cloudprovider.DeviceID]deviceallocation.Metadata)
+func collectDevices(seq iter.Seq2[cloudprovider.DeviceID, deviceallocation.DeviceMetadata]) map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata {
+	m := make(map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata)
 	for id, meta := range seq {
 		m[id] = meta
 	}
@@ -156,27 +157,47 @@ func collectDevices(seq iter.Seq2[cloudprovider.DeviceID, deviceallocation.Metad
 }
 
 // expectedDevices builds the expected map with zero-value metadata for each device.
-func expectedDevices(ids ...cloudprovider.DeviceID) map[cloudprovider.DeviceID]deviceallocation.Metadata {
-	m := make(map[cloudprovider.DeviceID]deviceallocation.Metadata, len(ids))
+func expectedDevices(ids ...cloudprovider.DeviceID) map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata {
+	m := make(map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata, len(ids))
 	for _, id := range ids {
-		m[id] = deviceallocation.Metadata{}
+		m[id] = deviceallocation.DeviceMetadata{}
 	}
 	return m
 }
 
-// triggerHydration reconciles a no-allocation claim to fire the controller's hydrationOnce, making
-// subsequent AllocatedDevices calls non-blocking. Call this at the start of any test that is not
-// explicitly testing the hydration blocking behavior.
+// expectCapacity asserts that the actual capacity map has the same keys and semantically equal quantities as expected.
+func expectCapacity(actual, expected map[resourcev1.QualifiedName]resource.Quantity) {
+	GinkgoHelper()
+	Expect(actual).To(HaveLen(len(expected)))
+	for name, expectedQty := range expected {
+		Expect(actual).To(HaveKey(name))
+		actualQty := actual[name]
+		Expect(actualQty.Cmp(expectedQty)).To(Equal(0), "capacity %q: got %s, want %s", name, actualQty.String(), expectedQty.String())
+	}
+}
+
+// deviceResultWithCapacity constructs a DeviceRequestAllocationResult with consumed capacity.
+func deviceResultWithCapacity(device string, capacity map[resourcev1.QualifiedName]resource.Quantity) resourcev1.DeviceRequestAllocationResult {
+	return resourcev1.DeviceRequestAllocationResult{
+		Request:          "request",
+		Driver:           "driver.example.com",
+		Pool:             "pool-a",
+		Device:           device,
+		ConsumedCapacity: capacity,
+	}
+}
+
+// triggerHydration calls Hydrate() directly to close hydrationCh, making subsequent AllocatedDevices
+// calls non-blocking. In production this is triggered by a manager runnable after cache sync. Call
+// this at the start of any test that is not explicitly testing the hydration blocking behavior.
 func triggerHydration() {
-	dummy := resourceClaim("hydration-trigger")
-	ExpectApplied(ctx, env.Client, dummy)
-	ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(dummy))
+	controller.Hydrate(ctx)
 }
 
 var _ = Describe("DeviceAllocation Controller", func() {
 	Describe("Hydration", func() {
-		It("blocks until the first reconcile completes", func() {
-			results := make(chan map[cloudprovider.DeviceID]deviceallocation.Metadata, 1)
+		It("blocks until hydration completes", func() {
+			results := make(chan map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata, 1)
 			go func() {
 				defer GinkgoRecover()
 				seq, err := controller.AllocatedDevices(ctx)
@@ -424,6 +445,55 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				deviceID("device-2"),
 			)))
 		})
+		It("removes stale devices and adds new ones when a claim is recreated with different devices", func() {
+			claim := resourceClaim("claim-a", deviceResult("device-0"), deviceResult("device-1"))
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			ExpectDeleted(ctx, env.Client, claim)
+			claim = resourceClaim("claim-a", deviceResult("device-1"), deviceResult("device-2"))
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			Expect(devices).ToNot(HaveKey(deviceID("device-0")))
+			Expect(devices).To(HaveKey(deviceID("device-1")))
+			Expect(devices).To(HaveKey(deviceID("device-2")))
+		})
+		It("retains a shared device when one claim drops it but another claim still references it", func() {
+			claimA := resourceClaim("claim-a", deviceResult("device-0"), deviceResult("device-1"))
+			claimB := resourceClaim("claim-b", deviceResult("device-0"))
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			ExpectDeleted(ctx, env.Client, claimA)
+			claimA = resourceClaim("claim-a", deviceResult("device-1"))
+			ExpectApplied(ctx, env.Client, claimA)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			Expect(devices).To(HaveKey(deviceID("device-0")))
+			Expect(devices).To(HaveKey(deviceID("device-1")))
+		})
+		It("clears the allocation entirely when a claim's allocation is set to nil", func() {
+			claim := resourceClaim("claim-a", deviceResult("device-0"))
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			claim.Status.Allocation = nil
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			Expect(devices).To(BeEmpty())
+		})
 	})
 
 	Describe("Metadata", func() {
@@ -445,7 +515,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
+					deviceallocation.DeviceMetadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
 				))
 			})
 			It("is true when a claim is reserved for multiple pods", func() {
@@ -462,7 +532,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a", "uid-b"}},
+					deviceallocation.DeviceMetadata{Releasable: true, PodUIDs: []types.UID{"uid-a", "uid-b"}},
 				))
 			})
 			It("is true when two claims sharing a device are both reserved only for pods", func() {
@@ -497,7 +567,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: false},
+					deviceallocation.DeviceMetadata{Releasable: false},
 				))
 			})
 			It("is false when a claim is reserved for a non-pod consumer", func() {
@@ -579,7 +649,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices = collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
+					deviceallocation.DeviceMetadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
 				))
 			})
 			It("becomes releasable when the only non-pod claim sharing a device is deleted", func() {
@@ -609,7 +679,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices = collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
+					deviceallocation.DeviceMetadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
 				))
 			})
 			It("becomes non-releasable when a claim's reservations are cleared", func() {
@@ -634,9 +704,480 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices = collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: false},
+					deviceallocation.DeviceMetadata{Releasable: false},
 				))
 			})
 		})
 	})
+
+	Describe("Consumable Capacity", func() {
+		BeforeEach(func() {
+			if env.Version.Minor() < 36 {
+				Skip("ConsumedCapacity requires K8s version >= 1.36.x (DRAConsumableCapacity feature gate)")
+			}
+			triggerHydration()
+		})
+
+		Describe("Hydration", func() {
+			It("computes shared and consumed capacity for pre-existing claims", func() {
+				claimA := withReservedFor(
+					resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("256Mi"),
+					})),
+					podRef("pod-a", "uid-a"),
+				)
+				claimB := withReservedFor(
+					resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("128Mi"),
+					})),
+					podRef("pod-b", "uid-b"),
+				)
+				ExpectApplied(ctx, env.Client, claimA, claimB)
+
+				// triggerHydration() already called in BeforeEach; re-create controller to test fresh hydration
+				controller = deviceallocation.NewController(env.Client)
+				triggerHydration()
+
+				seq, err := controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices := collectDevices(seq)
+				meta := devices[deviceID("device-0")]
+				Expect(meta.Shared).To(BeTrue())
+				Expect(meta.Releasable).To(BeTrue())
+				Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a"), types.UID("uid-b")))
+				expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("384Mi"),
+				})
+			})
+		})
+
+		It("marks a device as shared with aggregated consumed capacity when a claim has ConsumedCapacity", func() {
+			claim := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("512Mi"),
+					"connections": resource.MustParse("2"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Releasable).To(BeTrue())
+			Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a")))
+			Expect(meta.Shared).To(BeTrue())
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("512Mi"),
+				"connections": resource.MustParse("2"),
+			})
+		})
+
+		It("aggregates consumed capacity across multiple claims referencing the same device", func() {
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("256Mi"),
+					"connections": resource.MustParse("1"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("128Mi"),
+					"connections": resource.MustParse("3"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			Expect(meta.Releasable).To(BeTrue())
+			Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a"), types.UID("uid-b")))
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("384Mi"),
+				"connections": resource.MustParse("4"),
+			})
+		})
+
+		It("surfaces per-claim contributions paired with their reserving pods", func() {
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("256Mi"),
+					"connections": resource.MustParse("1"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("128Mi"),
+					"connections": resource.MustParse("3"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			// One contribution per referencing claim, each attributed to that claim's reserving pod and carrying only
+			// that claim's capacity (not the aggregate).
+			Expect(meta.Contributions).To(HaveLen(2))
+			contributionForPod := func(uid types.UID) deviceallocation.ContributionMetadata {
+				for _, c := range meta.Contributions {
+					for _, podUID := range c.PodUIDs {
+						if podUID == uid {
+							return c
+						}
+					}
+				}
+				return deviceallocation.ContributionMetadata{}
+			}
+			expectCapacity(contributionForPod("uid-a").ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("256Mi"),
+				"connections": resource.MustParse("1"),
+			})
+			expectCapacity(contributionForPod("uid-b").ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("128Mi"),
+				"connections": resource.MustParse("3"),
+			})
+		})
+
+		It("does not mark a device as shared when ConsumedCapacity is nil (exclusive allocation)", func() {
+			claim := withReservedFor(
+				resourceClaim("claim-a", deviceResult("device-0")),
+				podRef("pod-a", "uid-a"),
+			)
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeFalse())
+			Expect(meta.ConsumedCapacity).To(BeNil())
+			Expect(meta.Contributions).To(BeEmpty())
+		})
+
+		It("handles a mix of shared and exclusive devices in the same claim", func() {
+			claim := withReservedFor(
+				resourceClaim("claim-a",
+					deviceResultWithCapacity("shared-dev", map[resourcev1.QualifiedName]resource.Quantity{
+						"slots": resource.MustParse("4"),
+					}),
+					deviceResult("exclusive-dev"),
+				),
+				podRef("pod-a", "uid-a"),
+			)
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+
+			sharedMeta := devices[deviceID("shared-dev")]
+			Expect(sharedMeta.Shared).To(BeTrue())
+			expectCapacity(sharedMeta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"slots": resource.MustParse("4"),
+			})
+
+			exclusiveMeta := devices[deviceID("exclusive-dev")]
+			Expect(exclusiveMeta.Shared).To(BeFalse())
+			Expect(exclusiveMeta.ConsumedCapacity).To(BeNil())
+		})
+
+		It("aggregates capacity with partially overlapping keys from different claims", func() {
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("256Mi"),
+					"slots":  resource.MustParse("2"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("128Mi"),
+					"connections": resource.MustParse("1"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("384Mi"),
+				"slots":       resource.MustParse("2"),
+				"connections": resource.MustParse("1"),
+			})
+		})
+
+		It("aggregates capacity with distinct keys from different claims", func() {
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("256Mi"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"connections": resource.MustParse("5"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("256Mi"),
+				"connections": resource.MustParse("5"),
+			})
+		})
+
+		It("is non-releasable when a shared device has empty ReservedFor", func() {
+			claim := resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("128Mi"),
+			}))
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Releasable).To(BeFalse())
+			Expect(meta.Shared).To(BeTrue())
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("128Mi"),
+			})
+		})
+
+		It("is non-releasable with capacity when a shared device has a non-pod consumer", func() {
+			claim := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("256Mi"),
+				})),
+				nonPodRef(),
+			)
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Releasable).To(BeFalse())
+			Expect(meta.Shared).To(BeTrue())
+			Expect(meta.PodUIDs).To(BeNil())
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("256Mi"),
+			})
+		})
+
+		Describe("Allocation Changes", func() {
+			It("reduces aggregated capacity when one of multiple shared claims is deleted", func() {
+				claimA := withReservedFor(
+					resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("256Mi"),
+					})),
+					podRef("pod-a", "uid-a"),
+				)
+				claimB := withReservedFor(
+					resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("128Mi"),
+					})),
+					podRef("pod-b", "uid-b"),
+				)
+				ExpectApplied(ctx, env.Client, claimA, claimB)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+				ExpectDeleted(ctx, env.Client, claimB)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+				seq, err := controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices := collectDevices(seq)
+				meta := devices[deviceID("device-0")]
+				Expect(meta.Shared).To(BeTrue())
+				Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a")))
+				expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("256Mi"),
+				})
+			})
+
+			It("removes shared device entirely when all claims with capacity are deleted", func() {
+				claimA := withReservedFor(
+					resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("256Mi"),
+					})),
+					podRef("pod-a", "uid-a"),
+				)
+				ExpectApplied(ctx, env.Client, claimA)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+
+				ExpectDeleted(ctx, env.Client, claimA)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+
+				seq, err := controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices := collectDevices(seq)
+				Expect(devices).To(BeEmpty())
+			})
+
+			It("updates capacity when a claim is recreated with more capacity on the same device", func() {
+				claim := withReservedFor(
+					resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("128Mi"),
+					})),
+					podRef("pod-a", "uid-a"),
+				)
+				ExpectApplied(ctx, env.Client, claim)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+				ExpectDeleted(ctx, env.Client, claim)
+				claim = withReservedFor(
+					resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("512Mi"),
+					})),
+					podRef("pod-a", "uid-a"),
+				)
+				ExpectApplied(ctx, env.Client, claim)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+				seq, err := controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices := collectDevices(seq)
+				meta := devices[deviceID("device-0")]
+				Expect(meta.Shared).To(BeTrue())
+				expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("512Mi"),
+				})
+			})
+
+			It("removes stale devices when a claim's allocation replaces one shared device with another", func() {
+				claim := withReservedFor(
+					resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"slots": resource.MustParse("2"),
+					})),
+					podRef("pod-a", "uid-a"),
+				)
+				ExpectApplied(ctx, env.Client, claim)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+				ExpectDeleted(ctx, env.Client, claim)
+				claim = withReservedFor(
+					resourceClaim("claim-a", deviceResultWithCapacity("device-1", map[resourcev1.QualifiedName]resource.Quantity{
+						"slots": resource.MustParse("3"),
+					})),
+					podRef("pod-a", "uid-a"),
+				)
+				ExpectApplied(ctx, env.Client, claim)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+				seq, err := controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices := collectDevices(seq)
+				Expect(devices).ToNot(HaveKey(deviceID("device-0")))
+				meta := devices[deviceID("device-1")]
+				Expect(meta.Releasable).To(BeTrue())
+				Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a")))
+				Expect(meta.Shared).To(BeTrue())
+				expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+					"slots": resource.MustParse("3"),
+				})
+			})
+
+			It("transitions a device from shared to exclusive when all capacity claims are deleted", func() {
+				claimA := withReservedFor(
+					resourceClaim("claim-a", deviceResult("device-0")),
+					podRef("pod-a", "uid-a"),
+				)
+				claimB := withReservedFor(
+					resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("128Mi"),
+					})),
+					podRef("pod-b", "uid-b"),
+				)
+				ExpectApplied(ctx, env.Client, claimA, claimB)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+				seq, err := controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices := collectDevices(seq)
+				Expect(devices[deviceID("device-0")].Shared).To(BeTrue())
+
+				ExpectDeleted(ctx, env.Client, claimB)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+				seq, err = controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices = collectDevices(seq)
+				meta := devices[deviceID("device-0")]
+				Expect(meta.Shared).To(BeFalse())
+				Expect(meta.ConsumedCapacity).To(BeNil())
+				Expect(meta.Releasable).To(BeTrue())
+				Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a")))
+			})
+
+			It("transitions a device from exclusive to shared when a second claim with capacity references it", func() {
+				claimA := withReservedFor(
+					resourceClaim("claim-a", deviceResult("device-0")),
+					podRef("pod-a", "uid-a"),
+				)
+				ExpectApplied(ctx, env.Client, claimA)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+
+				seq, err := controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices := collectDevices(seq)
+				Expect(devices[deviceID("device-0")].Shared).To(BeFalse())
+
+				claimB := withReservedFor(
+					resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+						"memory": resource.MustParse("128Mi"),
+					})),
+					podRef("pod-b", "uid-b"),
+				)
+				ExpectApplied(ctx, env.Client, claimB)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+				seq, err = controller.AllocatedDevices(ctx)
+				Expect(err).ToNot(HaveOccurred())
+				devices = collectDevices(seq)
+				meta := devices[deviceID("device-0")]
+				Expect(meta.Shared).To(BeTrue())
+				expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("128Mi"),
+				})
+				Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a"), types.UID("uid-b")))
+			})
+		})
+	})
+
 })

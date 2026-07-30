@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -106,6 +107,40 @@ func NodeEventHandler(c client.Client, cloudProvider cloudprovider.CloudProvider
 		// Because we get so many NodeClaims from this response, we are not DeepCopying the cached data here
 		// DO NOT MUTATE NodeClaims in this function as this will affect the underlying cached NodeClaim
 		ncs, err := ListManaged(ctx, c, cloudProvider, ForProviderID(o.(*corev1.Node).Spec.ProviderID), client.UnsafeDisableDeepCopy)
+		if err != nil {
+			return nil
+		}
+		return lo.Map(ncs, func(nc *v1.NodeClaim, _ int) reconcile.Request {
+			return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(nc)}
+		})
+	})
+}
+
+// ResourceSliceEventHandler is a watcher on resourcev1.ResourceSlice that maps a slice to the NodeClaim(s) backing the
+// node the slice is local to (via spec.nodeName or a Node owner reference) and enqueues reconcile.Requests for them.
+// It lets the lifecycle controller re-evaluate initialization when a DRA driver publishes its slices.
+func ResourceSliceEventHandler(c client.Client, cloudProvider cloudprovider.CloudProvider) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		slice := o.(*resourcev1.ResourceSlice)
+		nodeName := lo.FromPtr(slice.Spec.NodeName)
+		if nodeName == "" {
+			for _, ref := range slice.OwnerReferences {
+				if ref.Kind == "Node" {
+					nodeName = ref.Name
+					break
+				}
+			}
+		}
+		if nodeName == "" {
+			return nil
+		}
+		node := &corev1.Node{}
+		if err := c.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+			return nil
+		}
+		// Because we get so many NodeClaims from this response, we are not DeepCopying the cached data here
+		// DO NOT MUTATE NodeClaims in this function as this will affect the underlying cached NodeClaim
+		ncs, err := ListManaged(ctx, c, cloudProvider, ForProviderID(node.Spec.ProviderID), client.UnsafeDisableDeepCopy)
 		if err != nil {
 			return nil
 		}

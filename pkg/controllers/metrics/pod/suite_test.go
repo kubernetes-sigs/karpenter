@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -75,6 +76,34 @@ var _ = Describe("Pod Metrics", func() {
 		_, found := FindMetricWithLabelValues("karpenter_pods_state", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+	})
+	It("should set the managed label based on whether the pod's node is Karpenter-managed", func() {
+		// Pod scheduled onto a Karpenter-managed node (identified by the nodepool label).
+		managedNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+			v1.NodePoolLabelKey: "default",
+		}}})
+		managedPod := test.Pod(test.PodOptions{NodeName: managedNode.Name})
+		// Pod scheduled onto a node not managed by Karpenter (no nodepool label).
+		unmanagedNode := test.Node()
+		unmanagedPod := test.Pod(test.PodOptions{NodeName: unmanagedNode.Name})
+
+		ExpectApplied(ctx, env.Client, managedNode, managedPod, unmanagedNode, unmanagedPod)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(managedPod))
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(unmanagedPod))
+
+		_, found := FindMetricWithLabelValues("karpenter_pods_state", map[string]string{
+			"name":      managedPod.GetName(),
+			"namespace": managedPod.GetNamespace(),
+			"managed":   "true",
+		})
+		Expect(found).To(BeTrue())
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_state", map[string]string{
+			"name":      unmanagedPod.GetName(),
+			"namespace": unmanagedPod.GetNamespace(),
+			"managed":   "false",
 		})
 		Expect(found).To(BeTrue())
 	})

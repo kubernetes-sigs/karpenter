@@ -19,6 +19,7 @@ package pod
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,7 @@ const (
 	podPhase            = "phase"
 	podScheduled        = "scheduled"
 	podReady            = "ready"
+	managed             = "managed"
 )
 
 var (
@@ -191,6 +193,7 @@ func labelNames() []string {
 		podHostInstanceType,
 		podPhase,
 		podReady,
+		managed,
 	}
 }
 
@@ -442,6 +445,7 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	metricLabels[metrics.CapacityTypeLabel] = node.Labels[v1.CapacityTypeLabelKey]
 	metricLabels[podHostInstanceType] = node.Labels[corev1.LabelInstanceTypeStable]
 	metricLabels[metrics.NodePoolLabel] = node.Labels[v1.NodePoolLabelKey]
+	metricLabels[managed] = strconv.FormatBool(node.Labels[v1.NodePoolLabelKey] != "")
 	return metricLabels, nil
 }
 

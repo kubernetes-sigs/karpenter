@@ -353,13 +353,12 @@ func createRealisticInstanceTypes(count int) []*cloudprovider.InstanceType {
 			cpuValue := 2 * (idx%8 + 1)
 			memoryValue := 4 * (idx%8 + 1)
 
-			instanceTypes = append(instanceTypes, fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: name,
-				Resources: corev1.ResourceList{
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(name,
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpuValue)),
 					corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", memoryValue)),
-				},
-			}))
+				}),
+			))
 			idx++
 		}
 		if idx >= count {

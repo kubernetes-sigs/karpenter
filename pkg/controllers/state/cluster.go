@@ -85,6 +85,20 @@ type Cluster struct {
 	unsyncedStartTime   time.Time
 	lastUnsyncedLogTime time.Time
 	antiAffinityPods    sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
+
+	// bufferPodCounts tracks how many virtual CapacityBuffer pods the provisioner's
+	// scheduling simulation placed on each node (keyed by providerID). This is
+	// rebuilt wholesale after every provisioning pass — it is NOT incremental.
+	//
+	// Used by:
+	//   - disruption/emptiness.go: prevents empty-consolidation of nodes that host
+	//     buffer capacity (HasBufferPods check in ShouldDisrupt).
+	//
+	// NOT used by consolidation — consolidation naturally accounts for buffer pods
+	// because SimulateScheduling calls GetPendingPods which injects virtual pods
+	// into the pending set. Any replacement must fit both real and virtual pods.
+	bufferPodCountsMu sync.RWMutex
+	bufferPodCounts   map[string]int
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
@@ -100,6 +114,8 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		nodePoolResources:         map[string]corev1.ResourceList{},
 
 		NodePoolState: NewNodePoolState(),
+
+		bufferPodCounts: map[string]int{},
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -278,6 +294,33 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	if n, ok := c.nodes[providerID]; ok {
 		n.Nominate(ctx, c.clock) // extends nomination window if already nominated
 	}
+}
+
+// UpdateBufferPodCounts replaces the entire buffer pod count mapping with the
+// new counts. Called by the provisioner after each scheduling pass to reflect
+// which nodes are hosting virtual buffer pods. Nodes not in the map are cleared.
+//
+// The mapping is derived from Results.ExistingNodes — each ExistingNode.Pods
+// entry that carries the fake-pod annotation is counted. When buffer capacity
+// is consumed (real pods take the space), virtual pods move to other nodes or
+// new NodeClaims, and this map updates accordingly on the next pass.
+func (c *Cluster) UpdateBufferPodCounts(counts map[string]int) {
+	c.bufferPodCountsMu.Lock()
+	defer c.bufferPodCountsMu.Unlock()
+	c.bufferPodCounts = counts
+}
+
+// HasBufferPods returns true if the node with the given providerID has at least
+// one virtual buffer pod placed on it during the last provisioning pass.
+func (c *Cluster) HasBufferPods(providerID string) bool {
+	return c.BufferPodCount(providerID) > 0
+}
+
+// BufferPodCount returns the number of virtual buffer pods on the node.
+func (c *Cluster) BufferPodCount(providerID string) int {
+	c.bufferPodCountsMu.RLock()
+	defer c.bufferPodCountsMu.RUnlock()
+	return c.bufferPodCounts[providerID]
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
@@ -601,6 +644,7 @@ func (c *Cluster) Reset() {
 	c.podAcks = sync.Map{}
 	c.podsSchedulingAttempted = sync.Map{}
 	c.podsSchedulableTimes = sync.Map{}
+	c.bufferPodCounts = map[string]int{}
 }
 
 // sets the cluster to be synced or unsynced for unit testing

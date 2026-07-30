@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
@@ -60,6 +61,7 @@ type Controller struct {
 	recorder      events.Recorder
 	clock         clock.Clock
 	cloudProvider cloudprovider.CloudProvider
+	clusterCost   *cost.ClusterCost
 	methods       []Method
 	mu            sync.Mutex
 	lastRun       map[string]time.Time
@@ -79,7 +81,7 @@ func WithMethods(methods ...Method) option.Function[ControllerOptions] {
 }
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, opts ...option.Function[ControllerOptions]) *Controller {
+	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, clusterCost *cost.ClusterCost, opts ...option.Function[ControllerOptions]) *Controller {
 
 	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue)...)}, opts...)...)
 	return &Controller{
@@ -90,6 +92,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		provisioner:   provisioner,
 		recorder:      recorder,
 		cloudProvider: cp,
+		clusterCost:   clusterCost,
 		lastRun:       map[string]time.Time{},
 		methods:       o.methods,
 	}
@@ -98,7 +101,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
 	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 	return []Method{
-		// Delete any empty NodeClaims as there is zero cost in terms of disruption.
+		// Delete empty nodes across all consolidation policies (WhenEmpty, WhenEmptyOrUnderutilized, Balanced).
 		NewEmptiness(c),
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
 		NewStaticDrift(cluster, provisioner, cp),
@@ -184,7 +187,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
+	candidates, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -195,6 +198,10 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	// If there are no candidates, move to the next disruption
 	if len(candidates) == 0 {
 		return false, nil
+	}
+	// Pass precomputed NodePool totals to consolidation methods for balanced scoring
+	if setter, ok := disruption.(NodePoolTotalsSetter); ok {
+		setter.SetNodePoolTotals(nodePoolTotals)
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
 	if err != nil {

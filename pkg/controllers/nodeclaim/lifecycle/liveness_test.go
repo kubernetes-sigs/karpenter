@@ -31,6 +31,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -183,6 +184,42 @@ var _ = Describe("Liveness", func() {
 		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		// expect that the nodeclaim was not deleted
 		ExpectExists(ctx, env.Client, nodeClaim)
+	})
+	It("should respect a custom launch timeout configured via the LaunchTimeout var", func() {
+		nodeclaimlifecycle.LaunchTimeout = 45 * time.Second
+		DeferCleanup(func() { nodeclaimlifecycle.LaunchTimeout = 5 * time.Minute })
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
+						fake.ResourceGPUVendorA: resource.MustParse("1"),
+					},
+				},
+			},
+		})
+		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		// Before the custom 45s timeout, the NodeClaim should still exist
+		env.Clock.Step(time.Second * 30)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectExists(ctx, env.Client, nodeClaim)
+
+		// Past the custom 45s timeout but well before the default 5m timeout, it should be deleted
+		env.Clock.Step(time.Second * 30)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should use the status condition transition time for launch timeout, not the creation timestamp", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{

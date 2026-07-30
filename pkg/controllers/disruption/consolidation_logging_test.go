@@ -105,9 +105,10 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 	candidate1.instanceType = &cloudprovider.InstanceType{
 		Name: "source-type",
 		Offerings: cloudprovider.Offerings{
-			{Price: 0.50},
+			{Price: 0.50, Available: true},
 		},
 	}
+	candidate1.Price = 0.50
 
 	cmd := Command{
 		Candidates:   []*Candidate{candidate1},
@@ -120,7 +121,7 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 							{
 								Name: "dest-type-1",
 								Offerings: cloudprovider.Offerings{
-									{Price: 0.20},
+									{Price: 0.20, Available: true},
 								},
 							},
 						},
@@ -132,7 +133,7 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 							{
 								Name: "dest-type-2",
 								Offerings: cloudprovider.Offerings{
-									{Price: 0.15},
+									{Price: 0.15, Available: true},
 								},
 							},
 						},

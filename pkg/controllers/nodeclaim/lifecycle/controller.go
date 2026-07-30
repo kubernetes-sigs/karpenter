@@ -27,6 +27,7 @@ import (
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
@@ -49,6 +50,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
@@ -95,13 +97,22 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	// higher concurrency limit since we want fast reaction to node syncing and launch
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
 	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
-	return controllerruntime.NewControllerManagedBy(m).
+	b := controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Watches(
 			&corev1.Node{},
 			nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider),
-		).
+		)
+	// When DRA is enabled, watch ResourceSlices so a NodeClaim is re-evaluated for initialization as its DRA drivers
+	// publish their pools. The watch (and its resource.k8s.io RBAC) is only wired up when DRA support is on.
+	if !options.FromContext(ctx).IgnoreDRARequests {
+		b = b.Watches(
+			&resourcev1.ResourceSlice{},
+			nodeclaimutils.ResourceSliceEventHandler(c.kubeClient, c.cloudProvider),
+		)
+	}
+	return b.
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
 				// back off until last attempt occurs ~90 seconds before nodeclaim expiration
