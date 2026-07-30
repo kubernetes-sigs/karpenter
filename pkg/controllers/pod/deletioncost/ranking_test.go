@@ -239,17 +239,11 @@ var _ = Describe("Ranking", func() {
 		})
 	})
 
-	Context("Node do-not-disrupt precedence", func() {
-		// Node-level karpenter.sh/do-not-disrupt, PDB-blocked, and
-		// non-RS-owned all share Group D routing on not-yet-tainted nodes.
-		// These tests co-locate DND with the other predicates to verify the
-		// classifier reaches the same Group D outcome via either path (and
-		// that intersecting predicates don't accidentally short-circuit to a
-		// different tier). The disrupted-taint predicate still wins over
-		// everything: a tainted node is fait accompli.
+	Context("Group D composition on non-tainted nodes", func() {
+		// DND, PDB-blocked, and non-RS-owned all share Group D routing on
+		// non-tainted nodes. These tests verify intersecting predicates
+		// still land in Group D; a tainted node overrides them all.
 		It("should route do-not-disrupt node hosting a StatefulSet pod to Group D", func() {
-			// Both DND and non-RS-owned predicates would independently route
-			// this node to Group D; verify they compose correctly.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -283,10 +277,8 @@ var _ = Describe("Ranking", func() {
 		})
 
 		It("should route do-not-disrupt node hosting a PDB-blocked pod to Group D", func() {
-			// Both DND and PDB-blocked predicates would independently route
-			// this node to Group D; verify they compose correctly. Node 1 is
-			// separately given the disrupted taint to prove the same PDB list
-			// still classifies a tainted node as Group A on the parallel path.
+			// Node 1 is separately tainted to also verify the Group A path
+			// still fires on a PDB-blocked pod when the taint is present.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -879,16 +871,11 @@ var _ = Describe("Ranking", func() {
 			Expect(node2Rank).To(BeNumerically(">", math.MinInt32))
 		})
 
-		// hasNonRSOwnedPods routes non-tainted nodes hosting bare pods,
-		// StatefulSet-owned pods, or pods with any other non-RS/Job/DaemonSet
-		// owner to Group D (Not Disruptable): the non-RS pod pins the node so
-		// Karpenter can't consolidate it, and MinInt-ing co-resident RS pods
-		// only churns them off with no consolidation benefit. Job-owned and
-		// DaemonSet-owned pods (plus kube-system pods) do NOT trigger the
-		// predicate; they fall through to Group C. Uses HasDoNotDisrupt on
-		// the NodeRank to observe Group D directly (the reconcile-path
-		// annotation is the same "cleared" for Group D whether via the
-		// non-RS predicate or the DND path).
+		// Bare and StatefulSet pods route their host node to Group D.
+		// Job, DaemonSet, and kube-system pods do not — they fall through
+		// to Group C. Observes HasDoNotDisrupt on NodeRank because Group C
+		// and Group D produce different annotation states but the same
+		// helper output shape.
 		DescribeTable("should _Edge_ classify non-RS-owned pods as Group D (not disruptable)",
 			func(ownerRef *metav1.OwnerReference, expectGroupD bool) {
 				nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
@@ -952,15 +939,7 @@ var _ = Describe("Ranking", func() {
 		)
 
 		It("should _Edge_ route a non-tainted node with a PDB-blocked pod to Group D", func() {
-			// PDB-blocked pods on a not-yet-tainted node signal "Karpenter's
-			// own consolidation refuses this candidate." Group D (Not
-			// Disruptable) is the correct home; steering RS to preferentially
-			// delete PDB-blocked pods via MinInt32 would bypass the operator's
-			// stated protection intent, since RS scale-down calls
-			// pods.Delete() rather than the eviction API and thus is not
-			// gated by PDB. Cluster has NO tainted node — this test
-			// deliberately exercises the steady-state code path where the
-			// PDB list must still be fetched.
+			// Cluster has NO tainted node — exercises the steady-state path.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
