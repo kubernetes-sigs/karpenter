@@ -1,8 +1,8 @@
-# NodeOverlay `priceExpression`
+# RFC: NodeOverlay `priceExpression`
 
 ## Summary
 
-This RFC proposes adding a `spec.priceExpression` field that accepts a CEL (Common Expression Language) expression. The expression receives the cloud provider's offering price as `self.price` and evaluates to a numeric value, giving operators full control over order of operations in a single, readable formula. Negative results are permitted as an intentional scheduling incentive but surface as a `PriceNonNegative=False` warning condition on the overlay.
+This RFC proposes adding a `spec.priceExpression` field to NodeOverlay that accepts a CEL (Common Expression Language) expression. The expression receives the cloud provider's offering price as `self.price` and evaluates to a numeric value, giving operators full control over the price calculation in a single, readable formula. It also proposes a graduation path that deprecates the existing `price` and `priceAdjustment` fields in favor of `priceExpression`, removing them at GA.
 
 ## Motivation
 
@@ -38,15 +38,26 @@ This directly limits the utility of NodeOverlays as a cost-modeling tool and was
 
 5. **Spot vs on-demand gap refinement**: Enterprise discounts may apply to spot pricing while reservation savings apply to on-demand pricing, changing the effective gap between capacity types. Modeled accurately, Karpenter can make more correct capacity-type decisions during provisioning.
 
-## Proposed Solution: `priceExpression` CEL Field
+## Goals
 
-### Overview
+- Add a `spec.priceExpression` CEL field to NodeOverlay that replaces `spec.price` and `spec.priceAdjustment` as the primary price configuration mechanism.
+- Compile expressions once at reconcile time and store the compiled program so evaluation at scheduling time is a single cheap numeric computation.
+- Surface CEL syntax and type errors as `ValidationSucceeded=False` conditions on the overlay.
+- Permit negative prices as an intentional scheduling incentive, surfacing them via a non-blocking `PriceNonNegative=False` condition.
+- Define a graduation path that auto-migrates `price` and `priceAdjustment` to equivalent `priceExpression` values at beta, then removes the legacy fields at GA.
 
-Add a `spec.priceExpression` field that accepts a CEL expression string. The expression exposes a single variable `self` with a `price` field (double) representing the instance type's base price for the current offering. The expression must evaluate to a numeric value, which becomes the new simulated price. Negative results are permitted; see [Negative Prices](#negative-prices).
+## Non-Goals
 
-This approach was suggested by @jmdeal in [kubernetes-sigs/karpenter#3004](https://github.com/kubernetes-sigs/karpenter/pull/3004) as a cleaner alternative to maintaining a structured list of price operations.
+- Exposing additional expression variables beyond `self.price` (e.g. instance family, zone, capacity type). The environment is intentionally minimal.
+- Supporting stacking or merging of multiple price overlays. See [Alternatives Considered: Stacking Overlays](#stacking-overlays).
+- Auto-generating NodeOverlay resources from cost data sources (e.g. AWS Cost Explorer, billing APIs).
+- Providing a migration CLI or tooling beyond the admission webhook auto-rewrite.
+
+## Proposed Solution
 
 ### API
+
+Add a `spec.priceExpression` field that accepts a CEL expression string. The expression exposes a single variable `self` with a `price` field (double) representing the instance type's base price for the current offering. The expression must evaluate to a numeric value, which becomes the new simulated price.
 
 ```yaml
 apiVersion: karpenter.sh/v1alpha1
@@ -64,58 +75,13 @@ spec:
 
 The three-factor example from the motivation section (−10% EDP, +$0.05 agent fee, +3% AZ surcharge) is expressed as a single formula. The operator controls order of operations directly via parenthesization.
 
-The existing `price` field is retained for explicit price overrides. Specifying `priceExpression` alongside `price` is a validation error.
-
-`priceExpression` can also set a price directly by using a bare numeric literal that ignores `self.price`:
+`priceExpression` can also set a price directly by using a bare numeric literal:
 
 ```yaml
-priceExpression: "0.50"   # equivalent to price: "0.50"
+priceExpression: "0.50"   # sets the offering price to exactly $0.50/hr
 ```
 
-This makes `spec.price` largely redundant — `priceExpression` subsumes it. `spec.price` is retained because it is more self-documenting for the simple override case and is validated by a regex at admission time rather than by CEL type-checking.
-
-### Expression Environment
-
-| Variable | Type | Description |
-|----------|------|-------------|
-| `self.price` | `double` | The cloud provider's offering price as a double. This is always the raw provider price; it is not affected by `spec.price` overrides on other overlays. |
-
-The CEL environment is deliberately minimal. No other variables are exposed. The expression must return a `double`, `int`, or `uint`. Returning a negative value is permitted; see [Negative Prices](#negative-prices) below.
-
-### Resolution Rules
-
-For a given instance type offering, let $M$ be the set of all matching NodeOverlays sorted by weight descending (alphabetical by name to break ties):
-
-1. **Base price**: The cloud provider's offering price is always the input to any price computation. `spec.price` from one overlay is never visible to `priceExpression` on another overlay — the two fields are independent and compete under highest-weight-wins.
-
-2. **`priceExpression`**: If the highest-weight overlay in $M$ specifies `priceExpression`, it is evaluated with `self.price` set to the cloud provider's offering price. The result becomes the new simulated price. Lower-weight overlays are not applied (same highest-weight-wins semantics as today).
-
-3. **`spec.price`**: If the highest-weight overlay in $M$ specifies `spec.price` (and does not specify `priceExpression`), that value becomes the simulated price directly. Lower-weight overlays are not applied.
-
-### Why Not Merge Multiple Matching Overlays?
-
-An earlier design considered allowing multiple matching price overlays to merge, then resolving conflicts by weight and applying the resulting set of adjustments in order.
-
-**Advantages**
-
-- Users could define one global base discount overlay, then stack narrower overlays for instance-family-specific discounts instead of repeating the global discount in every instance-family expression.
-- Independently owned cost dimensions could remain in separate resources. For example, a platform team could own the enterprise discount while an application team owns a per-node licensing fee.
-- Shared adjustments could be updated once and automatically affect every more-specific overlay that composes with them.
-
-**Disadvantages**
-
-- The rest of NodeOverlay follows a simple highest-weight-wins model: when multiple overlays target the same field, the controller picks one winner and reports conflicts rather than composing partial state across resources. Price adjustment merging would be the only behavior with a different resolution model.
-- Merge resolution would require users and maintainers to reason about:
-
-  - which fields merge and which fields conflict,
-  - whether ordering comes from weight, declaration order, operation type, or another explicit field,
-  - how additive fees interact with percentage discounts,
-  - whether a higher-weight overlay replaces or composes with a lower-weight overlay, and
-  - how to explain status, events, and validation errors when the final price comes from several resources.
-
-**Decision**
-
-We moved away from multiple-overlay merge resolution because it makes NodeOverlay resolution significantly more complex while solving only this one feature's composition problem. Those semantics are especially hard for cost modeling because the order of operations is business-specific. A per-node licensing fee, an EBS cost, an ISP discount, and an enterprise discount can all be validly ordered in different ways depending on the contract. Encoding that behavior through multiple overlay merge rules would make the API look declarative while hiding the most important part of the calculation in controller-specific conflict resolution. A single CEL expression keeps the existing overlay selection semantics intact and makes the final arithmetic explicit in the resource that owns the price model.
+Specifying `priceExpression` alongside `price` or `priceAdjustment` is a validation error enforced at admission time.
 
 ### Mathematical Order of Operations
 
@@ -129,6 +95,24 @@ The operator fully controls order of operations via the expression. For the moti
 
 The operator chooses which form accurately models their cost structure. This is the core advantage over a fixed ordered-list approach: there is no ambiguity about what "apply in order" means across multipliers and additive fees.
 
+### Expression Environment
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `self.price` | `double` | The cloud provider's offering price. Always the raw provider price; not affected by `spec.price` overrides on other overlays. |
+
+The CEL environment is deliberately minimal. No other variables are exposed. The expression must return a `double`, `int`, or `uint`.
+
+### Resolution Rules
+
+For a given instance type offering, let $M$ be the set of all matching NodeOverlays sorted by weight descending (alphabetical by name to break ties):
+
+1. **Base price**: The cloud provider's offering price is always the input to any price computation. `spec.price` from one overlay is never visible to `priceExpression` on another overlay.
+
+2. **`priceExpression`**: If the highest-weight overlay in $M$ specifies `priceExpression`, it is evaluated with `self.price` set to the cloud provider's offering price. The result becomes the new simulated price. Lower-weight overlays are not applied.
+
+3. **`spec.price` / `spec.priceAdjustment`** (deprecated at beta, removed at GA): If the highest-weight overlay in $M$ specifies one of these legacy fields, it is applied using the existing semantics. Lower-weight overlays are not applied. Both fields are superseded by `priceExpression` and will be removed at GA.
+
 ### Design Details
 
 **Compilation model**
@@ -138,40 +122,38 @@ CEL expressions are compiled once when the NodeOverlay controller reconciles, no
 **Controller changes**
 
 1. On reconcile, call `cel.Compile(overlay.Spec.PriceExpression)` for each overlay with a `priceExpression`.
-2. If compilation fails, set `ValidationSucceeded=False` with reason `RuntimeValidation` (same path as existing runtime validation failures).
-3. Before storing the overlay, evaluate the expression against every matched offering. If any matched offering fails to evaluate, set `ValidationSucceeded=False` with reason `ExpressionEvaluationError` and do not store the overlay. This prevents a high-weight invalid expression from blocking a lower-weight valid overlay that targets the same offerings.
+2. If compilation fails, set `ValidationSucceeded=False` with reason `RuntimeValidation`.
+3. Before storing the overlay, evaluate the expression against every matched offering. If any matched offering fails to evaluate, set `ValidationSucceeded=False` with reason `ExpressionEvaluationError` and do not store the overlay. This prevents a high-weight invalid expression from silencing a lower-weight valid overlay.
 4. Store the compiled `cel.Program` in the `priceUpdate` struct alongside the overlay update string.
 5. At scheduling time, evaluate the stored program against the cloud provider's offering price to produce the adjusted price.
 6. Track the overlay name and adjusted price in the instance type store so Karpenter can annotate launched NodeClaims with the price overlay that affected the selected offering. Reserved offerings are distinguished by reservation ID in addition to instance type, zone, and capacity type.
 
 **Validation**
 
-- **`priceExpression` syntax**: Validated at admission time via `RuntimeValidate`. Any CEL parse or type-check error surfaces as a validation error on the overlay resource before it is applied.
-- **Return type**: The expression must return a numeric type (`double`, `int`, or `uint`). Expressions returning booleans, strings, or other types are rejected at compile time.
-- **Negative price**: Expressions that evaluate to a negative value are **permitted**. Negative prices are intentionally allowed so operators can use them as a scheduling incentive (Karpenter's `OrderByPrice` sorts cheaper offerings first, so a negative price causes those offerings to be strongly preferred). When a CEL expression produces a negative result, a `log.Info` warning is emitted and the overlay surfaces `PriceNonNegative=False`. The overlay remains Ready.
-- **Runtime evaluation errors**: Expressions that compile successfully but fail to evaluate against matched offerings (e.g. accessing a field that is not present in the expression environment) set `ValidationSucceeded=False` and `PriceAdjusted=False` with reason `ExpressionEvaluationError`. The expression is not stored or applied. Lower-weight valid overlays can still apply to the affected offerings.
-- **Mutual exclusion**: Specifying `priceExpression` alongside `price` or `priceAdjustment` on the same resource is a validation error enforced at admission time via CEL XValidation rules on the CRD.
+- **Syntax**: Validated at admission time via `RuntimeValidate`. Any CEL parse or type-check error surfaces as a validation error on the overlay resource.
+- **Return type**: The expression must return a numeric type (`double`, `int`, or `uint`). Other return types are rejected at compile time.
+- **Negative price**: Permitted. When an expression produces a negative result, a `log.Info` warning is emitted and the overlay surfaces `PriceNonNegative=False`. The overlay remains Ready. See [Negative Prices](#negative-prices).
+- **Runtime evaluation errors**: Set `ValidationSucceeded=False` and `PriceAdjusted=False` with reason `ExpressionEvaluationError`. The expression is not stored or applied. Lower-weight valid overlays can still apply to the affected offerings.
+- **Mutual exclusion**: Specifying `priceExpression` alongside `price` or `priceAdjustment` is a validation error enforced at admission time.
 
 **Negative Prices** <a name="negative-prices"></a>
 
-The existing `price` and `priceAdjustment` fields clamp their result to `0` via `AdjustedPrice()` in `cloudprovider/types.go`, so they cannot produce negative prices. Only `priceExpression` can produce a negative value.
+The existing `price` and `priceAdjustment` fields clamp their result to `0` via `AdjustedPrice()` in `cloudprovider/types.go`. Only `priceExpression` can produce a negative value.
 
-When the NodeOverlay controller evaluates a CEL expression at reconcile time and the result is negative:
+When the NodeOverlay controller evaluates a CEL expression and the result is negative:
 1. The price is applied as-is (not clamped). A negative price causes those offerings to sort ahead of all positive-priced offerings in `OrderByPrice`, acting as a hard scheduling preference.
 2. `log.Info` emits a warning with the overlay name.
-3. The overlay sets `PriceNonNegative=False` with reason `NegativePrice`. This condition is informational only; it is not part of `Ready`, so the overlay remains Ready if validation succeeds and the price configuration matches at least one offering.
+3. The overlay sets `PriceNonNegative=False` with reason `NegativePrice`. This condition is informational only and does not affect `Ready`.
 
 Operators who want a scheduling incentive without distorting disruption cost math should prefer a very small positive price (e.g. `0.001`) over a negative value.
 
 **Status Conditions** <a name="status-conditions"></a>
 
-NodeOverlay exposes status conditions for validation, price application, and negative-price observability:
-
 | Condition | Ready dependency | Description |
 |-----------|------------------|-------------|
 | `ValidationSucceeded` | Yes | Runtime validation, conflict detection, and expression evaluation succeeded. |
 | `PriceAdjusted` | Yes | The overlay has no price configuration, or its price configuration matched and adjusted at least one instance type offering. |
-| `PriceNonNegative` | No | All evaluated `priceExpression` results were non-negative. This is informational and does not affect `Ready`. |
+| `PriceNonNegative` | No | All evaluated `priceExpression` results were non-negative. Informational only. |
 
 `ValidationSucceeded` reasons:
 
@@ -179,14 +161,14 @@ NodeOverlay exposes status conditions for validation, price application, and neg
 |--------|-------------|
 | `RuntimeValidation` | CEL expression failed to compile (syntax or type error). |
 | `Conflict` | Two overlays of the same weight target the same offering. |
-| `ExpressionEvaluationError` | Expression compiled successfully but failed to evaluate against one or more matched offerings (e.g. accessing a key that is not in the expression environment). |
+| `ExpressionEvaluationError` | Expression compiled but failed to evaluate against one or more matched offerings. |
 
 `PriceAdjusted` reasons:
 
 | Reason | Description |
 |--------|-------------|
-| `NoMatchingInstanceTypes` | The overlay has price configuration, but it did not match any instance type offerings for the evaluated NodePools. |
-| `ExpressionEvaluationError` | Expression compiled successfully but failed to evaluate against one or more matched offerings. |
+| `NoMatchingInstanceTypes` | Price configuration did not match any instance type offerings. |
+| `ExpressionEvaluationError` | Expression compiled but failed to evaluate against one or more matched offerings. |
 
 `PriceNonNegative` reasons:
 
@@ -194,13 +176,13 @@ NodeOverlay exposes status conditions for validation, price application, and neg
 |--------|-------------|
 | `NegativePrice` | The expression produced a negative price for one or more matched offerings. |
 
-`ValidationSucceeded=False` or `PriceAdjusted=False` sets `Ready=False`. `PriceNonNegative=False` does not affect `Ready`; it exists so operators can observe negative pricing without blocking intentionally negative cost models.
+`ValidationSucceeded=False` or `PriceAdjusted=False` sets `Ready=False`. `PriceNonNegative=False` does not affect `Ready`.
 
 The conditions are updated during the NodeOverlay controller's reconcile loop, which runs at least every 6 hours and on any NodeOverlay, NodePool, or NodeClass change.
 
 **NodeClaim observability** <a name="nodeclaim-observability"></a>
 
-When Karpenter launches a NodeClaim, it can resolve the concrete instance type offering selected by the cloud provider. At that point Karpenter annotates the NodeClaim with overlay information from the instance type store:
+When Karpenter launches a NodeClaim, it annotates the NodeClaim with overlay information from the instance type store:
 
 | Annotation | Description |
 |------------|-------------|
@@ -208,13 +190,98 @@ When Karpenter launches a NodeClaim, it can resolve the concrete instance type o
 | `karpenter.sh/price-overlay-adjusted-price` | Adjusted price used for the launched offering. |
 | `karpenter.sh/capacity-overlay-applied` | Name of the capacity overlay that adjusted the launched instance type. |
 
-These annotations are best-effort observability. They are written during launch after the cloud provider returns concrete labels such as instance type, zone, capacity type, and reservation ID. If no overlay applies, the annotations are omitted.
+These annotations are best-effort and written after the cloud provider returns concrete labels (instance type, zone, capacity type, reservation ID). Omitted when no overlay applies.
 
-**Backward Compatibility**
+## Graduation Criteria
 
-The existing `price` field is unchanged. Existing NodeOverlay resources that use `price` continue to behave exactly as today. Operators opt in to `priceExpression` explicitly.
+### Alpha (`v1alpha1`) — No breaking changes
 
-### Pros and Cons
+- `priceExpression` is added to the NodeOverlay API alongside the existing `price` and `priceAdjustment` fields.
+- All three fields are accepted. Specifying more than one is a validation error (mutually exclusive).
+- CEL expressions are compiled at reconcile time and evaluated at scheduling time.
+- Status conditions (`ValidationSucceeded`, `PriceAdjusted`, `PriceNonNegative`) implemented and accurate.
+- NodeClaim annotations (`price-overlay-applied`, `price-overlay-adjusted-price`) populated at launch time.
+- `price` and `priceAdjustment` continue to behave exactly as today. No existing overlays require changes.
+- Unit and integration tests covering `priceExpression` evaluation, validation errors, negative prices, and NodeClaim annotation.
+
+### Beta (`v1beta1`) — Deprecate and auto-migrate legacy fields
+
+- `price` and `priceAdjustment` are marked deprecated in the API documentation and CRD schema descriptions.
+- An admission webhook auto-rewrites incoming resources that use the legacy fields:
+  - `spec.price: "0.50"` → `spec.priceExpression: "0.50"`
+  - `spec.priceAdjustment: "-10%"` → `spec.priceExpression: "self.price * 0.90"`
+  - `spec.priceAdjustment: "+5%"` → `spec.priceExpression: "self.price * 1.05"`
+  - `spec.priceAdjustment: "-0.05"` → `spec.priceExpression: "self.price - 0.05"`
+  - `spec.priceAdjustment: "+0.05"` → `spec.priceExpression: "self.price + 0.05"`
+- After rewriting, the resource is stored with only `priceExpression` set. Operators reading their resources back will observe the rewritten form.
+- A controller event and `log.Info` warning are emitted for each overlay that was auto-migrated, directing the operator to update their manifests.
+- Existing overlays written before the beta upgrade are migrated on their next reconcile.
+- At least two releases in alpha with no breaking API changes.
+- Positive user feedback from alpha adoption.
+
+### GA (`v1`) — Legacy fields removed
+
+- `price` and `priceAdjustment` are removed from the NodeOverlay CRD spec. Resources specifying these fields are rejected at admission with a clear error message directing the operator to `priceExpression`.
+- Only `priceExpression` is supported for price configuration.
+- At least two releases in beta with no breaking API changes.
+- No outstanding critical bugs or performance regressions.
+- E2E test coverage across at least two cloud provider implementations.
+
+## Alternatives Considered
+
+### Stacking Multiple Overlays <a name="stacking-overlays"></a>
+
+The most frequently requested alternative is allowing multiple price overlays to apply to the same instance type offering in a defined order, so that each overlay contributes one dimension of the final price. For example, a global EDP discount overlay and a per-node licensing fee overlay would both match `m5.xlarge`, and the controller would apply them in sequence.
+
+We explicitly rejected stacking for the following reasons:
+
+**It breaks the existing resolution model.** Every other NodeOverlay field—capacity, requirements—uses a highest-weight-wins model. One overlay wins and is reported in the status; the others are recorded as conflicts. Stacking price adjustments would be the only field with a different composition model, making the overall API harder to understand and document.
+
+**Order of operations is inherently business-specific.** A per-node licensing fee, a cloud provider discount, and a tax surcharge can be validly applied in multiple orders depending on the contract. For example:
+
+- `(self.price * 0.9 + 0.05) * 1.03` — AZ surcharge applied after license fee
+- `self.price * 0.9 * 1.03 + 0.05` — AZ surcharge on compute only, license fee added after
+
+These produce different prices, and neither order is universally correct. A stacking model must pick one order (e.g. highest-weight-first), but that order may be wrong for many users. The controller cannot know the right answer; only the operator can. Embedding the order of operations inside a CEL expression keeps the business logic explicit and visible in the resource rather than hidden in controller behavior.
+
+**Conflict semantics break down with stacking.** Karpenter's conflict detection flags two overlays of equal weight that target the same offering as a `Conflict` error. With stacking, the question becomes: should two same-weight overlays conflict (existing behavior) or compose additively (stacking behavior)? Either answer is surprising in some scenario. The `weight` field's meaning shifts from "this overlay wins" to something ambiguous between "this overlay takes priority" and "this overlay is applied at this layer."
+
+**Status and observability become ambiguous.** When a NodeClaim is launched, Karpenter annotates it with the overlay name that adjusted the offering. With stacking, the price is the result of N overlays. The annotation would need to list all N overlays, and the `PriceAdjusted` condition would need to account for partial application—what does it mean if two of three stacked overlays applied successfully but one failed? Attributing the final price becomes opaque to both operators and Karpenter itself.
+
+**Debugging is harder.** When an operator observes an unexpected price on a NodeClaim annotation, they need to reconstruct which sequence of overlays produced it and in what order. With a single expression, the formula is self-documenting in the resource that owns the price model.
+
+**CEL already solves the composition problem more cleanly.** The motivation for stacking is that operators want to compose multiple independent cost factors without duplicating overlays. A single CEL expression achieves the same result with explicit, readable arithmetic and no changes to the resolution model.
+
+### Structured Operation List
+
+An earlier design considered a structured list field, e.g.:
+
+```yaml
+spec:
+  priceAdjustments:
+    - op: multiply
+      value: "0.9"
+    - op: add
+      value: "0.05"
+    - op: multiply
+      value: "1.03"
+```
+
+**Advantages**
+
+- Each adjustment is individually named and introspectable.
+- Individual adjustments could be validated by type (percentage, absolute, multiplier) rather than relying on CEL type-checking.
+
+**Disadvantages**
+
+- "Apply in order" still encodes the order of operations in the list, which is exactly what operators need to control explicitly. The structured form offers no ordering advantage over a CEL expression.
+- Harder to express non-trivial formulas (e.g. applying a surcharge only to the compute portion before adding a flat fee).
+- Requires a new custom operation language when CEL is already a well-known, tested standard used elsewhere in Kubernetes.
+- More API surface to define, validate, and maintain for equivalent expressive power.
+
+The CEL expression approach was chosen because it gives operators full control over order of operations in a single readable string, uses a well-known language, and requires no new operation vocabulary.
+
+## Pros and Cons
 
 **Pros**
 - Operator has complete, explicit control over order of operations—no ambiguity about how multipliers and additive fees interact.
@@ -222,10 +289,11 @@ The existing `price` field is unchanged. Existing NodeOverlay resources that use
 - Consistent with CEL usage elsewhere in Kubernetes (admission webhooks, `kubeReserved`/`systemReserved` in the AWS provider).
 - Expressions are compiled once at reconcile time; evaluation at scheduling time is a single cheap numeric computation.
 - Simpler API surface than a structured list: one string field, standard language semantics.
+- Graduation path removes `price` and `priceAdjustment`, shrinking the API surface over time rather than growing it.
 
 **Cons**
 - CEL is less approachable than structured fields for operators unfamiliar with expression languages. A typo produces a compile error rather than a field-level validation message.
 - Harder to introspect programmatically (e.g. "what discounts apply to this instance type?") than a structured list of named adjustments.
 - Cannot compose adjustments across independently owned overlays—teams that want separate overlays for separate cost dimensions still need to merge them into a single expression (or use the weight-based highest-wins model at coarser granularity).
 - Expressions that are syntactically valid but semantically wrong (e.g. `self.price * 0.0`) will produce correct-but-unexpected prices with no warning.
-- Expressions that produce negative prices are permitted but distort Karpenter's disruption cost math (which uses the simulated price as a cost estimate). The `PriceNonNegative` condition makes this visible, but Karpenter intentionally does not block the overlay.
+- The auto-migration of `priceAdjustment` strings at beta requires parsing the adjustment format (`-10%`, `+0.05`, etc.) and emitting a CEL equivalent—the translation is mechanical but adds controller complexity.
