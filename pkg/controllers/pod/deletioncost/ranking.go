@@ -166,11 +166,12 @@ func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state
 	return out, nil
 }
 
-// partitionNodes splits nodes into four tiers. Order matters: a node that
-// matches any Group A predicate takes precedence over a do-not-disrupt signal
-// because Group A nodes are already on the disruption path; once Karpenter
-// has tainted them, Group A is the right cohort regardless of pod
-// annotations. Within the remaining nodes, do-not-disrupt and
+// partitionNodes splits nodes into four tiers. Order matters and reflects
+// two rules: (a) once a node carries the karpenter.sh/disrupted taint the
+// disruption command is fait accompli, so isDisrupted wins over every other
+// signal; (b) on nodes NOT yet tainted, node-level do-not-disrupt is
+// authoritative operator intent and must beat the PDB-blocked / non-RS-owned
+// Group A predicates. Within the remaining nodes, do-not-disrupt and
 // consolidation-disabled route to Group D, drifted to Group B, everything
 // else to Group C.
 //
@@ -188,16 +189,26 @@ func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state
 func partitionNodes(clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs pdb.Limits) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
 	for _, node := range nodes {
 		pods := nodePods[node.Name()]
-		// Group A first — any of the three Group A signals routes here
-		// regardless of do-not-disrupt signals on the node itself or its
-		// pods. RFC §"Group A" calls for OR semantics across all three
-		// predicates: A || B || C, not (A && B) || C.
-		if isDisrupted(node) || hasPDBBlockedPods(clk, pods, pdbs) || hasNonRSOwnedPods(pods) {
+		// isDisrupted is authoritative: the disruption path does not re-check
+		// do-not-disrupt after tainting (see disruption/queue.go
+		// waitOrTerminate and validation.go validateCandidates, both of which
+		// run pre-taint only), so a tainted node is going down regardless.
+		// Route it to Group A to keep the RS scale-down cost aligned with
+		// actual controller behavior.
+		if isDisrupted(node) {
 			disruptedBlocked = append(disruptedBlocked, node)
 			continue
 		}
+		// Node-level do-not-disrupt is checked BEFORE the remaining Group A
+		// predicates (PDB-blocked, non-RS-owned) so operator intent wins over
+		// heuristic "delete-first" signals on not-yet-tainted nodes — those
+		// nodes are still candidates for the operator to save.
 		if hasNodeDoNotDisrupt(node) {
 			doNotDisrupt = append(doNotDisrupt, node)
+			continue
+		}
+		if hasPDBBlockedPods(clk, pods, pdbs) || hasNonRSOwnedPods(pods) {
+			disruptedBlocked = append(disruptedBlocked, node)
 			continue
 		}
 		if isConsolidationDisabled(node, nodePoolMap) {

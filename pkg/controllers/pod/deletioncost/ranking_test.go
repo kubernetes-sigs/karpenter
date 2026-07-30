@@ -239,6 +239,145 @@ var _ = Describe("Ranking", func() {
 		})
 	})
 
+	Context("Node do-not-disrupt precedence", func() {
+		// Node-level karpenter.sh/do-not-disrupt beats the PDB-blocked and
+		// non-RS-owned Group A predicates so operator intent wins on
+		// not-yet-tainted nodes. The disrupted-taint predicate still wins over
+		// do-not-disrupt because once a node is tainted the disruption path is
+		// fait accompli (Karpenter does not re-check the annotation post-taint).
+		It("should route do-not-disrupt node hosting a StatefulSet pod to Group D", func() {
+			// StatefulSet pod would otherwise trigger the non-RS-owned Group A
+			// predicate; the do-not-disrupt annotation must override it.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			// Node 0 carries the node-level do-not-disrupt annotation and hosts
+			// a StatefulSet-owned pod (non-RS-owned).
+			nodes[0].Annotations = lo.Assign(nodes[0].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
+			stsPod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: types.UID("sts-uid"),
+					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+				}}},
+				NodeName: nodes[0].Name,
+			})
+			// Node 1 is a plain Group C node so partitioning has something to
+			// contrast Group D against.
+			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
+			ExpectApplied(ctx, env.Client, stsPod, normalPod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Group D clears the annotation on the StatefulSet pod; Group C
+			// gets a strictly-negative rank on the normal pod.
+			expectPodAnnotationCleared(stsPod)
+			Expect(expectPodRank(normalPod)).To(BeNumerically("<", 0))
+		})
+
+		It("should route do-not-disrupt node hosting a PDB-blocked pod to Group D", func() {
+			// PDB-blocked pod would otherwise trigger the hasPDBBlockedPods
+			// Group A predicate; the do-not-disrupt annotation must override
+			// it. Note this test needs another node to actually carry the
+			// disrupted taint, since RankNodes short-circuits the cluster-wide
+			// PDB list when no candidate is disrupted.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			// Node 0 carries do-not-disrupt AND hosts a PDB-blocked pod.
+			nodes[0].Annotations = lo.Assign(nodes[0].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			// Node 1 carries the disrupted taint so anyDisrupted() is true and
+			// pdb.Limits gets populated (otherwise hasPDBBlockedPods early-exits).
+			nodes[1].Spec.Taints = append(nodes[1].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2])
+			pdbBlockedPod := rsOwnedPod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+				NodeName:   nodes[0].Name,
+			})
+			taintedPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
+			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name})
+			ExpectApplied(ctx, env.Client, pdbBlockedPod, taintedPod, normalPod)
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: "default"},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 0},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Node 0's PDB-blocked pod is on a do-not-disrupt node → Group D,
+			// annotation cleared.
+			expectPodAnnotationCleared(pdbBlockedPod)
+			// Node 1's pod is on a disrupted-tainted node → Group A, MinInt32.
+			Expect(expectPodRank(taintedPod)).To(Equal(math.MinInt32))
+			// Node 2 is Group C, strictly-negative rank greater than MinInt32.
+			Expect(expectPodRank(normalPod)).To(BeNumerically("<", 0))
+			Expect(expectPodRank(normalPod)).To(BeNumerically(">", math.MinInt32))
+		})
+
+		It("should _Edge_ keep a disrupted-tainted node in Group A even when do-not-disrupt is set", func() {
+			// Fait accompli invariant: once the karpenter.sh/disrupted taint
+			// is applied, the disruption controller does not re-check
+			// do-not-disrupt (queue.go waitOrTerminate + validation.go
+			// validateCandidates both run pre-taint only). A late do-not-
+			// disrupt flip must NOT re-route the node to Group D — Group A
+			// treatment stays aligned with actual controller behavior.
+			// Direct-helper because both classifications produce the same
+			// annotated pod-deletion-cost (MinInt32 vs. cleared), and we need
+			// to observe HasDoNotDisrupt directly.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			// Node 0: disrupted taint AND do-not-disrupt annotation (the race
+			// case — operator flipped the annotation after Karpenter tainted).
+			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			nodes[0].Annotations = lo.Assign(nodes[0].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
+			taintedPod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
+			ExpectApplied(ctx, env.Client, taintedPod, normalPod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ranks).To(HaveLen(2))
+
+			// Node 0 (disrupted + do-not-disrupt): Group A, MinInt32,
+			// HasDoNotDisrupt=false. Node 1 (normal): Group C, strictly
+			// greater than MinInt32.
+			for _, r := range ranks {
+				if r.Node.Node.Name == nodes[0].Name {
+					Expect(r.HasDoNotDisrupt).To(BeFalse(), "disrupted-tainted node must stay in Group A regardless of do-not-disrupt")
+					Expect(r.Rank).To(Equal(int(math.MinInt32)))
+				} else {
+					Expect(r.Rank).To(BeNumerically(">", math.MinInt32))
+				}
+			}
+		})
+	})
+
 	Context("Group A: Disrupted + PDB-blocked nodes", func() {
 		It("should rank disrupted+PDB-blocked nodes below all other groups", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
