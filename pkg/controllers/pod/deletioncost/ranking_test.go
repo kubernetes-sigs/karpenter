@@ -240,14 +240,16 @@ var _ = Describe("Ranking", func() {
 	})
 
 	Context("Node do-not-disrupt precedence", func() {
-		// Node-level karpenter.sh/do-not-disrupt beats the PDB-blocked and
-		// non-RS-owned Group A predicates so operator intent wins on
-		// not-yet-tainted nodes. The disrupted-taint predicate still wins over
-		// do-not-disrupt because once a node is tainted the disruption path is
-		// fait accompli (Karpenter does not re-check the annotation post-taint).
+		// Node-level karpenter.sh/do-not-disrupt, PDB-blocked, and
+		// non-RS-owned all share Group D routing on not-yet-tainted nodes.
+		// These tests co-locate DND with the other predicates to verify the
+		// classifier reaches the same Group D outcome via either path (and
+		// that intersecting predicates don't accidentally short-circuit to a
+		// different tier). The disrupted-taint predicate still wins over
+		// everything: a tainted node is fait accompli.
 		It("should route do-not-disrupt node hosting a StatefulSet pod to Group D", func() {
-			// StatefulSet pod would otherwise trigger the non-RS-owned Group A
-			// predicate; the do-not-disrupt annotation must override it.
+			// Both DND and non-RS-owned predicates would independently route
+			// this node to Group D; verify they compose correctly.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -281,11 +283,11 @@ var _ = Describe("Ranking", func() {
 		})
 
 		It("should route do-not-disrupt node hosting a PDB-blocked pod to Group D", func() {
-			// PDB-blocked pod would otherwise trigger the hasPDBBlockedPods
-			// Group A predicate; the do-not-disrupt annotation must override
-			// it. Note this test needs another node to actually carry the
-			// disrupted taint, since RankNodes short-circuits the cluster-wide
-			// PDB list when no candidate is disrupted.
+			// Both DND and PDB-blocked predicates would independently route
+			// this node to Group D; verify they compose correctly. This test
+			// needs another node to actually carry the disrupted taint,
+			// since RankNodes short-circuits the cluster-wide PDB list when
+			// no candidate is disrupted.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -378,8 +380,8 @@ var _ = Describe("Ranking", func() {
 		})
 	})
 
-	Context("Group A: Disrupted + PDB-blocked nodes", func() {
-		It("should rank disrupted+PDB-blocked nodes below all other groups", func() {
+	Context("Group A: Disrupted (tainted) nodes", func() {
+		It("should rank disrupted nodes below all other groups", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -761,10 +763,10 @@ var _ = Describe("Ranking", func() {
 		})
 
 		It("should _Edge_ classify a disrupted node as Group A even without PDB-blocked pods", func() {
-			// RFC §"Group A" uses OR semantics across the three predicates
-			// (disrupted OR PDB-blocked OR non-RS-owned). A node that carries
-			// the disrupted taint is already on the disruption path and
-			// belongs in Group A regardless of PDB state.
+			// Group A is defined solely by the karpenter.sh/disrupted taint
+			// (RFC #2935 "Draining"). A tainted node belongs in Group A
+			// regardless of PDB state or non-RS-owned pods on the node — the
+			// disruption path has already committed to termination.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -879,14 +881,18 @@ var _ = Describe("Ranking", func() {
 			Expect(node2Rank).To(BeNumerically(">", math.MinInt32))
 		})
 
-		// Group A predicate: hasNonRSOwnedPods routes nodes hosting bare pods,
+		// hasNonRSOwnedPods routes non-tainted nodes hosting bare pods,
 		// StatefulSet-owned pods, or pods with any other non-RS/Job/DaemonSet
-		// owner to Group A. Job-owned and DaemonSet-owned pods (plus
-		// kube-system pods) must NOT trigger Group A. These are direct-helper
-		// checks because the reconcile-path annotation value doesn't
-		// distinguish Group A from Group A: both land at math.MinInt32.
-		DescribeTable("should _Edge_ classify non-RS-owned pods as Group A",
-			func(ownerRef *metav1.OwnerReference, expectGroupA bool) {
+		// owner to Group D (Not Disruptable): the non-RS pod pins the node so
+		// Karpenter can't consolidate it, and MinInt-ing co-resident RS pods
+		// only churns them off with no consolidation benefit. Job-owned and
+		// DaemonSet-owned pods (plus kube-system pods) do NOT trigger the
+		// predicate; they fall through to Group C. Uses HasDoNotDisrupt on
+		// the NodeRank to observe Group D directly (the reconcile-path
+		// annotation is the same "cleared" for Group D whether via the
+		// non-RS predicate or the DND path).
+		DescribeTable("should _Edge_ classify non-RS-owned pods as Group D (not disruptable)",
+			func(ownerRef *metav1.OwnerReference, expectGroupD bool) {
 				nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 					Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -919,37 +925,89 @@ var _ = Describe("Ranking", func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(ranks).To(HaveLen(2))
 
-				var node0Rank int
+				var node0 deletioncost.NodeRank
 				for _, r := range ranks {
 					if r.Node.Node.Name == nodes[0].Name {
-						node0Rank = r.Rank
+						node0 = r
 					}
 				}
-				if expectGroupA {
-					Expect(node0Rank).To(Equal(math.MinInt32), "expected Group A (math.MinInt32) for non-RS-owned pod")
+				if expectGroupD {
+					Expect(node0.HasDoNotDisrupt).To(BeTrue(), "non-RS-owned pod should route its host to Group D")
 				} else {
-					Expect(node0Rank).To(BeNumerically(">", math.MinInt32), "expected Group B/C rank (>MinInt32) for RS/Job/DaemonSet-owned or system pod")
+					Expect(node0.HasDoNotDisrupt).To(BeFalse(), "Job/DaemonSet-owned or system pods must not push their host to Group D")
+					Expect(node0.Rank).To(BeNumerically(">", math.MinInt32), "expected Group B/C rank for RS/Job/DaemonSet-owned or system pod")
 				}
 			},
-			Entry("bare pod (no owner references)", (*metav1.OwnerReference)(nil), true),
-			Entry("StatefulSet-owned pod",
+			Entry("bare pod (no owner references) routes to Group D", (*metav1.OwnerReference)(nil), true),
+			Entry("StatefulSet-owned pod routes to Group D",
 				&metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: types.UID("sts-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
 				true,
 			),
-			Entry("Job-owned pod is NOT Group A",
+			Entry("Job-owned pod is NOT Group D",
 				&metav1.OwnerReference{APIVersion: "batch/v1", Kind: "Job", Name: "job", UID: types.UID("job-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
 				false,
 			),
-			Entry("DaemonSet-owned pod is NOT Group A",
+			Entry("DaemonSet-owned pod is NOT Group D",
 				&metav1.OwnerReference{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "ds", UID: types.UID("ds-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
 				false,
 			),
 		)
 
-		It("should _Edge_ exclude kube-system bare pods from Group A", func() {
+		It("should _Edge_ route a non-tainted node with a PDB-blocked pod to Group D", func() {
+			// PDB-blocked pods on a not-yet-tainted node signal "Karpenter's
+			// own consolidation refuses this candidate." Group D (Not
+			// Disruptable) is the correct home; steering RS to preferentially
+			// delete PDB-blocked pods via MinInt32 would bypass the operator's
+			// stated protection intent, since RS scale-down calls
+			// pods.Delete() rather than the eviction API and thus is not
+			// gated by PDB.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			// Node 0: NOT tainted, hosts a PDB-blocked pod.
+			// Node 1: tainted so anyDisrupted() is true and pdb.Limits gets
+			// populated (otherwise hasPDBBlockedPods short-circuits false).
+			nodes[1].Spec.Taints = append(nodes[1].Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2])
+			pdbBlockedPod := rsOwnedPod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
+				NodeName:   nodes[0].Name,
+			})
+			taintedPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
+			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name})
+			ExpectApplied(ctx, env.Client, pdbBlockedPod, taintedPod, normalPod)
+			minAvail := intstr.FromString("100%")
+			pdb := &policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: "default"},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: &minAvail,
+					Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "blocked"}},
+				},
+				Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 0},
+			}
+			ExpectApplied(ctx, env.Client, pdb)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Non-tainted PDB-blocked node → Group D, annotation cleared.
+			expectPodAnnotationCleared(pdbBlockedPod)
+			// Tainted node → Group A, MinInt32.
+			Expect(expectPodRank(taintedPod)).To(Equal(math.MinInt32))
+			// Normal node → Group C.
+			Expect(expectPodRank(normalPod)).To(BeNumerically("<", 0))
+			Expect(expectPodRank(normalPod)).To(BeNumerically(">", math.MinInt32))
+		})
+
+		It("should _Edge_ exclude kube-system bare pods from Group D", func() {
 			// hasNonRSOwnedPods explicitly skips kube-system, since system
 			// components (coredns, kube-proxy) are legitimately unowned and
-			// should not push their host node into Group A.
+			// should not push their host node into Group D — those nodes
+			// remain consolidation candidates.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},

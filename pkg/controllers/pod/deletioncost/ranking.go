@@ -35,10 +35,13 @@ import (
 )
 
 // RankNodes ranks nodes using PodCount strategy with four-tier partitioning:
-//   - Group A: Disrupted+PDB-blocked or non-RS-owned-pod nodes, get math.MinInt32 (do not consume budget).
+//   - Group A: Nodes carrying the karpenter.sh/disrupted taint (Draining per
+//     RFC #2935), get math.MinInt32. Do not consume budget.
 //   - Group B: Drifted nodes, sequential ranks deleted first.
 //   - Group C: Normal nodes, sequential ranks deleted second.
-//   - Group D: Do-not-disrupt nodes, ranked at the top so the controller clears their annotations.
+//   - Group D: Not-disruptable nodes (do-not-disrupt annotation on node or
+//     pod, consolidation disabled, PDB-blocked pods, or non-RS-owned pods).
+//     Annotations are cleared; RS controller uses default scale-down ordering.
 //
 // Per-NodePool disruption budgets bound Groups B and C. Nodes exceeding either
 // budget overflow into Group D. The nodes slice must be a pre-computed
@@ -166,49 +169,43 @@ func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state
 	return out, nil
 }
 
-// partitionNodes splits nodes into four tiers. Order matters and reflects
-// two rules: (a) once a node carries the karpenter.sh/disrupted taint the
-// disruption command is fait accompli, so isDisrupted wins over every other
-// signal; (b) on nodes NOT yet tainted, node-level do-not-disrupt is
-// authoritative operator intent and must beat the PDB-blocked / non-RS-owned
-// Group A predicates. Within the remaining nodes, do-not-disrupt and
-// consolidation-disabled route to Group D, drifted to Group B, everything
-// else to Group C.
-//
-// RFC §"Partitioning":
-//   - Group A: any of (disrupted (karpenter.sh/disrupted taint) OR
-//     PDB-blocked OR hosts a non-RS-owned pod). Each of the three predicates
-//     reflects a "delete this node first" signal: disrupted means Karpenter
-//     is already committed; PDB-blocked means consolidation is already
-//     stuck; non-RS-owned means the pod has no controller to recreate it,
-//     so disrupting that node is more painful than disrupting a fresh node.
+// partitionNodes splits nodes into four tiers per RFC #2935:
+//   - Group A: nodes carrying the karpenter.sh/disrupted taint (RFC
+//     "Draining"). MinInt32; not sequentially ranked. Karpenter has already
+//     committed to terminating; draining fast helps.
 //   - Group B: drifted (NodeClaim ConditionTypeDrifted=True), not in A.
 //   - Group C: normal — consolidation candidates, not in A/B/D.
-//   - Group D: node-level do-not-disrupt annotation, do-not-disrupt pods, or
-//     NodePool with consolidation disabled (ConsolidateAfter=Never).
+//   - Group D (RFC "Not Disruptable"): everything Karpenter's consolidation
+//     path won't touch — node-level do-not-disrupt, PDB-blocked pods,
+//     non-RS-owned pods, consolidation disabled, or do-not-disrupt pods.
+//     Annotations are cleared so RS controller falls back to default
+//     scale-down heuristics.
+//
+// Design rule: Group A holds nodes we WANT gone. Group D holds nodes we
+// want to leave alone. PDB-blocked and non-RS-owned nodes are ones Karpenter
+// itself refuses to consolidate; steering RS to preferentially delete their
+// pods either bypasses operator protection (PDB) or churns pods on a node
+// that stays pinned anyway (SS/bare-pod pin), neither of which the RFC
+// intends.
 func partitionNodes(clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs pdb.Limits) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
 	for _, node := range nodes {
 		pods := nodePods[node.Name()]
-		// isDisrupted is authoritative: the disruption path does not re-check
+		// Group A is nodes Karpenter has already committed to terminating
+		// (disrupted taint). The disruption path does not re-check
 		// do-not-disrupt after tainting (see disruption/queue.go
-		// waitOrTerminate and validation.go validateCandidates, both of which
-		// run pre-taint only), so a tainted node is going down regardless.
-		// Route it to Group A to keep the RS scale-down cost aligned with
-		// actual controller behavior.
+		// waitOrTerminate and validation.go validateCandidates, both pre-taint
+		// only), so a tainted node is going down regardless of any other
+		// annotation state on the node or its pods.
 		if isDisrupted(node) {
 			disruptedBlocked = append(disruptedBlocked, node)
 			continue
 		}
-		// Node-level do-not-disrupt is checked BEFORE the remaining Group A
-		// predicates (PDB-blocked, non-RS-owned) so operator intent wins over
-		// heuristic "delete-first" signals on not-yet-tainted nodes — those
-		// nodes are still candidates for the operator to save.
-		if hasNodeDoNotDisrupt(node) {
+		// Group D catch-all for non-tainted nodes Karpenter's consolidation
+		// path won't touch. Any of: operator hands-off (do-not-disrupt),
+		// blocked eviction (PDB), or a pod pin (non-RS-owned) → clear the
+		// annotation and let RS use its default sort.
+		if hasNodeDoNotDisrupt(node) || hasPDBBlockedPods(clk, pods, pdbs) || hasNonRSOwnedPods(pods) {
 			doNotDisrupt = append(doNotDisrupt, node)
-			continue
-		}
-		if hasPDBBlockedPods(clk, pods, pdbs) || hasNonRSOwnedPods(pods) {
-			disruptedBlocked = append(disruptedBlocked, node)
 			continue
 		}
 		if isConsolidationDisabled(node, nodePoolMap) {
@@ -336,14 +333,14 @@ func hasDoNotDisruptPods(pods []*corev1.Pod) bool {
 	return false
 }
 
-// hasNonRSOwnedPods returns true if any non-system pod on the node is owned by
-// a controller other than ReplicaSet/Job — e.g. StatefulSet, DaemonSet, raw
-// Pod. The RFC's Group A definition includes these because their replacement
-// path is more disruptive than evicting a ReplicaSet pod (StatefulSet pods
-// have ordinal identity and persistent volumes; bare pods cannot be recreated
-// at all). DaemonSet pods are excluded because they're tied to the node and
-// will be replaced anyway when the node is replaced — they don't make the
-// node "expensive to delete".
+// hasNonRSOwnedPods returns true if any non-system pod on the node is owned
+// by a controller other than ReplicaSet/Job/DaemonSet — e.g. StatefulSet,
+// raw Pod. Nodes hosting such pods route to Group D: those pods pin the
+// node (SS have ordinal identity + PVs; bare pods cannot be recreated),
+// so Karpenter can't consolidate the node, and MinInt-ing the co-resident
+// RS pods only churns them off with no consolidation benefit. DaemonSet
+// pods are excluded because they're tied to the node and get replaced with
+// it — they don't pin.
 func hasNonRSOwnedPods(pods []*corev1.Pod) bool {
 	for _, pod := range pods {
 		if pod.Namespace == "kube-system" {
