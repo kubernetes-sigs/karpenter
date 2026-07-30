@@ -373,7 +373,7 @@ func sortByPodCount(nodes []*state.StateNode, nodePods map[string][]*corev1.Pod)
 	if len(nodes) <= 1 {
 		return
 	}
-	sort.SliceStable(nodes, func(i, j int) bool {
+	sort.Slice(nodes, func(i, j int) bool {
 		ci := math.MaxInt
 		if pods, ok := nodePods[nodes[i].Name()]; ok {
 			ci = len(pods)
