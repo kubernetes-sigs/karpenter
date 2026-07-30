@@ -31,9 +31,9 @@ import (
 type Constraint interface {
 	// Add is called when allocating a device. Returns false if the constraint is violated.
 	// If false is returned, the constraint's state must not be modified.
-	Add(requestName string, device cloudprovider.Device, deviceID DeviceID) bool
+	Add(requestName RequestName, device cloudprovider.Device, deviceID DeviceID) bool
 	// Remove is called during backtracking to reverse one successful Add().
-	Remove(requestName string, device cloudprovider.Device, deviceID DeviceID)
+	Remove(requestName RequestName, device cloudprovider.Device, deviceID DeviceID)
 	// Reset clears all mutable state, returning the constraint to its initial (unpinned) condition.
 	Reset()
 }
@@ -75,7 +75,7 @@ type AttributeBindingFallback struct {
 }
 
 //nolint:gocyclo
-func (m *MatchAttributeConstraint) Add(requestName string, device cloudprovider.Device, deviceID DeviceID) bool {
+func (m *MatchAttributeConstraint) Add(requestName RequestName, device cloudprovider.Device, deviceID DeviceID) bool {
 	if !m.appliesTo(requestName) {
 		return true
 	}
@@ -130,7 +130,7 @@ func (m *MatchAttributeConstraint) Add(requestName string, device cloudprovider.
 	return true
 }
 
-func (m *MatchAttributeConstraint) Remove(requestName string, device cloudprovider.Device, deviceID DeviceID) {
+func (m *MatchAttributeConstraint) Remove(requestName RequestName, device cloudprovider.Device, deviceID DeviceID) {
 	if !m.appliesTo(requestName) {
 		return
 	}
@@ -149,11 +149,17 @@ func (m *MatchAttributeConstraint) Reset() {
 	m.AllocatedDeviceIDs = nil
 }
 
-func (m *MatchAttributeConstraint) appliesTo(requestName string) bool {
+func (m *MatchAttributeConstraint) appliesTo(requestName RequestName) bool {
 	if m.RequestNames.Len() == 0 {
 		return true
 	}
-	return m.RequestNames.Has(requestName)
+	if m.RequestNames.Has(requestName.Parent) {
+		return true
+	}
+	if requestName.Sub != "" {
+		return m.RequestNames.Has(requestName.String())
+	}
+	return false
 }
 
 // LookupAttribute finds a device attribute by its fully qualified name. If not found directly,

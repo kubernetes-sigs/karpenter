@@ -8,4 +8,4 @@ These documents are also not the source truth for the karpenter.sh website. The 
 
 ## Contributing
 
-If you wish to work on a feature that requires an RFC, use the documents in this folder as a reference for structure or content. There is no template.
+If you wish to work on a feature that requires an RFC, use [rfc-template.md](./rfc-template.md) as a starting point. You can also use the other documents in this folder as a reference for structure or content.
