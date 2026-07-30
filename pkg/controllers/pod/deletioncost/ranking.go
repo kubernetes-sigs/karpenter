@@ -59,15 +59,13 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	if err != nil {
 		return nil, fmt.Errorf("listing pods on candidate nodes, %w", err)
 	}
-	// PDBs are only consulted for nodes that already carry the disrupted
-	// taint; on a steady-state cluster that's rare. Skip the cluster-wide
-	// list entirely when no candidate is disrupted.
-	var pdbs pdb.Limits
-	if anyDisrupted(nodes) {
-		pdbs, err = pdb.NewLimits(ctx, kubeClient)
-		if err != nil {
-			return nil, fmt.Errorf("listing pod disruption budgets, %w", err)
-		}
+	// PDB-blocked pods are a Group D (Not Disruptable) signal on any node,
+	// tainted or not — the operator's PDB is what "please don't churn my
+	// pods here" looks like. So we need the cluster-wide PDB list on every
+	// reconcile, not only when a candidate is already tainted.
+	pdbs, err := pdb.NewLimits(ctx, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("listing pod disruption budgets, %w", err)
 	}
 
 	// Sort once by pod count ascending with a deterministic name tie-break.
@@ -247,18 +245,6 @@ func buildBudgetForReason(ctx context.Context, nodePoolMap map[string]*v1.NodePo
 		budget[name] = remaining
 	}
 	return budget
-}
-
-// anyDisrupted reports whether any of the given state nodes has the
-// karpenter.sh/disrupted taint. Used to skip the cluster-wide PDB list when
-// no candidate is disrupted.
-func anyDisrupted(nodes []*state.StateNode) bool {
-	for _, node := range nodes {
-		if isDisrupted(node) {
-			return true
-		}
-	}
-	return false
 }
 
 // hasNodeDoNotDisrupt returns true if the Node itself has the

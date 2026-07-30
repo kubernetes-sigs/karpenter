@@ -284,10 +284,9 @@ var _ = Describe("Ranking", func() {
 
 		It("should route do-not-disrupt node hosting a PDB-blocked pod to Group D", func() {
 			// Both DND and PDB-blocked predicates would independently route
-			// this node to Group D; verify they compose correctly. This test
-			// needs another node to actually carry the disrupted taint,
-			// since RankNodes short-circuits the cluster-wide PDB list when
-			// no candidate is disrupted.
+			// this node to Group D; verify they compose correctly. Node 1 is
+			// separately given the disrupted taint to prove the same PDB list
+			// still classifies a tainted node as Group A on the parallel path.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -295,8 +294,7 @@ var _ = Describe("Ranking", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			// Node 0 carries do-not-disrupt AND hosts a PDB-blocked pod.
 			nodes[0].Annotations = lo.Assign(nodes[0].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
-			// Node 1 carries the disrupted taint so anyDisrupted() is true and
-			// pdb.Limits gets populated (otherwise hasPDBBlockedPods early-exits).
+			// Node 1 carries the disrupted taint (Group A path).
 			nodes[1].Spec.Taints = append(nodes[1].Spec.Taints, v1.DisruptedNoScheduleTaint)
 			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2])
 			pdbBlockedPod := rsOwnedPod(test.PodOptions{
@@ -960,24 +958,21 @@ var _ = Describe("Ranking", func() {
 			// delete PDB-blocked pods via MinInt32 would bypass the operator's
 			// stated protection intent, since RS scale-down calls
 			// pods.Delete() rather than the eviction API and thus is not
-			// gated by PDB.
-			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+			// gated by PDB. Cluster has NO tainted node — this test
+			// deliberately exercises the steady-state code path where the
+			// PDB list must still be fetched.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			// Node 0: NOT tainted, hosts a PDB-blocked pod.
-			// Node 1: tainted so anyDisrupted() is true and pdb.Limits gets
-			// populated (otherwise hasPDBBlockedPods short-circuits false).
-			nodes[1].Spec.Taints = append(nodes[1].Spec.Taints, v1.DisruptedNoScheduleTaint)
-			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2])
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
 			pdbBlockedPod := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
 				NodeName:   nodes[0].Name,
 			})
-			taintedPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
-			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name})
-			ExpectApplied(ctx, env.Client, pdbBlockedPod, taintedPod, normalPod)
+			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
+			ExpectApplied(ctx, env.Client, pdbBlockedPod, normalPod)
 			minAvail := intstr.FromString("100%")
 			pdb := &policyv1.PodDisruptionBudget{
 				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: "default"},
@@ -996,8 +991,6 @@ var _ = Describe("Ranking", func() {
 
 			// Non-tainted PDB-blocked node → Group D, annotation cleared.
 			expectPodAnnotationCleared(pdbBlockedPod)
-			// Tainted node → Group A, MinInt32.
-			Expect(expectPodRank(taintedPod)).To(Equal(math.MinInt32))
 			// Normal node → Group C.
 			Expect(expectPodRank(normalPod)).To(BeNumerically("<", 0))
 			Expect(expectPodRank(normalPod)).To(BeNumerically(">", math.MinInt32))
