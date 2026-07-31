@@ -266,36 +266,46 @@ func (c *SchedulerConfiguration) validate() error {
 	if c.PodTopologySpread == nil {
 		return nil
 	}
-	for i, tsc := range c.PodTopologySpread.DefaultConstraints {
-		if tsc.MaxSkew <= 0 {
-			return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d].maxSkew must be greater than 0", i)
-		}
-		if tsc.TopologyKey == "" {
-			return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d].topologyKey must be set", i)
-		}
-		if errs := validation.IsQualifiedName(tsc.TopologyKey); len(errs) != 0 {
-			return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d].topologyKey %q is not a valid label name, %s", i, tsc.TopologyKey, strings.Join(errs, ", "))
-		}
-		if tsc.WhenUnsatisfiable != corev1.DoNotSchedule && tsc.WhenUnsatisfiable != corev1.ScheduleAnyway {
-			return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d].whenUnsatisfiable %q must be one of %q or %q",
-				i, tsc.WhenUnsatisfiable, corev1.DoNotSchedule, corev1.ScheduleAnyway)
-		}
-		// Upstream forbids a selector here because it deduces one per pod, and so does Karpenter. Accepting one would
-		// silently diverge: a static selector matches an unrelated set of pods in every other workload.
-		if tsc.LabelSelector != nil {
-			return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d].labelSelector must not be set, as selectors are deduced for each pod", i)
-		}
-		// matchLabelKeys is inert upstream: the plugin merges it into the selector and then overwrites that selector
-		// with the per-pod deduced one. Rejecting it avoids implying Karpenter honors a key kube-scheduler ignores.
-		if len(tsc.MatchLabelKeys) != 0 {
-			return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d].matchLabelKeys must not be set, as it has no effect on default constraints", i)
+	constraints := c.PodTopologySpread.DefaultConstraints
+	for i := range constraints {
+		if err := validateDefaultConstraint(constraints[i]); err != nil {
+			return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d]%w", i, err)
 		}
 		// Mirrors upstream's validateConstraintNotRepeat.
-		for j, other := range c.PodTopologySpread.DefaultConstraints[:i] {
-			if tsc.TopologyKey == other.TopologyKey && tsc.WhenUnsatisfiable == other.WhenUnsatisfiable {
-				return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d] is a duplicate of [%d], {%v, %v}", i, j, tsc.TopologyKey, tsc.WhenUnsatisfiable)
+		for j := range constraints[:i] {
+			if constraints[i].TopologyKey == constraints[j].TopologyKey && constraints[i].WhenUnsatisfiable == constraints[j].WhenUnsatisfiable {
+				return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d] is a duplicate of [%d], {%v, %v}",
+					i, j, constraints[i].TopologyKey, constraints[i].WhenUnsatisfiable)
 			}
 		}
+	}
+	return nil
+}
+
+// validateDefaultConstraint validates a single default constraint. The returned error is a fragment appended to the
+// field path of the constraint being validated, so it begins with the offending field rather than a capital letter.
+func validateDefaultConstraint(tsc corev1.TopologySpreadConstraint) error {
+	if tsc.MaxSkew <= 0 {
+		return fmt.Errorf(".maxSkew must be greater than 0")
+	}
+	if tsc.TopologyKey == "" {
+		return fmt.Errorf(".topologyKey must be set")
+	}
+	if errs := validation.IsQualifiedName(tsc.TopologyKey); len(errs) != 0 {
+		return fmt.Errorf(".topologyKey %q is not a valid label name, %s", tsc.TopologyKey, strings.Join(errs, ", "))
+	}
+	if tsc.WhenUnsatisfiable != corev1.DoNotSchedule && tsc.WhenUnsatisfiable != corev1.ScheduleAnyway {
+		return fmt.Errorf(".whenUnsatisfiable %q must be one of %q or %q", tsc.WhenUnsatisfiable, corev1.DoNotSchedule, corev1.ScheduleAnyway)
+	}
+	// Upstream forbids a selector here because it deduces one per pod, and so does Karpenter. Accepting one would
+	// silently diverge: a static selector matches an unrelated set of pods in every other workload.
+	if tsc.LabelSelector != nil {
+		return fmt.Errorf(".labelSelector must not be set, as selectors are deduced for each pod")
+	}
+	// matchLabelKeys is inert upstream: the plugin merges it into the selector and then overwrites that selector
+	// with the per-pod deduced one. Rejecting it avoids implying Karpenter honors a key kube-scheduler ignores.
+	if len(tsc.MatchLabelKeys) != 0 {
+		return fmt.Errorf(".matchLabelKeys must not be set, as it has no effect on default constraints")
 	}
 	return nil
 }
