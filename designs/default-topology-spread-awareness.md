@@ -22,7 +22,9 @@ A note on the scheduler's own defaults surfaced in #1197: `kube-scheduler` ships
 
 ### **Use Cases**
 
-1. **Cluster-wide zone spread (`DoNotSchedule`).** A platform team sets a cluster-level default of `maxSkew: 1` across `topology.kubernetes.io/zone` with `whenUnsatisfiable: DoNotSchedule`, so that *every* workload is zone-balanced without each team having to declare it. A new Deployment ships with no `topologySpreadConstraints`. The scheduler enforces the default and the pods go `Pending` because the current nodes are all in one zone. Karpenter, unaware of the default, sees an unconstrained pod, tries to pack it onto existing capacity in the wrong zone, and never launches a node in the zone the scheduler needs — the pods are stuck with no recovery path.
+1. **Cluster-wide zone spread (`DoNotSchedule`).** A platform team sets a cluster-level default of `maxSkew: 1` across `topology.kubernetes.io/zone` with `whenUnsatisfiable: DoNotSchedule`, so that workloads are zone-balanced without each team having to declare it. A new Deployment ships with no `topologySpreadConstraints`. The scheduler enforces the default and the pods go `Pending` because the current nodes are all in one zone. Karpenter, unaware of the default, sees an unconstrained pod, tries to pack it onto existing capacity in the wrong zone, and never launches a node in the zone the scheduler needs — the pods are stuck with no recovery path.
+
+    Note that "every workload" is narrower than it sounds, and this is the scheduler's behavior rather than a limitation of this proposal: a default only applies to a pod for which the scheduler can deduce a label selector, so bare pods and `Job`/`DaemonSet` pods that no `Service` selects are not spread by the default at all. See [Deducing the Label Selector](#deducing-the-label-selector).
 2. **Debuggability of an invisible constraint.** Because a default constraint lives in scheduler config rather than the pod spec, a workload owner who hits the `Pending` failure in use case 1 sees a pod with no `topologySpreadConstraints` and no obvious reason it won't schedule. This is the same failure the real scheduler produces today for a defaulted pod, so Karpenter honoring the default at least makes its provisioning consistent with the scheduler; improving the failure *messaging* so the cluster default is attributable is called out as future work (see [Observability](#observability)).
 
 ### **Non-Goals**
@@ -52,8 +54,7 @@ Controller flag / env var (mirroring `options.go`):
     A YAML/JSON document configuring the parts of the cluster's kube-scheduler
     behavior that Karpenter must mirror during scheduling simulation. Empty means
     no scheduler-config overrides.
-    (env SCHEDULER_CONFIG) (default "")<highlight t="yellow-2">
-</highlight>
+    (env SCHEDULER_CONFIG) (default "")
 ```
 
 The value is a plain YAML block describing a Karpenter-owned config type — no `apiVersion` or `kind` header. For this RFC it carries a single section (shown as YAML; the env var holds this document as a string) :
@@ -69,21 +70,21 @@ podTopologySpread:
       whenUnsatisfiable: ScheduleAnyway
     - maxSkew: 3
       topologyKey: kubernetes.io/hostname
-      whenUnsatisfiable: ScheduleAnyway<highlight t="yellow-2">
-</highlight>
+      whenUnsatisfiable: ScheduleAnyway
 ```
 
 The `defaultConstraints` field is intentionally the same shape as the scheduler's, so an operator lifts that fragment out of their `KubeSchedulerConfiguration` (`profiles[].pluginConfig[name: PodTopologySpread].args.defaultConstraints`) and pastes it under `podTopologySpread`.
 
-**Extensibility (illustrative, not in scope for this RFC).** A future scheduler-mirroring setting — for example a `NodeResourcesFit` scoring strategy — would be added as a sibling field, requiring no new flag/env var and no change to how the config is transported:
+Note the absence of a `labelSelector` on each constraint. That is not an omission for brevity: `kube-scheduler` **forbids** a selector on `defaultConstraints` and deduces one per pod instead, so Karpenter forbids it too and deduces the same selector. See [Deducing the Label Selector](#deducing-the-label-selector).
+
+**Extensibility (illustrative, not in scope for this RFC).** A future scheduler-mirroring setting — for example a `NodeResourcesFit` scoring strategy, the gap reported in [kubernetes-sigs/karpenter#3196](https://github.com/kubernetes-sigs/karpenter/issues/3196) — would be added as a sibling field, requiring no new flag/env var and no change to how the config is transported:
 
 ```yaml
 podTopologySpread:
   defaultConstraints: [ ... ]
 nodeResourcesFit:            # <-- hypothetical future extension
   scoringStrategy:
-    type: LeastAllocated<highlight t="yellow-2">
-</highlight>
+    type: LeastAllocated
 ```
 
 The Go type mirrors this structure:
@@ -111,8 +112,36 @@ The change adds a defaulting step that mirrors the scheduler's `PodTopologySprea
 - **Applies only when the pod declares no constraints of its own.** A pod with any `topologySpreadConstraints` uses those and the cluster default is not applied — the same all-or-nothing rule the scheduler's plugin uses (the default set is applied only when the pod's own list is empty).
 - **`whenUnsatisfiable` is honored exactly as for per-pod constraints today.** Under the default `preference-policy: Respect`, both `DoNotSchedule` and `ScheduleAnyway` become hard `TopologyGroup`s that are then relaxed one at a time during preference relaxation (`preferences.go`, `removeTopologySpreadScheduleAnyway`); under `Ignore`, `ScheduleAnyway` defaults are dropped. This means a synthesized `ScheduleAnyway` default rides the exact same relaxation path that per-pod `ScheduleAnyway` constraints already use — no new relaxation logic.
 - **`maxSkew`, `minDomains`, and `topologyKey` handling are unchanged.** The synthesized constraints feed the existing `TopologyGroup` machinery, including the `hostname` special case (`domainMinCount` returns 0 for `kubernetes.io/hostname`, since Karpenter can always create a new node/domain).
+- **Each injected constraint carries a `labelSelector` deduced for that pod.** The configured constraints carry none — the scheduler forbids it — so Karpenter deduces one per pod from the `Service`s and the controlling rc/rs/ss that select it, exactly as the plugin does. A pod for which no selector can be deduced receives no defaults at all. This is the substantive part of mirroring the plugin and is covered in [Deducing the Label Selector](#deducing-the-label-selector).
+- **Each pod gets its own copy of the constraint list.** Preference relaxation mutates the list in place, so the configured constraints are deep-copied per pod and stamped with that pod's deduced selector; relaxing one pod's `ScheduleAnyway` default cannot affect another's.
 
 Injection happens **at pod ingestion, not inside `newForTopologies`**, and this placement is deliberate. Preference relaxation works by mutating the pod copy's `Spec` — `removeTopologySpreadScheduleAnyway` (`preferences.go`) deletes a `ScheduleAnyway` entry from `Spec.TopologySpreadConstraints`, and the scheduler then calls `topology.Update` to re-derive groups from the mutated spec. If the defaults were synthesized inside `newForTopologies` (from a value held on `Topology`) rather than written to the spec, relaxation would delete nothing (the spec is empty) and every `Update` would re-synthesize the same group — so a `ScheduleAnyway` default could never be relaxed and would behave like a hard `DoNotSchedule`. Injecting into the spec once, upstream of the relax loop, makes relaxation delete the entry for real and keeps it deleted on subsequent iterations. The injected constraints exist only on the scheduling-time pod copy; Karpenter never writes them back to the API server (it emits NodeClaims), and the real scheduler applies the same default itself at bind time, so there is no double-application. The `SchedulerConfiguration` value is decoded and validated once at startup and carried via context, reaching the ingestion step the same way `preference-policy` does today.
+
+### **Deducing the Label Selector**
+
+A `topologySpreadConstraint` is only meaningful together with a `labelSelector`, which defines *which* pods are counted per domain. For a per-pod constraint the author supplies it. For a cluster-level default there is no single selector that could be correct — a selector that groups one team's Deployment would group unrelated workloads too — so `kube-scheduler` **forbids** `labelSelector` on `defaultConstraints` (`ValidatePodTopologySpreadArgs`: *"constraint must not define a selector, as they deduced for each pod"*) and derives one per pod instead. Karpenter must derive the *same* selector, or it counts a different set of pods than the scheduler and the two disagree again — the very divergence this RFC exists to close.
+
+Karpenter therefore ports the scheduler's derivation (`helper.DefaultSelector`). For each pod that is a candidate for defaulting:
+
+1. **Services.** Every `Service` in the pod's namespace whose `spec.selector` matches the pod's labels contributes its selector. A `Service` with a `nil` selector matches nothing and contributes nothing (a non-`nil` but empty selector matches every pod but contributes no labels).
+2. **The controlling owner.** The pod's *controller* owner reference (only that one — not every owner) contributes its selector, and only for the three kinds the scheduler handles: `ReplicationController`, `ReplicaSet`, and `StatefulSet`. Any other controller (a `Job`, a `DaemonSet`, a custom resource) contributes nothing.
+
+The two are combined, and the result becomes the `labelSelector` on each injected constraint. Upstream merges the Service selectors into a label set and then *adds* the owner's requirements on top, so a key present in both is ANDed rather than overwritten; Karpenter preserves that by carrying the Service contribution as `matchLabels` and the owner's as `matchExpressions`. Because every contributing selector already matches the pod by construction, conflicting values cannot arise in practice.
+
+Two consequences of this derivation are worth stating plainly, because both are surprising and neither is a Karpenter choice — they are what the scheduler does:
+
+- **A pod with no deducible selector is not defaulted at all.** If the pod has no matching `Service` and no rc/rs/ss controller, the derived selector is empty, and upstream applies *no* default constraints to it (`if selector.Empty() { return nil, nil }`). Karpenter does the same. In practice this means **bare pods, and `Job`/`DaemonSet` pods that no `Service` selects, are never subject to the cluster default** — by either the scheduler or Karpenter. An operator setting a cluster-wide default should not expect it to reach those workloads. This also matters for correctness, not just parity: an empty `LabelSelector` resolves to "match everything," which would silently count every pod in the namespace toward the spread.
+- **Deployment pods spread per *revision*, not per Deployment.** A `Deployment` does not own its pods directly; its `ReplicaSet` does, and the RS's selector includes `pod-template-hash`. The derived selector therefore pins the group to a single RS, so during a rollout the old and new revisions form two independent topology groups and each spreads across all domains on its own. This is the scheduler's behavior, and mirroring it is the point.
+
+Deriving from the *owner's* selector — rather than from the pod's own labels, which superficially look equivalent — is load-bearing. A `StatefulSet` pod carries per-pod labels (`statefulset.kubernetes.io/pod-name`, `apps.kubernetes.io/pod-index`) that appear in no selector; including them would give every pod a unique selector, one topology group each, and a silently inert spread. Reading the owner also preserves a selector that uses `matchExpressions` rather than plain equality, which a labels-derived selector would flatten.
+
+Because the derivation reads `Services` and the owning rc/rs/ss, it requires cluster-wide read access to those resources (see [Permissions](#permissions)). Lookups are cached per namespace and per owner for the duration of a single scheduling pass, since one pass can ingest many pods belonging to a handful of workloads. Mirroring upstream, a failed lookup is logged and degrades to a partial selector rather than failing the scheduling loop — a `ReplicaSet` deleted while its pods linger must not stall provisioning.
+
+### **Permissions**
+
+The selector derivation adds one new RBAC requirement: cluster-wide `get`/`list`/`watch` on `services`. Read access to `replicationcontrollers`, `replicasets`, and `statefulsets` is already granted by Karpenter's ClusterRole today, so no change is needed for the owner lookups.
+
+This also implies a new `Service` informer. It is created lazily on first use, so a cluster that sets no `SCHEDULER_CONFIG` never starts it and pays nothing; a cluster that does set one caches `Services` cluster-wide for the controller's lifetime, and the first scheduling loop after startup blocks briefly on that informer's initial sync.
 
 ### **Interaction with Existing Features**
 
@@ -125,6 +154,7 @@ Injection happens **at pod ingestion, not inside `newForTopologies`**, and this 
 
 - A one-time startup log line records the parsed scheduler configuration (including the default topology spread constraints).
 - Scheduling failures use the **existing** `FailedScheduling` event and topology error path unchanged. Because a defaulted constraint is injected onto the pod copy's spec, an unschedulable default surfaces through the same `topologyError` (`topology.go`) that a per-pod constraint would — no new event or reason is added by this change. The tradeoff is that such an event does not distinguish "failed due to a cluster default" from "failed due to the pod's own constraint," which is a real debugging hazard for cluster-level defaults (use case 2): the constraint is invisible in the pod spec, so the operator sees a topology failure on a pod whose manifest declares no spread. Improving that attribution is deliberately **out of scope** here — it would require tracking which constraints were injected — and is left as a potential future improvement to Karpenter's scheduling-failure messaging generally.
+- A failed `Service` or owner lookup during selector derivation is logged at debug level and does not fail the scheduling loop; the derivation proceeds with a partial selector, mirroring upstream's handling of lister errors.
 - No new status conditions are required.
 
 ### **Edge Cases**
@@ -132,7 +162,16 @@ Injection happens **at pod ingestion, not inside `newForTopologies`**, and this 
 - **Pod partially constrained.** Per the scheduler's plugin semantics, defaults are applied only when the pod's own constraint list is *entirely* empty. A pod that declares even one `topologySpreadConstraint` uses only its own set; the cluster default is not merged in per-key.
 - **`DoNotSchedule` default that cannot be satisfied.** Mirrors a per-pod `DoNotSchedule` today: Karpenter launches nodes in the required domains, or the pod fails scheduling with a `topologyError`. This is intended — and is why an operator applying a cluster-wide default should generally prefer `ScheduleAnyway` unless strict spreading is truly required.
 - **`hostname` topology key.** Handled by the existing special case (`domainMinCount` returns 0 for `hostname`) because Karpenter can always create a new node/domain — no change.
-- **Malformed config value.** A `SCHEDULER_CONFIG` value that fails to decode or carries an unknown field fails fast in `Options.Parse` at startup (the operator does not come up), so misconfiguration surfaces immediately rather than at scheduling time. An empty or absent value is valid and means "no overrides."
+- **Malformed or invalid config value.** A `SCHEDULER_CONFIG` value that fails to decode, carries an unknown field, or fails validation fails fast in `Options.Parse` at startup (the operator does not come up), so misconfiguration surfaces immediately rather than at scheduling time. An empty or absent value is valid and means "no overrides." Validation mirrors `kube-scheduler`'s `ValidatePodTopologySpreadArgs`, so a config Karpenter accepts is one the scheduler would also accept:
+    - `maxSkew` must be greater than 0.
+    - `topologyKey` must be set and must be a valid label name.
+    - `whenUnsatisfiable` must be `DoNotSchedule` or `ScheduleAnyway`.
+    - `labelSelector` must **not** be set — selectors are deduced per pod (see [Deducing the Label Selector](#deducing-the-label-selector)). Accepting one would silently diverge from the scheduler, since a single static selector cannot be correct for more than one workload.
+    - `matchLabelKeys` must **not** be set. It is inert on `defaultConstraints` upstream — the plugin merges it into a selector and then overwrites that selector with the per-pod deduced one — so rejecting it avoids implying Karpenter honors a field the scheduler ignores.
+    - No two constraints may repeat the same `(topologyKey, whenUnsatisfiable)` pair.
+- **Pod with no deducible label selector.** No defaults are applied, matching the scheduler. See [Deducing the Label Selector](#deducing-the-label-selector).
+- **Owner deleted while its pods linger.** A pod may reference a `ReplicaSet` that no longer exists. The owner lookup fails, is logged, and the derivation proceeds with whatever the `Service`s contributed — mirroring upstream, which swallows lister errors rather than failing to schedule. If nothing remains, the pod is simply not defaulted.
+- **`Service` with a `nil` versus empty selector.** A `nil` selector matches no pods and contributes nothing (as with a headless `Service`); a non-`nil` but empty selector matches every pod but contributes no labels. Neither yields a default on its own.
 
 ## **Alternatives Considered**
 
@@ -187,7 +226,11 @@ Fully backward compatible. When `SCHEDULER_CONFIG` is unset (or omits `podTopolo
 
 No feature gate. The surface is opt-in through `SCHEDULER_CONFIG` and defaults to today's behavior (no value, or no `podTopologySpread` section, is a no-op), so a user who sets nothing sees no change and there is no default-on risk to stage through alpha/beta. The change ships enabled. Because the config carries no `apiVersion`, the schema is evolved additively — new fields are added as optional, matching how Karpenter's existing flag/env options grow — rather than through explicit versioned conversions.
 
-The validation bar before merge is that default-topology-spread simulation is validated against `kube-scheduler`'s `PodTopologySpread` plugin across the cases that matter: `zone` and `hostname` topology keys, `ScheduleAnyway` and `DoNotSchedule`, `minDomains`, and the partially-constrained pod (default *not* applied).
+The validation bar before merge is that default-topology-spread simulation is validated against `kube-scheduler`'s `PodTopologySpread` plugin across the cases that matter:
+
+- **Constraint handling:** `zone` and `hostname` topology keys, `ScheduleAnyway` and `DoNotSchedule`, `minDomains`, and the partially-constrained pod (default *not* applied).
+- **Selector derivation:** the owner's selector is used rather than the pod's labels (including a `StatefulSet` pod whose volatile per-pod labels must be excluded, and an owner selector using `matchExpressions`); a matching `Service` yields a selector for a pod with no supported owner; `nil`, empty, non-matching, and cross-namespace `Service`s contribute nothing; an unsupported owner kind and a non-controller owner reference contribute nothing; a deleted owner degrades gracefully.
+- **Spread outcomes, not just derived selectors:** pre-existing cluster pods are counted through the deduced selector (so a new pod is placed away from an already-full domain); two workloads scheduling in the same pass spread independently rather than pooling into one group; and two revisions of one Deployment spread independently, since the RS selector pins the group by `pod-template-hash`.
 
 ## **Open Questions**
 
