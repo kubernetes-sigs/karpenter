@@ -94,6 +94,56 @@ var _ = Describe("Options", func() {
 			Entry("with whitespace", "SpotToSpotConsolidation\t= false", false),
 			Entry("multiple values", "Hello=true,SpotToSpotConsolidation=false,World=true", false),
 		)
+
+		Context("Additional", func() {
+			BeforeEach(func() {
+				options.RegisterAdditionalFeatureGates(map[string]bool{"MyProviderGate": false, "MyEnabledGate": true})
+				// Re-add flags so the usage string picks up the registered gates
+				fs = &options.FlagSet{FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError)}
+				opts = &options.Options{}
+				opts.AddFlags(fs)
+			})
+			AfterEach(func() {
+				options.AdditionalFeatureGates = map[string]bool{}
+			})
+
+			It("should use the cloudprovider provided defaults when unset", func() {
+				Expect(opts.Parse(fs)).To(Succeed())
+				Expect(opts.FeatureGates.Additional).To(Equal(map[string]bool{"MyProviderGate": false, "MyEnabledGate": true}))
+			})
+			It("should parse cloudprovider gates alongside core gates", func() {
+				Expect(opts.Parse(fs, "--feature-gates", "NodeRepair=true,MyProviderGate=true,MyEnabledGate=false")).To(Succeed())
+				Expect(opts.FeatureGates.NodeRepair).To(BeTrue())
+				Expect(opts.FeatureGates.Additional).To(Equal(map[string]bool{"MyProviderGate": true, "MyEnabledGate": false}))
+			})
+			It("should not mutate the registered defaults when parsing", func() {
+				Expect(opts.Parse(fs, "--feature-gates", "MyProviderGate=true")).To(Succeed())
+				Expect(options.AdditionalFeatureGates).To(Equal(map[string]bool{"MyProviderGate": false, "MyEnabledGate": true}))
+			})
+			It("should include cloudprovider gates in the flag usage string", func() {
+				Expect(fs.Lookup("feature-gates").Usage).To(ContainSubstring("MyEnabledGate, MyProviderGate"))
+			})
+			// Unknown gates are tolerated for both core and cloudprovider gates, so a gate a cloudprovider hasn't
+			// registered is ignored rather than rejected
+			It("should ignore a gate that no cloudprovider registered", func() {
+				Expect(opts.Parse(fs, "--feature-gates", "MyProviderGaet=true")).To(Succeed())
+				Expect(opts.FeatureGates.Additional).To(Equal(map[string]bool{"MyProviderGate": false, "MyEnabledGate": true}))
+			})
+			It("should panic when a cloudprovider gate collides with a core gate", func() {
+				Expect(func() { options.RegisterAdditionalFeatureGates(map[string]bool{"NodeRepair": true}) }).To(Panic())
+			})
+			// Guards against coreFeatureGateNames drifting as core gates are added to the FeatureGates struct. A
+			// missing name would let a cloudprovider silently shadow a core gate.
+			It("should reject every bool field on FeatureGates as a cloudprovider gate name", func() {
+				for field := range reflect.TypeFor[options.FeatureGates]().Fields() {
+					if !field.IsExported() || field.Type.Kind() != reflect.Bool {
+						continue
+					}
+					Expect(func() { options.RegisterAdditionalFeatureGates(map[string]bool{field.Name: true}) }).
+						To(Panic(), "core gate %s is missing from coreFeatureGateNames", field.Name)
+				}
+			})
+		})
 	})
 
 	Context("Parse", func() {
@@ -411,5 +461,6 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.StaticCapacity).To(Equal(optsB.FeatureGates.StaticCapacity))
 	Expect(optsA.FeatureGates.CapacityBuffer).To(Equal(optsB.FeatureGates.CapacityBuffer))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.FeatureGates.Additional).To(Equal(optsB.FeatureGates.Additional))
 	Expect(optsA.IgnoreDRARequests).To(Equal(optsB.IgnoreDRARequests))
 }

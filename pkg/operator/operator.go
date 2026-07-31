@@ -104,8 +104,9 @@ type Operator struct {
 }
 
 type Options struct {
-	LeaderElectionLabels map[string]string
-	LeaderElectionConfig *rest.Config // Optional separate config for leader election
+	LeaderElectionLabels   map[string]string
+	LeaderElectionConfig   *rest.Config // Optional separate config for leader election
+	AdditionalFeatureGates map[string]bool
 }
 
 // Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
@@ -122,6 +123,15 @@ func WithLeaderElectionConfig(config *rest.Config) option.Function[Options] {
 	}
 }
 
+// WithAdditionalFeatureGates registers cloudprovider-defined feature gates and their default values. They're parsed
+// from the same --feature-gates flag / FEATURE_GATES env var as the core gates, and are readable through
+// options.FromContext(ctx).FeatureGates.Additional[name]. Panics if a gate collides with a core gate name.
+func WithAdditionalFeatureGates(gates map[string]bool) option.Function[Options] {
+	return func(opts *Options) {
+		opts.AdditionalFeatureGates = lo.Assign(opts.AdditionalFeatureGates, gates)
+	}
+}
+
 // NewOperator instantiates a controller manager or panics
 func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	opts := option.Resolve(o...)
@@ -130,6 +140,8 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	ctx := context.Background()
 
 	// Options
+	// Register cloudprovider feature gates before parsing so they're picked up from --feature-gates
+	options.RegisterAdditionalFeatureGates(opts.AdditionalFeatureGates)
 	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
 
 	// Make the Karpenter binary aware of the container memory limit

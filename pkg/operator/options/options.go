@@ -21,7 +21,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -49,6 +52,12 @@ var (
 	validPreferencePolicies = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
 
 	Injectables = []Injectable{&Options{}}
+
+	AdditionalFeatureGates = map[string]bool{}
+
+	// coreFeatureGateNames must list every bool field on FeatureGates. The "should reject every bool field on
+	// FeatureGates as a cloudprovider gate name" spec fails if it drifts.
+	coreFeatureGateNames = []string{"NodeRepair", "ReservedCapacity", "SpotToSpotConsolidation", "NodeOverlay", "StaticCapacity", "CapacityBuffer"}
 )
 
 type optionsKey struct{}
@@ -62,6 +71,7 @@ type FeatureGates struct {
 	NodeOverlay             bool
 	StaticCapacity          bool
 	CapacityBuffer          bool
+	Additional              map[string]bool
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -131,7 +141,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,CapacityBuffer=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, StaticCapacity, and CapacityBuffer.")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,CapacityBuffer=false"), fmt.Sprintf("Optional features can be enabled / disabled using feature gates. Current options are: %s.", strings.Join(validFeatureGateNames(), ", ")))
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -175,7 +185,18 @@ func DefaultFeatureGates() FeatureGates {
 		NodeOverlay:             false,
 		StaticCapacity:          false,
 		CapacityBuffer:          false,
+		Additional:              maps.Clone(AdditionalFeatureGates),
 	}
+}
+
+// RegisterAdditionalFeatureGates adds cloudprovider-defined gates to AdditionalFeatureGates
+func RegisterAdditionalFeatureGates(gates map[string]bool) {
+	for name := range gates {
+		if slices.Contains(coreFeatureGateNames, name) {
+			panic(fmt.Sprintf("feature gate %q conflicts with a karpenter-core feature gate", name))
+		}
+	}
+	AdditionalFeatureGates = lo.Assign(AdditionalFeatureGates, gates)
 }
 
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {
@@ -205,8 +226,17 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	if val, ok := gateMap["CapacityBuffer"]; ok {
 		gates.CapacityBuffer = val
 	}
+	for name := range gates.Additional {
+		if val, ok := gateMap[name]; ok {
+			gates.Additional[name] = val
+		}
+	}
 
 	return gates, nil
+}
+
+func validFeatureGateNames() []string {
+	return append(slices.Clone(coreFeatureGateNames), slices.Sorted(maps.Keys(AdditionalFeatureGates))...)
 }
 
 func ToContext(ctx context.Context, opts *Options) context.Context {
