@@ -132,15 +132,16 @@ var _ = Describe("Options", func() {
 			It("should panic when a cloudprovider gate collides with a core gate", func() {
 				Expect(func() { options.RegisterAdditionalFeatureGates(map[string]bool{"NodeRepair": true}) }).To(Panic())
 			})
-			// Guards against coreFeatureGateNames drifting as core gates are added to the FeatureGates struct. A
-			// missing name would let a cloudprovider silently shadow a core gate.
-			It("should reject every bool field on FeatureGates as a cloudprovider gate name", func() {
+			// Every core gate should be collision-checked and listed in --help without anyone maintaining a list of
+			// gate names by hand
+			It("should cover every bool field on FeatureGates", func() {
 				for field := range reflect.TypeFor[options.FeatureGates]().Fields() {
 					if !field.IsExported() || field.Type.Kind() != reflect.Bool {
 						continue
 					}
 					Expect(func() { options.RegisterAdditionalFeatureGates(map[string]bool{field.Name: true}) }).
-						To(Panic(), "core gate %s is missing from coreFeatureGateNames", field.Name)
+						To(Panic(), "core gate %s should collide with a cloudprovider gate of the same name", field.Name)
+					Expect(fs.Lookup("feature-gates").Usage).To(ContainSubstring(field.Name))
 				}
 			})
 		})

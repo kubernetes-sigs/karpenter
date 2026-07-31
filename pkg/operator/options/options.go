@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -55,9 +56,11 @@ var (
 
 	AdditionalFeatureGates = map[string]bool{}
 
-	// coreFeatureGateNames must list every bool field on FeatureGates. The "should reject every bool field on
-	// FeatureGates as a cloudprovider gate name" spec fails if it drifts.
-	coreFeatureGateNames = []string{"NodeRepair", "ReservedCapacity", "SpotToSpotConsolidation", "NodeOverlay", "StaticCapacity", "CapacityBuffer"}
+	// coreFeatureGateNames is every bool field on FeatureGates, so adding a core gate to the struct is enough to
+	// have it show up in --help and to be rejected as a cloudprovider gate name
+	coreFeatureGateNames = lo.FilterMap(slices.Collect(reflect.TypeFor[FeatureGates]().Fields()), func(f reflect.StructField, _ int) (string, bool) {
+		return f.Name, f.IsExported() && f.Type.Kind() == reflect.Bool
+	})
 )
 
 type optionsKey struct{}
