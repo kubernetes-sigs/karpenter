@@ -56,6 +56,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
@@ -97,14 +99,18 @@ type Queue struct {
 	ProviderIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
 	source              chan event.TypedGenericEvent[*v1.NodeClaim]
 	kubeClient          client.Client
-	recorder            events.Recorder
-	cluster             *state.Cluster
-	clock               clock.Clock
-	provisioner         *provisioning.Provisioner
+	// apiReader reads directly from the apiserver, bypassing the informer cache. It's used to
+	// confirm a candidate is still disruptable at the point of no return, where a stale cache
+	// would cost us the workload.
+	apiReader   client.Reader
+	recorder    events.Recorder
+	cluster     *state.Cluster
+	clock       clock.Clock
+	provisioner *provisioning.Provisioner
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
-func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
+func NewQueue(kubeClient client.Client, apiReader client.Reader, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
 	provisioner *provisioning.Provisioner,
 ) *Queue {
 	queue := &Queue{
@@ -113,6 +119,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		source:              make(chan event.TypedGenericEvent[*v1.NodeClaim], 10000),
 		ProviderIDToCommand: map[string]*Command{},
 		kubeClient:          kubeClient,
+		apiReader:           apiReader,
 		recorder:            recorder,
 		cluster:             cluster,
 		clock:               clock,
@@ -227,6 +234,18 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 		return fmt.Errorf("waiting for replacement initialization, %w", err)
 	}
 
+	// Deleting the NodeClaim is the point of no return: a deletionTimestamp can't be cleared, and
+	// the termination controller only drains once it's set. Confirm the candidates are still
+	// disruptable while we can still walk the command back.
+	if err := q.ensureCandidatesDisruptable(ctx, cmd); err != nil {
+		if state.IgnorePodBlockEvictionError(err) == nil {
+			// The decision is no longer valid. Give up on the command so its candidates get
+			// un-tainted, rather than committing them to termination.
+			return NewUnrecoverableError(err)
+		}
+		return err
+	}
+
 	// All replacements have been provisioned.
 	// All we need to do now is get a successful delete call for each node claim,
 	// then the termination controller will handle the eventual deletion of the nodes.
@@ -249,6 +268,48 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
+	return multierr.Combine(errs...)
+}
+
+// ensureCandidatesDisruptable re-reads the pods bound to each candidate straight from the
+// apiserver and returns a PodBlockEvictionError if any of them blocks eviction.
+//
+// The decision to disrupt was taken against cluster state that can go stale: LastPodEventTime
+// keeps a NodeClaim's Consolidatable condition current, and both it and the pod informer stop
+// tracking reality when the apiserver sheds writes (ResourceExhausted), so a node can be picked
+// as empty while pods are landing on it. The disrupted taint is already in place by the time we
+// get here, which is what makes this read conclusive rather than another race: nothing new can
+// be scheduled to the candidate, so whatever the apiserver returns now is the final set of pods.
+//
+// This only applies to graceful disruption. Eventual disruption deliberately proceeds through
+// blocking pods once a NodeClaim's TerminationGracePeriod is set.
+func (q *Queue) ensureCandidatesDisruptable(ctx context.Context, cmd *Command) error {
+	if cmd.Class() != GracefulDisruptionClass {
+		return nil
+	}
+	errs := make([]error, len(cmd.Candidates))
+	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
+		if cmd.Candidates[i].Node == nil {
+			return
+		}
+		pods, err := nodeutils.GetPods(ctx, q.apiReader, cmd.Candidates[i].Node.Name)
+		if err != nil {
+			errs[i] = fmt.Errorf("listing pods, %w", err)
+			return
+		}
+		for _, p := range pods {
+			// Mirrors StateNode.ValidatePodsDisruptable: only actively running pods hold up
+			// disruption with the do-not-disrupt annotation.
+			if !podutils.IsDisruptable(p, q.clock, q.recorder) {
+				err := serrors.Wrap(
+					fmt.Errorf(`pod scheduled after the disruption decision has a "karpenter.sh/do-not-disrupt" annotation`),
+					"Pod", klog.KObj(p))
+				q.recorder.Publish(disruptionevents.Blocked(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, pretty.Sentence(err.Error()))...)
+				errs[i] = state.NewPodBlockEvictionError(err)
+				return
+			}
+		}
+	})
 	return multierr.Combine(errs...)
 }
 
