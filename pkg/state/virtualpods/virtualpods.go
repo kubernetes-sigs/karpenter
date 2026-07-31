@@ -32,9 +32,9 @@ import (
 type Cache struct {
 	// kubeClient is used to resolve buffer pod specs when hydrating the cache
 	kubeClient client.Client
-	// capacityBufferToPods maps a CapacityBuffer's UID -> to a list of virtual
-	// pods corresponding to that CapacityBuffer
-	capacityBufferToPods map[types.UID][]*corev1.Pod
+	// capacityBufferToPods maps a CapacityBuffer's namespace/name -> to a list of
+	// virtual pods corresponding to that CapacityBuffer
+	capacityBufferToPods map[types.NamespacedName][]*corev1.Pod
 	// mutex guards capacityBufferToPods and warmed
 	mutex sync.Mutex
 	// warmed signals that capacityBufferToPods has been populated from the kube api state
@@ -44,7 +44,7 @@ type Cache struct {
 func NewVirtualPodCache(kubeClient client.Client) *Cache {
 	return &Cache{
 		kubeClient:           kubeClient,
-		capacityBufferToPods: map[types.UID][]*corev1.Pod{},
+		capacityBufferToPods: map[types.NamespacedName][]*corev1.Pod{},
 	}
 }
 
@@ -54,19 +54,19 @@ func NewVirtualPodCache(kubeClient client.Client) *Cache {
 // doesn't re-fetch the same PodTemplate/workload
 func (v *Cache) UpdateEntry(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec) {
 	if !isBufferReadyForProvisioning(cb) {
-		v.RemoveEntry(cb.UID)
+		v.RemoveEntry(client.ObjectKeyFromObject(cb))
 		return
 	}
 	podCache := BuildVirtualPods(cb, spec)
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
-	v.capacityBufferToPods[cb.UID] = podCache
+	v.capacityBufferToPods[client.ObjectKeyFromObject(cb)] = podCache
 }
 
-func (v *Cache) RemoveEntry(uid types.UID) {
+func (v *Cache) RemoveEntry(key types.NamespacedName) {
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
-	delete(v.capacityBufferToPods, uid)
+	delete(v.capacityBufferToPods, key)
 }
 
 // hydrateCache performs the one-time lazy hydration of the cache. The caller
@@ -77,14 +77,14 @@ func (v *Cache) hydrateCache(ctx context.Context) error {
 		return err
 	}
 
-	newMap := make(map[types.UID][]*corev1.Pod)
+	newMap := make(map[types.NamespacedName][]*corev1.Pod)
 	for _, cb := range buffers {
 		spec, err := resolveVirtualPodSpec(ctx, v.kubeClient, cb)
 		if err != nil {
 			log.FromContext(ctx).WithValues("capacitybuffer", client.ObjectKeyFromObject(cb)).V(1).Info("skipping buffer", "reason", err.Error())
 			continue
 		}
-		newMap[cb.UID] = BuildVirtualPods(cb, spec)
+		newMap[client.ObjectKeyFromObject(cb)] = BuildVirtualPods(cb, spec)
 	}
 	v.capacityBufferToPods = newMap
 	return nil

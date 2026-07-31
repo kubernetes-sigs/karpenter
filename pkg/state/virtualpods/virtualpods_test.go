@@ -161,21 +161,21 @@ var _ = Describe("VirtualPodCache", func() {
 	})
 
 	Describe("RemoveEntry", func() {
-		It("should remove the entry for the given uid", func() {
+		It("should remove the entry for the given namespace/name", func() {
 			cb := test.ReadyBuffer("web", 3)
 			cache := NewVirtualPodCache(fakeClient(podTemplateFor(cb)))
 			cache.warmed = true
 			resolveAndUpdate(ctx, cache, cb)
 			Expect(cache.GetAll(ctx)).To(HaveLen(3))
 
-			cache.RemoveEntry(cb.UID)
+			cache.RemoveEntry(client.ObjectKeyFromObject(cb))
 			Expect(cache.GetAll(ctx)).To(BeEmpty())
 		})
 
 		It("should be a no-op for an unknown entry", func() {
 			cache := NewVirtualPodCache(fakeClient())
 			cache.warmed = true
-			cache.RemoveEntry(types.UID("does-not-exist"))
+			cache.RemoveEntry(types.NamespacedName{Namespace: "default", Name: "does-not-exist"})
 			Expect(cache.GetAll(ctx)).To(BeEmpty())
 		})
 	})

@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
@@ -102,7 +103,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -129,7 +130,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -181,7 +182,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, deploy, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -210,7 +211,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -259,7 +260,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, sts, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -286,7 +287,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			Expect(ExpectObjectReconcileFailed(ctx, env.Client, cbController, cb)).To(HaveOccurred())
+			ExpectReconciledFailed(ctx, cbController, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cb)})
 		})
 
 		It("should return error for unsupported API group", func() {
@@ -305,7 +306,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			Expect(ExpectObjectReconcileFailed(ctx, env.Client, cbController, cb)).To(HaveOccurred())
+			ExpectReconciledFailed(ctx, cbController, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cb)})
 		})
 
 		It("should default to 1 replica when workload has nil Spec.Replicas", func() {
@@ -347,7 +348,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, deploy, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -365,7 +366,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 		DescribeTable("should resolve buffer replicas from replicas, percentage, and limits",
 			func(backing client.Object, cb *autoscalingv1beta1.CapacityBuffer, expected int32) {
 				ExpectApplied(ctx, env.Client, backing, cb)
-				ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+				ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 				Expect(ExpectExists(ctx, env.Client, cb).Status.Replicas).To(HaveValue(Equal(expected)))
 			},
 			// podTemplateRef: replicas and limits only (percentage requires a scalableRef).
@@ -496,7 +497,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			Expect(cb.Status.PodTemplateGeneration).ToNot(BeNil())
@@ -510,7 +511,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectApplied(ctx, env.Client, pt)
 
 			// Reconcile the buffer again; podTemplateGeneration in status should update.
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 			cb = ExpectExists(ctx, env.Client, cb)
 			Expect(cb.Status.PodTemplateGeneration).ToNot(BeNil())
 			// Generation must have advanced OR stayed the same (envtest behavior varies);
@@ -540,7 +541,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
-			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			Expect(trigger.calls).To(ContainElement(cb.UID))
@@ -558,7 +559,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
 
 			Expect(trigger.calls).To(BeEmpty())
 		})
@@ -583,7 +584,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
-			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
 
 			Expect(cache.GetAll(ctx)).To(HaveLen(3))
 		})
@@ -606,14 +607,43 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
-			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
 			Expect(cache.GetAll(ctx)).To(HaveLen(2))
 
 			// Delete the referenced template so resolution now fails with NotFound.
 			// The buffer is no longer ready for provisioning, so its stale entry
 			// must be dropped from the cache.
 			ExpectDeleted(ctx, env.Client, pt)
-			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
+		})
+
+		It("should evict the cache entry when the buffer is deleted", func() {
+			cache := virtualpods.NewVirtualPodCache(env.Client)
+			ctrl := NewController(env.Client, &fakeTrigger{}, cache)
+
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "del-template", Namespace: "default"},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{Containers: []v1.Container{{Name: "c", Image: "p"}}},
+				},
+			}
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "del-buffer", Namespace: "default"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "del-template"},
+					Replicas:       lo.ToPtr(int32(3)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+			Expect(cache.GetAll(ctx)).To(HaveLen(3))
+
+			// Delete the buffer and reconcile its key. The buffer is gone, so
+			// Reconcile hits the NotFound branch and evicts the cache entry.
+			ExpectDeleted(ctx, env.Client, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+
 			Expect(cache.GetAll(ctx)).To(BeEmpty())
 		})
 
@@ -628,7 +658,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
 
 			Expect(cache.GetAll(ctx)).To(BeEmpty())
 		})

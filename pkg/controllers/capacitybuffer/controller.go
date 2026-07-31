@@ -28,11 +28,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -72,8 +70,17 @@ func (c *Controller) Name() string {
 	return "capacitybuffer"
 }
 
-func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
+
+	cb := &autoscalingv1beta1.CapacityBuffer{}
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, cb); err != nil {
+		if errors.IsNotFound(err) {
+			// The buffer was deleted; drop its virtual pods from the cache.
+			c.virtualPodCache.RemoveEntry(req.NamespacedName)
+		}
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
 
 	stored := cb.DeepCopy()
 
@@ -103,7 +110,7 @@ func (c *Controller) Reconcile(ctx context.Context, cb *autoscalingv1beta1.Capac
 	if resolved {
 		c.virtualPodCache.UpdateEntry(cb, *podSpec)
 	} else {
-		c.virtualPodCache.RemoveEntry(cb.UID)
+		c.virtualPodCache.RemoveEntry(client.ObjectKeyFromObject(cb))
 	}
 
 	// Notify the provisioner so it can construct virtual pods and update the
@@ -122,14 +129,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Named(c.Name()).
 		For(&autoscalingv1beta1.CapacityBuffer{}).
 		Watches(
-			&autoscalingv1beta1.CapacityBuffer{},
-			handler.Funcs{
-				DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[client.Object], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-					c.virtualPodCache.RemoveEntry(e.Object.GetUID())
-				},
-			},
-		).
-		Watches(
 			&v1.PodTemplate{},
 			handler.EnqueueRequestsFromMapFunc(c.podTemplateToBuffers),
 		).
@@ -137,7 +136,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             reasonable.RateLimiter(),
 		}).
-		Complete(reconcile.AsReconciler(m.GetClient(), c))
+		Complete(c)
 }
 
 func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object) []reconcile.Request {
