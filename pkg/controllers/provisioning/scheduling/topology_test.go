@@ -32,6 +32,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -3103,9 +3104,17 @@ var _ = Describe("Topology", func() {
 		It("should count pre-existing cluster pods through the deduced selector", func() {
 			// Every other spec in this context starts from an empty cluster, so countDomains' list always comes back
 			// empty and the deduced selector is never exercised as a *query*. Here two of the ReplicaSet's pods already
-			// occupy test-zone-1, so a correct selector must find them and push the new pod elsewhere. A selector that
-			// failed to match real pods would count zero and happily pile into the full zone.
+			// occupy test-zone-1, so a correct selector must find them and keep the new pods out of that zone.
+			//
+			// The cluster is restricted to two zones and two new pods are provisioned so the assertion discriminates
+			// regardless of map-iteration order. Counted correctly, zone-1 is over-full and both new pods go to zone-2,
+			// giving a 2/2 skew. Counting nothing, both zones look empty, the new pods balance one per zone, and zone-1
+			// ends with 3 - a different skew whichever zone is chosen first. A single new pod would not be enough: with
+			// no counts all domains tie, and nextDomainTopologySpread's pick among tied domains follows map order, so the
+			// bug would only surface some of the time.
 			setDefaults(zoneDefault)
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
 			existingNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
 			}})
@@ -3116,12 +3125,23 @@ var _ = Describe("Topology", func() {
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{owner}}, NodeName: existingNode.Name}),
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{owner}}, NodeName: existingNode.Name}),
 			)
-			pod := ownedPods(1)[0]
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[corev1.LabelTopologyZone]).ToNot(Equal("test-zone-1"))
-			// zone-1 keeps its 2 pre-existing pods, and the new pod opens a second domain.
-			ExpectSkew(ctx, env.Client, "default", withSelector(zoneDefault)).To(ConsistOf(2, 1))
+			// This suite's client is uncached and offers no read-your-writes guarantee, so wait until both pre-existing
+			// pods are visible to the same List that countDomains performs. Without this the spec can race ahead, count
+			// zero existing pods, and pass even when the deduced selector fails to match them at all - i.e. it would
+			// silently stop guarding the behavior it exists to guard.
+			Eventually(func(g Gomega) {
+				podList := &corev1.PodList{}
+				g.Expect(env.Client.List(ctx, podList, scheduling.TopologyListOptions("default", deducedSelector))).To(Succeed())
+				g.Expect(podList.Items).To(HaveLen(2))
+			}, time.Second).Should(Succeed())
+			newPods := ownedPods(2)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, newPods...)
+			for _, p := range newPods {
+				node := ExpectScheduled(ctx, env.Client, p)
+				Expect(node.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-2"))
+			}
+			// zone-1 keeps its 2 pre-existing pods; both new pods go to zone-2.
+			ExpectSkew(ctx, env.Client, "default", withSelector(zoneDefault)).To(ConsistOf(2, 2))
 		})
 		It("should spread each workload independently", func() {
 			// The whole point of deducing a selector per pod: two ReplicaSets scheduling at once must form separate
