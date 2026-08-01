@@ -183,15 +183,16 @@ func NewScheduler(
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
-		clock:                   clock,
-		reservationManager:      NewReservationManager(instanceTypes),
-		reservedOfferingMode:    option.Resolve(opts...).reservedOfferingMode,
-		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
-		minValuesPolicy:         minValuesPolicy,
-		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
-		allocator:               allocator,
-		instanceTypes:           instanceTypes,
-		cachedResourceClaims:    map[types.NamespacedName]*resourcev1.ResourceClaim{},
+		clock:                        clock,
+		reservationManager:           NewReservationManager(instanceTypes),
+		reservedOfferingMode:         option.Resolve(opts...).reservedOfferingMode,
+		preferencePolicy:             option.Resolve(opts...).preferencePolicy,
+		minValuesPolicy:              minValuesPolicy,
+		numConcurrentReconciles:      lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
+		allocator:                    allocator,
+		instanceTypes:                instanceTypes,
+		cachedResourceClaims:         map[types.NamespacedName]*resourcev1.ResourceClaim{},
+		cachedResourceClaimTemplates: map[types.NamespacedName]*resourcev1.ResourceClaimTemplate{},
 	}
 
 	npByName := lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) {
@@ -256,6 +257,8 @@ type Scheduler struct {
 	instanceTypes map[string][]*cloudprovider.InstanceType
 	// cachedResourceClaims memoizes ResourceClaim lookups for the duration of a single scheduling loop.
 	cachedResourceClaims map[types.NamespacedName]*resourcev1.ResourceClaim
+	// cachedResourceClaimTemplates memoizes ResourceClaimTemplate lookups for virtual pods during a scheduling loop.
+	cachedResourceClaimTemplates map[types.NamespacedName]*resourcev1.ResourceClaimTemplate
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
