@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	clock "k8s.io/utils/clock/testing"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -34,14 +36,16 @@ func TestPrediction(t *testing.T) {
 
 var _ = Describe("Store", func() {
 	var store *Store
+	var fakeClock *clock.FakeClock
 
 	BeforeEach(func() {
+		fakeClock = clock.NewFakeClock(time.Now())
 		store = NewStore()
 	})
 
 	It("should store and update a prediction by target key", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+		target := types.UID("uid-app")
 		pred1 := &Prediction{Containers: map[string]corev1.ResourceList{
 			"container1": {
 				corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -52,21 +56,21 @@ var _ = Describe("Store", func() {
 			"container1": {corev1.ResourceCPU: resource.MustParse("200m")},
 		}}
 
-		store.Set(source, target, pred1, time.Now())
-		retrieved, ok := store.Get("default", "Deployment", "app")
+		store.Set(source, target, pred1, fakeClock.Now())
+		retrieved, ok := store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(retrieved).To(Equal(pred1))
 
-		store.Set(source, target, pred2, time.Now())
-		retrieved, ok = store.Get("default", "Deployment", "app")
+		store.Set(source, target, pred2, fakeClock.Now())
+		retrieved, ok = store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(retrieved).To(Equal(pred2))
 	})
 
 	It("should delete previous target when source is retargeted", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target1 := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app1"}
-		target2 := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app2"}
+		target1 := types.UID("uid-app1")
+		target2 := types.UID("uid-app2")
 		pred1 := &Prediction{Containers: map[string]corev1.ResourceList{
 			"container1": {corev1.ResourceCPU: resource.MustParse("100m")},
 		}}
@@ -74,28 +78,28 @@ var _ = Describe("Store", func() {
 			"container1": {corev1.ResourceCPU: resource.MustParse("200m")},
 		}}
 
-		store.Set(source, target1, pred1, time.Now())
-		store.Set(source, target2, pred2, time.Now())
+		store.Set(source, target1, pred1, fakeClock.Now())
+		store.Set(source, target2, pred2, fakeClock.Now())
 
-		_, ok := store.Get("default", "Deployment", "app1")
+		_, ok := store.Get(target1)
 		Expect(ok).To(BeFalse())
 
-		retrieved, ok := store.Get("default", "Deployment", "app2")
+		retrieved, ok := store.Get(target2)
 		Expect(ok).To(BeTrue())
 		Expect(retrieved).To(Equal(pred2))
 	})
 
 	It("should delete a prediction and be idempotent", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+		target := types.UID("uid-app")
 		pred := &Prediction{Containers: map[string]corev1.ResourceList{
 			"c": {corev1.ResourceCPU: resource.MustParse("100m")},
 		}}
 
-		store.Set(source, target, pred, time.Now())
+		store.Set(source, target, pred, fakeClock.Now())
 		store.Delete(source)
 
-		_, ok := store.Get("default", "Deployment", "app")
+		_, ok := store.Get(target)
 		Expect(ok).To(BeFalse())
 
 		// Deleting again should not panic
@@ -104,7 +108,7 @@ var _ = Describe("Store", func() {
 
 	Context("Tie-Breaking", func() {
 		It("should use the earliest-created source's prediction", func() {
-			target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+			target := types.UID("uid-app")
 			older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
 			newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
 			predOlder := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -121,13 +125,13 @@ var _ = Describe("Store", func() {
 			store.Set(newer, target, predNewer, t2)
 			store.Set(older, target, predOlder, t1)
 
-			retrieved, ok := store.Get("default", "Deployment", "app")
+			retrieved, ok := store.Get(target)
 			Expect(ok).To(BeTrue())
 			Expect(retrieved).To(Equal(predOlder))
 		})
 
 		It("should break ties by lexicographically smallest name when timestamps are equal", func() {
-			target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+			target := types.UID("uid-app")
 			sourceA := types.NamespacedName{Namespace: "default", Name: "vpa-alpha"}
 			sourceB := types.NamespacedName{Namespace: "default", Name: "vpa-beta"}
 			predA := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -142,13 +146,13 @@ var _ = Describe("Store", func() {
 			store.Set(sourceB, target, predB, ts)
 			store.Set(sourceA, target, predA, ts)
 
-			retrieved, ok := store.Get("default", "Deployment", "app")
+			retrieved, ok := store.Get(target)
 			Expect(ok).To(BeTrue())
 			Expect(retrieved).To(Equal(predA))
 		})
 
 		It("should promote next-strongest on delete of the winner", func() {
-			target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+			target := types.UID("uid-app")
 			older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
 			newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
 			predOlder := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -165,19 +169,19 @@ var _ = Describe("Store", func() {
 			store.Set(newer, target, predNewer, t2)
 
 			// Older wins initially
-			retrieved, ok := store.Get("default", "Deployment", "app")
+			retrieved, ok := store.Get(target)
 			Expect(ok).To(BeTrue())
 			Expect(retrieved).To(Equal(predOlder))
 
 			// Delete the winner — newer should be promoted
 			store.Delete(older)
-			retrieved, ok = store.Get("default", "Deployment", "app")
+			retrieved, ok = store.Get(target)
 			Expect(ok).To(BeTrue())
 			Expect(retrieved).To(Equal(predNewer))
 		})
 
 		It("should remove target entirely when all contenders are deleted", func() {
-			target := TargetKey{Namespace: "default", Kind: "Deployment", Name: "app"}
+			target := types.UID("uid-app")
 			source1 := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
 			source2 := types.NamespacedName{Namespace: "default", Name: "vpa-2"}
 			pred := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -193,7 +197,7 @@ var _ = Describe("Store", func() {
 			store.Delete(source1)
 			store.Delete(source2)
 
-			_, ok := store.Get("default", "Deployment", "app")
+			_, ok := store.Get(target)
 			Expect(ok).To(BeFalse())
 		})
 	})

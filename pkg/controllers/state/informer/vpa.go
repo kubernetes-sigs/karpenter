@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package vpa
+package informer
 
 import (
 	"context"
@@ -25,6 +25,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	vpav1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
@@ -41,7 +43,7 @@ import (
 // Controller periodically lists VerticalPodAutoscaler objects and maintains a prediction
 // cache of post-recreation resources for VPA-managed pods. It uses a singleton (polling)
 // pattern rather than an informer to gracefully tolerate VPA CRD not being installed.
-type Controller struct {
+type VPAController struct {
 	kubeClient client.Client
 	store      *prediction.Store
 	// lastSeen tracks the resourceVersion of each VPA we've processed,
@@ -49,16 +51,16 @@ type Controller struct {
 	lastSeen map[types.NamespacedName]string
 }
 
-func NewController(kubeClient client.Client, store *prediction.Store) *Controller {
+func NewVPAController(kubeClient client.Client, store *prediction.Store) *VPAController {
 	utilruntime.Must(vpav1.AddToScheme(scheme.Scheme))
-	return &Controller{
+	return &VPAController{
 		kubeClient: kubeClient,
 		store:      store,
 		lastSeen:   make(map[types.NamespacedName]string),
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
+func (c *VPAController) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
 	var vpaList vpav1.VerticalPodAutoscalerList
@@ -90,12 +92,15 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			c.store.Delete(key)
 			continue
 		}
+		// Resolve the target workload's UID
+		targetObj := &unstructured.Unstructured{}
+		targetObj.SetGroupVersionKind(schema.FromAPIVersionAndKind(vpa.Spec.TargetRef.APIVersion, vpa.Spec.TargetRef.Kind))
+		if err := c.kubeClient.Get(ctx, types.NamespacedName{Namespace: vpa.Namespace, Name: vpa.Spec.TargetRef.Name}, targetObj); err != nil {
+			c.store.Delete(key)
+			continue
+		}
 
-		c.store.Set(key, prediction.TargetKey{
-			Namespace: vpa.Namespace,
-			Kind:      vpa.Spec.TargetRef.Kind,
-			Name:      vpa.Spec.TargetRef.Name,
-		}, p, vpa.CreationTimestamp.Time)
+		c.store.Set(key, targetObj.GetUID(), p, vpa.CreationTimestamp.Time)
 	}
 
 	// Clean up predictions for deleted VPAs
@@ -109,11 +114,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
-func (c *Controller) Name() string {
+func (c *VPAController) Name() string {
 	return "vpa.prediction"
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+func (c *VPAController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).

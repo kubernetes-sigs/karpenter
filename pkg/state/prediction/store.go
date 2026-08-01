@@ -25,13 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// TargetKey identifies a workload that a prediction applies to.
-type TargetKey struct {
-	Namespace string
-	Kind      string
-	Name      string
-}
-
 // Prediction holds the predicted resource requests for all containers of a workload.
 // Maps container name to its predicted resource requests.
 type Prediction struct {
@@ -50,35 +43,35 @@ type targetEntry struct {
 // the store uses VPA's tie-breaking semantics (earliest creation time wins,
 // then lexicographically smallest name) to determine which prediction is active.
 type Store struct {
-	mu sync.RWMutex
+	sync.RWMutex
 	// byTarget indexes all contending predictions by the workload they apply to.
 	// Entries are sorted by strength (strongest first).
-	byTarget map[TargetKey][]targetEntry
+	byTarget map[types.UID][]targetEntry
 	// bySource maps the prediction source identity to its TargetKey, for deletion cleanup.
-	bySource map[types.NamespacedName]TargetKey
+	bySource map[types.NamespacedName]types.UID
 }
 
 func NewStore() *Store {
 	return &Store{
-		byTarget: make(map[TargetKey][]targetEntry),
-		bySource: make(map[types.NamespacedName]TargetKey),
+		byTarget: make(map[types.UID][]targetEntry),
+		bySource: make(map[types.NamespacedName]types.UID),
 	}
 }
 
 // Set stores a prediction from the given source for the given target.
 // If the source previously targeted a different workload, the old entry is removed.
-func (s *Store) Set(source types.NamespacedName, target TargetKey, p *Prediction, createdAt time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) Set(source types.NamespacedName, targetUID types.UID, p *Prediction, createdAt time.Time) {
+	s.Lock()
+	defer s.Unlock()
 
 	// If this source previously targeted a different workload, remove it from the old target.
-	if prev, ok := s.bySource[source]; ok && prev != target {
+	if prev, ok := s.bySource[source]; ok && prev != targetUID {
 		s.removeEntry(prev, source)
 	}
 
-	s.bySource[source] = target
+	s.bySource[source] = targetUID
 
-	entries := s.byTarget[target]
+	entries := s.byTarget[targetUID]
 	found := false
 	for i := range entries {
 		if entries[i].source == source {
@@ -100,14 +93,14 @@ func (s *Store) Set(source types.NamespacedName, target TargetKey, p *Prediction
 			return stronger(entries[i], entries[j])
 		})
 	}
-	s.byTarget[target] = entries
+	s.byTarget[targetUID] = entries
 }
 
 // Delete removes the prediction from the given source. If other sources target
 // the same workload, the next-strongest is automatically promoted.
 func (s *Store) Delete(source types.NamespacedName) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Lock()
+	defer s.Unlock()
 
 	if target, ok := s.bySource[source]; ok {
 		s.removeEntry(target, source)
@@ -116,11 +109,12 @@ func (s *Store) Delete(source types.NamespacedName) {
 }
 
 // Get returns the active (strongest) prediction for the given target.
-func (s *Store) Get(namespace, targetKind, targetName string) (*Prediction, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+// Callers should not mutate the returned Prediction.
+func (s *Store) Get(targetUID types.UID) (*Prediction, bool) {
+	s.RLock()
+	defer s.RUnlock()
 
-	entries := s.byTarget[TargetKey{Namespace: namespace, Kind: targetKind, Name: targetName}]
+	entries := s.byTarget[targetUID]
 	if len(entries) == 0 {
 		return nil, false
 	}
@@ -129,7 +123,7 @@ func (s *Store) Get(namespace, targetKind, targetName string) (*Prediction, bool
 
 // removeEntry removes the entry for the given source from the target's list.
 // If the list becomes empty, the target key is removed from the map.
-func (s *Store) removeEntry(target TargetKey, source types.NamespacedName) {
+func (s *Store) removeEntry(target types.UID, source types.NamespacedName) {
 	entries := s.byTarget[target]
 	for i := range entries {
 		if entries[i].source == source {

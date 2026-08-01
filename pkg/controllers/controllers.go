@@ -65,7 +65,6 @@ import (
 	statenodeclaimgc "sigs.k8s.io/karpenter/pkg/controllers/state/nodeclaimgc"
 	staticdeprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
 	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
-	vpacontroller "sigs.k8s.io/karpenter/pkg/controllers/vpa"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
@@ -208,7 +207,7 @@ func NewControllers(
 	}
 
 	if !o.disableVPAPrediction {
-		controllers = append(controllers, vpacontroller.NewController(kubeClient, predictionStore))
+		controllers = append(controllers, informer.NewVPAController(kubeClient, predictionStore))
 	}
 
 	return controllers
