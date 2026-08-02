@@ -203,6 +203,7 @@ func NewScheduler(
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
 		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
+		placementStrategy:       option.Resolve(opts...).placementStrategy,
 		allocator:               allocator,
 		instanceTypes:           instanceTypes,
 		cachedResourceClaims:    map[types.NamespacedName]*resourcev1.ResourceClaim{},
@@ -901,13 +902,14 @@ func (s *Scheduler) sortExistingNodes() {
 		if !s.existingNodes[i].Initialized() && s.existingNodes[j].Initialized() {
 			return false
 		}
-		if s.placementStrategy == PlacementStrategyLeastAllocated {
+		switch s.placementStrategy {
+		case PlacementStrategyLeastAllocated:
 			utilI := nodeUtilizationRatio(s.existingNodes[i])
 			utilJ := nodeUtilizationRatio(s.existingNodes[j])
 			if utilI != utilJ {
 				return utilI < utilJ
 			}
-		} else if s.placementStrategy == PlacementStrategyMostAllocated {
+		case PlacementStrategyMostAllocated:
 			utilI := nodeUtilizationRatio(s.existingNodes[i])
 			utilJ := nodeUtilizationRatio(s.existingNodes[j])
 			if utilI != utilJ {

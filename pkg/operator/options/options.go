@@ -52,8 +52,8 @@ const (
 )
 
 var (
-	validLogLevels            = []string{"", "debug", "info", "error"}
-	validPreferencePolicies   = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
+	validLogLevels           = []string{"", "debug", "info", "error"}
+	validPreferencePolicies  = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
 	validPlacementStrategies = []PlacementStrategy{PlacementStrategyMostAllocated, PlacementStrategyLeastAllocated}
 
 	Injectables = []Injectable{&Options{}}
