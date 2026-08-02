@@ -118,37 +118,9 @@ func BuildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec
 }
 
 // sanitizeVirtualPodSpec removes fields that would make a synthetic pod
-// problematic for the scheduler. We can't resolve PVC topology without a
-// real PVC, and we don't want to inherit a nodeName from the template.
+// problematic for the scheduler, such as an inherited nodeName.
 func sanitizeVirtualPodSpec(spec corev1.PodSpec) corev1.PodSpec {
 	spec = *spec.DeepCopy()
 	spec.NodeName = ""
-	// Drop PVC-backed and ephemeral volumes and their mounts. Ephemeral volumes
-	// derive a PVC name from the pod name; for virtual pods that PVC will never
-	// exist, causing topology resolution errors.
-	keepVolumes := spec.Volumes[:0]
-	droppedVolumeNames := map[string]struct{}{}
-	for _, v := range spec.Volumes {
-		if v.PersistentVolumeClaim != nil || v.Ephemeral != nil {
-			droppedVolumeNames[v.Name] = struct{}{}
-			continue
-		}
-		keepVolumes = append(keepVolumes, v)
-	}
-	spec.Volumes = keepVolumes
-	if len(droppedVolumeNames) > 0 {
-		for i := range spec.Containers {
-			spec.Containers[i].VolumeMounts = lo.Filter(spec.Containers[i].VolumeMounts, func(m corev1.VolumeMount, _ int) bool {
-				_, dropped := droppedVolumeNames[m.Name]
-				return !dropped
-			})
-		}
-		for i := range spec.InitContainers {
-			spec.InitContainers[i].VolumeMounts = lo.Filter(spec.InitContainers[i].VolumeMounts, func(m corev1.VolumeMount, _ int) bool {
-				_, dropped := droppedVolumeNames[m.Name]
-				return !dropped
-			})
-		}
-	}
 	return spec
 }
