@@ -44,9 +44,17 @@ const (
 	MinValuesPolicyBestEffort MinValuesPolicy = "BestEffort"
 )
 
+type PlacementStrategy string
+
+const (
+	PlacementStrategyMostAllocated  PlacementStrategy = "MostAllocated"
+	PlacementStrategyLeastAllocated PlacementStrategy = "LeastAllocated"
+)
+
 var (
-	validLogLevels          = []string{"", "debug", "info", "error"}
-	validPreferencePolicies = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
+	validLogLevels            = []string{"", "debug", "info", "error"}
+	validPreferencePolicies   = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
+	validPlacementStrategies = []PlacementStrategy{PlacementStrategyMostAllocated, PlacementStrategyLeastAllocated}
 
 	Injectables = []Injectable{&Options{}}
 )
@@ -88,6 +96,8 @@ type Options struct {
 	PreferencePolicy                 PreferencePolicy
 	minValuesPolicyRaw               string
 	MinValuesPolicy                  MinValuesPolicy
+	placementStrategyRaw             string
+	PlacementStrategy                PlacementStrategy
 	IgnoreDRARequests                bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
 	FeatureGates                     FeatureGates
 }
@@ -130,6 +140,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
+	fs.StringVar(&o.placementStrategyRaw, "placement-strategy", env.WithDefaultString("PLACEMENT_STRATEGY", string(PlacementStrategyMostAllocated)), "The placement strategy for scheduler node selection. Can be one of 'MostAllocated' and 'LeastAllocated'")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,CapacityBuffer=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, StaticCapacity, and CapacityBuffer.")
 }
@@ -150,6 +161,9 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	if !lo.Contains([]MinValuesPolicy{MinValuesPolicyStrict, MinValuesPolicyBestEffort}, MinValuesPolicy(o.minValuesPolicyRaw)) {
 		return fmt.Errorf("validating cli flags / env vars, invalid MIN_VALUES_POLICY %q", o.minValuesPolicyRaw)
 	}
+	if !lo.Contains(validPlacementStrategies, PlacementStrategy(o.placementStrategyRaw)) {
+		return fmt.Errorf("validating cli flags / env vars, invalid PLACEMENT_STRATEGY %q", o.placementStrategyRaw)
+	}
 	if o.CPURequests <= 0 {
 		o.CPURequests = 1000
 	}
@@ -160,6 +174,7 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	o.FeatureGates = gates
 	o.PreferencePolicy = PreferencePolicy(o.preferencePolicyRaw)
 	o.MinValuesPolicy = MinValuesPolicy(o.minValuesPolicyRaw)
+	o.PlacementStrategy = PlacementStrategy(o.placementStrategyRaw)
 	return nil
 }
 
