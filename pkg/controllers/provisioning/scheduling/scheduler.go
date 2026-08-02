@@ -90,29 +90,15 @@ const (
 	PreferencePolicyIgnore
 )
 
-type PlacementStrategy int
-
-const (
-	PlacementStrategyMostAllocated PlacementStrategy = iota
-	PlacementStrategyLeastAllocated
-)
-
 type options struct {
 	reservedOfferingMode    ReservedOfferingMode
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
 	enforceConsolidateAfter bool
-	placementStrategy       PlacementStrategy
 }
 
 type Options = option.Function[options]
-
-var WithPlacementStrategy = func(strategy PlacementStrategy) Options {
-	return func(opts *options) {
-		opts.placementStrategy = strategy
-	}
-}
 
 var DisableReservedCapacityFallback = func(opts *options) {
 	opts.reservedOfferingMode = ReservedOfferingModeStrict
@@ -264,7 +250,6 @@ type Scheduler struct {
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
 	deletingNodeNames       sets.Set[string]
-	placementStrategy       PlacementStrategy
 
 	// allocator simulates DRA device allocation for pods with ResourceClaims. It is nil when DRA support is disabled.
 	allocator *dynamicresources.Allocator
@@ -668,7 +653,6 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, p *corev1.Pod) error 
 	// If we set the existingNode to something valid, this means that we successfully scheduled to one of these nodes
 	if existingNode != nil {
 		existingNode.Add(ctx, p, s.cachedPodData[p.UID], requirements, volumes, allocationResult)
-		s.sortExistingNodes()
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to existing nodes")
@@ -860,39 +844,7 @@ func (s *Scheduler) updateRemainingResources(node *state.StateNode) {
 	}
 }
 
-func nodeUtilizationRatio(node *ExistingNode) float64 {
-	allocatable := node.Allocatable()
-	if len(allocatable) == 0 {
-		return 0.0
-	}
-	var sum float64
-	var count float64
-
-	if cpuAllocQ, ok := allocatable[corev1.ResourceCPU]; ok {
-		cpuAllocVal := cpuAllocQ.AsApproximateFloat64()
-		if cpuAllocVal > 0 {
-			podReqs := node.PodRequests()
-			cpuReqQ := podReqs[corev1.ResourceCPU]
-			sum += cpuReqQ.AsApproximateFloat64() / cpuAllocVal
-			count++
-		}
-	}
-	if memAllocQ, ok := allocatable[corev1.ResourceMemory]; ok {
-		memAllocVal := memAllocQ.AsApproximateFloat64()
-		if memAllocVal > 0 {
-			podReqs := node.PodRequests()
-			memReqQ := podReqs[corev1.ResourceMemory]
-			sum += memReqQ.AsApproximateFloat64() / memAllocVal
-			count++
-		}
-	}
-	if count == 0 {
-		return 0.0
-	}
-	return sum / count
-}
-
-// sortExistingNodes sorts existing nodes with initialized nodes first, ordered by PlacementStrategy
+// sortExistingNodes sorts existing nodes with initialized nodes first
 func (s *Scheduler) sortExistingNodes() {
 	// Order the existing nodes for scheduling with initialized nodes first
 	// This is done specifically for consolidation where we want to make sure we schedule to initialized nodes
@@ -903,19 +855,6 @@ func (s *Scheduler) sortExistingNodes() {
 		}
 		if !s.existingNodes[i].Initialized() && s.existingNodes[j].Initialized() {
 			return false
-		}
-		if s.placementStrategy == PlacementStrategyLeastAllocated {
-			utilI := nodeUtilizationRatio(s.existingNodes[i])
-			utilJ := nodeUtilizationRatio(s.existingNodes[j])
-			if utilI != utilJ {
-				return utilI < utilJ
-			}
-		} else if s.placementStrategy == PlacementStrategyMostAllocated {
-			utilI := nodeUtilizationRatio(s.existingNodes[i])
-			utilJ := nodeUtilizationRatio(s.existingNodes[j])
-			if utilI != utilJ {
-				return utilI > utilJ
-			}
 		}
 		return s.existingNodes[i].Name() < s.existingNodes[j].Name()
 	})
