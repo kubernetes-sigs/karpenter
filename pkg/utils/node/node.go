@@ -106,7 +106,7 @@ func IgnoreDuplicateNodeClaimError(err error) error {
 // GetPods grabs all pods that are currently bound to the passed node names.
 // Empty node names are skipped so callers operating on un-registered NodeClaims
 // don't accidentally match unscheduled pods via the "spec.nodeName" field selector.
-func GetPods(ctx context.Context, kubeClient client.Client, nodeNames ...string) ([]*corev1.Pod, error) {
+func GetPods(ctx context.Context, kubeClient client.Reader, nodeNames ...string) ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
 	for _, nodeName := range nodeNames {
 		if nodeName == "" {

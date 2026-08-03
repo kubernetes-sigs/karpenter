@@ -206,6 +206,56 @@ var _ = Describe("Queue", func() {
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
+		It("should untaint nodes and abandon the command when a do-not-disrupt pod lands on a candidate", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			cmd := &disruption.Command{
+				Method:            disruption.NewEmptiness(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
+
+			// The node was empty when the command was computed. A pod that blocks eviction lands on
+			// it before we delete the NodeClaim, which our cluster state hasn't caught up with.
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node1)
+
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+			// The command is walked back rather than committed: the taint is removed and the
+			// NodeClaim is left alone, so the pod runs to completion.
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			Expect(nodeClaim1.DeletionTimestamp.IsZero()).To(BeTrue())
+		})
+		It("should delete the candidate when no pod blocks eviction", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			cmd := &disruption.Command{
+				Method:            disruption.NewEmptiness(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+			ExpectNotFound(ctx, env.Client, nodeClaim1)
+		})
 		It("should fully handle a command when replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
@@ -419,7 +469,7 @@ var _ = Describe("Queue", func() {
 		Context("CalculateRetryDuration", func() {
 			DescribeTable("should calculate correct timeout based on queue length",
 				func(numCommands int, expectedDuration time.Duration) {
-					q := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+					q := disruption.NewQueue(env.Client, env.Client, recorder, cluster, env.Clock, prov)
 					q.Lock()
 					for i := range numCommands {
 						q.ProviderIDToCommand[strconv.Itoa(i)] = &disruption.Command{}
