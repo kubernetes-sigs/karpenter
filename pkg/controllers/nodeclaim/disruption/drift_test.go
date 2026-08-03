@@ -18,14 +18,17 @@ package disruption_test
 
 import (
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/imdario/mergo"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -83,6 +86,33 @@ var _ = Describe("Drift", func() {
 		Entry("should detect drift", true),
 		Entry("should ignore drift for NodeClaims not managed by this instance of Karpenter", false),
 	)
+	It("should not log marking drifted again when reconciling against a stale NodeClaim", func() {
+		// A reconcile can run against a stale informer cache after a prior reconcile
+		// already persisted the Drifted condition; it must not log the transition again.
+		cp.Drifted = "drifted"
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		var messages []string
+		logCtx := log.IntoContext(ctx, funcr.New(func(_, args string) { messages = append(messages, args) }, funcr.Options{Verbosity: 1}))
+		countMarkingLogs := func() int {
+			return lo.CountBy(messages, func(m string) bool { return strings.Contains(m, "marking drifted") })
+		}
+
+		stale := ExpectExists(ctx, env.Client, nodeClaim).DeepCopy()
+		_, err := nodeClaimDisruptionController.Reconcile(logCtx, ExpectExists(ctx, env.Client, nodeClaim))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(countMarkingLogs()).To(Equal(1))
+		marked := ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(marked.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+
+		// The stale copy predates the patch, so it's missing the condition and carries an old resourceVersion.
+		// The reconcile re-applies the condition, but its patch must fail the optimistic lock
+		// without emitting a duplicate log or writing anything to the API server.
+		_, err = nodeClaimDisruptionController.Reconcile(logCtx, stale)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(countMarkingLogs()).To(Equal(1))
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).ResourceVersion).To(Equal(marked.ResourceVersion))
+	})
 	It("should detect stale instance type drift if the instance type label doesn't exist", func() {
 		delete(nodeClaim.Labels, corev1.LabelInstanceTypeStable)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
