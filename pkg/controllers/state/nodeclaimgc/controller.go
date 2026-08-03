@@ -70,7 +70,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			return reconcile.Result{}, err
 		}
 		if c.cluster.UnlaunchedNodeClaimExists(req.Name) {
-			log.FromContext(ctx).WithValues("NodeClaim", klog.KRef("", req.Name)).Info("garbage collecting stale unlaunched nodeclaim from cluster state")
+			log.FromContext(ctx).WithValues("NodeClaim", klog.KRef("", req.Name)).V(1).Info("garbage collecting stale unlaunched nodeclaim from cluster state")
 			c.cluster.DeleteNodeClaim(req.Name)
 		}
 	}
