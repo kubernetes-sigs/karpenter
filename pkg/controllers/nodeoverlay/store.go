@@ -129,6 +129,7 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 		Name:         it.Name,
 		Requirements: it.Requirements, // Shared - never modified
 		Overhead:     it.Overhead,     // Shared - never modified
+		VolumeLimits: it.VolumeLimits, // Shared - never modified
 		Capacity:     it.Capacity,
 	}
 

@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"unique"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -44,6 +45,7 @@ type NodeClaim struct {
 	NodeClaimTemplate
 
 	Pods                 []*corev1.Pod
+	volumes              scheduling.Volumes
 	reservationManager   *ReservationManager
 	topology             *Topology
 	daemonOverheadGroups []DaemonOverheadGroup
@@ -109,6 +111,7 @@ func NewNodeClaim(
 
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
+		volumes:              scheduling.Volumes{},
 		topology:             topology,
 		daemonOverheadGroups: groupsForNodeClaim,
 		hostname:             hostname,
@@ -119,12 +122,22 @@ func NewNodeClaim(
 }
 
 // CanAdd returns whether the pod can be added to the NodeClaim
-// based on the taints/tolerations, host port compatibility,
+// based on the taints/tolerations, volume limits, host port compatibility,
 // requirements, resources, reserved capacity reservations, and topology requirements
-func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, relaxMinValues bool, allocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, err error) {
+func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, volumes scheduling.Volumes, relaxMinValues bool, allocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
 		return nil, nil, nil, nil, err
+	}
+	// Filter out instance types which can't support the pod's volumes in addition to those of pods already
+	// scheduled to this NodeClaim
+	instanceTypes := n.InstanceTypeOptions
+	if len(volumes) != 0 {
+		prospectiveVolumes := n.volumes.Union(volumes)
+		instanceTypes = filterInstanceTypesByVolumeLimits(instanceTypes, prospectiveVolumes)
+		if len(instanceTypes) == 0 {
+			return nil, nil, nil, nil, volumeLimitError(n.InstanceTypeOptions, prospectiveVolumes)
+		}
 	}
 
 	baseRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
@@ -147,7 +160,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	// volume topology constraints affect downstream topology checks (e.g., pod anti-affinity).
 	var lastErr error
 	for _, volReqs := range volumeAlternatives {
-		reqs, its, ofs, result, err := n.tryVolumeAlternative(ctx, pod, podData, baseRequirements, volReqs, relaxMinValues, allocator)
+		reqs, its, ofs, result, err := n.tryVolumeAlternative(ctx, pod, podData, instanceTypes, baseRequirements, volReqs, relaxMinValues, allocator)
 		if err != nil {
 			lastErr = err
 			continue
@@ -161,7 +174,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 // checking topology, instance types, and offerings compatibility.
 //
 //nolint:gocyclo
-func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, podData *PodData, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements, relaxMinValues bool, allocator *dynamicresources.Allocator) (scheduling.Requirements, []*cloudprovider.InstanceType, []*cloudprovider.Offering, *dynamicresources.AllocationResult, error) {
+func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, podData *PodData, instanceTypes []*cloudprovider.InstanceType, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements, relaxMinValues bool, allocator *dynamicresources.Allocator) (scheduling.Requirements, []*cloudprovider.InstanceType, []*cloudprovider.Offering, *dynamicresources.AllocationResult, error) {
 	nodeClaimRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
 
 	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
@@ -210,7 +223,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 
-	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, pod, podData.Requests, n.daemonOverheadGroups, requests, relaxMinValues)
+	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(instanceTypes, nodeClaimRequirements, pod, podData.Requests, n.daemonOverheadGroups, requests, relaxMinValues)
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
 		for key, minValues := range unsatisfiableKeys {
@@ -242,12 +255,13 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 }
 
 // Add updates the NodeClaim to schedule the pod to this NodeClaim, updating
-// the NodeClaim with new requirements, instance types, and offerings to reserve
+// the NodeClaim with new requirements, instance types, volumes, and offerings to reserve
 // based on the pod scheduling
-func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, nodeClaimRequirements scheduling.Requirements, instanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, allocator *dynamicresources.Allocator) {
+func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, nodeClaimRequirements scheduling.Requirements, instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, allocator *dynamicresources.Allocator) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	n.InstanceTypeOptions = instanceTypes
+	n.volumes.Insert(volumes)
 	// Daemon overhead is excluded here to avoid double-counting
 	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 	n.Requirements = nodeClaimRequirements
@@ -635,4 +649,37 @@ func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList
 		}
 	}
 	return false, hasOffering
+}
+
+// filterInstanceTypesByVolumeLimits returns the instance types which can support the given volumes. Instance types
+// without a declared limit for a driver are assumed to support any number of its volumes.
+func filterInstanceTypesByVolumeLimits(instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes) []*cloudprovider.InstanceType {
+	return lo.Filter(instanceTypes, func(it *cloudprovider.InstanceType, _ int) bool {
+		for driver, vols := range volumes {
+			if limit, ok := it.VolumeLimits[driver]; ok && len(vols) > limit {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// volumeLimitError returns an error indicating that no instance type option can support the given volumes,
+// attributing the failure to a specific driver when possible.
+func volumeLimitError(instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes) error {
+	for driver, vols := range volumes {
+		maxLimit, exceedsAll := -1, true
+		for _, it := range instanceTypes {
+			limit, ok := it.VolumeLimits[driver]
+			if !ok || len(vols) <= limit {
+				exceedsAll = false
+				break
+			}
+			maxLimit = max(maxLimit, limit)
+		}
+		if exceedsAll {
+			return serrors.Wrap(fmt.Errorf("would exceed volume limit for all instance type options"), "provisioner", driver, "volume-count", len(vols), "volume-limit", maxLimit)
+		}
+	}
+	return fmt.Errorf("would exceed volume limit for all instance type options")
 }

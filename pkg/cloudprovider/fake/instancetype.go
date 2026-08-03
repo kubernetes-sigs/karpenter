@@ -60,6 +60,7 @@ type InstanceTypeConfig struct {
 	ResourceSliceTemplates []*cloudprovider.ResourceSliceTemplate
 	AttributeBindings      []*cloudprovider.AttributeBinding
 	Requirements           []*scheduling.Requirement
+	VolumeLimits           map[string]int
 }
 
 func WithResources(resources corev1.ResourceList) InstanceTypeOptions {
@@ -94,6 +95,10 @@ func WithAttributeBindings(bindings ...cloudprovider.AttributeBinding) InstanceT
 
 func WithRequirements(reqs ...*scheduling.Requirement) InstanceTypeOptions {
 	return func(c *InstanceTypeConfig) { c.Requirements = reqs }
+}
+
+func WithVolumeLimits(limits map[string]int) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) { c.VolumeLimits = limits }
 }
 
 func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.InstanceType {
@@ -190,6 +195,7 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 		Requirements: requirements,
 		Offerings:    cfg.Offerings,
 		Capacity:     cfg.Resources,
+		VolumeLimits: cfg.VolumeLimits,
 		DynamicResources: cloudprovider.DynamicResources{
 			ResourceSliceTemplates: cfg.ResourceSliceTemplates,
 			AttributeBindings:      cfg.AttributeBindings,

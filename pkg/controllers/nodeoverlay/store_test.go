@@ -77,10 +77,13 @@ var _ = Describe("Store Apply Selective Copy", func() {
 			// For ResourceList (map), we can't directly compare map pointers
 			// The correctness tests below verify the actual behavior
 			_ = expectSharedCapacity
+
+			Expect(result.VolumeLimits).To(Equal(instanceType.VolumeLimits), "expected VolumeLimits to be carried over")
 		},
 		Entry("no overlays - everything shared",
 			"no overlays - everything shared",
 			fake.NewInstanceType("m5.large",
+				fake.WithVolumeLimits(map[string]int{"fake.csi.provider": 10}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Requirements: scheduling.NewRequirements(
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
