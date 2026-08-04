@@ -118,6 +118,13 @@ spec:
             - name: MIN_VALUES_POLICY
               value: "{{ . }}"
           {{- end }}
+          {{- with .Values.settings.schedulerConfig }}
+            - name: SCHEDULER_CONFIG
+              # This is a multi-line YAML document, so it's emitted as a block scalar. The value is already a string, so
+              # it's indented directly rather than passed through toYaml, which would emit a nested block indicator.
+              value: |
+                {{- nindent 16 . }}
+          {{- end }}
           {{- with .Values.controller.env }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
