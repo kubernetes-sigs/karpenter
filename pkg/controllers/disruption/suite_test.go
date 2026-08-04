@@ -105,7 +105,7 @@ var _ = BeforeSuite(func() {
 	recorder = test.NewEventRecorder()
 	draController = deviceallocation.NewController(env.Client)
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController)
-	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -130,7 +130,7 @@ var _ = BeforeEach(func() {
 	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	env.Clock.SetTime(time.Now())
 	cluster.Reset()
-	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, env.Client))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -473,7 +473,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		defer hangCreateClient.Stop()
 
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(hangCreateClient))
-		q := disruption.NewQueue(hangCreateClient, recorder, cluster, env.Clock, p)
+		q := disruption.NewQueue(hangCreateClient, recorder, cluster, env.Clock, p, env.Client)
 		dc := disruption.NewController(env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q, clusterCost)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -2334,6 +2334,29 @@ func (f *failNodeTaintClient) Get(ctx context.Context, key client.ObjectKey, obj
 		return fmt.Errorf("simulated node taint failure")
 	}
 	return f.Client.Get(ctx, key, obj, opts...)
+}
+
+type failNodeClaimGetClient struct {
+	client.Client
+	nodeClaimName string
+}
+
+func (f *failNodeClaimGetClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*v1.NodeClaim); ok && key.Name == f.nodeClaimName {
+		return fmt.Errorf("simulated nodeclaim get failure")
+	}
+	return f.Client.Get(ctx, key, obj, opts...)
+}
+
+type failNodeClaimReader struct {
+	client.Reader
+}
+
+func (f *failNodeClaimReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*v1.NodeClaim); ok {
+		return fmt.Errorf("simulated uncached nodeclaim get failure")
+	}
+	return f.Reader.Get(ctx, key, obj, opts...)
 }
 
 type conflictNodeClaimDeleteClient struct {

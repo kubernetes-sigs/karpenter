@@ -128,6 +128,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 
 	lastSavedCommand := Command{}
 	var lastSavedPerPool map[string]ScoreResult
+	multiReplacementFallback := Command{}
+	var multiReplacementFallbackPerPool map[string]ScoreResult
 	// Defer rejection events until search completes to avoid log2(N) * pools
 	// duplicate emissions.
 	var lastRejectedCmd Command
@@ -149,7 +151,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		}
 		if len(cmd.Replacements) == maxMultiNodeMultiReplacements {
 			if approved, perPool := m.evaluator.ApproveCommand(ctx, cmd); approved {
-				return cmd, perPool, nil
+				multiReplacementFallback = cmd
+				multiReplacementFallbackPerPool = perPool
 			} else {
 				lastRejectedCmd = cmd
 				lastRejectedPerPool = perPool
@@ -168,6 +171,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			if errors.Is(err, context.DeadlineExceeded) {
 				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
 				if lastSavedCommand.Candidates == nil {
+					if multiReplacementFallback.Candidates != nil {
+						return multiReplacementFallback, multiReplacementFallbackPerPool, nil
+					}
 					log.FromContext(ctx).V(1).Info("failed to find a multi-node consolidation after timeout", "last_batch_size", (min+max)/2)
 					return Command{}, nil, nil
 				}
@@ -180,14 +186,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		validDecision := cmd.Decision() == DeleteDecision
-		if cmd.Decision() == ReplaceDecision {
-			if len(cmd.Replacements) == 1 {
-				cmd.Replacements[0], err = filterOutSameInstanceType(cmd.Replacements[0], candidatesToConsolidate)
-			}
-			// Multi-replacement commands are already bounded and price-filtered by computeConsolidation.
-			if err == nil && len(cmd.Replacements) > 0 && lo.EveryBy(cmd.Replacements, func(replacement *Replacement) bool {
-				return replacement != nil && len(replacement.InstanceTypeOptions) > 0
-			}) {
+		if cmd.Decision() == ReplaceDecision && len(cmd.Replacements) == 1 {
+			cmd.Replacements[0], err = filterOutSameInstanceType(cmd.Replacements[0], candidatesToConsolidate)
+			if err == nil && cmd.Replacements[0] != nil && len(cmd.Replacements[0].InstanceTypeOptions) > 0 {
 				validDecision = true
 			}
 		}
@@ -209,13 +210,19 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			max = mid - 1
 		}
 	}
-	// If binary search found no valid command and balanced scoring rejected at
+	if lastSavedCommand.Candidates != nil {
+		return lastSavedCommand, lastSavedPerPool, nil
+	}
+	if multiReplacementFallback.Candidates != nil {
+		return multiReplacementFallback, multiReplacementFallbackPerPool, nil
+	}
+	// If neither search found a valid command and balanced scoring rejected at
 	// least one iteration, emit rejection metrics once using the final (smallest
 	// failing window) results rather than at every iteration.
-	if lastSavedCommand.Candidates == nil && lastRejectedPerPool != nil {
+	if lastRejectedPerPool != nil {
 		m.evaluator.EmitMultiNodeEvents(ctx, lastRejectedCmd, lastRejectedPerPool, false)
 	}
-	return lastSavedCommand, lastSavedPerPool, nil
+	return Command{}, nil, nil
 }
 
 // filterOutSameInstanceType filters out instance types that are more expensive than the cheapest instance type that is being

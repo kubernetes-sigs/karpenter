@@ -87,8 +87,6 @@ var _ = Describe("Queue", func() {
 				},
 			},
 		)
-		node1.Spec.Taints = append(node1.Spec.Taints, v1.DisruptedNoScheduleTaint)
-		node2.Spec.Taints = append(node2.Spec.Taints, v1.DisruptedNoScheduleTaint)
 	})
 	// multiReplacementCommand builds the alpha bounded multi-node multi-replacement command shape: a multi-node
 	// consolidation command with exactly two replacements.
@@ -531,6 +529,31 @@ var _ = Describe("Queue", func() {
 			ExpectExists(ctx, env.Client, nodeClaim1)
 			ExpectExists(ctx, env.Client, node1)
 		})
+		It("should use the uncached reader for the final replacement barrier", func() {
+			enableMultiReplacement()
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			uncachedFailureQueue := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, &failNodeClaimReader{Reader: env.Client})
+			cmd := multiReplacementCommand(uncachedFailureQueue, stateNode)
+			Expect(uncachedFailureQueue.StartCommand(ctx, cmd)).To(Succeed())
+
+			replacementNodeClaims := make([]*v1.NodeClaim, len(cmd.Replacements))
+			replacementNodes := make([]*corev1.Node, len(cmd.Replacements))
+			for i, replacement := range cmd.Replacements {
+				replacementNodeClaims[i] = &v1.NodeClaim{}
+				Expect(env.Client.Get(ctx, types.NamespacedName{Name: replacement.Name}, replacementNodeClaims[i])).To(Succeed())
+				replacementNodeClaims[i], replacementNodes[i] = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaims[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				replacementNodes, replacementNodeClaims)
+
+			ExpectObjectReconciled(ctx, env.Client, uncachedFailureQueue, stateNode.NodeClaim)
+			Expect(uncachedFailureQueue.IsEmpty()).To(BeFalse())
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			ExpectExists(ctx, env.Client, node1)
+		})
 		It("should clean up a replacement that was updated after creation", func() {
 			enableMultiReplacement()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
@@ -673,7 +696,7 @@ var _ = Describe("Queue", func() {
 		Context("CalculateRetryDuration", func() {
 			DescribeTable("should calculate correct timeout based on queue length",
 				func(numCommands int, expectedDuration time.Duration) {
-					q := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+					q := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, env.Client)
 					q.Lock()
 					for i := range numCommands {
 						q.ProviderIDToCommand[strconv.Itoa(i)] = &disruption.Command{}
@@ -703,7 +726,7 @@ var _ = Describe("Queue", func() {
 
 			failingClient := &failNthNodeClaimCreateClient{Client: env.Client, failAt: 2}
 			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
-			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner)
+			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, env.Client)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
 			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
@@ -748,7 +771,7 @@ var _ = Describe("Queue", func() {
 
 			failingClient := &conflictNodeClaimDeleteClient{Client: &failNthNodeClaimCreateClient{Client: env.Client, failAt: 2}}
 			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
-			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner)
+			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, env.Client)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
 			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
@@ -780,10 +803,45 @@ var _ = Describe("Queue", func() {
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
+		It("should use the uncached reader when cleaning up a partial replacement launch", func() {
+			enableMultiReplacement()
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			failingClient := &failNthNodeClaimCreateClient{Client: env.Client, failAt: 2}
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
+			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, &failNodeClaimReader{Reader: env.Client})
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			nct2 := scheduling.NewNodeClaimTemplate(nodePool)
+			nct2.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method: disruption.NewMultiNodeConsolidation(
+					disruption.MakeConsolidation(env.Clock, cluster, failingClient, failingProvisioner, cloudProvider, recorder, failingQueue),
+				),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements: []*disruption.Replacement{
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}},
+					{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct2}},
+				},
+			}
+
+			err := failingQueue.StartCommand(ctx, cmd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("getting unused replacement"))
+			successfulNames := lo.Compact(lo.Map(cmd.Replacements, func(replacement *disruption.Replacement, _ int) string {
+				return replacement.Name
+			}))
+			Expect(successfulNames).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: successfulNames[0]}})
+		})
 		It("should only roll back candidates that it tainted when marking partially fails", func() {
-			node1.Spec.Taints = lo.Reject(node1.Spec.Taints, func(taint corev1.Taint, _ int) bool {
-				return taint.MatchTaint(&v1.DisruptedNoScheduleTaint)
-			})
+			node2.Spec.Taints = append(node2.Spec.Taints, v1.DisruptedNoScheduleTaint)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1, nodeClaim2, node2)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
 				[]*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
@@ -794,7 +852,7 @@ var _ = Describe("Queue", func() {
 			// fails, so this command must not clear that state while rolling back.
 			failingClient := &failNodeTaintClient{Client: env.Client, nodeName: node2.Name}
 			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
-			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner)
+			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, env.Client)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
 			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
@@ -821,6 +879,57 @@ var _ = Describe("Queue", func() {
 			// The candidate it never tainted keeps the state it already had.
 			node2 = ExpectNodeExists(ctx, env.Client, node2.Name)
 			Expect(node2.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
+		})
+		It("should preserve a pre-existing disruption taint when condition marking fails", func() {
+			node1.Spec.Taints = append(node1.Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			failingClient := &failNodeClaimGetClient{Client: env.Client, nodeClaimName: nodeClaim1.Name}
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
+			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, env.Client)
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, failingProvisioner, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements:      []*disruption.Replacement{{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}}},
+			}
+
+			Expect(failingQueue.StartCommand(ctx, cmd)).ToNot(Succeed())
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
+		})
+		It("should preserve a pre-existing disruption taint when a queued command times out", func() {
+			node1.Spec.Taints = append(node1.Spec.Taints, v1.DisruptedNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements:      []*disruption.Replacement{{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}}},
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(Succeed())
+
+			env.Clock.Step(11 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+			Expect(queue.IsEmpty()).To(BeTrue())
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
+			Expect(ExpectExists(ctx, env.Client, nodeClaim1).StatusConditions().Get(v1.ConditionTypeDisruptionReason)).To(BeNil())
 		})
 	})
 })

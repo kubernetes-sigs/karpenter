@@ -38,6 +38,10 @@ type multiReplacementFixture struct {
 }
 
 func setupThreeToTwoMultiReplacement(nodePool *v1.NodePool, replacementPrice float64) multiReplacementFixture {
+	return setupThreeToTwoMultiReplacementWithPodShape(nodePool, replacementPrice, 2, "30")
+}
+
+func setupThreeToTwoMultiReplacementWithPodShape(nodePool *v1.NodePool, replacementPrice float64, podsPerNode int, podCPU string) multiReplacementFixture {
 	const zone = "test-zone-1"
 	offering := func(price float64) cloudprovider.Offering {
 		return cloudprovider.Offering{
@@ -102,7 +106,7 @@ func setupThreeToTwoMultiReplacement(nodePool *v1.NodePool, replacementPrice flo
 
 	replicaSet := test.ReplicaSet()
 	ExpectApplied(ctx, env.Client, nodePool, replicaSet)
-	pods := test.Pods(6, test.PodOptions{
+	pods := test.Pods(3*podsPerNode, test.PodOptions{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{"app": "test"},
 			OwnerReferences: []metav1.OwnerReference{{
@@ -115,7 +119,7 @@ func setupThreeToTwoMultiReplacement(nodePool *v1.NodePool, replacementPrice flo
 			}},
 		},
 		ResourceRequirements: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("30")},
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(podCPU)},
 		},
 	})
 
@@ -125,7 +129,7 @@ func setupThreeToTwoMultiReplacement(nodePool *v1.NodePool, replacementPrice flo
 	objects = append(objects, lo.Map(pods, func(pod *corev1.Pod, _ int) client.Object { return pod })...)
 	ExpectApplied(ctx, env.Client, objects...)
 	for i, pod := range pods {
-		ExpectManualBinding(ctx, env.Client, pod, nodes[i/2])
+		ExpectManualBinding(ctx, env.Client, pod, nodes[i/podsPerNode])
 	}
 	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	return multiReplacementFixture{nodeClaims: nodeClaims, nodes: nodes}

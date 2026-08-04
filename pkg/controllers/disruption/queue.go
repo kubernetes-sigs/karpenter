@@ -100,6 +100,7 @@ type Queue struct {
 	ProviderIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
 	source              chan event.TypedGenericEvent[*v1.NodeClaim]
 	kubeClient          client.Client
+	apiReader           client.Reader
 	recorder            events.Recorder
 	cluster             *state.Cluster
 	clock               clock.Clock
@@ -108,7 +109,7 @@ type Queue struct {
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
 func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner,
+	provisioner *provisioning.Provisioner, apiReader client.Reader,
 ) *Queue {
 	queue := &Queue{
 		// nolint:staticcheck
@@ -116,6 +117,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		source:              make(chan event.TypedGenericEvent[*v1.NodeClaim], 10000),
 		ProviderIDToCommand: map[string]*Command{},
 		kubeClient:          kubeClient,
+		apiReader:           apiReader,
 		recorder:            recorder,
 		cluster:             cluster,
 		clock:               clock,
@@ -170,7 +172,7 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.Reason())),
 			ConsolidationTypeLabel: string(cmd.Decision()),
 		})
-		multiErr := multierr.Combine(err, q.unmarkCandidates(ctx, cmd.Candidates), q.cleanupUnusedReplacements(ctx, cmd))
+		multiErr := multierr.Combine(err, q.rollbackCandidates(ctx, cmd.Candidates, cmd.taintedCandidates), q.cleanupUnusedReplacements(ctx, cmd))
 		// Log the error
 		log.FromContext(ctx).Error(multiErr, "failed terminating nodes while executing a disruption command")
 	} else {
@@ -270,12 +272,20 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 	errs := make([]error, len(cmd.Candidates))
 	tainted := make([]bool, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
+		alreadyTainted := false
+		if cmd.Candidates[i].Node != nil {
+			node := &corev1.Node{}
+			if err := q.apiReader.Get(ctx, client.ObjectKey{Name: cmd.Candidates[i].Node.Name}, node); err != nil {
+				errs[i] = fmt.Errorf("getting node before tainting, %w", err)
+				return
+			}
+			alreadyTainted = lo.Contains(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
+		}
 		if err := state.RequireNoScheduleTaint(ctx, q.kubeClient, true, cmd.Candidates[i].StateNode); err != nil {
 			errs[i] = serrors.Wrap(fmt.Errorf("tainting nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
 			return
 		}
-		// The disruption taint is applied, so this command is responsible for removing it if a later step fails.
-		tainted[i] = true
+		tainted[i] = !alreadyTainted
 		// refresh nodeclaim before updating status
 		nodeClaim := &v1.NodeClaim{}
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
@@ -327,17 +337,18 @@ func (q *Queue) createReplacementNodeClaims(ctx context.Context, cmd *Command) e
 	return nil
 }
 
-func (q *Queue) unmarkCandidates(ctx context.Context, candidates []*Candidate) error {
-	stateNodes := lo.Map(candidates, func(candidate *Candidate, _ int) *state.StateNode { return candidate.StateNode })
-	q.cluster.UnmarkForDeletion(lo.Map(candidates, func(candidate *Candidate, _ int) string { return candidate.ProviderID() })...)
-	for _, candidate := range candidates {
+func (q *Queue) rollbackCandidates(ctx context.Context, markedCandidates, taintedCandidates []*Candidate) error {
+	q.cluster.UnmarkForDeletion(lo.Map(markedCandidates, func(candidate *Candidate, _ int) string { return candidate.ProviderID() })...)
+	for _, candidate := range markedCandidates {
 		if candidate.OwnedByStaticNodePool() {
 			q.cluster.NodePoolState.MarkNodeClaimActive(candidate.NodePool.Name, candidate.NodeClaim.Name)
 		}
 	}
 	return multierr.Combine(
-		state.RequireNoScheduleTaint(ctx, q.kubeClient, false, stateNodes...),
-		state.ClearNodeClaimsCondition(ctx, q.kubeClient, q.clock, v1.ConditionTypeDisruptionReason, stateNodes...),
+		state.RequireNoScheduleTaint(ctx, q.kubeClient, false,
+			lo.Map(taintedCandidates, func(candidate *Candidate, _ int) *state.StateNode { return candidate.StateNode })...),
+		state.ClearNodeClaimsCondition(ctx, q.kubeClient, q.clock, v1.ConditionTypeDisruptionReason,
+			lo.Map(markedCandidates, func(candidate *Candidate, _ int) *state.StateNode { return candidate.StateNode })...),
 	)
 }
 
@@ -357,7 +368,7 @@ func (q *Queue) cleanupUnusedReplacements(ctx context.Context, cmd *Command) err
 		// resourceVersion goes stale as soon as the NodeClaim's launch status is written, which made the delete
 		// fail with a conflict that was then silently ignored.
 		nodeClaim := &v1.NodeClaim{}
-		if err := q.kubeClient.Get(ctx, types.NamespacedName{Name: replacement.Name}, nodeClaim); err != nil {
+		if err := q.apiReader.Get(ctx, types.NamespacedName{Name: replacement.Name}, nodeClaim); err != nil {
 			if errors.IsNotFound(err) {
 				continue
 			}
@@ -403,7 +414,7 @@ func replacementRetentionReason(nodeClaim *v1.NodeClaim) string {
 func (q *Queue) ensureReplacementsReady(ctx context.Context, cmd *Command) error {
 	for i := range cmd.Replacements {
 		nodeClaim := &v1.NodeClaim{}
-		if err := q.kubeClient.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].Name}, nodeClaim); err != nil {
+		if err := q.apiReader.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].Name}, nodeClaim); err != nil {
 			if errors.IsNotFound(err) && !q.cluster.NodeClaimExists(cmd.Replacements[i].Name) {
 				return NewUnrecoverableError(fmt.Errorf("initialized replacement was deleted, %w", err))
 			}
@@ -428,7 +439,7 @@ func (q *Queue) ensureReplacementsReady(ctx context.Context, cmd *Command) error
 			return serrors.Wrap(fmt.Errorf("verifying replacement node readiness, node state is not available"), "NodeClaim", klog.KObj(nodeClaim))
 		}
 		node := &corev1.Node{}
-		if err := q.kubeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		if err := q.apiReader.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 			return fmt.Errorf("verifying replacement node readiness, %w", err)
 		}
 		if !node.DeletionTimestamp.IsZero() {
@@ -473,8 +484,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	// If we get a failure marking some nodes as disrupted, if we are launching replacements, we shouldn't continue
 	// with disrupting the candidates. If it's just a delete operation, we can proceed
 	if markDisruptedErr != nil && (len(cmd.Replacements) > 0 || len(markedCandidates) == 0) {
-		// Only roll back candidates that this command tainted. Candidates it never touched are left alone.
-		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", multierr.Combine(markDisruptedErr, q.unmarkCandidates(ctx, taintedCandidates))), "command-id", cmd.ID)
+		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", multierr.Combine(markDisruptedErr, q.rollbackCandidates(ctx, markedCandidates, taintedCandidates))), "command-id", cmd.ID)
 	}
 
 	// Update the command to only consider the successfully MarkDisrupted candidates
@@ -483,15 +493,18 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	if partial := lo.Reject(taintedCandidates, func(candidate *Candidate, _ int) bool {
 		return lo.Contains(markedCandidates, candidate)
 	}); len(partial) > 0 {
-		if err := q.unmarkCandidates(ctx, partial); err != nil {
+		if err := q.rollbackCandidates(ctx, nil, partial); err != nil {
 			log.FromContext(ctx).Error(err, "failed rolling back partially marked candidates")
 		}
 	}
+	cmd.taintedCandidates = lo.Filter(taintedCandidates, func(candidate *Candidate, _ int) bool {
+		return lo.Contains(markedCandidates, candidate)
+	})
 
 	if err := q.createReplacementNodeClaims(ctx, cmd); err != nil {
 		// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 		// we don't want to disrupt workloads with no way to provision new nodes for them.
-		cleanupErr := multierr.Combine(q.unmarkCandidates(ctx, cmd.Candidates), q.cleanupUnusedReplacements(ctx, cmd))
+		cleanupErr := multierr.Combine(q.rollbackCandidates(ctx, cmd.Candidates, cmd.taintedCandidates), q.cleanupUnusedReplacements(ctx, cmd))
 		return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", multierr.Combine(err, cleanupErr)), "command-id", cmd.ID)
 	}
 	// IMPORTANT

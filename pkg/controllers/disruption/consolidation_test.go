@@ -3103,7 +3103,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 			}
 			// Reset the disruption controller so consolidation methods are not cached as consolidated
-			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, env.Client))
 			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 				disruption.WithMethods(NewMethodsWithNopValidator()...))
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -4030,6 +4030,16 @@ var _ = Describe("Consolidation", func() {
 			)
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("prefers a legacy 2-to-1 consolidation over a 3-to-2 fallback", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{MultiNodeMultiReplacement: new(true)}}))
+			setupThreeToTwoMultiReplacementWithPodShape(nodePool, 8, 1, "45")
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates).To(HaveLen(2))
+			Expect(cmds[0].Replacements).To(HaveLen(1))
 		})
 		It("keeps legacy behavior when multi-node multi-replacement is disabled", func() {
 			setupThreeToTwoMultiReplacement(nodePool, 8)

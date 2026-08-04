@@ -98,7 +98,7 @@ func NewControllers(
 	deviceAllocationController := deviceallocation.NewController(kubeClient)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
-	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
+	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p, mgr.GetAPIReader())
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
 	controllers := []controller.Controller{
