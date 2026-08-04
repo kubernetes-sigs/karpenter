@@ -57,7 +57,7 @@ import (
 )
 
 const (
-	minReconciles = 1000
+	minReconciles = 100
 	maxReconciles = 5000
 )
 
