@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -725,7 +726,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			failingClient := &failNthNodeClaimCreateClient{Client: env.Client, failAt: 2}
-			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient), virtualpods.NewVirtualPodCache(failingClient))
 			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, env.Client)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -770,7 +771,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			failingClient := &conflictNodeClaimDeleteClient{Client: &failNthNodeClaimCreateClient{Client: env.Client, failAt: 2}}
-			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient), virtualpods.NewVirtualPodCache(failingClient))
 			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, env.Client)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -810,7 +811,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			failingClient := &failNthNodeClaimCreateClient{Client: env.Client, failAt: 2}
-			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient), virtualpods.NewVirtualPodCache(failingClient))
 			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, &failNodeClaimReader{Reader: env.Client})
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -851,7 +852,7 @@ var _ = Describe("Queue", func() {
 			// node2 is already tainted and carries a disruption condition owned by something else. Tainting it
 			// fails, so this command must not clear that state while rolling back.
 			failingClient := &failNodeTaintClient{Client: env.Client, nodeName: node2.Name}
-			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient), virtualpods.NewVirtualPodCache(failingClient))
 			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, env.Client)
 
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
@@ -888,7 +889,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			failingClient := &failNodeClaimGetClient{Client: env.Client, nodeClaimName: nodeClaim1.Name}
-			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient))
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(failingClient), virtualpods.NewVirtualPodCache(failingClient))
 			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner, env.Client)
 			nct := scheduling.NewNodeClaimTemplate(nodePool)
 			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)

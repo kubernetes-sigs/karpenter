@@ -110,9 +110,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			"provider-id", nodeClaims[i].Status.ProviderID,
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
 		labels := map[string]string{
-			metrics.ReasonLabel:       "garbage_collected",
-			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1.CapacityTypeLabelKey],
+			metrics.ReasonLabel:              "garbage_collected",
+			metrics.NodePoolLabel:            nodeClaims[i].Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel:        nodeClaims[i].Labels[v1.CapacityTypeLabelKey],
+			metrics.ConsolidationPolicyLabel: "",
+			metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaims[i]),
 		}
 		metrics.NodeClaimsDisruptedTotal.Inc(labels)
 		// GC runs when the cloudprovider node is gone or NotReady; pod records may

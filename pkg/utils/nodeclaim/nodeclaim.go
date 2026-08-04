@@ -35,12 +35,25 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
 	return lo.ContainsBy(cp.GetSupportedNodeClasses(), func(nodeClass status.Object) bool {
 		return object.GVK(nodeClass).GroupKind() == nodeClaim.Spec.NodeClassRef.GroupKind()
 	})
+}
+
+// DisruptionTerminationMode returns the termination_mode metric label value for a
+// disrupted NodeClaim, derived from its terminationGracePeriod.
+func DisruptionTerminationMode(nodeClaim *v1.NodeClaim) string {
+	if nodeClaim == nil || nodeClaim.Spec.TerminationGracePeriod == nil {
+		return metrics.TerminationModeGraceful
+	}
+	if nodeClaim.Spec.TerminationGracePeriod.Duration <= 0 {
+		return metrics.TerminationModeForceful
+	}
+	return metrics.TerminationModeEventual
 }
 
 // IsManagedPredicateFuncs is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.

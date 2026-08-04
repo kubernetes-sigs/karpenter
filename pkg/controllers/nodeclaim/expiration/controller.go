@@ -85,9 +85,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
 	labels := map[string]string{
-		metrics.ReasonLabel:       strings.ToLower(metrics.ExpiredReason),
-		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+		metrics.ReasonLabel:              strings.ToLower(metrics.ExpiredReason),
+		metrics.NodePoolLabel:            nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel:        nodeClaim.Labels[v1.CapacityTypeLabelKey],
+		metrics.ConsolidationPolicyLabel: "",
+		metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 	}
 	metrics.NodeClaimsDisruptedTotal.Inc(labels)
 	// Pods that haven't started draining yet still appear bound to the node, so the

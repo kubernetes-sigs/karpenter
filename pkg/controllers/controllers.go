@@ -29,6 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	corev1 "k8s.io/api/core/v1"
 
 	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
@@ -60,6 +62,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	statenodeclaimgc "sigs.k8s.io/karpenter/pkg/controllers/state/nodeclaimgc"
 	staticdeprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
 	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -96,7 +99,8 @@ func NewControllers(
 ) []controller.Controller {
 	o := option.Resolve(opts...)
 	deviceAllocationController := deviceallocation.NewController(kubeClient)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController)
+	virtualPodCache := virtualpods.NewVirtualPodCache(kubeClient)
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p, mgr.GetAPIReader())
 	npState := nodepoolhealth.NewState()
@@ -114,6 +118,7 @@ func NewControllers(
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
+		statenodeclaimgc.NewController(kubeClient, cluster),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		nodepoolreadiness.NewController(clock, kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(clock, kubeClient, cloudProvider, npState),
@@ -164,7 +169,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
-		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController))
+		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))
 		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock, recorder))
 	}
 
@@ -173,7 +178,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
-		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p))
+		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p, virtualPodCache))
 		if !options.FromContext(ctx).DisableClusterStateObservability {
 			// Emit the standard operator_status_condition_* metrics for CapacityBuffer.
 			// A GenericObjectController reads status.conditions reflectively, so the
