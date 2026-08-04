@@ -61,6 +61,18 @@ type DefaultTopologySpreadInjector struct {
 	// ownerSelectorByUID caches the resolved selector of a pod's controller, keyed by the controller's UID. A
 	// controller that couldn't be resolved caches a nil selector so it isn't re-fetched.
 	ownerSelectorByUID map[types.UID]*metav1.LabelSelector
+	// selectorByPodShape caches the fully deduced selector for pods that share the same deduction inputs, so a
+	// workload's pods resolve it once rather than once each. A pod for which no selector could be deduced caches nil.
+	selectorByPodShape map[selectorCacheKey]*metav1.LabelSelector
+}
+
+// selectorCacheKey identifies pods that must deduce the same default selector: the deduction reads only the pod's
+// namespace, its controller, and its own labels.
+type selectorCacheKey struct {
+	namespace string
+	ownerUID  types.UID
+	// labels is the pod's label set in apimachinery's canonical sorted k=v form, so it's comparable as a map key.
+	labels string
 }
 
 func NewDefaultTopologySpreadInjector(kubeClient client.Client) *DefaultTopologySpreadInjector {
@@ -68,6 +80,7 @@ func NewDefaultTopologySpreadInjector(kubeClient client.Client) *DefaultTopology
 		kubeClient:          kubeClient,
 		servicesByNamespace: map[string][]corev1.Service{},
 		ownerSelectorByUID:  map[types.UID]*metav1.LabelSelector{},
+		selectorByPodShape:  map[selectorCacheKey]*metav1.LabelSelector{},
 	}
 }
 
@@ -91,7 +104,7 @@ func (d *DefaultTopologySpreadInjector) Inject(ctx context.Context, pods []*core
 		if len(p.Spec.TopologySpreadConstraints) != 0 {
 			continue
 		}
-		selector := d.defaultSelector(ctx, p)
+		selector := d.cachedDefaultSelector(ctx, p)
 		if selector == nil {
 			continue
 		}
@@ -104,6 +117,28 @@ func (d *DefaultTopologySpreadInjector) Inject(ctx context.Context, pods []*core
 		}
 		p.Spec.TopologySpreadConstraints = defaults
 	}
+}
+
+// cachedDefaultSelector returns the deduced selector for the pod, reusing a previously computed one when another pod
+// shares the same (namespace, controller UID, labels) inputs.
+//
+// Every pod of a workload deduces an identical selector, since the inputs are its namespace's Services, its
+// controller's selector, and its own labels - and the pods of a ReplicaSet share all three. Recomputing per pod means
+// re-matching every Service in the namespace against the pod's labels, which is the O(pods x services-per-namespace)
+// term in this pass. Keying on the pod's labels (not just its owner) keeps the result exact: pods of the same owner
+// with different labels may match different Services, and a pod with no controller still caches by its labels alone.
+func (d *DefaultTopologySpreadInjector) cachedDefaultSelector(ctx context.Context, p *corev1.Pod) *metav1.LabelSelector {
+	var ownerUID types.UID
+	if owner := metav1.GetControllerOfNoCopy(p); owner != nil {
+		ownerUID = owner.UID
+	}
+	key := selectorCacheKey{namespace: p.Namespace, ownerUID: ownerUID, labels: labels.Set(p.Labels).String()}
+	if cached, ok := d.selectorByPodShape[key]; ok {
+		return cached
+	}
+	selector := d.defaultSelector(ctx, p)
+	d.selectorByPodShape[key] = selector
+	return selector
 }
 
 // defaultSelector deduces the label selector kube-scheduler would use for the pod's default topology spread

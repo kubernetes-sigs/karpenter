@@ -240,6 +240,60 @@ var _ = Describe("DefaultTopologySpreadInjector", func() {
 		})
 	})
 
+	Context("selector caching", func() {
+		// The injector caches the deduced selector across pods that share its inputs (namespace, controller, labels).
+		// These pin the boundaries of that cache: pods differing in any input must not share a result.
+		It("should not share a selector between pods of the same owner with different labels", func() {
+			// Same ReplicaSet, but only one pod carries the label the service selects, so they must deduce
+			// different selectors despite sharing a controller.
+			replicaSet := test.ReplicaSet(test.ReplicaSetOptions{Selector: map[string]string{"app": "web"}})
+			ExpectApplied(ctx, env.Client, replicaSet,
+				test.Service(test.ServiceOptions{Selector: map[string]string{"tier": "frontend"}}))
+			owner := controllerRef("apps/v1", "ReplicaSet", replicaSet.Name, replicaSet.UID)
+
+			frontend := ownedPod(map[string]string{"app": "web", "tier": "frontend"}, owner)
+			plain := ownedPod(map[string]string{"app": "web"}, owner)
+			// Inject both in a single pass, so they share one injector and therefore one cache.
+			scheduling.NewDefaultTopologySpreadInjector(env.Client).Inject(ctx, []*corev1.Pod{frontend, plain})
+
+			Expect(frontend.Spec.TopologySpreadConstraints[0].LabelSelector.MatchLabels).To(Equal(map[string]string{"tier": "frontend"}))
+			Expect(plain.Spec.TopologySpreadConstraints[0].LabelSelector.MatchLabels).To(BeEmpty())
+		})
+		It("should not share a selector between identically-labeled pods in different namespaces", func() {
+			// Same labels and no controller, but the service exists in only one namespace.
+			namespace := test.Namespace()
+			ExpectApplied(ctx, env.Client, namespace,
+				test.Service(test.ServiceOptions{Selector: map[string]string{"app": "web"}}))
+
+			selected := ownedPod(map[string]string{"app": "web"})
+			other := ownedPod(map[string]string{"app": "web"})
+			other.Namespace = namespace.Name
+			scheduling.NewDefaultTopologySpreadInjector(env.Client).Inject(ctx, []*corev1.Pod{selected, other})
+
+			Expect(selected.Spec.TopologySpreadConstraints).To(HaveLen(1))
+			Expect(other.Spec.TopologySpreadConstraints).To(BeEmpty())
+		})
+		It("should give every pod its own copy of the injected constraints", func() {
+			// A shared cached selector must not become a shared slice or selector object, since per-pod preference
+			// relaxation mutates the constraints in place.
+			replicaSet := test.ReplicaSet(test.ReplicaSetOptions{Selector: map[string]string{"app": "web"}})
+			ExpectApplied(ctx, env.Client, replicaSet)
+			owner := controllerRef("apps/v1", "ReplicaSet", replicaSet.Name, replicaSet.UID)
+
+			first := ownedPod(map[string]string{"app": "web"}, owner)
+			second := ownedPod(map[string]string{"app": "web"}, owner)
+			scheduling.NewDefaultTopologySpreadInjector(env.Client).Inject(ctx, []*corev1.Pod{first, second})
+
+			Expect(first.Spec.TopologySpreadConstraints).To(HaveLen(1))
+			Expect(second.Spec.TopologySpreadConstraints).To(HaveLen(1))
+			// Distinct backing arrays, so truncating one pod's constraints can't affect the other.
+			Expect(&first.Spec.TopologySpreadConstraints[0]).ToNot(BeIdenticalTo(&second.Spec.TopologySpreadConstraints[0]))
+			// Distinct selector objects, so mutating one pod's selector can't affect the other.
+			Expect(first.Spec.TopologySpreadConstraints[0].LabelSelector).ToNot(BeIdenticalTo(second.Spec.TopologySpreadConstraints[0].LabelSelector))
+			Expect(first.Spec.TopologySpreadConstraints[0].LabelSelector).To(Equal(second.Spec.TopologySpreadConstraints[0].LabelSelector))
+		})
+	})
+
 	Context("injection", func() {
 
 		It("should leave a pod that declares its own constraints untouched", func() {
