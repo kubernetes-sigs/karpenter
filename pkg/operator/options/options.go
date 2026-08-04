@@ -254,15 +254,15 @@ func ParseSchedulerConfiguration(raw string) (*SchedulerConfiguration, error) {
 	if err := yaml.UnmarshalStrict([]byte(raw), config); err != nil {
 		return nil, fmt.Errorf("decoding scheduler config, %w", err)
 	}
-	if err := config.validate(); err != nil {
+	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 	return config, nil
 }
 
-// validate mirrors kube-scheduler's ValidatePodTopologySpreadArgs so that a config accepted here is one kube-scheduler
+// Validate mirrors kube-scheduler's ValidatePodTopologySpreadArgs so that a config accepted here is one kube-scheduler
 // would also accept, and vice versa.
-func (c *SchedulerConfiguration) validate() error {
+func (c *SchedulerConfiguration) Validate() error {
 	if c.PodTopologySpread == nil {
 		return nil
 	}
