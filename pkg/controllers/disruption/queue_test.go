@@ -882,7 +882,9 @@ var _ = Describe("Queue", func() {
 			Expect(node2.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
 		It("should preserve a pre-existing disruption taint when condition marking fails", func() {
-			node1.Spec.Taints = append(node1.Spec.Taints, v1.DisruptedNoScheduleTaint)
+			preExistingTaint := v1.DisruptedNoScheduleTaint
+			preExistingTaint.Value = "pre-existing"
+			node1.Spec.Taints = append(node1.Spec.Taints, preExistingTaint)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
 				[]*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
@@ -903,6 +905,27 @@ var _ = Describe("Queue", func() {
 			}
 
 			Expect(failingQueue.StartCommand(ctx, cmd)).ToNot(Succeed())
+			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+			Expect(node1.Spec.Taints).To(ContainElement(preExistingTaint))
+		})
+		It("should retry transient uncached reads before tracking taint ownership", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			flakyReader := &failOnceNodeReader{Reader: env.Client}
+			flakyQueue := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, flakyReader)
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+			}
+
+			Expect(flakyQueue.StartCommand(ctx, cmd)).To(Succeed())
+			Expect(flakyReader.nodeReads.Load()).To(BeNumerically(">=", 2))
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 		})

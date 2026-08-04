@@ -2361,6 +2361,18 @@ func (f *failNodeClaimReader) Get(ctx context.Context, key client.ObjectKey, obj
 	return f.Reader.Get(ctx, key, obj, opts...)
 }
 
+type failOnceNodeReader struct {
+	client.Reader
+	nodeReads atomic.Int64
+}
+
+func (f *failOnceNodeReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*corev1.Node); ok && f.nodeReads.Add(1) == 1 {
+		return fmt.Errorf("simulated transient node get failure")
+	}
+	return f.Reader.Get(ctx, key, obj, opts...)
+}
+
 type conflictNodeClaimDeleteClient struct {
 	client.Client
 }

@@ -110,8 +110,12 @@ type Queue struct {
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
 func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner, apiReader client.Reader,
+	provisioner *provisioning.Provisioner, apiReaders ...client.Reader,
 ) *Queue {
+	apiReader := client.Reader(kubeClient)
+	if len(apiReaders) > 0 && apiReaders[0] != nil {
+		apiReader = apiReaders[0]
+	}
 	queue := &Queue{
 		// nolint:staticcheck
 		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
@@ -125,6 +129,23 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		provisioner:         provisioner,
 	}
 	return queue
+}
+
+func (q *Queue) nodeHasDisruptionTaint(ctx context.Context, nodeName string) (bool, error) {
+	node := &corev1.Node{}
+	if err := retry.OnError(retry.DefaultBackoff, func(err error) bool {
+		return client.IgnoreNotFound(err) != nil
+	}, func() error {
+		return q.apiReader.Get(ctx, client.ObjectKey{Name: nodeName}, node)
+	}); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return lo.ContainsBy(node.Spec.Taints, func(taint corev1.Taint) bool {
+		return taint.MatchTaint(&v1.DisruptedNoScheduleTaint)
+	}), nil
 }
 
 func (q *Queue) Name() string {
@@ -282,12 +303,11 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
 		alreadyTainted := false
 		if cmd.Candidates[i].Node != nil {
-			node := &corev1.Node{}
-			if err := q.apiReader.Get(ctx, client.ObjectKey{Name: cmd.Candidates[i].Node.Name}, node); err != nil {
+			var err error
+			if alreadyTainted, err = q.nodeHasDisruptionTaint(ctx, cmd.Candidates[i].Node.Name); err != nil {
 				errs[i] = fmt.Errorf("getting node before tainting, %w", err)
 				return
 			}
-			alreadyTainted = lo.Contains(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		}
 		if err := state.RequireNoScheduleTaint(ctx, q.kubeClient, true, cmd.Candidates[i].StateNode); err != nil {
 			errs[i] = serrors.Wrap(fmt.Errorf("tainting nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
@@ -347,11 +367,6 @@ func (q *Queue) createReplacementNodeClaims(ctx context.Context, cmd *Command) e
 
 func (q *Queue) rollbackCandidates(ctx context.Context, markedCandidates, taintedCandidates []*Candidate) error {
 	q.cluster.UnmarkForDeletion(lo.Map(markedCandidates, func(candidate *Candidate, _ int) string { return candidate.ProviderID() })...)
-	for _, candidate := range markedCandidates {
-		if candidate.OwnedByStaticNodePool() {
-			q.cluster.NodePoolState.MarkNodeClaimActive(candidate.NodePool.Name, candidate.NodeClaim.Name)
-		}
-	}
 	return multierr.Combine(
 		state.RequireNoScheduleTaint(ctx, q.kubeClient, false,
 			lo.Map(taintedCandidates, func(candidate *Candidate, _ int) *state.StateNode { return candidate.StateNode })...),
