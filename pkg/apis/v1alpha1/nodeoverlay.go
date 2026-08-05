@@ -32,9 +32,6 @@ type NodeSelectorRequirement struct {
 	// +required
 	Key string `json:"key"`
 
-	// NOTE below: The code generator works strangely, and will union these
-	// enum values into the ones already defined on v1.NodeSelectorOperator
-
 	//nolint:kubeapilinter
 	// Represents a key's relationship to a set of values.
 	// Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
