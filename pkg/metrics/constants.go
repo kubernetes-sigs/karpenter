@@ -26,17 +26,25 @@ const (
 	// Common namespace for application metrics.
 	Namespace = "karpenter"
 
-	NodePoolLabel         = "nodepool"
-	ReasonLabel           = "reason"
-	ResourceTypeLabel     = "resource_type"
-	CapacityTypeLabel     = "capacity_type"
-	ZoneLabel             = "zone"
-	MinValuesRelaxedLabel = "min_values_relaxed"
+	NodePoolLabel            = "nodepool"
+	ReasonLabel              = "reason"
+	ResourceTypeLabel        = "resource_type"
+	CapacityTypeLabel        = "capacity_type"
+	ZoneLabel                = "zone"
+	MinValuesRelaxedLabel    = "min_values_relaxed"
+	ConsolidationPolicyLabel = "consolidation_policy"
+	TerminationModeLabel     = "termination_mode"
 
 	// Reasons for CREATE/DELETE shared metrics
 	ProvisionedReason = "provisioned"
 	ExpiredReason     = "expired"
 	UnhealthyReason   = "unhealthy"
+
+	// termination_mode label values. Graceful and Eventual are also the canonical
+	// values for the disruption Graceful/Eventual classes in the disruption controller.
+	TerminationModeGraceful = "graceful"
+	TerminationModeEventual = "eventual"
+	TerminationModeForceful = "forceful"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.

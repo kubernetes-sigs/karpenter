@@ -40,14 +40,15 @@ import (
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 const (
-	GracefulDisruptionClass = "graceful" // graceful disruption always respects blocking pod PDBs and the do-not-disrupt annotation
-	EventualDisruptionClass = "eventual" // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
+	GracefulDisruptionClass = metrics.TerminationModeGraceful // graceful disruption always respects blocking pod PDBs and the do-not-disrupt annotation
+	EventualDisruptionClass = metrics.TerminationModeEventual // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
 )
 
 type MethodOptions struct {
