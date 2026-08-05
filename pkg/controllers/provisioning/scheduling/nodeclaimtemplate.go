@@ -112,7 +112,7 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	if !i.IsStaticNodeClaim {
 		// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
 		instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
-		i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
+		i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues(), lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 			return i.Name
 		})...))
 

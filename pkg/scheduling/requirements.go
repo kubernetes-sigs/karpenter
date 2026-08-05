@@ -275,7 +275,7 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 
 func (r Requirements) HasMinValues() bool {
 	for _, req := range r {
-		if req.MinValues != nil {
+		if req.MinValues() != nil {
 			return true
 		}
 	}
