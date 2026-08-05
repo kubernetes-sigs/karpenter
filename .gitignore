@@ -21,3 +21,6 @@ bin/
 *.swp
 *.swo
 *~
+
+# Local AI assistant / superpowers artifacts (never push to remote)
+docs/superpowers/

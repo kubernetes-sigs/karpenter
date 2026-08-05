@@ -26,7 +26,13 @@ import (
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	errs = multierr.Combine(
+		in.Spec.Template.validateLabels(),
+		in.Spec.Template.Spec.validateTaints(),
+		in.Spec.Template.Spec.validateRequirements(ctx),
+		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(),
+		in.Spec.Disruption.validateDriftPolicy(),
+	)
 	return errs
 }
 
@@ -44,6 +50,16 @@ func (in *NodeClaimTemplate) validateLabels() (errs error) {
 		if err := IsRestrictedLabel(key); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("invalid key name %q in labels, %s", key, err.Error()))
 		}
+	}
+	return errs
+}
+
+func (in *Disruption) validateDriftPolicy() (errs error) {
+	if in.DriftPolicy == nil {
+		return nil
+	}
+	for _, msg := range validation.IsQualifiedName(in.DriftPolicy.TopologyKey) {
+		errs = multierr.Append(errs, fmt.Errorf("invalid topologyKey %q in driftPolicy: %s", in.DriftPolicy.TopologyKey, msg))
 	}
 	return errs
 }
