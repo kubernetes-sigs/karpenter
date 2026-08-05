@@ -94,6 +94,36 @@ var _ = Describe("Options", func() {
 			Entry("with whitespace", "SpotToSpotConsolidation\t= false", false),
 			Entry("multiple values", "Hello=true,SpotToSpotConsolidation=false,World=true", false),
 		)
+		DescribeTable(
+			"should ignore feature gates with empty values and fall back to defaults",
+			func(str string, expected options.FeatureGates) {
+				gates, err := options.ParseFeatureGates(str)
+				Expect(err).To(BeNil())
+				Expect(gates).To(Equal(expected))
+			},
+			Entry("empty value falls back to a false default", "NodeOverlay=", options.DefaultFeatureGates()),
+			Entry("empty value falls back to a true default, not false", "ReservedCapacity=", options.DefaultFeatureGates()),
+			Entry("empty value with whitespace", "NodeOverlay= ,StaticCapacity\t=", options.DefaultFeatureGates()),
+			Entry("all values empty", "NodeOverlay=,StaticCapacity=", options.DefaultFeatureGates()),
+			Entry(
+				"explicit values are honored while empty values default",
+				"ReservedCapacity=true,SpotToSpotConsolidation=false,NodeRepair=true,NodeOverlay=,StaticCapacity=",
+				func() options.FeatureGates {
+					gates := options.DefaultFeatureGates()
+					gates.NodeRepair = true
+					return gates
+				}(),
+			),
+		)
+		DescribeTable(
+			"should still error on malformed feature gate strings",
+			func(str string) {
+				_, err := options.ParseFeatureGates(str)
+				Expect(err).To(HaveOccurred())
+			},
+			Entry("non-boolean value", "NodeOverlay=banana"),
+			Entry("missing equals sign", "NodeOverlay"),
+		)
 	})
 
 	Context("Parse", func() {
