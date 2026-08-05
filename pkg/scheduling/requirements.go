@@ -283,10 +283,17 @@ func (r Requirements) HasMinValues() bool {
 }
 
 func (r Requirements) String() string {
-	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool {
-		return v1.RestrictedLabels.Has(requirement.Key)
-	})
-	stringRequirements := lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() })
-	slices.Sort(stringRequirements)
-	return strings.Join(stringRequirements, ", ")
+	result := make([]string, 0, len(r))
+
+	for _, requirement := range r {
+		// Skip restricted labels
+		if v1.RestrictedLabels.Has(requirement.Key) {
+			continue
+		}
+
+		result = append(result, requirement.String())
+	}
+
+	slices.Sort(result)
+	return strings.Join(result, ", ")
 }
