@@ -20,6 +20,11 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
+
+	// Embed the IANA Time Zone Database so that Budget time zones resolve consistently,
+	// even on images that don't ship a system tzdata (e.g. distroless).
+	_ "time/tzdata"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/mitchellh/hashstructure/v2"
@@ -106,6 +111,7 @@ type Disruption struct {
 	// the most restrictive value. If left undefined,
 	// this will default to one budget with a value to 10%.
 	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="self.all(x, has(x.schedule) == has(x.duration))"
+	// +kubebuilder:validation:XValidation:message="'timeZone' cannot be set without 'schedule'",rule="self.all(x, !has(x.timeZone) || has(x.schedule))"
 	// +kubebuilder:default:={{nodes: "10%"}}
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
@@ -138,11 +144,25 @@ type Budget struct {
 	//nolint:kubeapilinter
 	// Schedule specifies when a budget begins being active, following
 	// the upstream cronjob syntax. If omitted, the budget is always active.
-	// Timezones are not supported.
+	// The schedule is interpreted in the time zone specified by TimeZone,
+	// defaulting to UTC. Specifying a time zone within the schedule itself
+	// (e.g. "TZ=America/New_York 0 2 * * *") is not supported.
 	// This field is required if Duration is set.
 	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
 	// +optional
 	Schedule *string `json:"schedule,omitempty" hash:"ignore"`
+	//nolint:kubeapilinter
+	// TimeZone specifies the time zone in which the Schedule is interpreted,
+	// as a name from the IANA Time Zone Database (e.g. "America/New_York").
+	// If omitted, the schedule is interpreted in UTC.
+	// Daylight saving time transitions follow the upstream CronJob behavior: a schedule
+	// hit that falls in a skipped hour does not occur, and a schedule hit that falls in
+	// a repeated hour occurs at both offsets.
+	// This field may only be set if Schedule is set.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	TimeZone *string `json:"timeZone,omitempty" hash:"ignore"`
 	//nolint:kubeapilinter
 	// Duration determines how long a Budget is active since each Schedule hit.
 	// Only minutes and hours are accepted, as cron does not work in seconds.
@@ -413,7 +433,13 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	if in.Schedule == nil && in.Duration == nil {
 		return true, nil
 	}
-	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", lo.FromPtr(in.Schedule)))
+	timeZone := lo.FromPtrOr(in.TimeZone, "UTC")
+	// Validate the time zone before interpolating it into the cron spec so that an
+	// invalid value can't be misinterpreted as part of the schedule.
+	if _, err := time.LoadLocation(timeZone); err != nil {
+		return false, serrors.Wrap(fmt.Errorf("invalid time zone, %w", err), "timeZone", timeZone)
+	}
+	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=%s %s", timeZone, lo.FromPtr(in.Schedule)))
 	if err != nil {
 		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
