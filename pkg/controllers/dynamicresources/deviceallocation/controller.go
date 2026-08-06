@@ -53,6 +53,10 @@ type DeviceContribution struct {
 	// ConsumedCapacity is the capacity this claim consumes on the device.
 	// nil for exclusive allocations.
 	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+	// InvalidConsumedCapacity is true when any result contributing to this device reported a negative
+	// consumed-capacity value. Such a device is untrustworthy and must fail closed rather than be
+	// aggregated. See #3209.
+	InvalidConsumedCapacity bool
 }
 
 type ClaimMetadata struct {
@@ -93,6 +97,10 @@ type DeviceMetadata struct {
 	// is the per-claim view that ConsumedCapacity aggregates; consumers that need to attribute capacity to specific
 	// pods (e.g. to release only a deleting pod's share) use this instead of the aggregate.
 	Contributions []ContributionMetadata
+	// InvalidConsumedCapacity is true when any claim referencing this device reported a negative
+	// consumed-capacity value. The device's accounting cannot be trusted, so it must not be allocated on
+	// either the exclusive or the allow-multiple path until the invalid state clears. See #3209.
+	InvalidConsumedCapacity bool
 }
 
 type Controller struct {
@@ -164,10 +172,17 @@ func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName
 		// Sum this result's consumed capacity into the device's contribution rather than overwriting it. A
 		// multi-allocatable device can appear in more than one result of the same claim as distinct shares
 		// that differ only by ShareID, which is not part of deviceID, so they collapse to the same key here.
-		// addCapacity also drops any negative per-dimension value before it is aggregated across claims. See #3209.
-		contributions[deviceID] = DeviceContribution{
-			ConsumedCapacity: addCapacity(contributions[deviceID].ConsumedCapacity, result.ConsumedCapacity),
+		// A negative per-dimension value is invalid input (a driver bug or a corrupt status the API server
+		// does not yet validate, kubernetes/kubernetes#140563). Flag the whole physical device rather than
+		// dropping the value: a dropped negative reads as zero usage, which fails open on an allow-multiple
+		// device. See #3209.
+		contribution := contributions[deviceID]
+		if hasNegativeCapacity(result.ConsumedCapacity) {
+			contribution.InvalidConsumedCapacity = true
+		} else {
+			contribution.ConsumedCapacity = addCapacity(contribution.ConsumedCapacity, result.ConsumedCapacity)
 		}
+		contributions[deviceID] = contribution
 	}
 
 	devicesToRemove := make(sets.Set[cloudprovider.DeviceID])
@@ -290,6 +305,9 @@ func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) Device
 		meta.PodUIDs = append(meta.PodUIDs, claimMeta.PodUIDs...)
 
 		contributions := claimMeta.Contributions[device]
+		if contributions.InvalidConsumedCapacity {
+			meta.InvalidConsumedCapacity = true
+		}
 		if contributions.ConsumedCapacity != nil {
 			meta.Shared = true
 			meta.ConsumedCapacity = addCapacity(meta.ConsumedCapacity, contributions.ConsumedCapacity)
@@ -320,17 +338,12 @@ func deviceIDToString(d cloudprovider.DeviceID, _ int) string {
 	return d.String()
 }
 
-// addCapacity sums src into dest and returns the result, allocating dest lazily on the first kept entry. A
-// negative quantity is dropped rather than folded in: consumed capacity is never negative, and a negative
-// value ingested from a ResourceClaim status (which the API server does not yet validate,
-// kubernetes/kubernetes#140563) could otherwise offset a positive contribution from another claim or share
-// and under-count a shared device, over-admitting it. Leaving dest nil when nothing is kept means a device
-// with no positive consumed capacity is not treated as shared. See #3209.
+// addCapacity sums src into dest and returns the result, allocating dest lazily on the first entry. Callers
+// must reject a source containing a negative value (see hasNegativeCapacity) before summing it: addCapacity
+// itself is a plain sum and does not sanitize, so a negative here would offset a positive contribution from
+// another claim or share and under-count a shared device.
 func addCapacity(dest, src map[resourcev1.QualifiedName]resource.Quantity) map[resourcev1.QualifiedName]resource.Quantity {
 	for name, quantity := range src {
-		if quantity.Sign() < 0 {
-			continue
-		}
 		if dest == nil {
 			dest = make(map[resourcev1.QualifiedName]resource.Quantity, len(src))
 		}
@@ -339,4 +352,16 @@ func addCapacity(dest, src map[resourcev1.QualifiedName]resource.Quantity) map[r
 		dest[name] = current
 	}
 	return dest
+}
+
+// hasNegativeCapacity reports whether any per-dimension quantity is negative. Consumed capacity is never
+// negative, so a negative value makes the whole physical-device contribution invalid, not just that one
+// dimension; the caller fails the device closed rather than keeping the other dimensions. See #3209.
+func hasNegativeCapacity(capacity map[resourcev1.QualifiedName]resource.Quantity) bool {
+	for _, quantity := range capacity {
+		if quantity.Sign() < 0 {
+			return true
+		}
+	}
+	return false
 }

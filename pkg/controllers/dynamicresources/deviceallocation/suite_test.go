@@ -807,11 +807,11 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			})
 		})
 
-		It("drops a negative consumed-capacity contribution rather than offsetting a positive one from another claim", func() {
-			// claim-b reports a negative memory contribution. Consumed capacity is never negative, and the API
-			// server does not yet reject it (kubernetes/kubernetes#140563), so it must not offset claim-a's
-			// positive memory contribution during aggregation and under-count the shared device. claim-b's valid
-			// positive connections contribution is still counted.
+		It("flags a device with a negative consumed-capacity contribution as invalid and excludes that whole claim", func() {
+			// claim-b reports a negative memory contribution. Consumed capacity is never negative, so the whole
+			// claim-b contribution is untrustworthy: it is excluded from the aggregate (its positive connections
+			// too) and the device is flagged invalid so it fails closed at allocation. Dropping only the negative
+			// dimension would read as zero usage and fail open on an allow-multiple device. See #3209.
 			claimA := withReservedFor(
 				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
 					"memory":      resource.MustParse("256Mi"),
@@ -835,13 +835,14 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			devices := collectDevices(seq)
 			meta := devices[deviceID("device-0")]
 			Expect(meta.Shared).To(BeTrue())
-			// memory is claim-a's 256Mi alone; claim-b's -128Mi is dropped, not subtracted (would be 128Mi before
-			// the fix). connections sums both positive contributions.
+			// claim-b's negative invalidates the device: it fails closed at allocation regardless of the aggregate.
+			Expect(meta.InvalidConsumedCapacity).To(BeTrue())
+			// Only claim-a's valid contribution is aggregated; claim-b's connections=3 is not partially kept.
 			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
 				"memory":      resource.MustParse("256Mi"),
-				"connections": resource.MustParse("4"),
+				"connections": resource.MustParse("1"),
 			})
-			// The per-claim breakdown is sanitized too: claim-b contributes only its positive connections.
+			// claim-b contributes nothing to the per-claim breakdown; its whole contribution is excluded.
 			contributionForPod := func(uid types.UID) deviceallocation.ContributionMetadata {
 				for _, c := range meta.Contributions {
 					for _, podUID := range c.PodUIDs {
@@ -852,9 +853,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				}
 				return deviceallocation.ContributionMetadata{}
 			}
-			expectCapacity(contributionForPod("uid-b").ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
-				"connections": resource.MustParse("3"),
-			})
+			Expect(contributionForPod("uid-b").ConsumedCapacity).To(BeNil())
 		})
 
 		It("sums multiple shares of the same device within a claim rather than overwriting", func() {

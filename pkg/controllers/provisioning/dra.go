@@ -99,8 +99,16 @@ func (p *Provisioner) gatherAllocatedDevices(ctx context.Context, deletingPodUID
 	state := dynamicresources.AllocatedDeviceState{
 		ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
 		ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{},
+		BlockedDevices:   sets.New[cloudprovider.DeviceID](),
 	}
 	for id, meta := range seq {
+		// A device with invalid consumed-capacity accounting (e.g. a negative value in a claim status) is
+		// blocked on every allocation path until the invalid state clears. This must come first: dropping the
+		// value instead would read as zero usage and fail open on an allow-multiple device. See #3209.
+		if meta.InvalidConsumedCapacity {
+			state.BlockedDevices.Insert(id)
+			continue
+		}
 		// A device with no live consumers that every referencing claim considers releasable is available.
 		if meta.Releasable && len(meta.PodUIDs) == 0 {
 			continue
