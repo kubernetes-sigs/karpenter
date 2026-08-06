@@ -101,29 +101,44 @@ func (p *Provisioner) gatherAllocatedDevices(ctx context.Context, deletingPodUID
 		ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{},
 	}
 	for id, meta := range seq {
-		// A device with no live consumers that every referencing claim considers releasable is available.
-		if meta.Releasable && len(meta.PodUIDs) == 0 {
+		freed, consumed := deviceReallocation(meta, deletingPodUIDs)
+		if freed {
 			continue
 		}
-		// A device consumed only by deleting pods is available for reallocation.
-		if len(meta.PodUIDs) > 0 && allConsumersDeleting(meta.PodUIDs, deletingPodUIDs) {
-			continue
-		}
-		if meta.Shared {
-			// Free just the deleting pods' share of the device's consumed capacity. The device as a whole survives the
-			// all-consumers-deleting check above (live pods remain), but each contribution whose pods are all deleting
-			// is migrating off and its capacity should be available for reallocation.
-			effective := effectiveConsumedCapacity(meta, deletingPodUIDs)
-			if len(effective) == 0 {
-				// Every dimension was freed (or there was no live consumption left); treat the device as available.
-				continue
-			}
-			state.ConsumedCapacity[id] = effective
+		if consumed != nil {
+			state.ConsumedCapacity[id] = consumed
 			continue
 		}
 		state.ExclusiveDevices.Insert(id)
 	}
 	return state, nil
+}
+
+// deviceReallocation classifies an already-allocated device for the allocator's seed set, given the set of deleting
+// pods. It returns whether the whole device is available for reallocation (freed), and for a surviving shared device
+// the consumed capacity that remains reserved. A surviving exclusive device returns freed=false with a nil map.
+func deviceReallocation(meta deviceallocation.DeviceMetadata, deletingPodUIDs sets.Set[types.UID]) (freed bool, consumed map[resourcev1.QualifiedName]resource.Quantity) {
+	// A device with no live consumers that every referencing claim considers releasable is available.
+	if meta.Releasable && len(meta.PodUIDs) == 0 {
+		return true, nil
+	}
+	// A device consumed only by deleting pods is available for reallocation. A non-pod consumer keeps the device in
+	// use (Releasable is false), so it is not freed here even when every pod consumer is deleting.
+	if meta.Releasable && len(meta.PodUIDs) > 0 && allConsumersDeleting(meta.PodUIDs, deletingPodUIDs) {
+		return true, nil
+	}
+	if meta.Shared {
+		// Free just the deleting pods' share of the device's consumed capacity. The device as a whole survives the
+		// all-consumers-deleting check above (live pods remain), but each contribution whose pods are all deleting is
+		// migrating off and its capacity should be available for reallocation.
+		effective := effectiveConsumedCapacity(meta, deletingPodUIDs)
+		if len(effective) == 0 {
+			// Every dimension was freed (or there was no live consumption left); treat the device as available.
+			return true, nil
+		}
+		return false, effective
+	}
+	return false, nil
 }
 
 // effectiveConsumedCapacity computes a shared device's consumed capacity with the contributions of fully-deleting
@@ -136,9 +151,9 @@ func effectiveConsumedCapacity(meta deviceallocation.DeviceMetadata, deletingPod
 		effective[dim] = qty.DeepCopy()
 	}
 	for _, contribution := range meta.Contributions {
-		// A contribution reserved by no pods (e.g. a non-pod consumer) is never treated as deleting — only contributions
-		// whose entire pod set is being deleted are freed.
-		if len(contribution.PodUIDs) == 0 || !allConsumersDeleting(contribution.PodUIDs, deletingPodUIDs) {
+		// A contribution is freed only when its claim is releasable (no non-pod consumer) and its entire pod set is
+		// deleting. A claim reserved by no pods, or by a non-pod consumer alongside a deleting pod, keeps its share.
+		if !contribution.Releasable || len(contribution.PodUIDs) == 0 || !allConsumersDeleting(contribution.PodUIDs, deletingPodUIDs) {
 			continue
 		}
 		for dim, consumed := range contribution.ConsumedCapacity {
