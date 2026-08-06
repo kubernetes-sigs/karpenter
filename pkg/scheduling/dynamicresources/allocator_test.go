@@ -853,6 +853,48 @@ var _ = Describe("Allocator", func() {
 			Expect(result).ToNot(BeNil())
 		})
 
+		It("should deduct a blocked NonTargetingDevice's counters from the budget", func() {
+			// Same shape as the preallocated-NonTargetingDevices case above, but gpu-offnode is blocked rather
+			// than preallocated, and the budget is 40Gi. gpu-offnode reserves all of it, so the candidate gpu-0
+			// (40Gi) is rejected: a blocked device still occupies its shared counters even off the target topology.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("40Gi"),
+					})),
+					withGeneration(1, 3),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 3),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+					),
+				),
+				makeAPISlice("s-offnode", "gpu.example.com", "pool-a",
+					withZoneSelector("eu-west-1a"),
+					withGeneration(1, 3),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-offnode", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+					),
+				),
+			}
+			blocked := sets.New[cloudprovider.DeviceID](
+				deviceID("gpu.example.com", "pool-a", "gpu-offnode").DeviceID,
+			)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{BlockedDevices: blocked}, nil, env.Client, nil)
+
+			nc := &fakeNodeClaim{
+				id:             unique.Make("test-nc"),
+				nodePoolID:     unique.Make("test-np"),
+				requirements:   scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a")),
+				instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-1")},
+				resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
+			}
+			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).To(HaveOccurred())
+		})
+
 		DescribeTable("should reject allocation when device references invalid counters",
 			func(setup func() dynamicresources.NodeClaim) {
 				nc := setup()

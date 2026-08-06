@@ -807,7 +807,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			})
 		})
 
-		It("flags a device with a negative consumed-capacity contribution as invalid and excludes that whole claim", func() {
+		It("flags a device as invalid when a claim reports a negative consumed-capacity contribution", func() {
 			// claim-b reports a negative memory contribution. Consumed capacity is never negative, so the whole
 			// claim-b contribution is untrustworthy: it is excluded from the aggregate (its positive connections
 			// too) and the device is flagged invalid so it fails closed at allocation. Dropping only the negative
@@ -880,6 +880,14 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			Expect(meta.Shared).To(BeTrue())
 			// Both shares are summed: 256Mi + 128Mi. Before the fix the second share overwrote the first (128Mi).
 			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("384Mi"),
+			})
+			// The summed capacity is attributed to the single referencing claim's contribution (paired with its
+			// reserving pod), not just the device aggregate. effectiveConsumedCapacity subtracts this per-claim
+			// contribution, so it must carry the full 384Mi for the whole share to be released when pod-a deletes.
+			Expect(meta.Contributions).To(HaveLen(1))
+			Expect(meta.Contributions[0].PodUIDs).To(ConsistOf(types.UID("uid-a")))
+			expectCapacity(meta.Contributions[0].ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
 				"memory": resource.MustParse("384Mi"),
 			})
 		})
