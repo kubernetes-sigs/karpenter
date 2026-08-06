@@ -103,7 +103,13 @@ var _ = Describe("Requirement", func() {
 	Context("Intersect requirements", func() {
 		DescribeTable("should intersect two requirements without minValues",
 			func(existingRequirementWithoutMinValues, newRequirementWithoutMinValues, expectedRequirement *Requirement) {
-				Expect(existingRequirementWithoutMinValues.Intersection(newRequirementWithoutMinValues)).To(Equal(expectedRequirement))
+				actual := existingRequirementWithoutMinValues.Intersection(newRequirementWithoutMinValues)
+
+				// We need to provoke both requirements' String method to populate their internal cache so
+				// that the comparison of the two requirements is not affected by the cache.
+				Expect(actual.String()).To(Equal(expectedRequirement.String()))
+
+				Expect(actual).To(Equal(expectedRequirement))
 			},
 			Entry(nil, exists, exists, exists),
 			Entry(nil, exists, doesNotExist, doesNotExist),
@@ -317,7 +323,13 @@ var _ = Describe("Requirement", func() {
 		)
 		DescribeTable("should intersect requirement with minValues with a requirement without",
 			func(existingRequirementWithMinValues, newRequirementWithoutMinValues, expectedRequirement *Requirement) {
-				Expect(existingRequirementWithMinValues.Intersection(newRequirementWithoutMinValues)).To(Equal(expectedRequirement))
+				actual := existingRequirementWithMinValues.Intersection(newRequirementWithoutMinValues)
+
+				// We need to provoke both requirements' String method to populate their internal cache so
+				// that the comparison of the two requirements is not affected by the cache.
+				Expect(actual.String()).To(Equal(expectedRequirement.String()))
+
+				Expect(actual).To(Equal(expectedRequirement))
 			},
 			Entry(nil, existsOperatorWithFlexibility, exists, existsOperatorWithFlexibility),
 			Entry(nil, existsOperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
@@ -532,7 +544,13 @@ var _ = Describe("Requirement", func() {
 		)
 		DescribeTable("should intersect two requirements with minValues",
 			func(existingRequirementWithMinValues, newRequirementWithMinValues, expectedRequirement *Requirement) {
-				Expect(existingRequirementWithMinValues.Intersection(newRequirementWithMinValues)).To(Equal(expectedRequirement))
+				actual := existingRequirementWithMinValues.Intersection(newRequirementWithMinValues)
+
+				// We need to provoke both requirements' String method to populate their internal cache so
+				// that the comparison of the two requirements is not affected by the cache.
+				Expect(actual.String()).To(Equal(expectedRequirement.String()))
+
+				Expect(actual).To(Equal(expectedRequirement))
 			},
 			Entry(nil, existsOperatorWithFlexibility, existsOperatorWithFlexibility, existsOperatorWithFlexibility),
 			Entry(nil, existsOperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
