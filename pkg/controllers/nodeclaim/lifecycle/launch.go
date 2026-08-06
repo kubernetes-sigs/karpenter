@@ -39,6 +39,13 @@ import (
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
+const (
+	// maxEventMessageLength is the maximum length of an Event message. Kubernetes rejects Events whose message
+	// exceeds this limit at validation time, so the message has to be truncated before the Event is created.
+	// https://github.com/kubernetes/kubernetes/blob/564b0e55c7007745500d579356897848aaacb9dd/pkg/apis/core/validation/events.go#L38
+	maxEventMessageLength = 1024
+)
+
 type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
@@ -169,9 +176,11 @@ func PopulateNodeClaimDetails(nodeClaim, retrieved *v1.NodeClaim) *v1.NodeClaim 
 	return nodeClaim
 }
 
+// truncateMessage truncates the message so that it fits within the Event message length limit.
 func truncateMessage(msg string) string {
-	if len(msg) < 300 {
+	if len(msg) <= maxEventMessageLength {
 		return msg
 	}
-	return msg[:300] + "..."
+	const suffix = "..."
+	return msg[:maxEventMessageLength-len(suffix)] + suffix
 }
