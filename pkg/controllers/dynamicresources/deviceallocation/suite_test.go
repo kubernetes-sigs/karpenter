@@ -807,6 +807,84 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			})
 		})
 
+		It("drops a negative consumed-capacity contribution rather than offsetting a positive one from another claim", func() {
+			// claim-b reports a negative memory contribution. Consumed capacity is never negative, and the API
+			// server does not yet reject it (kubernetes/kubernetes#140563), so it must not offset claim-a's
+			// positive memory contribution during aggregation and under-count the shared device. claim-b's valid
+			// positive connections contribution is still counted.
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("256Mi"),
+					"connections": resource.MustParse("1"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("-128Mi"),
+					"connections": resource.MustParse("3"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			// memory is claim-a's 256Mi alone; claim-b's -128Mi is dropped, not subtracted (would be 128Mi before
+			// the fix). connections sums both positive contributions.
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("256Mi"),
+				"connections": resource.MustParse("4"),
+			})
+			// The per-claim breakdown is sanitized too: claim-b contributes only its positive connections.
+			contributionForPod := func(uid types.UID) deviceallocation.ContributionMetadata {
+				for _, c := range meta.Contributions {
+					for _, podUID := range c.PodUIDs {
+						if podUID == uid {
+							return c
+						}
+					}
+				}
+				return deviceallocation.ContributionMetadata{}
+			}
+			expectCapacity(contributionForPod("uid-b").ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"connections": resource.MustParse("3"),
+			})
+		})
+
+		It("sums multiple shares of the same device within a claim rather than overwriting", func() {
+			// A multi-allocatable device can be allocated more than once to the same claim as distinct shares that
+			// differ only by ShareID. deviceID ignores ShareID, so the shares collapse to one key; their consumed
+			// capacity must be summed, not overwritten by the last share.
+			shareA, shareB := types.UID("11111111-1111-1111-1111-111111111111"), types.UID("22222222-2222-2222-2222-222222222222")
+			resultA := deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("256Mi"),
+			})
+			resultA.ShareID = &shareA
+			resultB := deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("128Mi"),
+			})
+			resultB.ShareID = &shareB
+			claim := withReservedFor(resourceClaim("claim-a", resultA, resultB), podRef("pod-a", "uid-a"))
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			// Both shares are summed: 256Mi + 128Mi. Before the fix the second share overwrote the first (128Mi).
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("384Mi"),
+			})
+		})
+
 		It("surfaces per-claim contributions paired with their reserving pods", func() {
 			claimA := withReservedFor(
 				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{

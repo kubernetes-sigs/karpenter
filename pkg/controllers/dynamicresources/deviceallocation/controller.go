@@ -161,7 +161,13 @@ func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName
 			Pool:   unique.Make(result.Pool),
 			Device: unique.Make(result.Device),
 		}
-		contributions[deviceID] = DeviceContribution{ConsumedCapacity: result.ConsumedCapacity}
+		// Sum this result's consumed capacity into the device's contribution rather than overwriting it. A
+		// multi-allocatable device can appear in more than one result of the same claim as distinct shares
+		// that differ only by ShareID, which is not part of deviceID, so they collapse to the same key here.
+		// addCapacity also drops any negative per-dimension value before it is aggregated across claims. See #3209.
+		contributions[deviceID] = DeviceContribution{
+			ConsumedCapacity: addCapacity(contributions[deviceID].ConsumedCapacity, result.ConsumedCapacity),
+		}
 	}
 
 	devicesToRemove := make(sets.Set[cloudprovider.DeviceID])
@@ -314,11 +320,20 @@ func deviceIDToString(d cloudprovider.DeviceID, _ int) string {
 	return d.String()
 }
 
+// addCapacity sums src into dest and returns the result, allocating dest lazily on the first kept entry. A
+// negative quantity is dropped rather than folded in: consumed capacity is never negative, and a negative
+// value ingested from a ResourceClaim status (which the API server does not yet validate,
+// kubernetes/kubernetes#140563) could otherwise offset a positive contribution from another claim or share
+// and under-count a shared device, over-admitting it. Leaving dest nil when nothing is kept means a device
+// with no positive consumed capacity is not treated as shared. See #3209.
 func addCapacity(dest, src map[resourcev1.QualifiedName]resource.Quantity) map[resourcev1.QualifiedName]resource.Quantity {
-	if dest == nil {
-		dest = make(map[resourcev1.QualifiedName]resource.Quantity, len(src))
-	}
 	for name, quantity := range src {
+		if quantity.Sign() < 0 {
+			continue
+		}
+		if dest == nil {
+			dest = make(map[resourcev1.QualifiedName]resource.Quantity, len(src))
+		}
 		current := dest[name]
 		current.Add(quantity)
 		dest[name] = current
