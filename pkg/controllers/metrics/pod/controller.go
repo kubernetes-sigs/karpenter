@@ -393,8 +393,12 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 		c.unscheduledPods.Insert(key)
 		return
 	}
-	if c.unscheduledPods.Has(key) && ok && cond.Status == corev1.ConditionTrue {
-		// Delete the unbound metric since the pod is now bound
+	if c.unscheduledPods.Has(key) {
+		// The pod has left Pending, so the unbound metrics no longer describe it.
+		// Delete them regardless of the PodScheduled condition: a pod can leave
+		// Pending while PodScheduled is still False, and these metrics would
+		// otherwise keep reporting stale values until the pod is deleted from the
+		// cluster entirely.
 		PodUnboundTimeSeconds.Delete(map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
@@ -404,9 +408,13 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 			podNamespace: pod.Namespace,
 		})
 
-		PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
-		if !schedulableTime.IsZero() {
-			PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+		// The bound durations are only meaningful when the pod actually reached
+		// PodScheduled=True, so they stay gated on the condition.
+		if ok && cond.Status == corev1.ConditionTrue {
+			PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+			if !schedulableTime.IsZero() {
+				PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+			}
 		}
 		c.unscheduledPods.Delete(key)
 	}
