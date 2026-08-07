@@ -226,9 +226,11 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 		},
 		Status: corev1.NodeStatus{
 			// KWOK nodes don't support overriding Karpenter's WellKnownResources,
-			// so we only apply resource requests, since NodeOverlay will not apply.
+			// so we only apply resource requests for overriding, since NodeOverlay will not apply.
 			// If this changes in the future, we'll need to update capacity and allocatable values for KWOK nodes.
-			Capacity:    nodeClaim.Spec.Resources.Requests,
+			// The instance type's actual capacity/allocatable still takes precedence for well-known resources so
+			// that a NodeClaim that never registers is still counted accurately against NodePool limits.
+			Capacity:    lo.Assign(nodeClaim.Spec.Resources.Requests, instanceType.Capacity),
 			Allocatable: lo.Assign(nodeClaim.Spec.Resources.Requests, instanceType.Allocatable()),
 			Phase:       corev1.NodePending,
 		},
