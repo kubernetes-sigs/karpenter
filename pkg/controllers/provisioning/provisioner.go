@@ -347,6 +347,9 @@ func (p *Provisioner) NewScheduler(
 		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(instanceTypes), p.kubeClient, deletingPodUIDs)
 	}
 
+	if options.FromContext(ctx).FeatureGates.NodeClaimOptimization {
+		opts = append(opts, scheduler.EnableNodeClaimOptimization)
+	}
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
 	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, opts...), nil
 }

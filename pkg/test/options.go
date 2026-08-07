@@ -59,6 +59,7 @@ type FeatureGates struct {
 	NodeOverlay             *bool
 	StaticCapacity          *bool
 	CapacityBuffer          *bool
+	NodeClaimOptimization   *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -96,6 +97,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
 			StaticCapacity:          lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
 			CapacityBuffer:          lo.FromPtrOr(opts.FeatureGates.CapacityBuffer, false),
+			NodeClaimOptimization:   lo.FromPtrOr(opts.FeatureGates.NodeClaimOptimization, false),
 		},
 	}
 }
