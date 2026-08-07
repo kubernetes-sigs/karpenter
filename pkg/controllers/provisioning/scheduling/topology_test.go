@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +32,8 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -2958,6 +2961,260 @@ var _ = Describe("Topology", func() {
 			Expect(n1.Name).To(Equal(n2.Name))
 		})
 	})
+
+	Context("DefaultConstraints", func() {
+		var replicaSet *appsv1.ReplicaSet
+		BeforeEach(func() {
+			// kube-scheduler forbids a labelSelector on defaultConstraints and deduces one per pod from the Services and
+			// the rc/rs/ss that select it, so these tests give the pods a real owner to deduce from.
+			replicaSet = test.ReplicaSet(test.ReplicaSetOptions{Selector: labels})
+			ExpectApplied(ctx, env.Client, replicaSet)
+		})
+		// Restore default options so a configured default doesn't leak into subsequent tests.
+		AfterEach(func() {
+			ctx = options.ToContext(ctx, test.Options())
+		})
+		// Configures a cluster-level default topology spread (from --scheduler-config) that mirrors
+		// kube-scheduler's PodTopologySpread plugin defaultConstraints.
+		setDefaults := func(constraints ...corev1.TopologySpreadConstraint) {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				SchedulerConfig: &options.SchedulerConfiguration{
+					PodTopologySpread: &options.PodTopologySpreadConfig{DefaultConstraints: constraints},
+				},
+			}))
+		}
+		// ownedPods returns n pods carrying `labels` and controlled by the ReplicaSet, i.e. the shape of pod that
+		// kube-scheduler would deduce a default selector for.
+		ownedPods := func(n int, opts ...test.PodOptions) []*corev1.Pod {
+			options := test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels:          labels,
+				OwnerReferences: []metav1.OwnerReference{ownerReferenceFor(replicaSet)},
+			}}
+			if len(opts) != 0 {
+				options.TopologySpreadConstraints = opts[0].TopologySpreadConstraints
+			}
+			return test.UnschedulablePods(options, n)
+		}
+		// The deduced selector, used only to assert skew. Karpenter derives this itself during scheduling.
+		deducedSelector := &metav1.LabelSelector{MatchLabels: labels}
+		zoneDefault := corev1.TopologySpreadConstraint{
+			TopologyKey:       corev1.LabelTopologyZone,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			MaxSkew:           1,
+		}
+		withSelector := func(tsc corev1.TopologySpreadConstraint) *corev1.TopologySpreadConstraint {
+			tsc.LabelSelector = deducedSelector
+			return &tsc
+		}
+		It("should apply default zonal spread to a pod that declares no constraints of its own", func() {
+			setDefaults(zoneDefault)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, ownedPods(4)...)
+			ExpectSkew(ctx, env.Client, "default", withSelector(zoneDefault)).To(ConsistOf(1, 1, 2))
+		})
+		It("should apply default hostname spread to a pod that declares no constraints of its own", func() {
+			hostnameDefault := corev1.TopologySpreadConstraint{
+				TopologyKey:       corev1.LabelHostname,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				MaxSkew:           1,
+			}
+			setDefaults(hostnameDefault)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, ownedPods(3)...)
+			// hostname spread with maxSkew 1 puts every pod on its own node
+			ExpectSkew(ctx, env.Client, "default", withSelector(hostnameDefault)).To(ConsistOf(1, 1, 1))
+		})
+		It("should NOT apply the default to a pod that declares its own constraints", func() {
+			// The default spreads on zone, but the pod declares its own hostname spread. Per the plugin's
+			// all-or-nothing semantics, only the pod's own constraint applies and the zone default is ignored.
+			ownConstraint := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelHostname,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			setDefaults(zoneDefault)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				ownedPods(3, test.PodOptions{TopologySpreadConstraints: ownConstraint})...,
+			)
+			// pod's own hostname spread applies (one per node); the zone default was not merged in
+			ExpectSkew(ctx, env.Client, "default", &ownConstraint[0]).To(ConsistOf(1, 1, 1))
+		})
+		It("should carry minDomains through a synthesized default", func() {
+			if env.Version.Minor() < 24 {
+				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
+			}
+			// Mirrors the per-pod "should respect minDomains constraints" test, but supplies the constraint as a
+			// cluster default to prove minDomains is carried through the injected constraint. With minDomains=3 but
+			// only 2 zones available, under-represented domains are treated as count 0, so no zone can exceed maxSkew.
+			var minDomains int32 = 3
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+			minDomainsDefault := corev1.TopologySpreadConstraint{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				MaxSkew:           1,
+				MinDomains:        &minDomains,
+			}
+			setDefaults(minDomainsDefault)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, ownedPods(3)...)
+			ExpectSkew(ctx, env.Client, "default", withSelector(minDomainsDefault)).To(ConsistOf(1, 1))
+		})
+		It("should relax a synthesized ScheduleAnyway default when it can't be satisfied", func() {
+			// Force everything into a single zone so a hard zone spread would be unsatisfiable. A ScheduleAnyway
+			// default must ride the existing relaxation path and still allow the pods to schedule.
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
+			setDefaults(corev1.TopologySpreadConstraint{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.ScheduleAnyway,
+				MaxSkew:           1,
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := ownedPods(3)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, p := range pods {
+				ExpectScheduled(ctx, env.Client, p)
+			}
+		})
+		It("should be a no-op when no default constraints are configured", func() {
+			// No SchedulerConfig set (default test.Options), so an unconstrained pod is treated exactly as today.
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node).ToNot(BeNil())
+		})
+		It("should not apply the default to a pod with no owner and no matching service", func() {
+			// Upstream deduces an empty selector for such a pod and applies no defaults at all. Karpenter must do the
+			// same: an empty selector would otherwise count every pod in the namespace.
+			setDefaults(zoneDefault)
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			// All 3 pods land in the single available zone, which a zone spread of maxSkew=1 would have forbidden.
+			pods := test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}, 3)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, p := range pods {
+				ExpectScheduled(ctx, env.Client, p)
+			}
+		})
+		It("should count pre-existing cluster pods through the deduced selector", func() {
+			// Every other spec in this context starts from an empty cluster, so countDomains' list always comes back
+			// empty and the deduced selector is never exercised as a *query*. Here two of the ReplicaSet's pods already
+			// occupy test-zone-1, so a correct selector must find them and keep the new pods out of that zone.
+			//
+			// The cluster is restricted to two zones and two new pods are provisioned so the assertion discriminates
+			// regardless of map-iteration order. Counted correctly, zone-1 is over-full and both new pods go to zone-2,
+			// giving a 2/2 skew. Counting nothing, both zones look empty, the new pods balance one per zone, and zone-1
+			// ends with 3 - a different skew whichever zone is chosen first. A single new pod would not be enough: with
+			// no counts all domains tie, and nextDomainTopologySpread's pick among tied domains follows map order, so the
+			// bug would only surface some of the time.
+			setDefaults(zoneDefault)
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+			existingNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+			}})
+			ExpectApplied(ctx, env.Client, nodePool, existingNode)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(existingNode))
+			owner := ownerReferenceFor(replicaSet)
+			ExpectApplied(ctx, env.Client,
+				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{owner}}, NodeName: existingNode.Name}),
+				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{owner}}, NodeName: existingNode.Name}),
+			)
+			// This suite's client is uncached and offers no read-your-writes guarantee, so wait until both pre-existing
+			// pods are visible to the same List that countDomains performs. Without this the spec can race ahead, count
+			// zero existing pods, and pass even when the deduced selector fails to match them at all - i.e. it would
+			// silently stop guarding the behavior it exists to guard.
+			Eventually(func(g Gomega) {
+				podList := &corev1.PodList{}
+				g.Expect(env.Client.List(ctx, podList, scheduling.TopologyListOptions("default", deducedSelector))).To(Succeed())
+				g.Expect(podList.Items).To(HaveLen(2))
+			}, time.Second).Should(Succeed())
+			newPods := ownedPods(2)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, newPods...)
+			for _, p := range newPods {
+				node := ExpectScheduled(ctx, env.Client, p)
+				Expect(node.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-2"))
+			}
+			// zone-1 keeps its 2 pre-existing pods; both new pods go to zone-2.
+			ExpectSkew(ctx, env.Client, "default", withSelector(zoneDefault)).To(ConsistOf(2, 2))
+		})
+		It("should spread each workload independently", func() {
+			// The whole point of deducing a selector per pod: two ReplicaSets scheduling at once must form separate
+			// topology groups. A single shared selector would pool all 6 pods into one group and spread them 2/2/2
+			// across zones instead of giving each workload its own 1/1/1.
+			setDefaults(zoneDefault)
+			otherLabels := map[string]string{"test": "other"}
+			otherReplicaSet := test.ReplicaSet(test.ReplicaSetOptions{Selector: otherLabels})
+			ExpectApplied(ctx, env.Client, nodePool, otherReplicaSet)
+			pods := append(
+				ownedPods(3),
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+					Labels:          otherLabels,
+					OwnerReferences: []metav1.OwnerReference{ownerReferenceFor(otherReplicaSet)},
+				}}, 3)...,
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, p := range pods {
+				ExpectScheduled(ctx, env.Client, p)
+			}
+			// Each workload spreads 1/1/1 over its own three zones, rather than the two sharing one group.
+			ExpectSkew(ctx, env.Client, "default", withSelector(zoneDefault)).To(ConsistOf(1, 1, 1))
+			otherZoneDefault := zoneDefault
+			otherZoneDefault.LabelSelector = &metav1.LabelSelector{MatchLabels: otherLabels}
+			ExpectSkew(ctx, env.Client, "default", &otherZoneDefault).To(ConsistOf(1, 1, 1))
+		})
+		It("should spread each Deployment revision independently", func() {
+			// A ReplicaSet's selector includes pod-template-hash, so pods of different revisions of the same Deployment
+			// land in different topology groups - matching kube-scheduler, which derives from the RS selector too. Each
+			// revision therefore spreads over all zones on its own instead of the two revisions interleaving.
+			setDefaults(zoneDefault)
+			oldLabels := map[string]string{"test": "test", "pod-template-hash": "old"}
+			newLabels := map[string]string{"test": "test", "pod-template-hash": "new"}
+			oldRS := test.ReplicaSet(test.ReplicaSetOptions{Selector: oldLabels})
+			newRS := test.ReplicaSet(test.ReplicaSetOptions{Selector: newLabels})
+			ExpectApplied(ctx, env.Client, nodePool, oldRS, newRS)
+			pods := append(
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+					Labels: oldLabels, OwnerReferences: []metav1.OwnerReference{ownerReferenceFor(oldRS)},
+				}}, 3),
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+					Labels: newLabels, OwnerReferences: []metav1.OwnerReference{ownerReferenceFor(newRS)},
+				}}, 3)...,
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, p := range pods {
+				ExpectScheduled(ctx, env.Client, p)
+			}
+			// Each revision spreads 1/1/1 on its own. Note the shared "test: test" label spans both revisions, so
+			// selecting on it alone sees all 6 - proving the groups are split by pod-template-hash, not by app label.
+			oldSkew := zoneDefault
+			oldSkew.LabelSelector = &metav1.LabelSelector{MatchLabels: oldLabels}
+			ExpectSkew(ctx, env.Client, "default", &oldSkew).To(ConsistOf(1, 1, 1))
+			newSkew := zoneDefault
+			newSkew.LabelSelector = &metav1.LabelSelector{MatchLabels: newLabels}
+			ExpectSkew(ctx, env.Client, "default", &newSkew).To(ConsistOf(1, 1, 1))
+		})
+		It("should deduce a selector from a matching service for a pod with no supported owner", func() {
+			// A Job-owned pod gets no owner selector, but a Service that selects it still yields one, so the default
+			// applies. This is the case an owner-only derivation would miss.
+			setDefaults(zoneDefault)
+			ExpectApplied(ctx, env.Client, nodePool, test.Service(test.ServiceOptions{Selector: labels}))
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "batch/v1", Kind: "Job", Name: "test-job", UID: "test-job-uid", Controller: new(true),
+					}},
+				}}, 4)...,
+			)
+			ExpectSkew(ctx, env.Client, "default", withSelector(zoneDefault)).To(ConsistOf(1, 1, 2))
+		})
+	})
 })
 
 var _ = Describe("Taints", func() {
@@ -3116,3 +3373,14 @@ var _ = Describe("Topology with Volume Requirements", func() {
 		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 	})
 })
+
+// ownerReferenceFor builds the controller owner reference that the given ReplicaSet's controller would set on its pods.
+func ownerReferenceFor(replicaSet *appsv1.ReplicaSet) metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: appsv1.SchemeGroupVersion.String(),
+		Kind:       "ReplicaSet",
+		Name:       replicaSet.Name,
+		UID:        replicaSet.UID,
+		Controller: new(true),
+	}
+}
