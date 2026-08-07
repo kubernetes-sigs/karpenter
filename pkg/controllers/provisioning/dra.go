@@ -116,7 +116,8 @@ func (p *Provisioner) gatherAllocatedDevices(ctx context.Context, deletingPodUID
 
 // deviceReallocation classifies an already-allocated device for the allocator's seed set, given the set of deleting
 // pods. It returns whether the whole device is available for reallocation (freed), and for a surviving shared device
-// the consumed capacity that remains reserved. A surviving exclusive device returns freed=false with a nil map.
+// the consumed capacity that remains reserved, as a non-nil map that may be empty. A surviving exclusive device
+// returns freed=false with a nil map.
 func deviceReallocation(meta deviceallocation.DeviceMetadata, deletingPodUIDs sets.Set[types.UID]) (freed bool, consumed map[resourcev1.QualifiedName]resource.Quantity) {
 	// A device with no live consumers that every referencing claim considers releasable is available.
 	if meta.Releasable && len(meta.PodUIDs) == 0 {
@@ -128,15 +129,12 @@ func deviceReallocation(meta deviceallocation.DeviceMetadata, deletingPodUIDs se
 		return true, nil
 	}
 	if meta.Shared {
-		// Free just the deleting pods' share of the device's consumed capacity. The device as a whole survives the
-		// all-consumers-deleting check above (live pods remain), but each contribution whose pods are all deleting is
-		// migrating off and its capacity should be available for reallocation.
-		effective := effectiveConsumedCapacity(meta, deletingPodUIDs)
-		if len(effective) == 0 {
-			// Every dimension was freed (or there was no live consumption left); treat the device as available.
-			return true, nil
-		}
-		return false, effective
+		// The two checks above are the only proof that the whole device can be released; reaching here means a live pod
+		// or a non-pod consumer still holds it, so the device stays in the seed state. effectiveConsumedCapacity
+		// subtracts the deleting pods' share, and the remaining map may be empty when the surviving shares consume zero
+		// capacity. Keep it non-nil: its key records the device's shared occupancy, which the allocator charges against
+		// fixed pool counters regardless of the capacity value.
+		return false, effectiveConsumedCapacity(meta, deletingPodUIDs)
 	}
 	return false, nil
 }

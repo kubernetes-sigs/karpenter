@@ -176,15 +176,18 @@ var _ = Describe("DRA Provisioner Internals", func() {
 		shared := func(contributions ...deviceallocation.ContributionMetadata) deviceallocation.DeviceMetadata {
 			aggregate := map[resourcev1.QualifiedName]resource.Quantity{}
 			var podUIDs []types.UID
+			releasable := true
 			for _, c := range contributions {
 				podUIDs = append(podUIDs, c.PodUIDs...)
+				releasable = releasable && c.Releasable
 				for dim, qty := range c.ConsumedCapacity {
 					cur := aggregate[dim]
 					cur.Add(qty)
 					aggregate[dim] = cur
 				}
 			}
-			return deviceallocation.DeviceMetadata{Releasable: true, Shared: true, PodUIDs: podUIDs, ConsumedCapacity: aggregate, Contributions: contributions}
+			// Mirror computeDeviceMetadata: the device is releasable only if every contributing claim is.
+			return deviceallocation.DeviceMetadata{Releasable: releasable, Shared: true, PodUIDs: podUIDs, ConsumedCapacity: aggregate, Contributions: contributions}
 		}
 		share := func(pods []types.UID, memory string) deviceallocation.ContributionMetadata {
 			return deviceallocation.ContributionMetadata{
@@ -236,6 +239,29 @@ var _ = Describe("DRA Provisioner Internals", func() {
 			freed, consumed := deviceReallocation(meta, deleting)
 			Expect(freed).To(BeTrue())
 			Expect(consumed).To(BeNil())
+		})
+
+		It("keeps a shared device when a live pod holds a zero-capacity share", func() {
+			// Subtracting the deleting claim's share empties the effective map, but the live pod still holds a
+			// zero-capacity share, so the device must stay in the seed state rather than be freed. An empty effective
+			// map is not proof that the last share is gone.
+			meta := shared(share([]types.UID{"deleting-a"}, "256Mi"), share([]types.UID{"live-b"}, "0"))
+			freed, consumed := deviceReallocation(meta, deleting)
+			Expect(freed).To(BeFalse())
+			Expect(consumed).ToNot(BeNil())
+			Expect(consumed).To(BeEmpty())
+		})
+
+		It("keeps a shared device when a non-releasable zero-capacity share survives", func() {
+			// A non-pod consumer holds a zero-capacity share alongside a deleting pod's positive share. Subtracting the
+			// deleting share empties the map, but the non-pod share still occupies the device.
+			nonPodShare := share(nil, "0")
+			nonPodShare.Releasable = false
+			meta := shared(share([]types.UID{"deleting-a"}, "256Mi"), nonPodShare)
+			freed, consumed := deviceReallocation(meta, deleting)
+			Expect(freed).To(BeFalse())
+			Expect(consumed).ToNot(BeNil())
+			Expect(consumed).To(BeEmpty())
 		})
 	})
 })

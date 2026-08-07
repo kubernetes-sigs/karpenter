@@ -775,6 +775,39 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			})
 		})
 
+		It("copies each claim's releasability onto its contribution", func() {
+			// The pod-only device asserts Releasable=true, which guards against dropping the production copy since false
+			// is the zero value; the mixed pod/non-pod device asserts its contribution is not releasable.
+			podClaim := withReservedFor(
+				resourceClaim("pod-claim", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("256Mi"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			mixedClaim := withReservedFor(
+				resourceClaim("mixed-claim", deviceResultWithCapacity("device-1", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("128Mi"),
+				})),
+				podRef("pod-b", "uid-b"),
+				nonPodRef(),
+			)
+			ExpectApplied(ctx, env.Client, podClaim, mixedClaim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(podClaim))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(mixedClaim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+
+			podMeta := devices[deviceID("device-0")]
+			Expect(podMeta.Contributions).To(HaveLen(1))
+			Expect(podMeta.Contributions[0].Releasable).To(BeTrue())
+
+			mixedMeta := devices[deviceID("device-1")]
+			Expect(mixedMeta.Contributions).To(HaveLen(1))
+			Expect(mixedMeta.Contributions[0].Releasable).To(BeFalse())
+		})
+
 		It("aggregates consumed capacity across multiple claims referencing the same device", func() {
 			claimA := withReservedFor(
 				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
