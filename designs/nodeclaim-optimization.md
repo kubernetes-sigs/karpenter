@@ -64,6 +64,8 @@ A SchedulingOption is captured when the addition of a pod pushes the NodeClaim t
 
 If any gate fails, the NodeClaim is left as-is and locked from any further optimizations during this scheduling run.
 
+Two conditions short-circuit ahead of the gates, skipping the claim before any candidate state is considered: pods with ResourceClaim requests (**DRA safety**) and reserved offerings held under strict mode (**Reserved-offering safety**), both below.
+
 ### Revert
 
 `NodeClaim.RevertTo(index)` rolls the claim back to `schedulingOptions[index]` and returns the displaced pods. Every side effect that `Add` produced on behalf of those pods is reversed symmetrically:
@@ -72,6 +74,19 @@ If any gate fails, the NodeClaim is left as-is and locked from any further optim
 - **Topology counts** are reversed pod-by-pod using deltas stored at Add time. `Topology.Record` now returns a `[]TopologyDelta` describing exactly which topology groups had which domains incremented for the pod; `Topology.Unrecord` replays those deltas. Re-deriving the mutation from the NodeClaim's current requirements would be wrong: those requirements tighten monotonically across Adds, so by revert time they no longer match what `Record` saw.
 - **Host-port reservations** are cleared via `HostPortUsage.DeletePod` per displaced pod.
 - **Reserved offerings** are reconciled to the *intersection* of those held now and those reachable through the snapshot's instance types. Seats acquired for displaced pods return to the shared pool; seats retained on the locked claim stay. The reserved set is not monotonic in either direction, so a simple diff would be incorrect.
+
+### DRA safety
+
+With Dynamic Resource Allocation, device requests move out of `pod.spec.resources.requests` and into ResourceClaims, where the displaced-pod cost estimator cannot see them. A displaced pod requesting `{cpu: 1, memory: 8Gi}` plus a GPU through a ResourceClaim is priced as fitting a small general-purpose instance, while its actual placement requires a GPU instance. Gate 4 could therefore approve a split that raises total cost, breaking the load-bearing invariant.
+
+Pricing the claim correctly would not be sufficient, because revert is independently unsafe for these claims. A committed device allocation has no inverse (`Allocation.Commit` is one-way), so displacing a pod would re-queue an allocation that has already been committed. And `RevertTo` re-widens `InstanceTypeOptions` back to the snapshot superset, which would re-advertise instance types the allocator has already released for that hostname.
+
+`findSplitPoint` therefore short-circuits to "no split" whenever any pod on the NodeClaim carries ResourceClaim requests, leaving the claim exactly as the main scheduling loop produced it. Two properties of the check are deliberate:
+
+- It keys off the **pod**, not the allocator or the `IgnoreDRARequests` flag, so it stays correct once DRA GA removes that flag.
+- It is **per-claim**, so a skipped DRA claim does not prevent its siblings in the same `Solve` from splitting.
+
+A narrower carve-out (skip only when a DRA pod would be *displaced*, allowing splits above a DRA-carrying prefix) was considered and rejected: the revert hazards above apply to retained DRA pods as well as displaced ones, so the split position does not make the operation safe. Device-aware cost estimation and efficiency scoring, which would let these claims participate, are follow-up work rather than a prerequisite for the gate.
 
 ### Reserved-offering safety
 
