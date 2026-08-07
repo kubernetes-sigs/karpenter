@@ -70,6 +70,9 @@ type ContributionMetadata struct {
 	PodUIDs []types.UID
 	// ConsumedCapacity is the capacity this single claim consumes on the device.
 	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+	// Releasable is false when the contributing claim has a non-pod consumer (or an empty ReservedFor), so its share
+	// must not be freed just because its pods are deleting.
+	Releasable bool
 }
 
 // Metadata contains supplementary information about an allocated device, derived from the ReservedFor status of all
@@ -290,6 +293,7 @@ func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) Device
 			meta.Contributions = append(meta.Contributions, ContributionMetadata{
 				PodUIDs:          claimMeta.PodUIDs,
 				ConsumedCapacity: contributions.ConsumedCapacity,
+				Releasable:       claimMeta.Releasable,
 			})
 		}
 	}
