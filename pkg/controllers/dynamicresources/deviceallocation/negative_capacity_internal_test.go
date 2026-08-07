@@ -80,6 +80,12 @@ func TestContributionsForResults(t *testing.T) {
 			t.Fatal("want InvalidConsumedCapacity=true even with a valid sibling result on the same device")
 		}
 	})
+	t.Run("a valid result after an invalid one does not clear the flag", func(t *testing.T) {
+		got := contributionsForResults([]resourcev1.DeviceRequestAllocationResult{result("d0", neg), result("d0", pos2)})
+		if !got[id("d0")].InvalidConsumedCapacity {
+			t.Fatal("want InvalidConsumedCapacity=true when the invalid result comes first")
+		}
+	})
 	t.Run("distinct shares of the same device are summed", func(t *testing.T) {
 		got := contributionsForResults([]resourcev1.DeviceRequestAllocationResult{result("d0", pos2), result("d0", pos3)})
 		c := got[id("d0")]

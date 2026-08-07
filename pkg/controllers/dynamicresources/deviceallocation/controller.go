@@ -99,7 +99,9 @@ type DeviceMetadata struct {
 	Contributions []ContributionMetadata
 	// InvalidConsumedCapacity is true when any claim referencing this device reported a negative
 	// consumed-capacity value. The device's accounting cannot be trusted, so it must not be allocated on
-	// either the exclusive or the allow-multiple path until the invalid state clears. See #3209.
+	// either the exclusive or the allow-multiple path until the invalid state clears. While it is set,
+	// ConsumedCapacity and Contributions hold only the results that were well-formed, so neither is the
+	// device's total and neither may be used to decide a fit. See #3209.
 	InvalidConsumedCapacity bool
 }
 
@@ -360,7 +362,7 @@ func addCapacity(dest, src map[resourcev1.QualifiedName]resource.Quantity) map[r
 }
 
 // hasNegativeCapacity reports whether any per-dimension quantity is negative. Consumed capacity is never
-// negative, so a negative value makes the whole physical-device contribution invalid, not just that one
+// negative, so a negative value makes the whole DRA-device contribution invalid, not just that one
 // dimension; the caller fails the device closed rather than keeping the other dimensions. See #3209.
 func hasNegativeCapacity(capacity map[resourcev1.QualifiedName]resource.Quantity) bool {
 	for _, quantity := range capacity {

@@ -878,20 +878,27 @@ var _ = Describe("Allocator", func() {
 					),
 				),
 			}
+			newNodeClaim := func() dynamicresources.NodeClaim {
+				return &fakeNodeClaim{
+					id:             unique.Make("test-nc"),
+					nodePoolID:     unique.Make("test-np"),
+					requirements:   scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a")),
+					instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-1")},
+					resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
+				}
+			}
+			// With nothing blocked gpu-0 takes the whole budget, which pins the rejection below on the block
+			// rather than on a slice, claim, or selector that never matched to begin with.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{}, nil, env.Client, nil)
+			result, err := alloc.Allocate(ctx, newNodeClaim(), []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+
 			blocked := sets.New[cloudprovider.DeviceID](
 				deviceID("gpu.example.com", "pool-a", "gpu-offnode").DeviceID,
 			)
 			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{BlockedDevices: blocked}, nil, env.Client, nil)
-
-			nc := &fakeNodeClaim{
-				id:             unique.Make("test-nc"),
-				nodePoolID:     unique.Make("test-np"),
-				requirements:   scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a")),
-				instanceTypes:  []dynamicresources.InstanceTypeID{unique.Make("it-1")},
-				resourceSlices: make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice),
-			}
-			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
-			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			_, err = alloc.Allocate(ctx, newNodeClaim(), []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -957,6 +964,59 @@ var _ = Describe("Allocator", func() {
 				))
 			}),
 		)
+	})
+
+	Describe("Blocked devices", func() {
+		It("should reject a blocked exclusive device that is otherwise free", func() {
+			// The device is the only candidate and consumes no shared counters, so nothing but the block can
+			// reject it. Without the check ahead of the allocation-mode branch this allocation succeeds. See #3209.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withGeneration(1, 1), withAPIDevices("gpu-0")),
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{}, nil, env.Client, nil)
+			result, err := alloc.Allocate(ctx, makeNodeClaim("it-1"), []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+
+			blocked := sets.New[cloudprovider.DeviceID](deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{BlockedDevices: blocked}, nil, env.Client, nil)
+			_, err = alloc.Allocate(ctx, makeNodeClaim("it-1"), []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should reject a blocked allow-multiple device that still has free capacity", func() {
+			// The allow-multiple branch gates on capacity instead of the exclusive-device set, so a block it does
+			// not see reads as the full 80Gi still free. The unblocked run pins that the request itself fits.
+			// See #3209.
+			inClusterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+						})
+					},
+				),
+			}
+			newClaim := func() *resourcev1.ResourceClaim {
+				return makeClaim("c1", exactRequestWithCapacity("req-1", "gpu", 1, map[resourcev1.QualifiedName]resource.Quantity{
+					"gpu.example.com/vram": resource.MustParse("16Gi"),
+				}))
+			}
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{}, nil, env.Client, nil)
+			result, err := alloc.Allocate(ctx, makeNodeClaim("it-1"), []*resourcev1.ResourceClaim{newClaim()})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+
+			blocked := sets.New[cloudprovider.DeviceID](deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID)
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{BlockedDevices: blocked}, nil, env.Client, nil)
+			_, err = alloc.Allocate(ctx, makeNodeClaim("it-1"), []*resourcev1.ResourceClaim{newClaim()})
+			Expect(err).To(HaveOccurred())
+		})
 	})
 
 	Describe("SharedCounters — zero capacity edge cases", func() {

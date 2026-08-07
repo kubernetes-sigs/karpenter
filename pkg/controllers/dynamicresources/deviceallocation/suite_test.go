@@ -892,6 +892,42 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			})
 		})
 
+		It("clears the invalid flag once the offending claim is gone", func() {
+			// The flag is recomputed from the claims that currently reference the device, not latched on it. When
+			// the claim carrying the negative goes away the device is allocatable again, with the capacity the
+			// surviving claim still holds.
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("256Mi"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("-128Mi"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(collectDevices(seq)[deviceID("device-0")].InvalidConsumedCapacity).To(BeTrue())
+
+			ExpectDeleted(ctx, env.Client, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err = controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			meta := collectDevices(seq)[deviceID("device-0")]
+			Expect(meta.InvalidConsumedCapacity).To(BeFalse())
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("256Mi"),
+			})
+		})
+
 		It("surfaces per-claim contributions paired with their reserving pods", func() {
 			claimA := withReservedFor(
 				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
