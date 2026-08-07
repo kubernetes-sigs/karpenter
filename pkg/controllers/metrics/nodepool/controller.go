@@ -38,7 +38,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+)
+
+const (
+	conditionLabel       = "condition"
+	conditionStatusLabel = "status"
 )
 
 var (
@@ -78,6 +84,20 @@ var (
 		},
 		[]string{metrics.NodePoolLabel},
 	)
+	NodeClaimCondition = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodePoolSubsystem,
+			Name:      "nodeclaim_condition",
+			Help:      "The number of nodeclaims owned by a nodepool broken down by status condition type and status. Labeled by nodepool, condition type, and condition status. Useful for tracking rollout progress, e.g. drift reconciliation via condition=\"Drifted\",status=\"True\".",
+		},
+		[]string{
+			metrics.NodePoolLabel,
+			conditionLabel,
+			conditionStatusLabel,
+		},
+	)
 )
 
 type Controller struct {
@@ -111,12 +131,16 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if !nodepoolutils.IsManaged(nodePool, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
-	c.metricStore.Update(req.String(), c.buildMetrics(nodePool))
+	storeMetrics, err := c.buildMetrics(ctx, nodePool)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	c.metricStore.Update(req.String(), storeMetrics)
 	// periodically update our metrics per nodepool even if nothing has changed
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *Controller) buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
+func (c *Controller) buildMetrics(ctx context.Context, nodePool *v1.NodePool) (res []*metrics.StoreMetric, err error) {
 	res = append(res, &metrics.StoreMetric{
 		GaugeMetric: ClusterCost,
 		Labels:      map[string]string{metrics.NodePoolLabel: nodePool.Name},
@@ -135,7 +159,47 @@ func (c *Controller) buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMe
 			})
 		}
 	}
-	return res
+
+	conditionMetrics, err := c.buildNodeClaimConditionMetrics(ctx, nodePool)
+	if err != nil {
+		return nil, err
+	}
+	return append(res, conditionMetrics...), nil
+}
+
+// buildNodeClaimConditionMetrics emits a gauge per (condition type, condition status) counting the NodeClaims owned by
+// the NodePool in that state. This provides an aggregate, NodePool-level view of NodeClaim conditions (e.g. Drifted)
+// so that rollout progress can be tracked across the nodes a NodePool owns.
+func (c *Controller) buildNodeClaimConditionMetrics(ctx context.Context, nodePool *v1.NodePool) ([]*metrics.StoreMetric, error) {
+	nodeClaimList := &v1.NodeClaimList{}
+	if err := c.kubeClient.List(ctx, nodeClaimList, nodeclaimutils.ForNodePool(nodePool.Name)); err != nil {
+		return nil, err
+	}
+	// Count NodeClaims bucketed by condition type and status.
+	counts := map[conditionKey]int{}
+	for i := range nodeClaimList.Items {
+		for _, cond := range nodeClaimList.Items[i].Status.Conditions {
+			counts[conditionKey{condition: cond.Type, status: string(cond.Status)}]++
+		}
+	}
+	res := make([]*metrics.StoreMetric, 0, len(counts))
+	for key, count := range counts {
+		res = append(res, &metrics.StoreMetric{
+			GaugeMetric: NodeClaimCondition,
+			Labels: map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
+				conditionLabel:        key.condition,
+				conditionStatusLabel:  key.status,
+			},
+			Value: float64(count),
+		})
+	}
+	return res, nil
+}
+
+type conditionKey struct {
+	condition string
+	status    string
 }
 
 func getLimits(nodePool *v1.NodePool) corev1.ResourceList {

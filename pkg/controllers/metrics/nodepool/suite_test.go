@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -132,8 +133,52 @@ var _ = Describe("Metrics", func() {
 			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
 		}
 	})
+	It("should update the nodeclaim condition metrics broken down by condition type and status", func() {
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// Two NodeClaims drifted, one not drifted.
+		nc1 := test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
+		nc2 := test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
+		nc3 := test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
+		nc1.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+		nc2.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+		ExpectApplied(ctx, env.Client, nc1, nc2, nc3)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+		m, found := FindMetricWithLabelValues("karpenter_nodepools_nodeclaim_condition", map[string]string{
+			metrics.NodePoolLabel: nodePool.GetName(),
+			"condition":           v1.ConditionTypeDrifted,
+			"status":              string(metav1.ConditionTrue),
+		})
+		Expect(found).To(BeTrue())
+		Expect(m.GetGauge().GetValue()).To(BeNumerically("==", 2))
+	})
+	It("should remove a nodeclaim condition metric label set once no NodeClaims are in that state", func() {
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		nc := test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
+		nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+		ExpectApplied(ctx, env.Client, nc)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+		driftedLabels := map[string]string{
+			metrics.NodePoolLabel: nodePool.GetName(),
+			"condition":           v1.ConditionTypeDrifted,
+			"status":              string(metav1.ConditionTrue),
+		}
+		_, found := FindMetricWithLabelValues("karpenter_nodepools_nodeclaim_condition", driftedLabels)
+		Expect(found).To(BeTrue())
+
+		// Clearing the Drifted condition should remove the drifted=True label set on the next reconcile.
+		_ = nc.StatusConditions().Clear(v1.ConditionTypeDrifted)
+		ExpectApplied(ctx, env.Client, nc)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+		_, found = FindMetricWithLabelValues("karpenter_nodepools_nodeclaim_condition", driftedLabels)
+		Expect(found).To(BeFalse())
+	})
 	It("should delete the nodepool state metrics on nodepool delete", func() {
-		expectedMetrics := []string{"karpenter_nodepools_limit", "karpenter_nodepools_usage"}
+		expectedMetrics := []string{"karpenter_nodepools_limit", "karpenter_nodepools_usage", "karpenter_nodepools_nodeclaim_condition"}
 		nodePool.Spec.Limits = v1.Limits{
 			corev1.ResourceCPU:              resource.MustParse("100"),
 			corev1.ResourceMemory:           resource.MustParse("100Mi"),
@@ -145,6 +190,9 @@ var _ = Describe("Metrics", func() {
 			corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
+		nc := test.NodeClaim(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}}})
+		nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+		ExpectApplied(ctx, env.Client, nc)
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for _, name := range expectedMetrics {
