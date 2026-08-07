@@ -356,7 +356,10 @@ func (c Command) SourceCost() float64 {
 }
 
 // EstimatedSavings returns the estimated cost savings from this consolidation.
-// Returns 0.0 when pricing cannot be determined.
+// Unknown prices degrade silently: an unpriceable source node carries Price 0
+// (see resolveNodePrice) and deflates savings, while a replacement with no
+// available compatible offering contributes 0 to destination cost and inflates
+// them.
 func (c Command) EstimatedSavings() float64 {
 	sourcePrice := c.SourceCost()
 
@@ -366,11 +369,12 @@ func (c Command) EstimatedSavings() float64 {
 	}
 
 	// For replace consolidation, sum destination costs from all replacement NodeClaims.
-	// Filter to available offerings so ICE'd zones don't produce an optimistic estimate.
 	destPrice := 0.0
 	for _, nodeClaim := range c.Results.NewNodeClaims {
 		if len(nodeClaim.InstanceTypeOptions) > 0 {
-			available := nodeClaim.InstanceTypeOptions[0].Offerings.Available()
+			available := nodeClaim.InstanceTypeOptions[0].Offerings.
+				Available().                       // Filter to available offerings so ICE'd zones don't produce an optimistic estimate.
+				Compatible(nodeClaim.Requirements) // Filter to only consider allowed offerings
 			if len(available) > 0 {
 				destPrice += available.Cheapest().Price
 			}
