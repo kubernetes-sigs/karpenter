@@ -21,3 +21,5 @@ bin/
 *.swp
 *.swo
 *~
+test_output/
+pkg/controllers/provisioning/scheduling/testdata/
