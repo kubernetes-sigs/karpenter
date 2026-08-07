@@ -111,6 +111,35 @@ type CSVWriter struct {
 	podFile       *os.File
 }
 
+// printTimingSummary renders the baseline-vs-optimized Solve timing overhead.
+// It reports across all runs and, separately, across the runs where a split
+// actually changed the NodeClaim layout ("split runs"). The split subset is
+// the meaningful one for the feature's worst-case cost: every run pays the
+// cheap per-pod recording, but only split runs pay the revert + re-queue +
+// re-solve of displaced pods.
+//
+// Relative percentages are inflated when the baseline Solve is sub-millisecond
+// (tiny pod counts), so read the absolute ms/run alongside the percentage.
+func printTimingSummary(label string, runs, splitRuns int, totalBaseSec, totalOptSec, splitBaseSec, splitOptSec float64) {
+	overhead := totalOptSec - totalBaseSec
+	pct := 0.0
+	if totalBaseSec > 0 {
+		pct = overhead / totalBaseSec * 100
+	}
+	fmt.Printf("\n=== %s TIMING: %d runs (Solve wall-clock, baseline=opt-off vs optimized=opt-on) ===\n", label, runs)
+	fmt.Printf("  all runs:        baseline %.3fs → optimized %.3fs | overhead %+.3fs (%+.1f%%) | avg %+.2fms/run\n",
+		totalBaseSec, totalOptSec, overhead, pct, overhead/float64(runs)*1000)
+	if splitRuns > 0 {
+		sOverhead := splitOptSec - splitBaseSec
+		sPct := 0.0
+		if splitBaseSec > 0 {
+			sPct = sOverhead / splitBaseSec * 100
+		}
+		fmt.Printf("  split runs (%d): baseline %.3fs → optimized %.3fs | overhead %+.3fs (%+.1f%%) | avg %+.2fms/run\n",
+			splitRuns, splitBaseSec, splitOptSec, sOverhead, sPct, sOverhead/float64(splitRuns)*1000)
+	}
+}
+
 func cpuToFloat(q resource.Quantity) float64 {
 	return float64(q.MilliValue()) / 1000.0
 }
@@ -142,7 +171,11 @@ func NewCSVWriter(prefix ...string) (*CSVWriter, error) {
 		return nil, err
 	}
 	w.summaryWriter = csv.NewWriter(w.summaryFile)
-	w.summaryWriter.Write([]string{"run", "pod_count", "pre_nodeclaims", "post_nodeclaims", "pre_cost", "post_cost", "duration_sec"})
+	// baseline_sec / optimized_sec time only the Solve call for the
+	// optimization-off and optimization-on arms respectively (same pods).
+	// overhead_sec = optimized_sec - baseline_sec isolates the added cost of
+	// the per-pod recording plus the terminal split pass.
+	w.summaryWriter.Write([]string{"run", "pod_count", "pre_nodeclaims", "post_nodeclaims", "pre_cost", "post_cost", "baseline_sec", "optimized_sec", "overhead_sec"})
 
 	w.ncFile, err = os.Create(dir + "/" + p + "nodeclaim_details.csv")
 	if err != nil {
@@ -168,7 +201,7 @@ func NewCSVWriter(prefix ...string) (*CSVWriter, error) {
 	return w, nil
 }
 
-func (w *CSVWriter) WriteSummary(run, podCount, preNodeClaims, postNodeClaims int, preCost, postCost, duration float64) {
+func (w *CSVWriter) WriteSummary(run, podCount, preNodeClaims, postNodeClaims int, preCost, postCost, baselineSec, optimizedSec float64) {
 	if w.summaryWriter == nil {
 		return
 	}
@@ -179,7 +212,9 @@ func (w *CSVWriter) WriteSummary(run, podCount, preNodeClaims, postNodeClaims in
 		fmt.Sprintf("%d", postNodeClaims),
 		fmt.Sprintf("%.4f", preCost),
 		fmt.Sprintf("%.4f", postCost),
-		fmt.Sprintf("%.3f", duration),
+		fmt.Sprintf("%.4f", baselineSec),
+		fmt.Sprintf("%.4f", optimizedSec),
+		fmt.Sprintf("%.4f", optimizedSec-baselineSec),
 	})
 }
 
@@ -375,6 +410,14 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 		var cheaperPreCost, cheaperPostCost float64
 		var cheaperPreNCs, cheaperPostNCs int
 		var cheaperPctSum float64
+		// Timing accumulators. baseline = Solve with optimization off,
+		// optimized = Solve with optimization on, both on the same pods.
+		// split* accumulate only the runs where a split actually changed the
+		// layout (postNCs > preNCs), the subset that pays the full
+		// revert/re-queue/re-solve cost, not just per-pod recording.
+		var totalBaselineSec, totalOptimizedSec float64
+		var splitRuns int
+		var splitBaselineSec, splitOptimizedSec float64
 		rapid.Check(GinkgoT(), func(t *rapid.T) {
 			runIndex++
 
@@ -416,14 +459,47 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 			nodePool := createNodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
 
-			podsCopy := make([]*corev1.Pod, len(pods))
-			for i, p := range pods {
-				podsCopy[i] = p.DeepCopy()
+			// A/B timing on identical pods. Each arm gets its own deep copy
+			// because Solve relaxes/mutates the pods it's handed. We time only
+			// the Solve call (not NewScheduler), since the split logic lives
+			// entirely inside Solve: the per-pod recording during the main
+			// loop plus the terminal tryOptimize/finalizeOptimization pass.
+			//
+			// Alternate arm order by run parity so one-time warmup cost
+			// (instance-type caches, allocator warmup) doesn't systematically
+			// land on whichever arm runs first.
+			deepCopyPods := func() []*corev1.Pod {
+				c := make([]*corev1.Pod, len(pods))
+				for i, p := range pods {
+					c[i] = p.DeepCopy()
+				}
+				return c
 			}
-			start := time.Now()
-			s, _ := prov.NewScheduler(ctx, podsCopy, nil, nil, scheduling.EnableNodeClaimOptimization)
-			results, _ := s.Solve(ctx, podsCopy)
-			duration := time.Since(start)
+			timeSolve := func(optimize bool) (scheduling.Results, time.Duration, *scheduling.Scheduler) {
+				podsCopy := deepCopyPods()
+				var s *scheduling.Scheduler
+				if optimize {
+					s, _ = prov.NewScheduler(ctx, podsCopy, nil, nil, scheduling.EnableNodeClaimOptimization)
+				} else {
+					s, _ = prov.NewScheduler(ctx, podsCopy, nil, nil)
+				}
+				start := time.Now()
+				res, _ := s.Solve(ctx, podsCopy)
+				return res, time.Since(start), s
+			}
+
+			var results scheduling.Results
+			var baselineDur, optimizedDur time.Duration
+			var s *scheduling.Scheduler
+			if runIndex%2 == 0 {
+				_, baselineDur, _ = timeSolve(false)
+				results, optimizedDur, s = timeSolve(true)
+			} else {
+				results, optimizedDur, s = timeSolve(true)
+				_, baselineDur, _ = timeSolve(false)
+			}
+			totalBaselineSec += baselineDur.Seconds()
+			totalOptimizedSec += optimizedDur.Seconds()
 
 			postCost := scheduling.TotalNodeClaimPrice(results.NewNodeClaims)
 			postNCs := len(results.NewNodeClaims)
@@ -436,6 +512,13 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 				preCost = s.OptimizationSnapshot.PreCost
 				preNCs = len(s.OptimizationSnapshot.Pre)
 				triggeredRuns++
+			}
+			// A split actually changed the layout when the optimized run ended
+			// with more NodeClaims than the pre-optimization snapshot.
+			if postNCs > preNCs {
+				splitRuns++
+				splitBaselineSec += baselineDur.Seconds()
+				splitOptimizedSec += optimizedDur.Seconds()
 			}
 
 			totalPreCost += preCost
@@ -461,15 +544,17 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 
 			// Sign convention: saved > 0 means the optimized cost is lower than
 			// the pre-optimization cost. Negative values mean the pass made
-			// things costlier.
-			fmt.Printf("cost (%4d), pods (%4d), nodeclaims (%3d → %3d), cost (%8.4f → %8.4f), saved %+8.4f (%+5.1f%%), duration %s\n",
+			// things costlier. base/opt are Solve wall-clock for the
+			// optimization-off/on arms; +Δ is the added time.
+			overheadDur := optimizedDur - baselineDur
+			fmt.Printf("cost (%4d), pods (%4d), nodeclaims (%3d → %3d), cost (%8.4f → %8.4f), saved %+8.4f (%+5.1f%%), time base %s opt %s (Δ %s)\n",
 				runIndex, podCount,
 				preNCs, postNCs,
 				preCost, postCost,
 				runSaved, runPctSaved,
-				duration.Round(time.Millisecond))
+				baselineDur.Round(time.Millisecond), optimizedDur.Round(time.Millisecond), overheadDur.Round(time.Millisecond))
 
-			csvWriter.WriteSummary(runIndex, podCount, preNCs, postNCs, preCost, postCost, duration.Seconds())
+			csvWriter.WriteSummary(runIndex, podCount, preNCs, postNCs, preCost, postCost, baselineDur.Seconds(), optimizedDur.Seconds())
 			if triggered {
 				csvWriter.WriteNodeClaimSnapshots(runIndex, "pre", s.OptimizationSnapshot.Pre)
 				csvWriter.WriteNodeClaimSnapshots(runIndex, "post", s.OptimizationSnapshot.Post)
@@ -527,6 +612,13 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 		}
 		fmt.Printf("  %d of %d runs triggered the optimization pass (%d%%)\n",
 			triggeredRuns, runIndex, triggeredRuns*100/runIndex)
+
+		// Timing overhead: optimized Solve wall-clock vs. baseline Solve
+		// wall-clock on the same pods. Overhead is the added cost of the
+		// per-pod recording plus the terminal split pass.
+		printTimingSummary("COST", runIndex, splitRuns,
+			totalBaselineSec, totalOptimizedSec,
+			splitBaselineSec, splitOptimizedSec)
 	})
 
 	It("should handle diverse pod scheduling constraints", func() {
@@ -676,6 +768,10 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 		var cheaperPreCost, cheaperPostCost float64
 		var cheaperPreNCs, cheaperPostNCs int
 		var cheaperPctSum float64
+		// Timing accumulators (see the cost test for the A/B methodology).
+		var totalBaselineSec, totalOptimizedSec float64
+		var splitRuns int
+		var splitBaselineSec, splitOptimizedSec float64
 
 		rapid.Check(GinkgoT(), func(t *rapid.T) {
 			runIndex++
@@ -696,12 +792,43 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 
 			nodePool := createNodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
-			podsCopy := make([]*corev1.Pod, len(pods))
-			for i, p := range pods {
-				podsCopy[i] = p.DeepCopy()
+
+			// A/B timing on identical pods, same methodology as the cost
+			// test: time only Solve, alternate arm order by run parity, and
+			// give each arm its own deep copy (Solve mutates the pods).
+			deepCopyPods := func() []*corev1.Pod {
+				c := make([]*corev1.Pod, len(pods))
+				for i, p := range pods {
+					c[i] = p.DeepCopy()
+				}
+				return c
 			}
-			s, _ := prov.NewScheduler(ctx, podsCopy, nil, nil, scheduling.EnableNodeClaimOptimization)
-			results, _ := s.Solve(ctx, podsCopy)
+			timeSolve := func(optimize bool) (scheduling.Results, time.Duration, *scheduling.Scheduler) {
+				podsCopy := deepCopyPods()
+				var s *scheduling.Scheduler
+				if optimize {
+					s, _ = prov.NewScheduler(ctx, podsCopy, nil, nil, scheduling.EnableNodeClaimOptimization)
+				} else {
+					s, _ = prov.NewScheduler(ctx, podsCopy, nil, nil)
+				}
+				start := time.Now()
+				res, _ := s.Solve(ctx, podsCopy)
+				return res, time.Since(start), s
+			}
+
+			var results scheduling.Results
+			var baselineDur, optimizedDur time.Duration
+			var s *scheduling.Scheduler
+			if runIndex%2 == 0 {
+				_, baselineDur, _ = timeSolve(false)
+				results, optimizedDur, s = timeSolve(true)
+			} else {
+				results, optimizedDur, s = timeSolve(true)
+				_, baselineDur, _ = timeSolve(false)
+			}
+			totalBaselineSec += baselineDur.Seconds()
+			totalOptimizedSec += optimizedDur.Seconds()
+
 			postCost := scheduling.TotalNodeClaimPrice(results.NewNodeClaims)
 			postNCs := len(results.NewNodeClaims)
 
@@ -714,6 +841,13 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 				preCost = s.OptimizationSnapshot.PreCost
 				preNCs = len(s.OptimizationSnapshot.Pre)
 				triggeredRuns++
+			}
+			// A split actually changed the layout when the optimized run ended
+			// with more NodeClaims than the pre-optimization snapshot.
+			if postNCs > preNCs {
+				splitRuns++
+				splitBaselineSec += baselineDur.Seconds()
+				splitOptimizedSec += optimizedDur.Seconds()
 			}
 
 			totalPreCost += preCost
@@ -767,14 +901,16 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 			// Sign convention: saved > 0 means the optimized cost is lower than
 			// the pre-optimization cost. Negative values mean the pass made
 			// things costlier.
-			fmt.Printf("diverse (%3d), pods (%4d), groups (%2d), nodeclaims (%3d → %3d), cost (%8.4f → %8.4f), saved %+8.4f (%+5.1f%%), constraints(zone/tsc/anti/hport/paff, %d/%d/%d/%d/%d), errs(%3d)\n",
+			overheadDur := optimizedDur - baselineDur
+			fmt.Printf("diverse (%3d), pods (%4d), groups (%2d), nodeclaims (%3d → %3d), cost (%8.4f → %8.4f), saved %+8.4f (%+5.1f%%), time base %s opt %s (Δ %s), constraints(zone/tsc/anti/hport/paff, %d/%d/%d/%d/%d), errs(%3d)\n",
 				runIndex, len(pods), len(groups),
 				preNCs, postNCs,
 				preCost, postCost,
 				runSaved, runPctSaved,
+				baselineDur.Round(time.Millisecond), optimizedDur.Round(time.Millisecond), overheadDur.Round(time.Millisecond),
 				nZoneAff, nTSC, nAntiAff, nHostPort, nPodAff, len(results.PodErrors))
 
-			csvWriter.WriteSummary(runIndex, len(pods), preNCs, postNCs, preCost, postCost, 0)
+			csvWriter.WriteSummary(runIndex, len(pods), preNCs, postNCs, preCost, postCost, baselineDur.Seconds(), optimizedDur.Seconds())
 			if triggered {
 				csvWriter.WriteNodeClaimSnapshots(runIndex, "pre", s.OptimizationSnapshot.Pre)
 				csvWriter.WriteNodeClaimSnapshots(runIndex, "post", s.OptimizationSnapshot.Post)
@@ -844,5 +980,9 @@ var _ = Describe("NodeClaim Optimization Rapid", func() {
 		}
 		fmt.Printf("  %d of %d runs triggered the optimization pass (%d%%)\n",
 			triggeredRuns, runIndex, triggeredRuns*100/runIndex)
+
+		printTimingSummary("DIVERSE", runIndex, splitRuns,
+			totalBaselineSec, totalOptimizedSec,
+			splitBaselineSec, splitOptimizedSec)
 	})
 })
