@@ -147,7 +147,7 @@ spec:
                         ConsolidateAfter is the duration the controller will wait
                         before attempting to terminate nodes that are underutilized.
                         Refer to ConsolidationPolicy for how underutilization is considered.
-                        When replicas is set, ConsolidateAfter is simply ignored
+                        Required unless replicas is set, in which case it is simply ignored.
                       pattern: ^(([0-9]+(s|m|h))+|Never)$
                       type: string
                     consolidationPolicy:
@@ -162,8 +162,6 @@ spec:
                         - WhenEmptyOrUnderutilized
                         - Balanced
                       type: string
-                  required:
-                    - consolidateAfter
                   type: object
                 limits:
                   additionalProperties:
@@ -465,6 +463,8 @@ spec:
                   rule: '!has(self.replicas) || (!has(self.limits) || size(self.limits) == 0 || (size(self.limits) == 1 && ''nodes'' in self.limits))'
                 - message: '''weight'' is not supported on static NodePools'
                   rule: '!has(self.replicas) || !has(self.weight)'
+                - message: disruption.consolidateAfter is required on dynamic NodePools
+                  rule: has(self.replicas) || has(self.disruption.consolidateAfter)
             status:
               description: NodePoolStatus defines the observed state of NodePool
               properties:

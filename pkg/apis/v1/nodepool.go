@@ -39,6 +39,7 @@ import (
 // +kubebuilder:validation:XValidation:rule="has(self.replicas) == has(oldSelf.replicas)",message="Cannot transition NodePool between static (replicas set) and dynamic (replicas unset) provisioning modes"
 // +kubebuilder:validation:XValidation:rule="!has(self.replicas) || (!has(self.limits) || size(self.limits) == 0 || (size(self.limits) == 1 && 'nodes' in self.limits))",message="only 'limits.nodes' is supported on static NodePools"
 // +kubebuilder:validation:XValidation:rule="!has(self.replicas) || !has(self.weight)",message="'weight' is not supported on static NodePools"
+// +kubebuilder:validation:XValidation:rule="has(self.replicas) || has(self.disruption.consolidateAfter)",message="disruption.consolidateAfter is required on dynamic NodePools"
 type NodePoolSpec struct {
 	//nolint:kubeapilinter
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
@@ -85,12 +86,12 @@ type Disruption struct {
 	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
-	// When replicas is set, ConsolidateAfter is simply ignored
+	// Required unless replicas is set, in which case it is simply ignored.
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
-	// +required
-	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
+	// +optional
+	ConsolidateAfter NillableDuration `json:"consolidateAfter,omitempty"`
 	//nolint:kubeapilinter
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified.
