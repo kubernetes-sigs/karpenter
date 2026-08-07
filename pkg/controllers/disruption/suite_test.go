@@ -40,8 +40,10 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock"
@@ -105,7 +107,7 @@ var _ = BeforeSuite(func() {
 	recorder = test.NewEventRecorder()
 	draController = deviceallocation.NewController(env.Client)
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
-	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -130,7 +132,7 @@ var _ = BeforeEach(func() {
 	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	env.Clock.SetTime(time.Now())
 	cluster.Reset()
-	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, env.Client))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -473,7 +475,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		defer hangCreateClient.Stop()
 
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(hangCreateClient), virtualpods.NewVirtualPodCache(hangCreateClient))
-		q := disruption.NewQueue(hangCreateClient, recorder, cluster, env.Clock, p)
+		q := disruption.NewQueue(hangCreateClient, recorder, cluster, env.Clock, p, env.Client)
 		dc := disruption.NewController(env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q, clusterCost)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -2307,4 +2309,77 @@ func (h *hangCreateClient) Create(_ context.Context, _ client.Object, _ ...clien
 	<-h.stop
 	h.hasWaiter.Store(false)
 	return nil
+}
+
+type failNthNodeClaimCreateClient struct {
+	client.Client
+	createCount atomic.Int64
+	failAt      int64
+}
+
+func (f *failNthNodeClaimCreateClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if _, ok := obj.(*v1.NodeClaim); ok && f.createCount.Add(1) == f.failAt {
+		return fmt.Errorf("simulated nodeclaim creation failure")
+	}
+	return f.Client.Create(ctx, obj, opts...)
+}
+
+// failNodeTaintClient fails the taint patch for a single Node so that a command can partially fail while marking
+// its candidates as disrupted.
+type failNodeTaintClient struct {
+	client.Client
+	nodeName string
+}
+
+func (f *failNodeTaintClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*corev1.Node); ok && key.Name == f.nodeName {
+		return fmt.Errorf("simulated node taint failure")
+	}
+	return f.Client.Get(ctx, key, obj, opts...)
+}
+
+type failNodeClaimGetClient struct {
+	client.Client
+	nodeClaimName string
+}
+
+func (f *failNodeClaimGetClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*v1.NodeClaim); ok && key.Name == f.nodeClaimName {
+		return fmt.Errorf("simulated nodeclaim get failure")
+	}
+	return f.Client.Get(ctx, key, obj, opts...)
+}
+
+type failNodeClaimReader struct {
+	client.Reader
+}
+
+func (f *failNodeClaimReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*v1.NodeClaim); ok {
+		return fmt.Errorf("simulated uncached nodeclaim get failure")
+	}
+	return f.Reader.Get(ctx, key, obj, opts...)
+}
+
+type failOnceNodeReader struct {
+	client.Reader
+	nodeReads atomic.Int64
+}
+
+func (f *failOnceNodeReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*corev1.Node); ok && f.nodeReads.Add(1) == 1 {
+		return fmt.Errorf("simulated transient node get failure")
+	}
+	return f.Reader.Get(ctx, key, obj, opts...)
+}
+
+type conflictNodeClaimDeleteClient struct {
+	client.Client
+}
+
+func (c *conflictNodeClaimDeleteClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if _, ok := obj.(*v1.NodeClaim); ok {
+		return apierrors.NewConflict(schema.GroupResource{Group: coreapis.Group, Resource: "nodeclaims"}, obj.GetName(), fmt.Errorf("simulated cleanup conflict"))
+	}
+	return c.Client.Delete(ctx, obj, opts...)
 }

@@ -1,0 +1,136 @@
+/*
+Copyright The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package disruption_test
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/samber/lo"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+)
+
+type multiReplacementFixture struct {
+	nodeClaims []*v1.NodeClaim
+	nodes      []*corev1.Node
+}
+
+func setupThreeToTwoMultiReplacement(nodePool *v1.NodePool, replacementPrice float64) multiReplacementFixture {
+	return setupThreeToTwoMultiReplacementWithPodShape(nodePool, replacementPrice, 2, "30")
+}
+
+func setupThreeToTwoMultiReplacementWithPodShape(nodePool *v1.NodePool, replacementPrice float64, podsPerNode int, podCPU string) multiReplacementFixture {
+	const zone = "test-zone-1"
+	offering := func(price float64) cloudprovider.Offering {
+		return cloudprovider.Offering{
+			Available: true,
+			Price:     price,
+			Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone: zone,
+			}),
+		}
+	}
+	d64 := fake.NewInstanceType("D64",
+		fake.WithResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("64"),
+			corev1.ResourceMemory: resource.MustParse("256Gi"),
+			corev1.ResourcePods:   resource.MustParse("100"),
+		}),
+		fake.WithOfferings(offering(6)),
+	)
+	d96 := fake.NewInstanceType("D96",
+		fake.WithResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("96"),
+			corev1.ResourceMemory: resource.MustParse("384Gi"),
+			corev1.ResourcePods:   resource.MustParse("100"),
+		}),
+		fake.WithOfferings(offering(replacementPrice)),
+	)
+	cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{d64, d96}
+	nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+		{
+			Key:      v1.CapacityTypeLabelKey,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{v1.CapacityTypeOnDemand},
+		},
+		{
+			Key:      corev1.LabelTopologyZone,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{zone},
+		},
+	}
+
+	nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: d64.Name,
+				v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone:       zone,
+			},
+		},
+		Status: v1.NodeClaimStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("64"),
+				corev1.ResourceMemory: resource.MustParse("256Gi"),
+				corev1.ResourcePods:   resource.MustParse("100"),
+			},
+		},
+	})
+	for _, nodeClaim := range nodeClaims {
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+	}
+
+	replicaSet := test.ReplicaSet()
+	ExpectApplied(ctx, env.Client, nodePool, replicaSet)
+	pods := test.Pods(3*podsPerNode, test.PodOptions{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{"app": "test"},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "ReplicaSet",
+				Name:               replicaSet.Name,
+				UID:                replicaSet.UID,
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
+			}},
+		},
+		ResourceRequirements: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(podCPU)},
+		},
+	})
+
+	objects := []client.Object{}
+	objects = append(objects, lo.Map(nodeClaims, func(nodeClaim *v1.NodeClaim, _ int) client.Object { return nodeClaim })...)
+	objects = append(objects, lo.Map(nodes, func(node *corev1.Node, _ int) client.Object { return node })...)
+	objects = append(objects, lo.Map(pods, func(pod *corev1.Pod, _ int) client.Object { return pod })...)
+	ExpectApplied(ctx, env.Client, objects...)
+	for i, pod := range pods {
+		ExpectManualBinding(ctx, env.Client, pod, nodes[i/podsPerNode])
+	}
+	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	return multiReplacementFixture{nodeClaims: nodeClaims, nodes: nodes}
+}

@@ -3103,7 +3103,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 			}
 			// Reset the disruption controller so consolidation methods are not cached as consolidated
-			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, env.Client))
 			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 				disruption.WithMethods(NewMethodsWithNopValidator()...))
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -3979,6 +3979,105 @@ var _ = Describe("Consolidation", func() {
 				spotNodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 			}
 		})
+		It("can merge 3 homogeneous D64 nodes with 2 pods each into 2 D96 replacements", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{MultiNodeMultiReplacement: new(true)}}))
+			fixture := setupThreeToTwoMultiReplacement(nodePool, 8)
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			cmd := cmds[0]
+			Expect(cmd.Candidates).To(HaveLen(3))
+			Expect(cmd.Replacements).To(HaveLen(2))
+			for _, replacement := range cmd.Replacements {
+				Expect(replacement.NodePoolName).To(Equal(nodePool.Name))
+				Expect(replacement.Requirements.Get(v1.CapacityTypeLabelKey).Values()).To(ConsistOf(v1.CapacityTypeOnDemand))
+				Expect(replacement.Requirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("test-zone-1"))
+				Expect(lo.Map(replacement.InstanceTypeOptions, func(instanceType *cloudprovider.InstanceType, _ int) string {
+					return instanceType.Name
+				})).To(ConsistOf("D96"))
+			}
+
+			replacementNodeClaims := make([]*v1.NodeClaim, 2)
+			replacementNodes := make([]*corev1.Node, 2)
+			for i, replacement := range cmd.Replacements {
+				replacementNodeClaims[i] = &v1.NodeClaim{}
+				Expect(env.Client.Get(ctx, client.ObjectKey{Name: replacement.Name}, replacementNodeClaims[i])).To(Succeed())
+				replacementNodeClaims[i], replacementNodes[i] = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaims[i])
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{replacementNodes[0]}, []*v1.NodeClaim{replacementNodeClaims[0]})
+			ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
+			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
+			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
+			for i := range fixture.nodeClaims {
+				ExpectExists(ctx, env.Client, fixture.nodeClaims[i])
+				ExpectExists(ctx, env.Client, fixture.nodes[i])
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{replacementNodes[1]}, []*v1.NodeClaim{replacementNodeClaims[1]})
+			ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
+			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
+			Expect(cmd.Replacements[1].Initialized).To(BeTrue())
+
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, fixture.nodeClaims...)
+			ExpectNotFound(ctx, env.Client,
+				fixture.nodeClaims[0], fixture.nodes[0],
+				fixture.nodeClaims[1], fixture.nodes[1],
+				fixture.nodeClaims[2], fixture.nodes[2],
+			)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("prefers a legacy 2-to-1 consolidation over a 3-to-2 fallback", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{MultiNodeMultiReplacement: new(true)}}))
+			setupThreeToTwoMultiReplacementWithPodShape(nodePool, 8, 1, "45")
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates).To(HaveLen(2))
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+		})
+		It("keeps legacy behavior when multi-node multi-replacement is disabled", func() {
+			setupThreeToTwoMultiReplacement(nodePool, 8)
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(3))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
+		})
+		It("rejects replacements whose aggregate worst-case price is not strictly lower", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{MultiNodeMultiReplacement: new(true)}}))
+			setupThreeToTwoMultiReplacement(nodePool, 9)
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(3))
+		})
+		DescribeTable("rejects a 3-to-2 decision when disruption safety changes during validation",
+			func(validatorOption TestConsolidationValidatorOption) {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{MultiNodeMultiReplacement: new(true)}}))
+				setupThreeToTwoMultiReplacement(nodePool, 8)
+
+				c := disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+				multiConsolidation := disruption.NewMultiNodeConsolidation(c, disruption.WithValidator(NewTestMultiConsolidationValidator(nodePool, validatorOption)))
+				budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, multiConsolidation.Reason())
+				Expect(err).To(Succeed())
+				candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
+				Expect(err).To(Succeed())
+
+				cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
+				Expect(err).To(Succeed())
+				Expect(cmds).To(BeEmpty())
+			},
+			Entry("a NodePool budget becomes blocking", WithUnderutilizedBlockingBudget()),
+			Entry("a PDB becomes blocking", WithUnderutilizedBlockingPDB()),
+			Entry("source pod placement changes", WithUnderutilizedChurn()),
+			Entry("refreshed source pricing removes the aggregate savings", WithUnderutilizedSourcePrice(4)),
+		)
 		DescribeTable("can merge 3 nodes into 1", func(spotToSpot bool) {
 			nodeClaims = lo.Ternary(spotToSpot, spotNodeClaims, nodeClaims)
 			nodes = lo.Ternary(spotToSpot, spotNodes, nodes)
@@ -4473,6 +4572,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
 	})
+
 	Context("Topology Consideration", func() {
 		var nodeClaims []*v1.NodeClaim
 		var nodes []*corev1.Node
@@ -4656,6 +4756,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodeClaims[2])
 		})
 	})
+
 	Context("Parallelization", func() {
 		It("should not schedule an additional node when receiving pending pods while consolidating", func() {
 			// create our RS so we can link a pod to it

@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 type ValidationError struct {
@@ -294,6 +295,8 @@ func (c *ConsolidationValidator) validateCandidates(ctx context.Context, candida
 }
 
 // ValidateCommand validates a command for a Method
+//
+//nolint:gocyclo
 func (v *validation) validateCommand(ctx context.Context, cmd Command, candidates []*Candidate) error {
 	// None of the chosen candidate are valid for execution, so retry
 	if len(candidates) == 0 {
@@ -307,11 +310,35 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 		return NewSchedulingValidationError(errors.New(results.NonPendingPodSchedulingErrors()))
 	}
 
+	if len(cmd.Replacements) == maxMultiNodeMultiReplacements {
+		if !options.FromContext(ctx).FeatureGates.MultiNodeMultiReplacement {
+			return NewSchedulingValidationError(fmt.Errorf("multi-node multi-replacement feature gate is disabled"))
+		}
+		refreshedReplacements, err := prepareMultiNodeMultiReplacement(candidates, results.NewNodeClaims)
+		if err != nil {
+			return NewSchedulingValidationError(err)
+		}
+		matchedReplacements, matched := matchReplacementPairs(cmd.Replacements, refreshedReplacements)
+		if !matched {
+			return NewSchedulingValidationError(fmt.Errorf("scheduling simulation produced new results"))
+		}
+		replacementNodeClaims := lo.Map(cmd.Replacements, func(replacement *Replacement, _ int) *scheduling.NodeClaim {
+			return replacement.NodeClaim
+		})
+		if err := validateMultiNodeMultiReplacementBoundary(candidates, replacementNodeClaims, true); err != nil {
+			return NewSchedulingValidationError(err)
+		}
+		sourcePrice := sumCandidatePrices(candidates)
+		if replacementPrice := aggregateWorstCaseReplacementPrice(cmd.Replacements, matchedReplacements); replacementPrice >= sourcePrice {
+			return NewSchedulingValidationError(fmt.Errorf("aggregate worst-case replacement price %.6f is not lower than refreshed source price %.6f", replacementPrice, sourcePrice))
+		}
+		return nil
+	}
+
 	// We want to ensure that the re-simulated scheduling using the current cluster state produces the same result.
 	// There are three possible options for the number of new candidates that we need to handle:
 	// len(NewNodeClaims) == 0, as long as we weren't expecting a new node, this is valid
-	// len(NewNodeClaims) > 1, something in the cluster changed so that the candidates we were going to delete can no longer
-	//                    be deleted without producing more than one node
+	// len(NewNodeClaims) > 1, something in the cluster changed so that a legacy m->0 or m->1 command is no longer valid
 	// len(NewNodeClaims) == 1, as long as the noe looks like what we were expecting, this is valid
 	if len(results.NewNodeClaims) == 0 {
 		if len(cmd.Replacements) == 0 {
@@ -323,7 +350,7 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 		return NewSchedulingValidationError(fmt.Errorf("scheduling simulation produced new results"))
 	}
 
-	// we need more than one replacement node which is never valid currently (all of our node replacement is m->1, never m->n)
+	// Legacy commands only support m->1 replacement.
 	if len(results.NewNodeClaims) > 1 {
 		return NewSchedulingValidationError(fmt.Errorf("scheduling simulation produced new results"))
 	}
