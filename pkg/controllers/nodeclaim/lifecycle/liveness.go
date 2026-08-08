@@ -37,6 +37,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -151,12 +152,18 @@ func (l *Liveness) deleteNodeClaimForTimeout(ctx context.Context, timeout time.D
 		return err
 	}
 	log.FromContext(ctx).V(1).WithValues("timeout", timeout, "reason", reason).Info("terminating due to timeout")
-	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+	labels := map[string]string{
 		metrics.ReasonLabel:              reason,
 		metrics.NodePoolLabel:            nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel:        nodeClaim.Labels[v1.CapacityTypeLabelKey],
 		metrics.ConsolidationPolicyLabel: "",
 		metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
-	})
+	}
+	metrics.NodeClaimsDisruptedTotal.Inc(labels)
+	if pods, err := nodeutils.ReschedulablePods(ctx, l.kubeClient, nodeClaim.Status.NodeName); err != nil {
+		log.FromContext(ctx).Error(err, "failed getting reschedulable pods for timed out nodeclaim")
+	} else {
+		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(pods)), labels)
+	}
 	return nil
 }
