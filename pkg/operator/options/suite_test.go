@@ -64,6 +64,7 @@ var _ = Describe("Options", func() {
 		"BATCH_IDLE_DURATION",
 		"PREFERENCE_POLICY",
 		"MIN_VALUES_POLICY",
+		"PLACEMENT_STRATEGY",
 		"FEATURE_GATES",
 	}
 
