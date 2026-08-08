@@ -102,7 +102,6 @@ var _ = Describe("Store", func() {
 		_, ok := store.Get(target)
 		Expect(ok).To(BeFalse())
 
-		// Deleting again should not panic
 		Expect(func() { store.Delete(source) }).NotTo(Panic())
 	})
 

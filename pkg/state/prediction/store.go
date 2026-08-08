@@ -17,6 +17,7 @@ limitations under the License.
 package prediction
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
@@ -44,6 +45,8 @@ type targetEntry struct {
 // then lexicographically smallest name) to determine which prediction is active.
 type Store struct {
 	sync.RWMutex
+	hydrationCh   chan struct{}
+	hydrationOnce sync.Once
 	// byTarget indexes all contending predictions by the workload they apply to.
 	// Entries are sorted by strength (strongest first).
 	byTarget map[types.UID][]targetEntry
@@ -53,8 +56,22 @@ type Store struct {
 
 func NewStore() *Store {
 	return &Store{
-		byTarget: make(map[types.UID][]targetEntry),
-		bySource: make(map[types.NamespacedName]types.UID),
+		hydrationCh: make(chan struct{}),
+		byTarget:    make(map[types.UID][]targetEntry),
+		bySource:    make(map[types.NamespacedName]types.UID),
+	}
+}
+
+func (s *Store) MarkHydrated() {
+	s.hydrationOnce.Do(func() { close(s.hydrationCh) })
+}
+
+func (s *Store) Hydrated(ctx context.Context) bool {
+	select {
+	case <-s.hydrationCh:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -64,7 +81,6 @@ func (s *Store) Set(source types.NamespacedName, targetUID types.UID, p *Predict
 	s.Lock()
 	defer s.Unlock()
 
-	// If this source previously targeted a different workload, remove it from the old target.
 	if prev, ok := s.bySource[source]; ok && prev != targetUID {
 		s.removeEntry(prev, source)
 	}
