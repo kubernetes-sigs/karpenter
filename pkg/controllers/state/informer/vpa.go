@@ -23,6 +23,8 @@ import (
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -45,16 +47,18 @@ import (
 // pattern rather than an informer to gracefully tolerate VPA CRD not being installed.
 type VPAController struct {
 	kubeClient client.Client
+	apiReader  client.Reader
 	store      *prediction.Store
 	// lastSeen tracks the resourceVersion of each VPA we've processed,
 	// so we skip recomputation when nothing changed.
 	lastSeen map[types.NamespacedName]string
 }
 
-func NewVPAController(kubeClient client.Client, store *prediction.Store) *VPAController {
+func NewVPAController(kubeClient client.Client, apiReader client.Reader, store *prediction.Store) *VPAController {
 	utilruntime.Must(vpav1.AddToScheme(scheme.Scheme))
 	return &VPAController{
 		kubeClient: kubeClient,
+		apiReader:  apiReader,
 		store:      store,
 		lastSeen:   make(map[types.NamespacedName]string),
 	}
@@ -66,13 +70,16 @@ func (c *VPAController) Reconcile(ctx context.Context) (reconciler.Result, error
 	var vpaList vpav1.VerticalPodAutoscalerList
 	if err := c.kubeClient.List(ctx, &vpaList); err != nil {
 		if meta.IsNoMatchError(err) {
+			c.store.Reset()
+			c.lastSeen = make(map[types.NamespacedName]string)
+			c.store.MarkHydrated()
 			return reconciler.Result{RequeueAfter: 1 * time.Minute}, nil
 		}
 		return reconciler.Result{}, err
 	}
 
-	// Track which VPAs we see this cycle, to detect deletions
 	seen := make(map[types.NamespacedName]bool, len(vpaList.Items))
+	allResolved := true
 
 	for i := range vpaList.Items {
 		vpa := &vpaList.Items[i]
@@ -82,28 +89,11 @@ func (c *VPAController) Reconcile(ctx context.Context) (reconciler.Result, error
 		if c.lastSeen[key] == vpa.ResourceVersion {
 			continue
 		}
-		c.lastSeen[key] = vpa.ResourceVersion
-
-		var p *prediction.Prediction
-		if vpa.Spec.TargetRef != nil {
-			p = computePrediction(vpa)
+		if !c.processVPA(ctx, vpa, key) {
+			allResolved = false
 		}
-		if p == nil {
-			c.store.Delete(key)
-			continue
-		}
-		// Resolve the target workload's UID
-		targetObj := &unstructured.Unstructured{}
-		targetObj.SetGroupVersionKind(schema.FromAPIVersionAndKind(vpa.Spec.TargetRef.APIVersion, vpa.Spec.TargetRef.Kind))
-		if err := c.kubeClient.Get(ctx, types.NamespacedName{Namespace: vpa.Namespace, Name: vpa.Spec.TargetRef.Name}, targetObj); err != nil {
-			c.store.Delete(key)
-			continue
-		}
-
-		c.store.Set(key, targetObj.GetUID(), p, vpa.CreationTimestamp.Time)
 	}
 
-	// Clean up predictions for deleted VPAs
 	for key := range c.lastSeen {
 		if !seen[key] {
 			c.store.Delete(key)
@@ -111,7 +101,34 @@ func (c *VPAController) Reconcile(ctx context.Context) (reconciler.Result, error
 		}
 	}
 
+	if allResolved {
+		c.store.MarkHydrated()
+	}
+
 	return reconciler.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+func (c *VPAController) processVPA(ctx context.Context, vpa *vpav1.VerticalPodAutoscaler, key types.NamespacedName) bool {
+	var p *prediction.Prediction
+	if vpa.Spec.TargetRef != nil {
+		p = computePrediction(vpa)
+	}
+	if p == nil {
+		c.store.Delete(key)
+		c.lastSeen[key] = vpa.ResourceVersion
+		return true
+	}
+	// Resolve the target workload's UID via the uncached API reader to avoid
+	// lazily starting cluster-wide informers for arbitrary target GVKs.
+	targetObj := &unstructured.Unstructured{}
+	targetObj.SetGroupVersionKind(schema.FromAPIVersionAndKind(vpa.Spec.TargetRef.APIVersion, vpa.Spec.TargetRef.Kind))
+	if err := c.apiReader.Get(ctx, types.NamespacedName{Namespace: vpa.Namespace, Name: vpa.Spec.TargetRef.Name}, targetObj); err != nil {
+		c.store.Delete(key)
+		return apierrors.IsNotFound(err)
+	}
+	c.store.Set(key, targetObj.GetUID(), p, vpa.CreationTimestamp.Time)
+	c.lastSeen[key] = vpa.ResourceVersion
+	return true
 }
 
 func (c *VPAController) Name() string {
@@ -162,7 +179,13 @@ func computeContainerResources(vpa *vpav1.VerticalPodAutoscaler, rec vpav1.Recom
 		if !ok {
 			continue
 		}
-		requests[res] = clamp(qty, res, policy)
+		qty = clamp(qty, res, policy)
+		if res == corev1.ResourceCPU {
+			if boosted := applyStartupBoost(qty, vpa, policy); boosted != nil {
+				qty = *boosted
+			}
+		}
+		requests[res] = qty
 	}
 	return requests
 }
@@ -209,4 +232,35 @@ func clamp(qty resource.Quantity, res corev1.ResourceName, policy *vpav1.Contain
 		}
 	}
 	return qty
+}
+
+func applyStartupBoost(cpu resource.Quantity, vpa *vpav1.VerticalPodAutoscaler, policy *vpav1.ContainerResourcePolicy) *resource.Quantity {
+	boost := findStartupBoost(vpa, policy)
+	if boost == nil || boost.CPU == nil {
+		return nil
+	}
+	switch boost.CPU.Type {
+	case vpav1.FactorStartupBoostType:
+		if boost.CPU.Factor != nil && *boost.CPU.Factor > 1 {
+			result := resource.NewMilliQuantity(cpu.MilliValue()*int64(*boost.CPU.Factor), cpu.Format)
+			return result
+		}
+	case vpav1.QuantityStartupBoostType:
+		if boost.CPU.Quantity != nil {
+			result := cpu.DeepCopy()
+			result.Add(*boost.CPU.Quantity)
+			return &result
+		}
+	}
+	return nil
+}
+
+func findStartupBoost(vpa *vpav1.VerticalPodAutoscaler, policy *vpav1.ContainerResourcePolicy) *vpav1.StartupBoost {
+	if policy != nil && policy.StartupBoost != nil {
+		return policy.StartupBoost
+	}
+	if vpa.Spec.StartupBoost != nil {
+		return vpa.Spec.StartupBoost
+	}
+	return nil
 }

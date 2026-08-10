@@ -207,7 +207,7 @@ func NewControllers(
 	}
 
 	if !o.disableVPAPrediction {
-		controllers = append(controllers, informer.NewVPAController(kubeClient, predictionStore))
+		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
 	}
 
 	return controllers

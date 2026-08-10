@@ -31,6 +31,7 @@ type VerticalPodAutoscalerOptions struct {
 	TargetRef      autoscalingv1.CrossVersionObjectReference
 	UpdatePolicy   *vpav1.PodUpdatePolicy
 	ResourcePolicy *vpav1.PodResourcePolicy
+	StartupBoost   *vpav1.StartupBoost
 }
 
 func VerticalPodAutoscaler(opts ...VerticalPodAutoscalerOptions) *vpav1.VerticalPodAutoscaler {
@@ -50,6 +51,7 @@ func VerticalPodAutoscaler(opts ...VerticalPodAutoscalerOptions) *vpav1.Vertical
 			},
 			UpdatePolicy:   options.UpdatePolicy,
 			ResourcePolicy: options.ResourcePolicy,
+			StartupBoost:   options.StartupBoost,
 		},
 	}
 }
