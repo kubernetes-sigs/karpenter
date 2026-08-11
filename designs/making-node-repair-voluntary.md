@@ -143,24 +143,26 @@ flowchart TD
     DR2 --> TERM
 ```
 
-### 1. Budget — repair as a `DisruptionReason`
+### 1. Budget — repair as an `Unhealthy` `DisruptionReason`
 
 Repair follows the same paced disruption-budget semantics consolidation and drift already use. It's one enum value:
 
 ```go
-// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted,Repair}
+// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted,Unhealthy}
 type DisruptionReason string
 
-const ( /* … */ DisruptionReasonRepair DisruptionReason = "Repair" )
+const ( /* … */ DisruptionReasonUnhealthy DisruptionReason = "Unhealthy" )
 ```
 
-An operator writes `spec.disruption.budgets` with `reasons: ["Repair"]` to say "repair at most N at a time," per-NodePool and schedulable — building directly on the reason-keyed budget design already in-tree (`designs/disruption-controls-by-reason.md`). A false-positive flood is bounded to a trickle instead of a stampede, and it **self-clears** as nodes recover, with no latched breaker to manually unstick. This replaces the binary 20% breaker outright.
+The reason names the node's *state*, not the action taken on it — matching the existing values, which all describe why a node is a candidate (`Underutilized`, `Empty`, `Drifted`) rather than what disruption does about it. "Repair" is the *method* (it keeps its name — `RepairPolicy`, the repair budget, the repair ordering); `Unhealthy` is the condition that method acts on. This also lines up with the vocabulary already used throughout: the controller being replaced is `node.health`, and every condition a cloud provider declares via `RepairPolicy` is an *unhealthy* condition.
+
+An operator writes `spec.disruption.budgets` with `reasons: ["Unhealthy"]` to say "repair at most N at a time," per-NodePool and schedulable — building directly on the reason-keyed budget design already in-tree (`designs/disruption-controls-by-reason.md`). A false-positive flood is bounded to a trickle instead of a stampede, and it **self-clears** as nodes recover, with no latched breaker to manually unstick. This replaces the binary 20% breaker outright.
 
 **Not a breaking change.** The default budget is 10% — *more* conservative than today's 20% — so an operator who does nothing gets tighter, not looser. Repair runs as a disruption *method* inside the shared disruption loop rather than as its own controller, and it must run **before drift and consolidation** (fixing a fault outranks a discretionary rebalance, as it effectively does today).
 
 Two benefits fall out of riding the shared machinery:
 
-- **Observability for free.** Budget metrics are already `reason`-labeled, so `reason="Repair"` gets its own `karpenter_nodepools_allowed_disruptions` and `nodes_consuming_budgets` series (equal ⇒ at cap), plus the NodePool-scoped `DisruptionBlocked` event. A false-positive flood becomes *visible* as repair pinned at its cap — exactly the legibility the breaker lacked, which today trips silently. (One counter worth adding: a `..._blocked_total`.)
+- **Observability for free.** Budget metrics are already `reason`-labeled, so `reason="Unhealthy"` gets its own `karpenter_nodepools_allowed_disruptions` and `nodes_consuming_budgets` series (equal ⇒ at cap), plus the NodePool-scoped `DisruptionBlocked` event. A false-positive flood becomes *visible* as repair pinned at its cap — exactly the legibility the breaker lacked, which today trips silently. (One counter worth adding: a `..._blocked_total`.)
 - **A natural home for smarter restraint.** A cap forces a choice of *which* node, and that choice point is where repair can eventually get much smarter — declining a valid, in-budget target when repairing it won't help (see [Scope](#scope-and-follow-ups)). The budget is a **ceiling, not a mandate.**
 
 > NodePool may not be the ideal budget scope (an arbitrary `nodeSelector` would be more flexible), but splitting repair's budget out alone fragments lifecycle management. [#2930](https://github.com/kubernetes-sigs/karpenter/pull/2930) proposes doing budget scoping properly for *all* disruption at once; this RFC rides the existing per-NodePool scope and stays compatible with that.
