@@ -70,16 +70,9 @@ var _ = BeforeEach(func() {
 	store = prediction.NewStore()
 	controller = informer.NewVPAController(env.Client, env.Client, store)
 
-	dep = &appsv1.Deployment{
+	dep = test.Deployment(test.DeploymentOptions{
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
-		Spec: appsv1.DeploymentSpec{
-			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "app"}},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "app"}},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "main", Image: "nginx"}}},
-			},
-		},
-	}
+	})
 	ExpectApplied(ctx, env.Client, dep)
 	fetched := &appsv1.Deployment{}
 	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(dep), fetched)).To(Succeed())
@@ -108,62 +101,143 @@ func (f transientErrorReader) List(_ context.Context, _ client.ObjectList, _ ...
 }
 
 var _ = Describe("VPA Controller", func() {
-	It("should populate the store from VPA recommendations", func() {
-		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
-		ExpectApplied(ctx, env.Client, vpa)
-		ExpectSingletonReconciled(ctx, controller)
+	DescribeTable("should compute predictions correctly",
+		func(opts test.VerticalPodAutoscalerOptions, recommendation map[string]corev1.ResourceList, expectFound bool, expected map[string]corev1.ResourceList) {
+			opts.TargetRef = targetRef
+			vpa := test.VerticalPodAutoscaler(opts)
+			ExpectApplied(ctx, env.Client, vpa)
+			test.UpdateVPARecommendation(ctx, env.Client, vpa, recommendation)
+			ExpectSingletonReconciled(ctx, controller)
 
-		_, ok := store.Get(targetUID)
-		Expect(ok).To(BeFalse())
-
-		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {
-				corev1.ResourceCPU:    resource.MustParse("500m"),
-				corev1.ResourceMemory: resource.MustParse("256Mi"),
+			pred, ok := store.Get(targetUID)
+			Expect(ok).To(Equal(expectFound))
+			if expectFound {
+				for container, resources := range expected {
+					for res, qty := range resources {
+						actual := pred.Containers[container][res]
+						Expect(actual.Cmp(qty)).To(Equal(0), "container=%s resource=%s expected=%s actual=%s", container, res, qty.String(), actual.String())
+					}
+				}
+			}
+		},
+		Entry("basic recommendation",
+			test.VerticalPodAutoscalerOptions{},
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
 			},
-		})
-		ExpectSingletonReconciled(ctx, controller)
-
-		pred, ok := store.Get(targetUID)
-		Expect(ok).To(BeTrue())
-		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
-		Expect(pred.Containers["main"][corev1.ResourceMemory]).To(Equal(resource.MustParse("256Mi")))
-		Expect(store.Hydrated(ctx)).To(BeTrue())
-	})
-
-	It("should remove predictions when VPA is deleted", func() {
-		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
-		ExpectApplied(ctx, env.Client, vpa)
-		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {corev1.ResourceCPU: resource.MustParse("1")},
-		})
-		ExpectSingletonReconciled(ctx, controller)
-
-		_, ok := store.Get(targetUID)
-		Expect(ok).To(BeTrue())
-
-		ExpectDeleted(ctx, env.Client, vpa)
-		ExpectSingletonReconciled(ctx, controller)
-
-		_, ok = store.Get(targetUID)
-		Expect(ok).To(BeFalse())
-	})
-
-	It("should skip VPAs with updateMode Off", func() {
-		mode := vpav1.UpdateModeOff
-		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
-			TargetRef:    targetRef,
-			UpdatePolicy: &vpav1.PodUpdatePolicy{UpdateMode: &mode},
-		})
-		ExpectApplied(ctx, env.Client, vpa)
-		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {corev1.ResourceCPU: resource.MustParse("100m")},
-		})
-		ExpectSingletonReconciled(ctx, controller)
-
-		_, ok := store.Get(targetUID)
-		Expect(ok).To(BeFalse())
-	})
+			true,
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
+			},
+		),
+		Entry("skip VPAs with updateMode Off",
+			test.VerticalPodAutoscalerOptions{
+				UpdatePolicy: &vpav1.PodUpdatePolicy{UpdateMode: lo.ToPtr(vpav1.UpdateModeOff)},
+			},
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("100m")},
+			},
+			false,
+			nil,
+		),
+		Entry("clamp recommendations to min/max bounds",
+			test.VerticalPodAutoscalerOptions{
+				ResourcePolicy: &vpav1.PodResourcePolicy{
+					ContainerPolicies: []vpav1.ContainerResourcePolicy{{
+						ContainerName: "main",
+						MinAllowed:    corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("200m")},
+						MaxAllowed:    corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")},
+					}},
+				},
+			},
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("1Gi")},
+			},
+			true,
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("200m"), corev1.ResourceMemory: resource.MustParse("512Mi")},
+			},
+		),
+		Entry("prefer specific container policy over wildcard",
+			test.VerticalPodAutoscalerOptions{
+				ResourcePolicy: &vpav1.PodResourcePolicy{
+					ContainerPolicies: []vpav1.ContainerResourcePolicy{
+						{ContainerName: "*", MinAllowed: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}},
+						{ContainerName: "main", MinAllowed: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")}},
+					},
+				},
+			},
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("50m")},
+			},
+			true,
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("500m")},
+			},
+		),
+		Entry("apply startup boost factor to CPU prediction",
+			test.VerticalPodAutoscalerOptions{
+				StartupBoost: &vpav1.StartupBoost{
+					CPU: &vpav1.GenericStartupBoost{
+						Type:   vpav1.FactorStartupBoostType,
+						Factor: lo.ToPtr(int32(3)),
+					},
+				},
+			},
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
+			},
+			true,
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("1500m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
+			},
+		),
+		Entry("apply startup boost quantity to CPU prediction",
+			test.VerticalPodAutoscalerOptions{
+				StartupBoost: &vpav1.StartupBoost{
+					CPU: &vpav1.GenericStartupBoost{
+						Type:     vpav1.QuantityStartupBoostType,
+						Quantity: lo.ToPtr(resource.MustParse("1")),
+					},
+				},
+			},
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("500m")},
+			},
+			true,
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("1500m")},
+			},
+		),
+		Entry("prefer per-container startup boost over VPA-level",
+			test.VerticalPodAutoscalerOptions{
+				StartupBoost: &vpav1.StartupBoost{
+					CPU: &vpav1.GenericStartupBoost{
+						Type:   vpav1.FactorStartupBoostType,
+						Factor: lo.ToPtr(int32(2)),
+					},
+				},
+				ResourcePolicy: &vpav1.PodResourcePolicy{
+					ContainerPolicies: []vpav1.ContainerResourcePolicy{{
+						ContainerName: "main",
+						StartupBoost: &vpav1.StartupBoost{
+							CPU: &vpav1.GenericStartupBoost{
+								Type:   vpav1.FactorStartupBoostType,
+								Factor: lo.ToPtr(int32(5)),
+							},
+						},
+					}},
+				},
+			},
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("200m")},
+			},
+			true,
+			map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse("1000m")},
+			},
+		),
+	)
 
 	It("should skip containers with mode Off", func() {
 		modeOff := vpav1.ContainerScalingModeOff
@@ -188,34 +262,6 @@ var _ = Describe("VPA Controller", func() {
 		Expect(pred.Containers).To(HaveKey("sidecar"))
 	})
 
-	It("should clamp recommendations to min/max bounds", func() {
-		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
-			TargetRef: targetRef,
-			ResourcePolicy: &vpav1.PodResourcePolicy{
-				ContainerPolicies: []vpav1.ContainerResourcePolicy{
-					{
-						ContainerName: "main",
-						MinAllowed:    corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("200m")},
-						MaxAllowed:    corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")},
-					},
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, vpa)
-		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {
-				corev1.ResourceCPU:    resource.MustParse("100m"),
-				corev1.ResourceMemory: resource.MustParse("1Gi"),
-			},
-		})
-		ExpectSingletonReconciled(ctx, controller)
-
-		pred, ok := store.Get(targetUID)
-		Expect(ok).To(BeTrue())
-		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("200m")))
-		Expect(pred.Containers["main"][corev1.ResourceMemory]).To(Equal(resource.MustParse("512Mi")))
-	})
-
 	It("should only include controlled resources", func() {
 		controlled := []corev1.ResourceName{corev1.ResourceMemory}
 		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
@@ -228,10 +274,7 @@ var _ = Describe("VPA Controller", func() {
 		})
 		ExpectApplied(ctx, env.Client, vpa)
 		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {
-				corev1.ResourceCPU:    resource.MustParse("500m"),
-				corev1.ResourceMemory: resource.MustParse("256Mi"),
-			},
+			"main": {corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
 		})
 		ExpectSingletonReconciled(ctx, controller)
 
@@ -241,26 +284,43 @@ var _ = Describe("VPA Controller", func() {
 		Expect(pred.Containers["main"]).NotTo(HaveKey(corev1.ResourceCPU))
 	})
 
-	It("should prefer specific container policy over wildcard", func() {
-		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
-			TargetRef: targetRef,
-			ResourcePolicy: &vpav1.PodResourcePolicy{
-				ContainerPolicies: []vpav1.ContainerResourcePolicy{
-					{ContainerName: "*", MinAllowed: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}},
-					{ContainerName: "main", MinAllowed: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")}},
-				},
-			},
-		})
+	It("should populate the store only after recommendation is set", func() {
+		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
 		ExpectApplied(ctx, env.Client, vpa)
+		ExpectSingletonReconciled(ctx, controller)
+
+		_, ok := store.Get(targetUID)
+		Expect(ok).To(BeFalse())
+
 		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {corev1.ResourceCPU: resource.MustParse("50m")},
+			"main": {corev1.ResourceCPU: resource.MustParse("500m")},
 		})
 		ExpectSingletonReconciled(ctx, controller)
 
 		pred, ok := store.Get(targetUID)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
+		Expect(store.Hydrated(ctx)).To(BeTrue())
 	})
+
+	It("should remove predictions when VPA is deleted", func() {
+		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
+		ExpectApplied(ctx, env.Client, vpa)
+		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
+			"main": {corev1.ResourceCPU: resource.MustParse("1")},
+		})
+		ExpectSingletonReconciled(ctx, controller)
+
+		_, ok := store.Get(targetUID)
+		Expect(ok).To(BeTrue())
+
+		ExpectDeleted(ctx, env.Client, vpa)
+		ExpectSingletonReconciled(ctx, controller)
+
+		_, ok = store.Get(targetUID)
+		Expect(ok).To(BeFalse())
+	})
+
 	It("should retry target resolution on transient failure", func() {
 		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
 		ExpectApplied(ctx, env.Client, vpa)
@@ -268,22 +328,14 @@ var _ = Describe("VPA Controller", func() {
 			"main": {corev1.ResourceCPU: resource.MustParse("500m")},
 		})
 
-		// Delete the target deployment so resolution fails
 		ExpectDeleted(ctx, env.Client, dep)
 		ExpectSingletonReconciled(ctx, controller)
 		_, ok := store.Get(targetUID)
 		Expect(ok).To(BeFalse())
 
-		newDep := &appsv1.Deployment{
+		newDep := test.Deployment(test.DeploymentOptions{
 			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
-			Spec: appsv1.DeploymentSpec{
-				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "app"}},
-				Template: corev1.PodTemplateSpec{
-					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "app"}},
-					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "main", Image: "nginx"}}},
-				},
-			},
-		}
+		})
 		ExpectApplied(ctx, env.Client, newDep)
 		fetched := &appsv1.Deployment{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(dep), fetched)).To(Succeed())
@@ -292,8 +344,8 @@ var _ = Describe("VPA Controller", func() {
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
 	})
+
 	It("should use the oldest VPA's prediction and promote runner-up on deletion", func() {
-		// With same creation timestamp, lexicographically smaller name wins
 		olderVPA := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
 			ObjectMeta: metav1.ObjectMeta{Name: "vpa-alpha", Namespace: "default"},
 			TargetRef:  targetRef,
@@ -314,12 +366,10 @@ var _ = Describe("VPA Controller", func() {
 
 		ExpectSingletonReconciled(ctx, controller)
 
-		// vpa-alpha wins (lexicographically smaller when timestamps are equal)
 		pred, ok := store.Get(targetUID)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("200m")))
 
-		// Delete the winner — runner-up should be promoted
 		ExpectDeleted(ctx, env.Client, olderVPA)
 		ExpectSingletonReconciled(ctx, controller)
 
@@ -345,83 +395,4 @@ var _ = Describe("VPA Controller", func() {
 		defer cancel()
 		Expect(store.Hydrated(checkCtx)).To(BeFalse())
 	})
-	It("should apply startup boost factor to CPU prediction", func() {
-		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
-			TargetRef: targetRef,
-			StartupBoost: &vpav1.StartupBoost{
-				CPU: &vpav1.GenericStartupBoost{
-					Type:   vpav1.FactorStartupBoostType,
-					Factor: lo.ToPtr(int32(3)),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, vpa)
-		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
-		})
-
-		ExpectSingletonReconciled(ctx, controller)
-
-		pred, ok := store.Get(targetUID)
-		Expect(ok).To(BeTrue())
-		cpu := pred.Containers["main"][corev1.ResourceCPU]
-		Expect(cpu.Cmp(resource.MustParse("1500m"))).To(Equal(0))
-		Expect(pred.Containers["main"][corev1.ResourceMemory]).To(Equal(resource.MustParse("256Mi")))
-	})
-	It("should apply startup boost quantity to CPU prediction", func() {
-		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
-			TargetRef: targetRef,
-			StartupBoost: &vpav1.StartupBoost{
-				CPU: &vpav1.GenericStartupBoost{
-					Type:     vpav1.QuantityStartupBoostType,
-					Quantity: lo.ToPtr(resource.MustParse("1")),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, vpa)
-		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {corev1.ResourceCPU: resource.MustParse("500m")},
-		})
-
-		ExpectSingletonReconciled(ctx, controller)
-
-		pred, ok := store.Get(targetUID)
-		Expect(ok).To(BeTrue())
-		cpu := pred.Containers["main"][corev1.ResourceCPU]
-		Expect(cpu.Cmp(resource.MustParse("1500m"))).To(Equal(0))
-	})
-	It("should prefer per-container startup boost over VPA-level", func() {
-		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
-			TargetRef: targetRef,
-			StartupBoost: &vpav1.StartupBoost{
-				CPU: &vpav1.GenericStartupBoost{
-					Type:   vpav1.FactorStartupBoostType,
-					Factor: lo.ToPtr(int32(2)),
-				},
-			},
-			ResourcePolicy: &vpav1.PodResourcePolicy{
-				ContainerPolicies: []vpav1.ContainerResourcePolicy{{
-					ContainerName: "main",
-					StartupBoost: &vpav1.StartupBoost{
-						CPU: &vpav1.GenericStartupBoost{
-							Type:   vpav1.FactorStartupBoostType,
-							Factor: lo.ToPtr(int32(5)),
-						},
-					},
-				}},
-			},
-		})
-		ExpectApplied(ctx, env.Client, vpa)
-		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
-			"main": {corev1.ResourceCPU: resource.MustParse("200m")},
-		})
-
-		ExpectSingletonReconciled(ctx, controller)
-
-		pred, ok := store.Get(targetUID)
-		Expect(ok).To(BeTrue())
-		cpu := pred.Containers["main"][corev1.ResourceCPU]
-		Expect(cpu.Cmp(resource.MustParse("1000m"))).To(Equal(0))
-	})
-
 })

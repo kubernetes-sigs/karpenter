@@ -20,8 +20,6 @@ import (
 	"testing"
 	"time"
 
-	clock "k8s.io/utils/clock/testing"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -36,10 +34,8 @@ func TestPrediction(t *testing.T) {
 
 var _ = Describe("Store", func() {
 	var store *Store
-	var fakeClock *clock.FakeClock
 
 	BeforeEach(func() {
-		fakeClock = clock.NewFakeClock(time.Now())
 		store = NewStore()
 	})
 
@@ -56,12 +52,12 @@ var _ = Describe("Store", func() {
 			"container1": {corev1.ResourceCPU: resource.MustParse("200m")},
 		}}
 
-		store.Set(source, target, pred1, fakeClock.Now())
+		store.Set(source, target, pred1, time.Now())
 		retrieved, ok := store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(retrieved).To(Equal(pred1))
 
-		store.Set(source, target, pred2, fakeClock.Now())
+		store.Set(source, target, pred2, time.Now())
 		retrieved, ok = store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(retrieved).To(Equal(pred2))
@@ -78,8 +74,8 @@ var _ = Describe("Store", func() {
 			"container1": {corev1.ResourceCPU: resource.MustParse("200m")},
 		}}
 
-		store.Set(source, target1, pred1, fakeClock.Now())
-		store.Set(source, target2, pred2, fakeClock.Now())
+		store.Set(source, target1, pred1, time.Now())
+		store.Set(source, target2, pred2, time.Now())
 
 		_, ok := store.Get(target1)
 		Expect(ok).To(BeFalse())
@@ -96,7 +92,7 @@ var _ = Describe("Store", func() {
 			"c": {corev1.ResourceCPU: resource.MustParse("100m")},
 		}}
 
-		store.Set(source, target, pred, fakeClock.Now())
+		store.Set(source, target, pred, time.Now())
 		store.Delete(source)
 
 		_, ok := store.Get(target)

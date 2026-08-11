@@ -111,11 +111,9 @@ func (s *Store) Set(source types.NamespacedName, targetUID types.UID, p *Predict
 			createdAt:  createdAt,
 		})
 	}
-	if len(entries) > 1 {
-		sort.Slice(entries, func(i, j int) bool {
-			return stronger(entries[i], entries[j])
-		})
-	}
+	sort.Slice(entries, func(i, j int) bool {
+		return stronger(entries[i], entries[j])
+	})
 	s.byTarget[targetUID] = entries
 }
 

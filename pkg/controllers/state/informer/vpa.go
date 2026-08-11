@@ -181,9 +181,7 @@ func computeContainerResources(vpa *vpav1.VerticalPodAutoscaler, rec vpav1.Recom
 		}
 		qty = clamp(qty, res, policy)
 		if res == corev1.ResourceCPU {
-			if boosted := applyStartupBoost(qty, vpa, policy); boosted != nil {
-				qty = *boosted
-			}
+			qty = applyStartupBoost(qty, vpa, policy)
 		}
 		requests[res] = qty
 	}
@@ -234,25 +232,24 @@ func clamp(qty resource.Quantity, res corev1.ResourceName, policy *vpav1.Contain
 	return qty
 }
 
-func applyStartupBoost(cpu resource.Quantity, vpa *vpav1.VerticalPodAutoscaler, policy *vpav1.ContainerResourcePolicy) *resource.Quantity {
+func applyStartupBoost(cpu resource.Quantity, vpa *vpav1.VerticalPodAutoscaler, policy *vpav1.ContainerResourcePolicy) resource.Quantity {
 	boost := findStartupBoost(vpa, policy)
 	if boost == nil || boost.CPU == nil {
-		return nil
+		return cpu
 	}
 	switch boost.CPU.Type {
 	case vpav1.FactorStartupBoostType:
 		if boost.CPU.Factor != nil && *boost.CPU.Factor > 1 {
-			result := resource.NewMilliQuantity(cpu.MilliValue()*int64(*boost.CPU.Factor), cpu.Format)
-			return result
+			return *resource.NewMilliQuantity(cpu.MilliValue()*int64(*boost.CPU.Factor), cpu.Format)
 		}
 	case vpav1.QuantityStartupBoostType:
 		if boost.CPU.Quantity != nil {
 			result := cpu.DeepCopy()
 			result.Add(*boost.CPU.Quantity)
-			return &result
+			return result
 		}
 	}
-	return nil
+	return cpu
 }
 
 func findStartupBoost(vpa *vpav1.VerticalPodAutoscaler, policy *vpav1.ContainerResourcePolicy) *vpav1.StartupBoost {
