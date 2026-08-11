@@ -47,6 +47,31 @@ The graduation tracking issue ([#2398](https://github.com/kubernetes-sigs/karpen
 
 The common thread: users reach for a *configurable* breaker, but their rationale keeps describing a *paced budget* — bounded rate, self-clearing, per-scope. That is not a better threshold; it is a different mechanism.
 
+### The disruption controls the operator already set are inert
+
+Repair consults exactly two controls today: the per-condition `TolerationDuration` (how long a condition must persist before the node is eligible) and the 20% breaker (the sole backpressure). Both of these are hard coded and cannot be controlled by the operator. Everything else the operator configured to govern *disruption* is bypassed, because repair deletes the NodeClaim directly instead of going through the disruption path: the node's `PodDisruptionBudget`, its `terminationGracePeriod`, and any `do-not-disrupt` intent are all ignored, and forceful termination evicts the pods before it even attempts to terminate the instance. Drawn as a decision flow — the two live controls in colour, every bypassed one grey:
+
+```mermaid
+flowchart TD
+    classDef start fill:#1e3a8a,color:#fff;
+    classDef live fill:#1e3a8a,color:#fff;
+    classDef pass fill:#374151,color:#fff;
+    classDef act fill:#7f1d1d,color:#fff,font-weight:bold;
+    classDef bad fill:#7f1d1d,color:#fff;
+
+    START["Node reports unhealthy condition"]:::start
+    START --> TOL{"past TolerationDuration?<br/>— consulted (detection gate)"}:::live
+    TOL -->|no| WAIT["Not yet eligible — requeue"]:::pass
+    TOL -->|yes| VETO["do-not-disrupt<br/>— IGNORED by repair"]:::pass
+    VETO --> BRK{"20% unhealthy breaker<br/>— the only backpressure"}:::act
+    BRK -->|"at or over 20%"| FZ["FREEZE all repair cluster-wide,<br/>latched until a human intervenes"]:::bad
+    BRK -->|"under 20%"| HR["headroom — IGNORED<br/>(always delete-first, no pre-spin)"]:::pass
+    HR --> PDB["PDB — IGNORED<br/>(drain grace clamped to now)"]:::pass
+    PDB --> TGP["terminationGracePeriod — IGNORED<br/>(overridden to now)"]:::pass
+    TGP --> DRAIN["Force-evict all pods now<br/>(drain runs first; grace clamped to now)"]:::bad
+    DRAIN --> DEL["Terminate the instance<br/>(stampede on recovery; churn on false positives)"]:::bad
+```
+
 ---
 
 ## Background: two axes of disruption
@@ -88,7 +113,35 @@ Both changes align with the original RFC ([#1768](https://github.com/kubernetes-
 
 ## Proposal
 
-Making repair a well-behaved voluntary disruption is four additive changes.
+Making repair a well-behaved voluntary disruption is four additive changes. Together they turn the inert controls above into live branches — the same decision flow, but now every control the operator set steers it:
+
+```mermaid
+flowchart TD
+    classDef start fill:#1e3a8a,color:#fff;
+    classDef cfg fill:#1e3a8a,color:#fff;
+    classDef act fill:#065f46,color:#fff;
+    classDef hold fill:#92400e,color:#fff;
+    classDef future fill:#4c1d95,color:#fff,stroke:#c4b5fd,stroke-width:2px,stroke-dasharray:5 5;
+
+    START["Node reports unhealthy condition"]:::start
+    START --> TOL{"past TolerationDuration?<br/>(detection gate, unchanged)"}:::cfg
+    TOL -->|no| WAIT0["Not yet eligible — requeue"]:::hold
+    TOL -->|yes| VETO{"repair veto set?"}:::cfg
+    VETO -->|set| SKIP["Skip — operator veto honored"]:::act
+    VETO -->|unset| BUD{"within repair budget<br/>+ ordering?"}:::cfg
+    BUD -->|"at cap"| WAIT["Wait — paced, real fault ranked first"]:::hold
+    WAIT --> BUD
+    BUD -->|"within"| DECLINE{"decline: repairing<br/>won't help?"}:::future
+    DECLINE -->|"yes (future)"| WAIT
+    DECLINE -->|"proceed (no such rule yet)"| PS["pre-spin replacement<br/>(replace-then-terminate, like all voluntary disruption)"]:::act
+    PS --> GATE{"replacement boots healthy?"}:::cfg
+    GATE -->|no| HOLD["Hold original + pool backoff"]:::hold
+    GATE -->|yes| PDB{"PDB present?"}:::cfg
+    PDB -->|yes| DR1["drain, bounded by policy TGP,<br/>honoring the PDB"]:::act
+    PDB -->|no| DR2["drain, bounded by policy TGP,<br/>no workload floor"]:::act
+    DR1 --> TERM["Terminate original"]:::act
+    DR2 --> TERM
+```
 
 ### 1. Budget — repair as a `DisruptionReason`
 
@@ -188,7 +241,7 @@ This RFC is deliberately the minimal change. Everything below builds additively;
 
 **Beta-blocking follow-ups (separate RFCs):**
 
-- **Pre-spin + no-headroom fallback ([#2906](https://github.com/kubernetes-sigs/karpenter/pull/2906)).** Voluntary disruption pre-spins a replacement before terminating — strictly better across the cases (a false positive becomes a wasted launch, not an outage; a genuine failure is a zero-downtime swap; a bad-component loop never terminates the original because the replacement comes up unhealthy). But fleets with no headroom (reserved/ODCR, static at `limits`) can't pre-spin and need a delete-first path. That's a cross-disruption primitive shared with drift, not a repair-only bolt-on — covered in a companion RFC ([#2905](https://github.com/kubernetes-sigs/karpenter/issues/2905), [#2955](https://github.com/kubernetes-sigs/karpenter/pull/2955)).
+- **No-headroom delete-first fallback ([#2906](https://github.com/kubernetes-sigs/karpenter/pull/2906)).** Pre-spinning a replacement before terminating comes with making repair voluntary — it's the same replace-then-terminate every voluntary disruption already does, and it's strictly better across the cases (a false positive becomes a wasted launch, not an outage; a genuine failure is a zero-downtime swap; a bad-component loop never terminates the original because the replacement comes up unhealthy). What this RFC does *not* need to solve is the fleet that has no headroom to pre-spin (reserved/ODCR, static at `limits`) and so needs a delete-first path instead. That fallback is a cross-disruption primitive shared with drift, not a repair-only bolt-on — covered in a companion RFC ([#2905](https://github.com/kubernetes-sigs/karpenter/issues/2905), [#2955](https://github.com/kubernetes-sigs/karpenter/pull/2955)).
 - **Repair veto shape ([#2424](https://github.com/kubernetes-sigs/karpenter/issues/2424)).** This RFC establishes that a repair-specific veto must exist (§4) but deliberately doesn't settle its shape. The follow-up decides the dedicated suppression signal (annotation? NodePool field? both?), its scope (node vs. NodePool), and — the open question — whether `karpenter.sh/do-not-disrupt` should imply "don't repair" by default, or whether suppression should instead be reason-scoped. Related pool-level pause prior art: [#2497](https://github.com/kubernetes-sigs/karpenter/issues/2497) / [#2901](https://github.com/kubernetes-sigs/karpenter/pull/2901).
 - **Termination contract ([#3029](https://github.com/kubernetes-sigs/karpenter/issues/3029)).** Repair coordinates with the termination controller through the `nodeclaim-termination-timestamp` annotation hack (with explicit optimistic-lock code to avoid a race). Formalizing a first-class termination contract resolves that and the related grace-period correctness bugs ([#3032](https://github.com/kubernetes-sigs/karpenter/issues/3032) (fixed), [#3111](https://github.com/kubernetes-sigs/karpenter/issues/3111)). Sequenced early to keep the refactor cheap; not itself a hard gate.
 
