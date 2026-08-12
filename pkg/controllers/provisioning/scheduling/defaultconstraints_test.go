@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -150,9 +151,10 @@ var _ = Describe("DefaultTopologySpreadInjector", func() {
 				controllerRef("v1", "ReplicationController", rc.Name, rc.UID),
 			))
 			Expect(selector).ToNot(BeNil())
-			Expect(selector.MatchExpressions).To(ConsistOf(
-				metav1.LabelSelectorRequirement{Key: "app", Operator: metav1.LabelSelectorOpIn, Values: []string{"legacy"}},
-			))
+			// Upstream merges a ReplicationController's selector into the label set (labels.Merge) rather than ANDing
+			// its requirements on, so it contributes matchLabels - unlike a ReplicaSet or StatefulSet.
+			Expect(selector.MatchLabels).To(Equal(map[string]string{"app": "legacy"}))
+			Expect(selector.MatchExpressions).To(BeEmpty())
 		})
 		It("should not deduce a selector from an unsupported owner kind", func() {
 			// kube-scheduler only deduces from rc/rs/ss, so a Job-owned pod is defaulted only via a Service.
@@ -237,6 +239,56 @@ var _ = Describe("DefaultTopologySpreadInjector", func() {
 				metav1.LabelSelectorRequirement{Key: "app", Operator: metav1.LabelSelectorOpIn, Values: []string{"web"}},
 				metav1.LabelSelectorRequirement{Key: "pod-template-hash", Operator: metav1.LabelSelectorOpIn, Values: []string{"abc123"}},
 			))
+		})
+	})
+
+	Context("conflicting service and owner selectors", func() {
+		// Upstream assumes a Service and a controller that both select the pod can't disagree on a key ("they won't have
+		// conflicting labels. Merging is safe."), but that's breakable: a pod's labels can be edited after creation, and
+		// a controller's selector can be mutated, either of which can leave the pod owned by a controller whose selector
+		// no longer agrees with the Service's. Upstream's behavior then differs by owner kind, and these pin both.
+		It("should let a ReplicationController's selector overwrite a conflicting service label", func() {
+			// labels.Merge means the RC's value wins outright, so the result still selects something.
+			rc := &corev1.ReplicationController{
+				ObjectMeta: test.NamespacedObjectMeta(),
+				Spec: corev1.ReplicationControllerSpec{
+					Selector: map[string]string{"app": "legacy"},
+					Template: &corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "legacy"}},
+						Spec:       test.Pod().Spec,
+					},
+				},
+			}
+			ExpectApplied(ctx, env.Client, rc,
+				test.Service(test.ServiceOptions{Selector: map[string]string{"app": "web"}}))
+			selector := inject(ownedPod(
+				map[string]string{"app": "web"}, // matches the service; the RC's selector disagrees
+				controllerRef("v1", "ReplicationController", rc.Name, rc.UID),
+			))
+			Expect(selector).ToNot(BeNil())
+			Expect(selector.MatchLabels).To(Equal(map[string]string{"app": "legacy"}))
+			Expect(selector.MatchExpressions).To(BeEmpty())
+		})
+		It("should AND a ReplicaSet's conflicting selector, selecting nothing", func() {
+			// selector.Add means the two requirements are intersected, so a contradiction matches no pods at all. That
+			// is upstream's behavior for a ReplicaSet, and differs from the ReplicationController case above.
+			replicaSet := test.ReplicaSet(test.ReplicaSetOptions{Selector: map[string]string{"app": "other"}})
+			ExpectApplied(ctx, env.Client, replicaSet,
+				test.Service(test.ServiceOptions{Selector: map[string]string{"app": "web"}}))
+			selector := inject(ownedPod(
+				map[string]string{"app": "web"},
+				controllerRef("apps/v1", "ReplicaSet", replicaSet.Name, replicaSet.UID),
+			))
+			Expect(selector).ToNot(BeNil())
+			Expect(selector.MatchLabels).To(Equal(map[string]string{"app": "web"}))
+			Expect(selector.MatchExpressions).To(ConsistOf(
+				metav1.LabelSelectorRequirement{Key: "app", Operator: metav1.LabelSelectorOpIn, Values: []string{"other"}},
+			))
+			// The emitted selector must be unsatisfiable, matching upstream rather than silently widening.
+			compiled, err := metav1.LabelSelectorAsSelector(selector)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(compiled.Matches(labels.Set{"app": "web"})).To(BeFalse())
+			Expect(compiled.Matches(labels.Set{"app": "other"})).To(BeFalse())
 		})
 	})
 

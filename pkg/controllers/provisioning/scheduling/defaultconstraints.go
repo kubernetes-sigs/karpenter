@@ -59,11 +59,23 @@ type DefaultTopologySpreadInjector struct {
 	// an empty slice, so it isn't re-listed for every pod.
 	servicesByNamespace map[string][]corev1.Service
 	// ownerSelectorByUID caches the resolved selector of a pod's controller, keyed by the controller's UID. A
-	// controller that couldn't be resolved caches a nil selector so it isn't re-fetched.
-	ownerSelectorByUID map[types.UID]*metav1.LabelSelector
+	// controller that couldn't be resolved caches nil so it isn't re-fetched.
+	ownerSelectorByUID map[types.UID]*ownerSelector
 	// selectorByPodShape caches the fully deduced selector for pods that share the same deduction inputs, so a
 	// workload's pods resolve it once rather than once each. A pod for which no selector could be deduced caches nil.
 	selectorByPodShape map[selectorCacheKey]*metav1.LabelSelector
+}
+
+// ownerSelector is a controller's selector together with how kube-scheduler folds it into the service-derived
+// selector, which differs by kind: helper.DefaultSelector merges a ReplicationController's selector into the label set
+// (labels.Merge, so a key shared with a Service takes the controller's value), but ANDs a ReplicaSet's or StatefulSet's
+// requirements onto the selector built so far (selector.Add, so a shared key must satisfy both). Carrying the kind's
+// semantics alongside the selector lets defaultSelector reproduce each exactly.
+type ownerSelector struct {
+	selector *metav1.LabelSelector
+	// overwritesServiceLabels is true only for a ReplicationController, whose equality-only selector is merged into the
+	// service-derived labels rather than intersected with them.
+	overwritesServiceLabels bool
 }
 
 // selectorCacheKey identifies pods that must deduce the same default selector: the deduction reads only the pod's
@@ -71,7 +83,10 @@ type DefaultTopologySpreadInjector struct {
 type selectorCacheKey struct {
 	namespace string
 	ownerUID  types.UID
-	// labels is the pod's label set in apimachinery's canonical sorted k=v form, so it's comparable as a map key.
+	// labels is the pod's label set rendered as a string, so it's comparable as a map key. labels.Set.String() sorts
+	// before joining, which is what makes two pods with the same labels hit the same entry. That ordering isn't a
+	// documented API guarantee, but nothing here depends on it for correctness: a differently-ordered rendering of the
+	// same labels is simply a distinct key, which costs a cache miss and a recomputation, never a wrong selector.
 	labels string
 }
 
@@ -79,7 +94,7 @@ func NewDefaultTopologySpreadInjector(kubeClient client.Client) *DefaultTopology
 	return &DefaultTopologySpreadInjector{
 		kubeClient:          kubeClient,
 		servicesByNamespace: map[string][]corev1.Service{},
-		ownerSelectorByUID:  map[types.UID]*metav1.LabelSelector{},
+		ownerSelectorByUID:  map[types.UID]*ownerSelector{},
 		selectorByPodShape:  map[selectorCacheKey]*metav1.LabelSelector{},
 	}
 }
@@ -104,7 +119,7 @@ func (d *DefaultTopologySpreadInjector) Inject(ctx context.Context, pods []*core
 		if len(p.Spec.TopologySpreadConstraints) != 0 {
 			continue
 		}
-		selector := d.cachedDefaultSelector(ctx, p)
+		selector := d.getDefaultSelector(ctx, p)
 		if selector == nil {
 			continue
 		}
@@ -119,7 +134,7 @@ func (d *DefaultTopologySpreadInjector) Inject(ctx context.Context, pods []*core
 	}
 }
 
-// cachedDefaultSelector returns the deduced selector for the pod, reusing a previously computed one when another pod
+// getDefaultSelector returns the deduced selector for the pod, reusing a previously computed one when another pod
 // shares the same (namespace, controller UID, labels) inputs.
 //
 // Every pod of a workload deduces an identical selector, since the inputs are its namespace's Services, its
@@ -127,7 +142,7 @@ func (d *DefaultTopologySpreadInjector) Inject(ctx context.Context, pods []*core
 // re-matching every Service in the namespace against the pod's labels, which is the O(pods x services-per-namespace)
 // term in this pass. Keying on the pod's labels (not just its owner) keeps the result exact: pods of the same owner
 // with different labels may match different Services, and a pod with no controller still caches by its labels alone.
-func (d *DefaultTopologySpreadInjector) cachedDefaultSelector(ctx context.Context, p *corev1.Pod) *metav1.LabelSelector {
+func (d *DefaultTopologySpreadInjector) getDefaultSelector(ctx context.Context, p *corev1.Pod) *metav1.LabelSelector {
 	var ownerUID types.UID
 	if owner := metav1.GetControllerOfNoCopy(p); owner != nil {
 		ownerUID = owner.UID
@@ -149,35 +164,32 @@ func (d *DefaultTopologySpreadInjector) cachedDefaultSelector(ctx context.Contex
 // StatefulSet) is added on top. Upstream tolerates lookup failures and proceeds with a partial selector, so we do too -
 // a transient API error shouldn't fail a scheduling loop.
 func (d *DefaultTopologySpreadInjector) defaultSelector(ctx context.Context, p *corev1.Pod) *metav1.LabelSelector {
-	matchLabels := map[string]string{}
-	for _, svc := range d.services(ctx, p.Namespace) {
-		// A nil selector matches nothing, not everything, so such a Service never contributes. A non-nil but empty
-		// selector matches every pod, but contributes no labels.
-		if svc.Spec.Selector == nil {
-			continue
-		}
-		if labels.SelectorFromValidatedSet(svc.Spec.Selector).Matches(labels.Set(p.Labels)) {
-			for k, v := range svc.Spec.Selector {
+	matchLabels := d.serviceMatchLabels(ctx, p)
+
+	// The owner's contribution is folded in the way upstream folds it, which differs by kind. Upstream assumes the two
+	// can't disagree ("Since services, RCs, RSs and SSs match the pod, they won't have conflicting labels. Merging is
+	// safe."), but that assumption is breakable - a pod's labels can be edited after creation, and a controller's
+	// selector can be mutated - so the two paths are kept distinct rather than collapsed into one.
+	var matchExpressions []metav1.LabelSelectorRequirement
+	if owner := d.ownerSelectorFor(ctx, p); owner != nil {
+		if owner.overwritesServiceLabels {
+			// Mirrors upstream's labels.Merge for a ReplicationController: its selector is merged into the
+			// service-derived label set, so a key in both takes the controller's value.
+			for k, v := range owner.selector.MatchLabels {
 				matchLabels[k] = v
 			}
+		} else {
+			// Mirrors upstream's selector.Add for a ReplicaSet or StatefulSet: the requirements are ANDed onto the
+			// service-derived selector, so a key in both must satisfy both and a contradictory pair selects nothing.
+			for k, v := range owner.selector.MatchLabels {
+				matchExpressions = append(matchExpressions, metav1.LabelSelectorRequirement{
+					Key:      k,
+					Operator: metav1.LabelSelectorOpIn,
+					Values:   []string{v},
+				})
+			}
+			matchExpressions = append(matchExpressions, owner.selector.MatchExpressions...)
 		}
-	}
-
-	var matchExpressions []metav1.LabelSelectorRequirement
-	if ownerSelector := d.ownerSelector(ctx, p); ownerSelector != nil {
-		// Upstream merges a ReplicationController's selector into the label set, but *adds* a ReplicaSet's or
-		// StatefulSet's requirements onto the service-derived selector, so a key present in both is ANDed rather than
-		// overwritten. Carrying the owner's contribution as expressions preserves that: a contradictory pair selects
-		// nothing, exactly as upstream. (In practice this can't arise, since every contributing selector already
-		// matches the pod.)
-		for k, v := range ownerSelector.MatchLabels {
-			matchExpressions = append(matchExpressions, metav1.LabelSelectorRequirement{
-				Key:      k,
-				Operator: metav1.LabelSelectorOpIn,
-				Values:   []string{v},
-			})
-		}
-		matchExpressions = append(matchExpressions, ownerSelector.MatchExpressions...)
 	}
 
 	// Mirrors upstream's `if selector.Empty() { return nil, nil }`. This is load-bearing: an empty LabelSelector would
@@ -190,6 +202,26 @@ func (d *DefaultTopologySpreadInjector) defaultSelector(ctx context.Context, p *
 		matchLabels = nil
 	}
 	return &metav1.LabelSelector{MatchLabels: matchLabels, MatchExpressions: matchExpressions}
+}
+
+// serviceMatchLabels returns the equality labels contributed by every Service in the pod's namespace that selects the
+// pod, mirroring upstream's GetPodServices followed by a labels.Merge of each matching Service's selector.
+func (d *DefaultTopologySpreadInjector) serviceMatchLabels(ctx context.Context, p *corev1.Pod) map[string]string {
+	matchLabels := map[string]string{}
+	for _, svc := range d.services(ctx, p.Namespace) {
+		// A nil selector matches nothing, not everything, so such a Service never contributes. A non-nil but empty
+		// selector matches every pod, but contributes no labels.
+		if svc.Spec.Selector == nil {
+			continue
+		}
+		if labels.SelectorFromValidatedSet(svc.Spec.Selector).Matches(labels.Set(p.Labels)) {
+			// A key set by more than one matching Service takes the last one's value, as labels.Merge does.
+			for k, v := range svc.Spec.Selector {
+				matchLabels[k] = v
+			}
+		}
+	}
+	return matchLabels
 }
 
 // services returns the Services in the given namespace, listing them once per namespace per injection pass. A list
@@ -211,9 +243,9 @@ func (d *DefaultTopologySpreadInjector) services(ctx context.Context, namespace 
 	return serviceList.Items
 }
 
-// ownerSelector returns the selector of the pod's controller, or nil if the pod has no controller, the controller isn't
-// one of the kinds kube-scheduler deduces selectors from, or it couldn't be resolved.
-func (d *DefaultTopologySpreadInjector) ownerSelector(ctx context.Context, p *corev1.Pod) *metav1.LabelSelector {
+// ownerSelectorFor returns the selector of the pod's controller, or nil if the pod has no controller, the controller
+// isn't one of the kinds kube-scheduler deduces selectors from, or it couldn't be resolved.
+func (d *DefaultTopologySpreadInjector) ownerSelectorFor(ctx context.Context, p *corev1.Pod) *ownerSelector {
 	owner := metav1.GetControllerOfNoCopy(p)
 	if owner == nil {
 		return nil
@@ -221,23 +253,24 @@ func (d *DefaultTopologySpreadInjector) ownerSelector(ctx context.Context, p *co
 	if cached, ok := d.ownerSelectorByUID[owner.UID]; ok {
 		return cached
 	}
-	selector, err := d.resolveOwnerSelector(ctx, p.Namespace, owner)
+	resolved, err := d.resolveOwnerSelector(ctx, p.Namespace, owner)
 	if err != nil {
 		// The owner may have been deleted while its pods linger, or be a kind we don't have access to. Upstream
 		// silently proceeds without the owner's contribution in this case.
 		log.FromContext(ctx).V(1).WithValues("Pod", klog.KObj(p), "owner", owner.Kind+"/"+owner.Name).Error(err, "ignoring pod owner when deducing default topology spread constraints")
-		selector = nil
+		resolved = nil
 	}
-	d.ownerSelectorByUID[owner.UID] = selector
-	return selector
+	d.ownerSelectorByUID[owner.UID] = resolved
+	return resolved
 }
 
-// resolveOwnerSelector fetches the owner and returns a copy of just its selector.
+// resolveOwnerSelector fetches the owner and returns a copy of just its selector, along with how that selector
+// combines with the service-derived labels.
 //
 // The owners are fetched with UnsafeDisableDeepCopy, since deep-copying a ReplicaSet or StatefulSet would copy its whole
 // Spec.Template when all we need is Spec.Selector. That aliases the informer cache, so the selector is copied out before
 // being returned - it's retained in ownerSelectorByUID and stamped onto pods, neither of which may alias the cache.
-func (d *DefaultTopologySpreadInjector) resolveOwnerSelector(ctx context.Context, namespace string, owner *metav1.OwnerReference) (*metav1.LabelSelector, error) {
+func (d *DefaultTopologySpreadInjector) resolveOwnerSelector(ctx context.Context, namespace string, owner *metav1.OwnerReference) (*ownerSelector, error) {
 	gv, err := schema.ParseGroupVersion(owner.APIVersion)
 	if err != nil {
 		// Mirrors upstream, which returns the service-derived selector on a parse failure rather than erroring.
@@ -254,19 +287,28 @@ func (d *DefaultTopologySpreadInjector) resolveOwnerSelector(ctx context.Context
 		if len(rc.Spec.Selector) == 0 {
 			return nil, nil
 		}
-		return &metav1.LabelSelector{MatchLabels: maps.Clone(rc.Spec.Selector)}, nil
+		return &ownerSelector{
+			selector:                &metav1.LabelSelector{MatchLabels: maps.Clone(rc.Spec.Selector)},
+			overwritesServiceLabels: true,
+		}, nil
 	case replicaSetKind:
 		rs := &appsv1.ReplicaSet{}
 		if err := d.kubeClient.Get(ctx, key, rs, client.UnsafeDisableDeepCopy); err != nil {
 			return nil, fmt.Errorf("getting replicaset, %w", err)
 		}
-		return rs.Spec.Selector.DeepCopy(), nil
+		if rs.Spec.Selector == nil {
+			return nil, nil
+		}
+		return &ownerSelector{selector: rs.Spec.Selector.DeepCopy()}, nil
 	case statefulSetKind:
 		ss := &appsv1.StatefulSet{}
 		if err := d.kubeClient.Get(ctx, key, ss, client.UnsafeDisableDeepCopy); err != nil {
 			return nil, fmt.Errorf("getting statefulset, %w", err)
 		}
-		return ss.Spec.Selector.DeepCopy(), nil
+		if ss.Spec.Selector == nil {
+			return nil, nil
+		}
+		return &ownerSelector{selector: ss.Spec.Selector.DeepCopy()}, nil
 	default:
 		// Not owned by a supported controller.
 		return nil, nil
