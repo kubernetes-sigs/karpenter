@@ -29,8 +29,44 @@ linters:
         type: "module"
         description: Kube API Linter lints Kube like APIs based on API conventions and best practices.
         settings:
-          linters: {}
-          lintersConfig: {}
+          # KAL's defaults target built-in/aggregated APIs. Karpenter's APIs are
+          # CRDs, so tailor the config accordingly (see openshift/api for reference).
+          linters:
+            disable:
+              - nonpointerstructs # Intended for native types, not CRD types.
+              - statusoptional # Legacy, not currently recommended.
+          lintersConfig:
+            conditions:
+              isFirstField: Warn
+              usePatchStrategy: Ignore # Patch strategy markers are required for in-tree API types, not CRDs.
+              useProtobuf: Ignore # CRDs are not serialized with protobuf.
+            # Use Warn rather than SuggestFix so that KAL reports issues without
+            # rewriting API types when running with `issues.fix: true`.
+            optionalfields:
+              pointers:
+                # Only require pointers when needed to distinguish the zero value
+                # from an omitted field.
+                preference: WhenRequired
+                policy: Warn
+              omitempty:
+                # Optional fields should be omitted from the serialized output
+                # unless they are non-zero.
+                policy: Warn
+              omitzero:
+                # Require omitzero on optional struct fields so they can be omitted
+                # correctly without needing pointers to structs.
+                policy: Warn
+            requiredfields:
+              pointers:
+                # Require pointers on required fields only when the zero value is a
+                # valid user choice with a semantic difference from being omitted.
+                policy: Warn
+              omitempty:
+                # Require omitempty on required fields so that not setting a value
+                # behaves the same between structured and unstructured clients.
+                policy: Warn
+              omitzero:
+                policy: Warn
     gocyclo:
       min-complexity: 11
     goheader:
@@ -81,6 +117,13 @@ linters:
       - path-except: pkg/apis/
         linters:
           - kubeapilinter
+      # These types are copied from the upstream cluster-autoscaler CapacityBuffer
+      # API and are kept in sync with upstream, so don't enforce field conventions
+      # that would change their Go types.
+      - path: pkg/apis/autoscaling/v1beta1/capacitybuffer\.go
+        linters:
+          - kubeapilinter
+        text: optionalfields
     paths:
       - tools
       - website
@@ -92,8 +135,6 @@ linters:
       - examples$
 issues:
   fix: true
-  fix-by-linter:
-    - kubeapilinter: false
 formatters:
   enable:
     - goimports
