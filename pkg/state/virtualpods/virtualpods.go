@@ -52,7 +52,7 @@ func NewVirtualPodCache(kubeClient client.Client) *Cache {
 // already-resolved pod spec. The caller resolves
 // the spec once to compute replicas and status, then passes it here so the cache
 // doesn't re-fetch the same PodTemplate/workload
-func (v *Cache) UpdateEntry(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec) {
+func (v *Cache) UpdateEntry(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodTemplateSpec) {
 	if !isBufferReadyForProvisioning(cb) {
 		v.RemoveEntry(client.ObjectKeyFromObject(cb))
 		return

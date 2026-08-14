@@ -65,25 +65,27 @@ func isBufferReadyForProvisioning(cb *autoscalingv1beta1.CapacityBuffer) bool {
 // resolveVirtualPodSpec fetches the pod spec for a buffer using the shared
 // workload resolution utilities. Reads from spec (not status) to avoid stale
 // references when users switch between podTemplateRef and scalableRef.
-func resolveVirtualPodSpec(ctx context.Context, kubeClient client.Client, cb *autoscalingv1beta1.CapacityBuffer) (corev1.PodSpec, error) {
+func resolveVirtualPodSpec(ctx context.Context, kubeClient client.Client, cb *autoscalingv1beta1.CapacityBuffer) (corev1.PodTemplateSpec, error) {
 	result, err := apps.ResolveCapacityBuffer(ctx, kubeClient, cb)
 	if err != nil {
-		return corev1.PodSpec{}, err
+		return corev1.PodTemplateSpec{}, err
 	}
-	return result.PodSpec, nil
+	return result.PodTemplateSpec, nil
 }
 
 // BuildVirtualPods materializes N identical placeholder pods for a buffer using
-// the given pod spec. Deterministic names and UIDs let downstream components
-// associate results back to the owning buffer without additional bookkeeping.
-func BuildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec) []*corev1.Pod {
+// the given pod template spec. Template labels are propagated to virtual pods so that
+// topology spread constraints and affinity rules are evaluated correctly.
+// Deterministic names and UIDs let downstream components associate results back
+// to the owning buffer without additional bookkeeping.
+func BuildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodTemplateSpec) []*corev1.Pod {
 	if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
 		return nil
 	}
 	count := int(*cb.Status.Replicas)
 	out := make([]*corev1.Pod, 0, count)
 	// Strip anything that would make the scheduler call the API server.
-	strippedSpec := sanitizeVirtualPodSpec(spec)
+	strippedSpec := sanitizeVirtualPodSpec(spec.Spec)
 	strippedSpec.Priority = lo.ToPtr(autoscalingv1beta1.VirtualPodPriority)
 
 	for i := 1; i <= count; i++ {
@@ -92,12 +94,12 @@ func BuildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodSpec
 				Name:      fmt.Sprintf("capacity-buffer-%s-%d", cb.Name, i),
 				Namespace: cb.Namespace,
 				UID:       types.UID(fmt.Sprintf("%s-%d", cb.UID, i)),
+				Labels:    spec.Labels,
+
 				Annotations: map[string]string{
-					autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
-				},
-				Labels: map[string]string{
-					autoscalingv1beta1.BufferNameLabel:      cb.Name,
-					autoscalingv1beta1.BufferNamespaceLabel: cb.Namespace,
+					autoscalingv1beta1.FakePodAnnotationKey:      autoscalingv1beta1.FakePodAnnotationValue,
+					autoscalingv1beta1.BufferNameAnnotation:      cb.Name,
+					autoscalingv1beta1.BufferNamespaceAnnotation: cb.Namespace,
 				},
 				CreationTimestamp: metav1.NewTime(time.Now()),
 			},
