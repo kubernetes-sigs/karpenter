@@ -22,14 +22,25 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// PodForDaemonSet generates a synthetic pod that represents what the DaemonSet controller would create on a node.
+// It includes OwnerReferences to the DaemonSet so that consumers (e.g. VPA prediction resolution) can resolve
+// the pod back to its owning workload, matching the behavior of real DaemonSet pods.
 func PodForDaemonSet(daemonSet *appsv1.DaemonSet) *corev1.Pod {
 	if daemonSet == nil {
 		return nil
 	}
+	controller := true
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      daemonSet.Name,
 			Namespace: daemonSet.Namespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       "DaemonSet",
+				Name:       daemonSet.Name,
+				UID:        daemonSet.UID,
+				Controller: &controller,
+			}},
 		},
 		Spec: daemonSet.Spec.Template.Spec,
 	}

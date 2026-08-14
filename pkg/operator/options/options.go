@@ -70,6 +70,7 @@ type FeatureGates struct {
 	TerminateFirstDrift       bool
 	TerminateFirstRepair      bool
 	PodDeletionCostManagement bool
+	PredictionEnabled         bool
 }
 
 // FeatureGate is the source-of-truth description of a feature gate. Declaring gates as FeatureGates keeps each gate's
@@ -148,6 +149,13 @@ var (
 		Help: "Karpenter sets controller.kubernetes.io/pod-deletion-cost on pods so ReplicaSet scale-down prefers " +
 			"nodes it plans to consolidate, and stops reading that annotation as a disruption cost.",
 	}
+	PredictionEnabledFeatureGate = FeatureGate{
+		Name:    "PredictionEnabled",
+		Default: true,
+		Stage:   docs.Alpha,
+		Help: "Karpenter sizes nodes during provisioning and disruption using the post-recreation resource requests " +
+			"predicted by a registered prediction source, and waits for that source to hydrate before scheduling.",
+	}
 )
 
 // KarpenterFeatureGates are the feature gates Karpenter supports, in the order --feature-gates lists them.
@@ -161,6 +169,7 @@ var KarpenterFeatureGates = []FeatureGate{
 	TerminateFirstDriftFeatureGate,
 	TerminateFirstRepairFeatureGate,
 	PodDeletionCostManagementFeatureGate,
+	PredictionEnabledFeatureGate,
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -287,9 +296,11 @@ func DefaultFeatureGates() FeatureGates {
 		TerminateFirstDrift:       TerminateFirstDriftFeatureGate.Default,
 		TerminateFirstRepair:      TerminateFirstRepairFeatureGate.Default,
 		PodDeletionCostManagement: PodDeletionCostManagementFeatureGate.Default,
+		PredictionEnabled:         PredictionEnabledFeatureGate.Default,
 	}
 }
 
+//nolint:gocyclo
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	gateMap := map[string]bool{}
 	gates := DefaultFeatureGates()
@@ -325,6 +336,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap[PodDeletionCostManagementFeatureGate.Name]; ok {
 		gates.PodDeletionCostManagement = val
+	}
+	if val, ok := gateMap[PredictionEnabledFeatureGate.Name]; ok {
+		gates.PredictionEnabled = val
 	}
 
 	return gates, nil
