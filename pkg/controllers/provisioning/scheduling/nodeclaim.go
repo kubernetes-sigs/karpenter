@@ -25,7 +25,6 @@ import (
 	"sync/atomic"
 	"unique"
 
-	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -678,7 +677,7 @@ func volumeLimitError(instanceTypes []*cloudprovider.InstanceType, volumes sched
 			maxLimit = max(maxLimit, limit)
 		}
 		if exceedsAll {
-			return serrors.Wrap(fmt.Errorf("would exceed volume limit for all instance type options"), "provisioner", driver, "volume-count", len(vols), "volume-limit", maxLimit)
+			return scheduling.NewVolumeLimitExceededError(fmt.Errorf("would exceed volume limit for all instance type options"), driver, len(vols), maxLimit)
 		}
 	}
 	return fmt.Errorf("would exceed volume limit for all instance type options")
