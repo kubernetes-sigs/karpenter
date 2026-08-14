@@ -73,15 +73,16 @@ import (
 )
 
 type ControllerOptions struct {
-	registrationHooks    []cloudprovider.NodeLifecycleHook
-	disableVPAPrediction bool
+	registrationHooks   []cloudprovider.NodeLifecycleHook
+	enableVPAPrediction bool
 }
 
-// WithoutVPAPrediction disables the VPA prediction controller. Use this when
-// a different prediction source is registered separately.
-func WithoutVPAPrediction() option.Function[ControllerOptions] {
+// WithVPAPrediction enables the VPA prediction controller as the prediction source.
+// When enabled alongside the PredictionEnabled feature gate, Karpenter uses VPA
+// recommendations to size nodes during provisioning and disruption.
+func WithVPAPrediction() option.Function[ControllerOptions] {
 	return func(o *ControllerOptions) {
-		o.disableVPAPrediction = true
+		o.enableVPAPrediction = true
 	}
 }
 
@@ -111,7 +112,7 @@ func NewControllers(
 	o := option.Resolve(opts...)
 	deviceAllocationController := deviceallocation.NewController(kubeClient)
 	virtualPodCache := virtualpods.NewVirtualPodCache(kubeClient)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache)
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache, predictionStore)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
@@ -206,7 +207,7 @@ func NewControllers(
 		}
 	}
 
-	if !o.disableVPAPrediction {
+	if o.enableVPAPrediction && options.FromContext(ctx).FeatureGates.PredictionEnabled {
 		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
 	}
 
