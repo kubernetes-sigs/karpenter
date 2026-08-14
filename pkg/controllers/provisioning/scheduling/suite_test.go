@@ -62,6 +62,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -70,6 +71,7 @@ import (
 
 var ctx context.Context
 var prov *provisioning.Provisioner
+var predictionStore *prediction.Store
 var env *test.Environment
 var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
@@ -102,7 +104,8 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client))
+	predictionStore = prediction.NewStore()
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client), predictionStore)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
 })
 
@@ -113,6 +116,7 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	// reset instance types
 	newCP := fake.CloudProvider{}
+	*predictionStore = *prediction.NewStore()
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
 	scheduling.MaxInstanceTypes = 60
@@ -2045,7 +2049,7 @@ var _ = Context("Scheduling", func() {
 						return []string{o.(*corev1.Pod).Spec.NodeName}
 					},
 				).Build()
-				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(kubeClient), virtualpods.NewVirtualPodCache(kubeClient))
+				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(kubeClient), virtualpods.NewVirtualPodCache(kubeClient), nil)
 				controller := informer.NewNodeController(kubeClient, cluster)
 				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
 				ExpectApplied(ctx, kubeClient, nodePool)
@@ -5497,7 +5501,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler1 := scheduling.NewScheduler(ctx1, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology1,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), env.Clock, nil, nil)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), env.Clock, nil, nil, nil, nil)
 			results1, err := scheduler1.Solve(ctx1, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results1.NewNodeClaims).To(HaveLen(1))
@@ -5510,7 +5514,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler2 := scheduling.NewScheduler(ctx2, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology2,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), env.Clock, nil, nil)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), env.Clock, nil, nil, nil, nil)
 			results2, err := scheduler2.Solve(ctx2, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results2.NewNodeClaims).To(HaveLen(1))
