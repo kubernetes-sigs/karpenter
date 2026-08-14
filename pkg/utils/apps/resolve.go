@@ -60,7 +60,7 @@ type ScalableRefResult struct {
 // PodTemplateName/PodTemplateGeneration for podTemplateRef, ScalableReplicas for
 // scalableRef.
 type BufferResolution struct {
-	PodSpec               corev1.PodSpec
+	PodTemplateSpec       corev1.PodTemplateSpec
 	UsesPodTemplate       bool
 	PodTemplateName       string
 	PodTemplateGeneration int64
@@ -79,7 +79,7 @@ func ResolveCapacityBuffer(ctx context.Context, c client.Client, cb *autoscaling
 			return nil, err
 		}
 		return &BufferResolution{
-			PodSpec:               result.PodSpec,
+			PodTemplateSpec:       result.PodTemplateSpec,
 			UsesPodTemplate:       true,
 			PodTemplateName:       result.Name,
 			PodTemplateGeneration: result.Generation,
@@ -90,7 +90,7 @@ func ResolveCapacityBuffer(ctx context.Context, c client.Client, cb *autoscaling
 			return nil, err
 		}
 		return &BufferResolution{
-			PodSpec:          result.PodSpec,
+			PodTemplateSpec:  result.PodTemplateSpec,
 			ScalableReplicas: result.ScalableReplicas,
 		}, nil
 	default:

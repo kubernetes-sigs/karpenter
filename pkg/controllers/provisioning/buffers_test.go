@@ -50,7 +50,7 @@ var _ = Describe("bufferKeyOf", func() {
 				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
 			},
 			Labels: map[string]string{
-				autoscalingv1beta1.BufferNameLabel: "my-buffer",
+				autoscalingv1beta1.BufferNameAnnotation: "my-buffer",
 			},
 		}}
 		Expect(bufferKeyOf(pod)).To(Equal(""))
@@ -64,7 +64,7 @@ var _ = Describe("bufferKeyOf", func() {
 				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
 			},
 			Labels: map[string]string{
-				autoscalingv1beta1.BufferNamespaceLabel: "default",
+				autoscalingv1beta1.BufferNamespaceAnnotation: "default",
 			},
 		}}
 		Expect(bufferKeyOf(pod)).To(Equal(""))
@@ -78,8 +78,8 @@ var _ = Describe("bufferKeyOf", func() {
 				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
 			},
 			Labels: map[string]string{
-				autoscalingv1beta1.BufferNameLabel:      "my-buffer",
-				autoscalingv1beta1.BufferNamespaceLabel: "default",
+				autoscalingv1beta1.BufferNameAnnotation:      "my-buffer",
+				autoscalingv1beta1.BufferNamespaceAnnotation: "default",
 			},
 		}}
 		Expect(bufferKeyOf(pod)).To(Equal("default/my-buffer"))
@@ -116,7 +116,7 @@ var _ = Describe("classifyBufferPods", func() {
 		cbA := test.ReadyBuffer("a", 3)
 		cbB := test.ReadyBuffer("b", 2)
 		buffers := map[string]*autoscalingv1beta1.CapacityBuffer{"default/a": cbA, "default/b": cbB}
-		spec := corev1.PodSpec{}
+		spec := corev1.PodTemplateSpec{}
 
 		aPods := virtualpods.BuildVirtualPods(cbA, spec)
 		bPods := virtualpods.BuildVirtualPods(cbB, spec)
@@ -151,7 +151,7 @@ var _ = Describe("classifyBufferPods", func() {
 			"ns-a/buffer": cbA,
 			"ns-b/buffer": cbB,
 		}
-		spec := corev1.PodSpec{}
+		spec := corev1.PodTemplateSpec{}
 
 		aPods := virtualpods.BuildVirtualPods(cbA, spec)
 		bPods := virtualpods.BuildVirtualPods(cbB, spec)
@@ -217,7 +217,7 @@ var _ = Describe("bufferPodCountsFromResults", func() {
 	It("should count virtual pods per providerID on existing nodes", func() {
 		cbA := test.ReadyBuffer("a", 3)
 		cbB := test.ReadyBuffer("b", 2)
-		spec := corev1.PodSpec{}
+		spec := corev1.PodTemplateSpec{}
 
 		aPods := virtualpods.BuildVirtualPods(cbA, spec)
 		bPods := virtualpods.BuildVirtualPods(cbB, spec)
@@ -279,7 +279,7 @@ var _ = Describe("computeProvisioningCondition with scalableRef buffer", func() 
 var _ = Describe("filterVirtualPodErrors", func() {
 	It("should remove virtual pods from error map", func() {
 		cb := test.ReadyBuffer("web", 2)
-		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodTemplateSpec{})
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[*corev1.Pod]error{
@@ -295,7 +295,7 @@ var _ = Describe("filterVirtualPodErrors", func() {
 
 	It("should return empty map when all pods are virtual", func() {
 		cb := test.ReadyBuffer("web", 2)
-		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodTemplateSpec{})
 
 		input := map[*corev1.Pod]error{
 			virtualPods[0]: fmt.Errorf("err"),
@@ -328,7 +328,7 @@ var _ = Describe("filterVirtualPodErrors", func() {
 var _ = Describe("filterVirtualPodMapping", func() {
 	It("should remove virtual pods from pod slices", func() {
 		cb := test.ReadyBuffer("web", 2)
-		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodTemplateSpec{})
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[string][]*corev1.Pod{
@@ -343,7 +343,7 @@ var _ = Describe("filterVirtualPodMapping", func() {
 
 	It("should drop keys entirely when only virtual pods remain", func() {
 		cb := test.ReadyBuffer("web", 2)
-		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodTemplateSpec{})
 		realPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "real", Namespace: "default"}}
 
 		input := map[string][]*corev1.Pod{
@@ -359,7 +359,7 @@ var _ = Describe("filterVirtualPodMapping", func() {
 
 	It("should return empty map when all pods are virtual", func() {
 		cb := test.ReadyBuffer("web", 2)
-		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodSpec{})
+		virtualPods := virtualpods.BuildVirtualPods(cb, corev1.PodTemplateSpec{})
 
 		input := map[string][]*corev1.Pod{
 			"nodepool-a": {virtualPods[0], virtualPods[1]},

@@ -762,9 +762,6 @@ var _ = Describe("CapacityBuffer", func() {
 	})
 	Context("Anti-Affinity", func() {
 		It("should respect pod anti-affinity between virtual buffer pods", func() {
-			// Create a PodTemplate with labels and anti-affinity referencing those labels.
-			// This tests that template labels are propagated to virtual pods so that
-			// anti-affinity selectors match correctly between them.
 			antiAffinityTemplate := &corev1.PodTemplate{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "anti-affinity-template",
@@ -813,10 +810,57 @@ var _ = Describe("CapacityBuffer", func() {
 			env.ExpectCreated(antiAffinityTemplate, buffer)
 
 			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 3)
-
-			// Anti-affinity requires one pod per node, so 3 replicas should create 3 nodes
 			env.EventuallyExpectCreatedNodeClaimCount("==", 3)
 			env.EventuallyExpectInitializedNodeCount("==", 3)
+
+			EventuallyExpectCapacityBufferProvisionedWithReason(env, env.Client, buffer, "FitsExistingCapacity")
+		})
+
+		It("should respect pod anti-affinity between virtual buffer pods using scalableRef", func() {
+			deployment := test.Deployment(test.DeploymentOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "spread-deploy",
+					Namespace: "default",
+				},
+				Replicas: 1,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "spread-scalable"}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+					PodAntiRequirements: []corev1.PodAffinityTerm{{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "spread-scalable"},
+						},
+						TopologyKey: "kubernetes.io/hostname",
+					}},
+				},
+			})
+
+			env.ExpectCreated(deployment)
+			selector := labels.SelectorFromSet(deployment.Spec.Selector.MatchLabels)
+			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, selector, 1)
+
+			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "spread-deploy",
+					},
+					Replicas: lo.ToPtr(int32(3)),
+				},
+			})
+
+			env.ExpectCreated(buffer)
+
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 3)
+			// 1 node for the deployment pod + 3 nodes for buffer pods = 4 total
+			env.EventuallyExpectCreatedNodeClaimCount("==", 4)
+			env.EventuallyExpectInitializedNodeCount("==", 4)
 
 			EventuallyExpectCapacityBufferProvisionedWithReason(env, env.Client, buffer, "FitsExistingCapacity")
 		})
