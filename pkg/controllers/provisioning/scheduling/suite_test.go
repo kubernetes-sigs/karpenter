@@ -3203,6 +3203,51 @@ var _ = Context("Scheduling", func() {
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("large-limit"))
 			})
+			It("should filter out instance types which cannot support all of the pod's volumes across multiple CSI drivers", func() {
+				const localCSIProvider = "local.csi.provider"
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					fake.NewInstanceType("partial-support",
+						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("16"),
+							corev1.ResourcePods: resource.MustParse("1024"),
+						}),
+						fake.WithVolumeLimits(map[string]int{csiProvider: 10, localCSIProvider: 1}),
+					),
+					fake.NewInstanceType("full-support",
+						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("1024"),
+							corev1.ResourcePods: resource.MustParse("1024"),
+						}),
+						fake.WithVolumeLimits(map[string]int{csiProvider: 10, localCSIProvider: 10}),
+					),
+				}
+				localStorageClass := test.StorageClass(test.StorageClassOptions{
+					ObjectMeta:        metav1.ObjectMeta{Name: "local-storage-class"},
+					Provisioner:       new(localCSIProvider),
+					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+					Zones:             []string{"test-zone-1"},
+				})
+				ExpectApplied(ctx, env.Client, nodePool, storageClass, localStorageClass)
+				var claimNames []string
+				for i := range 2 {
+					pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("my-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-%d", i)},
+					})
+					localPVC := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("local-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-local-claim-%d", i)},
+					})
+					ExpectApplied(ctx, env.Client, pvc, localPVC)
+					claimNames = append(claimNames, pvc.Name, localPVC.Name)
+				}
+				pod := test.UnschedulablePod(test.PodOptions{
+					PersistentVolumeClaims: claimNames,
+				})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("full-support"))
+			})
 		})
 		It("should schedule pods using a PV with multiple zones", func() {
 			// Use multiple node selector terms so the PV zones are ORed.
