@@ -78,12 +78,12 @@ var _ = Describe("Store Apply Selective Copy", func() {
 			// The correctness tests below verify the actual behavior
 			_ = expectSharedCapacity
 
-			Expect(result.VolumeLimits).To(Equal(instanceType.VolumeLimits), "expected VolumeLimits to be carried over")
+			Expect(result.VolumeAttachmentLimits).To(Equal(instanceType.VolumeAttachmentLimits), "expected VolumeAttachmentLimits to be carried over")
 		},
 		Entry("no overlays - everything shared",
 			"no overlays - everything shared",
 			fake.NewInstanceType("m5.large",
-				fake.WithVolumeLimits(map[string]int{"fake.csi.provider": 10}),
+				fake.WithVolumeAttachmentLimits(map[string]int{"fake.csi.provider": 10}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Requirements: scheduling.NewRequirements(
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
@@ -103,7 +103,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 		Entry("price overlay only - offerings copied, others shared",
 			"price overlay only - offerings copied, others shared",
 			func() *cloudprovider.InstanceType {
-				return fake.NewInstanceType("m5.large", fake.WithVolumeLimits(map[string]int{"fake.csi.provider": 10}))
+				return fake.NewInstanceType("m5.large", fake.WithVolumeAttachmentLimits(map[string]int{"fake.csi.provider": 10}))
 			}(),
 			func() map[string]*priceUpdate {
 				it := fake.NewInstanceType("m5.large")
@@ -121,7 +121,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 		Entry("capacity overlay only - capacity copied, others shared",
 			"capacity overlay only - capacity copied, others shared",
 			fake.NewInstanceType("m5.large",
-				fake.WithVolumeLimits(map[string]int{"fake.csi.provider": 10}),
+				fake.WithVolumeAttachmentLimits(map[string]int{"fake.csi.provider": 10}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Requirements: scheduling.NewRequirements(
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
@@ -145,7 +145,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 		Entry("both overlays - only modified fields copied",
 			"both overlays - only modified fields copied",
 			func() *cloudprovider.InstanceType {
-				return fake.NewInstanceType("m5.large", fake.WithVolumeLimits(map[string]int{"fake.csi.provider": 10}))
+				return fake.NewInstanceType("m5.large", fake.WithVolumeAttachmentLimits(map[string]int{"fake.csi.provider": 10}))
 			}(),
 			func() map[string]*priceUpdate {
 				it := fake.NewInstanceType("m5.large")

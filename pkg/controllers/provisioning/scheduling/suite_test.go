@@ -3042,7 +3042,7 @@ var _ = Context("Scheduling", func() {
 			// 5 of the same PVC should all be schedulable on the same node
 			Expect(nodeList.Items).To(HaveLen(1))
 		})
-		Context("InstanceType VolumeLimits", func() {
+		Context("InstanceType VolumeAttachmentLimits", func() {
 			var storageClass *storagev1.StorageClass
 			BeforeEach(func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
@@ -3051,7 +3051,7 @@ var _ = Context("Scheduling", func() {
 							corev1.ResourceCPU:  resource.MustParse("1024"),
 							corev1.ResourcePods: resource.MustParse("1024"),
 						}),
-						fake.WithVolumeLimits(map[string]int{csiProvider: 10}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 10}),
 					),
 				}
 				storageClass = test.StorageClass(test.StorageClassOptions{
@@ -3130,7 +3130,7 @@ var _ = Context("Scheduling", func() {
 							corev1.ResourceCPU:  resource.MustParse("1024"),
 							corev1.ResourcePods: resource.MustParse("1024"),
 						}),
-						fake.WithVolumeLimits(map[string]int{"other.csi.provider": 1}),
+						fake.WithVolumeAttachmentLimits(map[string]int{"other.csi.provider": 1}),
 					),
 				}
 				ExpectApplied(ctx, env.Client, nodePool, storageClass)
@@ -3176,14 +3176,14 @@ var _ = Context("Scheduling", func() {
 							corev1.ResourceCPU:  resource.MustParse("16"),
 							corev1.ResourcePods: resource.MustParse("1024"),
 						}),
-						fake.WithVolumeLimits(map[string]int{csiProvider: 2}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 2}),
 					),
 					fake.NewInstanceType("large-limit",
 						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 							corev1.ResourceCPU:  resource.MustParse("1024"),
 							corev1.ResourcePods: resource.MustParse("1024"),
 						}),
-						fake.WithVolumeLimits(map[string]int{csiProvider: 20}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 20}),
 					),
 				}
 				ExpectApplied(ctx, env.Client, nodePool, storageClass)
@@ -3211,14 +3211,14 @@ var _ = Context("Scheduling", func() {
 							corev1.ResourceCPU:  resource.MustParse("16"),
 							corev1.ResourcePods: resource.MustParse("1024"),
 						}),
-						fake.WithVolumeLimits(map[string]int{csiProvider: 10, localCSIProvider: 1}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 10, localCSIProvider: 1}),
 					),
 					fake.NewInstanceType("full-support",
 						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 							corev1.ResourceCPU:  resource.MustParse("1024"),
 							corev1.ResourcePods: resource.MustParse("1024"),
 						}),
-						fake.WithVolumeLimits(map[string]int{csiProvider: 10, localCSIProvider: 10}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 10, localCSIProvider: 10}),
 					),
 				}
 				localStorageClass := test.StorageClass(test.StorageClassOptions{

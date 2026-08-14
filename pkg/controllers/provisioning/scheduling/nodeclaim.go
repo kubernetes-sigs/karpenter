@@ -133,9 +133,9 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	instanceTypes := n.InstanceTypeOptions
 	if len(volumes) != 0 {
 		prospectiveVolumes := n.volumes.Union(volumes)
-		instanceTypes = filterInstanceTypesByVolumeLimits(instanceTypes, prospectiveVolumes)
+		instanceTypes = filterInstanceTypesByVolumeAttachmentLimits(instanceTypes, prospectiveVolumes)
 		if len(instanceTypes) == 0 {
-			return nil, nil, nil, nil, volumeLimitError(n.InstanceTypeOptions, prospectiveVolumes)
+			return nil, nil, nil, nil, volumeAttachmentLimitError(n.InstanceTypeOptions, prospectiveVolumes)
 		}
 	}
 
@@ -650,12 +650,12 @@ func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList
 	return false, hasOffering
 }
 
-// filterInstanceTypesByVolumeLimits returns the instance types which can support the given volumes. Instance types
+// filterInstanceTypesByVolumeAttachmentLimits returns the instance types which can support the given volumes. Instance types
 // without a declared limit for a driver are assumed to support any number of its volumes.
-func filterInstanceTypesByVolumeLimits(instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes) []*cloudprovider.InstanceType {
+func filterInstanceTypesByVolumeAttachmentLimits(instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes) []*cloudprovider.InstanceType {
 	return lo.Filter(instanceTypes, func(it *cloudprovider.InstanceType, _ int) bool {
 		for driver, vols := range volumes {
-			if limit, ok := it.VolumeLimits[driver]; ok && len(vols) > limit {
+			if limit, ok := it.VolumeAttachmentLimits[driver]; ok && len(vols) > limit {
 				return false
 			}
 		}
@@ -663,13 +663,13 @@ func filterInstanceTypesByVolumeLimits(instanceTypes []*cloudprovider.InstanceTy
 	})
 }
 
-// volumeLimitError returns an error indicating that no instance type option can support the given volumes,
+// volumeAttachmentLimitError returns an error indicating that no instance type option can support the given volumes,
 // attributing the failure to a specific driver when possible.
-func volumeLimitError(instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes) error {
+func volumeAttachmentLimitError(instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes) error {
 	for driver, vols := range volumes {
 		maxLimit, exceedsAll := -1, true
 		for _, it := range instanceTypes {
-			limit, ok := it.VolumeLimits[driver]
+			limit, ok := it.VolumeAttachmentLimits[driver]
 			if !ok || len(vols) <= limit {
 				exceedsAll = false
 				break
