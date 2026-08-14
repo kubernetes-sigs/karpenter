@@ -42,28 +42,24 @@ var _ = Describe("bufferKeyOf", func() {
 		Expect(bufferKeyOf(pod)).To(Equal(""))
 	})
 
-	It("should return empty string when namespace label is missing", func() {
+	It("should return empty string when namespace annotation is missing", func() {
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:      "virt",
 			Namespace: "default",
 			Annotations: map[string]string{
 				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
-			},
-			Labels: map[string]string{
 				autoscalingv1beta1.BufferNameAnnotation: "my-buffer",
 			},
 		}}
 		Expect(bufferKeyOf(pod)).To(Equal(""))
 	})
 
-	It("should return empty string when name label is missing", func() {
+	It("should return empty string when name annotation is missing", func() {
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:      "virt",
 			Namespace: "default",
 			Annotations: map[string]string{
-				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
-			},
-			Labels: map[string]string{
+				autoscalingv1beta1.FakePodAnnotationKey:      autoscalingv1beta1.FakePodAnnotationValue,
 				autoscalingv1beta1.BufferNamespaceAnnotation: "default",
 			},
 		}}
@@ -75,9 +71,7 @@ var _ = Describe("bufferKeyOf", func() {
 			Name:      "virt",
 			Namespace: "default",
 			Annotations: map[string]string{
-				autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
-			},
-			Labels: map[string]string{
+				autoscalingv1beta1.FakePodAnnotationKey:      autoscalingv1beta1.FakePodAnnotationValue,
 				autoscalingv1beta1.BufferNameAnnotation:      "my-buffer",
 				autoscalingv1beta1.BufferNamespaceAnnotation: "default",
 			},
