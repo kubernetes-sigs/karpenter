@@ -119,7 +119,7 @@ var _ = Describe("VirtualPodCache", func() {
 			pods := cache.GetAll(ctx)
 			Expect(pods).To(HaveLen(3))
 			for _, p := range pods {
-				Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("web"))
+				Expect(p.Annotations[autoscalingv1beta1.BufferNameAnnotation]).To(Equal("web"))
 			}
 		})
 
@@ -146,7 +146,7 @@ var _ = Describe("VirtualPodCache", func() {
 			// Flip the buffer to not-ready and update. UpdateEntry drops the entry
 			// regardless of the spec it is handed.
 			cb.Status.Conditions[0].Status = metav1.ConditionFalse
-			cache.UpdateEntry(cb, corev1.PodSpec{})
+			cache.UpdateEntry(cb, corev1.PodTemplateSpec{})
 			Expect(cache.GetAll(ctx)).To(BeEmpty())
 		})
 
@@ -202,7 +202,7 @@ var _ = Describe("VirtualPodCache", func() {
 			pods := cache.GetAll(ctx)
 			Expect(pods).To(HaveLen(3))
 			for _, p := range pods {
-				Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("web"))
+				Expect(p.Annotations[autoscalingv1beta1.BufferNameAnnotation]).To(Equal("web"))
 			}
 		})
 
@@ -232,7 +232,7 @@ var _ = Describe("VirtualPodCache", func() {
 			pods := cache.GetAll(ctx)
 			Expect(pods).To(HaveLen(2))
 			for _, p := range pods {
-				Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("api"))
+				Expect(p.Annotations[autoscalingv1beta1.BufferNameAnnotation]).To(Equal("api"))
 			}
 		})
 

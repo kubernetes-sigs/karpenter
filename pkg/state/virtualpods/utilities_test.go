@@ -32,8 +32,9 @@ import (
 var _ = Describe("buildVirtualPods", func() {
 	It("should create the correct number of pods with expected metadata", func() {
 		cb := test.ReadyBuffer("web", 3)
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{Name: "app", Image: "pause:v1"}},
+		spec := corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web", "env": "prod"}},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "pause:v1"}}},
 		}
 
 		pods := BuildVirtualPods(cb, spec)
@@ -45,8 +46,10 @@ var _ = Describe("buildVirtualPods", func() {
 			Expect(p.Namespace).To(Equal("default"))
 			Expect(string(p.UID)).To(Equal("uid-web-" + strconv.Itoa(idx)))
 			Expect(p.Annotations[autoscalingv1beta1.FakePodAnnotationKey]).To(Equal("true"))
-			Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("web"))
-			Expect(p.Labels[autoscalingv1beta1.BufferNamespaceLabel]).To(Equal("default"))
+			Expect(p.Annotations[autoscalingv1beta1.BufferNameAnnotation]).To(Equal("web"))
+			Expect(p.Annotations[autoscalingv1beta1.BufferNamespaceAnnotation]).To(Equal("default"))
+			Expect(p.Labels).To(HaveKeyWithValue("app", "web"))
+			Expect(p.Labels).To(HaveKeyWithValue("env", "prod"))
 			Expect(p.Spec.Priority).ToNot(BeNil())
 			Expect(*p.Spec.Priority).To(Equal(autoscalingv1beta1.VirtualPodPriority))
 			Expect(p.Spec.NodeName).To(BeEmpty())
@@ -63,18 +66,23 @@ var _ = Describe("buildVirtualPods", func() {
 
 	It("should produce deterministic UIDs across calls", func() {
 		cb := test.ReadyBuffer("web", 2)
-		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
+		spec := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
 		a := BuildVirtualPods(cb, spec)
 		b := BuildVirtualPods(cb, spec)
 		Expect(a).To(HaveLen(len(b)))
 		for i := range a {
 			Expect(a[i].UID).To(Equal(b[i].UID))
+			Expect(a[i].Labels).To(BeNil())
 		}
 	})
 
 	It("should return nil for zero replicas", func() {
 		cb := test.ReadyBuffer("web", 0)
-		spec := corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}
+		spec := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
 		Expect(BuildVirtualPods(cb, spec)).To(BeNil())
 	})
 })
@@ -251,8 +259,9 @@ var _ = Describe("listBuffersReadyForProvisioning", func() {
 var _ = Describe("buildVirtualPods with scalableRef buffer", func() {
 	It("should create pods with expected metadata for scalableRef buffers", func() {
 		cb := test.ReadyScalableRefBuffer("scalable-app", 2)
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}},
+		spec := corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "scalable"}},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}}},
 		}
 
 		pods := BuildVirtualPods(cb, spec)
@@ -263,8 +272,9 @@ var _ = Describe("buildVirtualPods with scalableRef buffer", func() {
 			Expect(p.Name).To(Equal("capacity-buffer-scalable-app-" + strconv.Itoa(idx)))
 			Expect(p.Namespace).To(Equal("default"))
 			Expect(p.Annotations[autoscalingv1beta1.FakePodAnnotationKey]).To(Equal("true"))
-			Expect(p.Labels[autoscalingv1beta1.BufferNameLabel]).To(Equal("scalable-app"))
-			Expect(p.Labels[autoscalingv1beta1.BufferNamespaceLabel]).To(Equal("default"))
+			Expect(p.Annotations[autoscalingv1beta1.BufferNameAnnotation]).To(Equal("scalable-app"))
+			Expect(p.Annotations[autoscalingv1beta1.BufferNamespaceAnnotation]).To(Equal("default"))
+			Expect(p.Labels).To(HaveKeyWithValue("app", "scalable"))
 			Expect(*p.Spec.Priority).To(Equal(autoscalingv1beta1.VirtualPodPriority))
 		}
 	})
