@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -114,6 +115,8 @@ func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Co
 
 type TestConsolidationValidator struct {
 	blocked       bool
+	pdbBlocked    bool
+	sourcePrice   *float64
 	churn         bool
 	nominated     bool
 	cluster       *state.Cluster
@@ -132,6 +135,18 @@ func WithUnderutilizedChurn() TestConsolidationValidatorOption {
 func WithUnderutilizedBlockingBudget() TestConsolidationValidatorOption {
 	return func(v *TestConsolidationValidator) {
 		v.blocked = true
+	}
+}
+
+func WithUnderutilizedBlockingPDB() TestConsolidationValidatorOption {
+	return func(v *TestConsolidationValidator) {
+		v.pdbBlocked = true
+	}
+}
+
+func WithUnderutilizedSourcePrice(price float64) TestConsolidationValidatorOption {
+	return func(v *TestConsolidationValidator) {
+		v.sourcePrice = &price
 	}
 }
 
@@ -171,6 +186,29 @@ func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruptio
 	}
 	if t.blocked {
 		blockingBudget(nodes, nodeClaims, t.nodePool)
+	}
+	if t.pdbBlocked {
+		ExpectApplied(ctx, env.Client, test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         map[string]string{"app": "test"},
+			MaxUnavailable: fromInt(0),
+			Status: &policyv1.PodDisruptionBudgetStatus{
+				ObservedGeneration: 1,
+				DisruptionsAllowed: 0,
+				CurrentHealthy:     1,
+				DesiredHealthy:     1,
+				ExpectedPods:       1,
+			},
+		}))
+	}
+	if t.sourcePrice != nil && len(stateNodes) > 0 {
+		sourceInstanceType := stateNodes[0].Labels()[corev1.LabelInstanceTypeStable]
+		for _, instanceType := range cloudProvider.InstanceTypes {
+			if instanceType.Name == sourceInstanceType {
+				for _, offering := range instanceType.Offerings {
+					offering.Price = *t.sourcePrice
+				}
+			}
+		}
 	}
 	if t.churn {
 		churn(nodes, nodeClaims)
