@@ -199,7 +199,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		return reconcile.Result{}, nil
 	}
 
-	if q.needsForceDelete(pod, nodeTerminationTime) {
+	if needsForceDelete(pod, nodeTerminationTime, q.clock) {
 		return q.forceDelete(ctx, pod, nodeTerminationTime)
 	}
 	// Pod is terminal (Failed/Succeeded) or terminating so drop the queue entry.
@@ -219,9 +219,11 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 
 // needsForceDelete reports whether the pod should be force-deleted now: its
 // grace period would (or already does) extend past nodeTerminationTime if
-// allowed to run on its own. Re-evaluated on every reconcile, so a pod stuck
-// on a PDB upgrades to force-delete naturally once the deadline passes.
-func (q *Queue) needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time) bool {
+// allowed to run on its own. Shared between Drain (which enqueues past-deadline
+// pods across all tiers immediately) and Queue.Reconcile (which re-evaluates on
+// every reconcile, so a pod stuck on a PDB upgrades to force-delete naturally
+// once the deadline passes).
+func needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time, clk clock.Clock) bool {
 	if nodeTerminationTime == nil {
 		return false
 	}
@@ -232,7 +234,7 @@ func (q *Queue) needsForceDelete(pod *corev1.Pod, nodeTerminationTime *time.Time
 		return false
 	}
 	deleteTime := nodeTerminationTime.Add(time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second * -1)
-	return q.clock.Now().After(deleteTime)
+	return clk.Now().After(deleteTime)
 }
 
 // evict removes a pod via the Kubernetes eviction subresource, respecting PDBs.

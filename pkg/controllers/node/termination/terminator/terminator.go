@@ -96,15 +96,41 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-	// Hand the queue every pod we're waiting on plus the node's deadline. The
-	// queue picks evict vs force-delete vs requeue per pod, per reconcile —
-	// the terminator does no per-pod drain decisioning.
-	podGroups := t.groupPodsByPriority(lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) }))
+	waiting := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) })
+
+	// Split waiting pods into two disjoint sets:
+	//   - deleteEligible: past the force-delete threshold. Enqueue across ALL tiers
+	//     immediately — at the hard deadline we must not gate deletion behind
+	//     graceful eviction of an earlier tier (a PDB on a noncritical pod would
+	//     otherwise hold up a past-deadline critical pod).
+	//   - gracefulCandidates: candidates for the PDB-respecting eviction API.
+	//     Tier-gated so noncritical/non-daemon pods drain before critical/daemon
+	//     ones (k8s graceful shutdown ordering).
+	// The queue re-evaluates needsForceDelete on every reconcile, so a graceful
+	// candidate whose deadline crosses while it's enqueued upgrades to force-delete
+	// naturally.
+	var deleteEligible, gracefulCandidates []*corev1.Pod
+	for _, p := range waiting {
+		if needsForceDelete(p, nodeGracePeriodExpirationTime, t.clock) {
+			deleteEligible = append(deleteEligible, p)
+		} else {
+			gracefulCandidates = append(gracefulCandidates, p)
+		}
+	}
+	if len(deleteEligible) > 0 {
+		t.evictionQueue.Add(nodeGracePeriodExpirationTime, deleteEligible...)
+	}
+	podGroups := t.groupPodsByPriority(gracefulCandidates)
 	for _, group := range podGroups {
 		if len(group) > 0 {
 			t.evictionQueue.Add(nodeGracePeriodExpirationTime, group...)
-			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", lo.SumBy(podGroups, func(pods []*corev1.Pod) int { return len(pods) })))
+			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(waiting)))
 		}
+	}
+	// No graceful candidates remain, but we may still be waiting on the
+	// delete-eligible batch to finish being removed.
+	if len(deleteEligible) > 0 {
+		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(waiting)))
 	}
 	return nil
 }
