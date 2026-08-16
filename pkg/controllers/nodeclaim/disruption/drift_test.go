@@ -83,6 +83,18 @@ var _ = Describe("Drift", func() {
 		Entry("should detect drift", true),
 		Entry("should ignore drift for NodeClaims not managed by this instance of Karpenter", false),
 	)
+	It("should requeue after the cluster-wide default interval when the NodePool doesn't set DriftInterval", func() {
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		Expect(result.RequeueAfter).To(Equal(v1.DefaultDriftInterval))
+	})
+	It("should requeue after the NodePool's own DriftInterval when it's set", func() {
+		nodePool.Spec.Disruption.DriftInterval = &metav1.Duration{Duration: 45 * time.Second}
+		nodeClaim.Annotations[v1.NodePoolHashAnnotationKey] = nodePool.Hash()
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		Expect(result.RequeueAfter).To(Equal(45 * time.Second))
+	})
 	It("should detect stale instance type drift if the instance type label doesn't exist", func() {
 		delete(nodeClaim.Labels, corev1.LabelInstanceTypeStable)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
