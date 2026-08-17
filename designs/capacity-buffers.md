@@ -1,4 +1,4 @@
-#  RFC : Capacity Buffer Support For Karpenter
+# RFC : Capacity Buffer Support For Karpenter
 
 # Problem
 
@@ -16,6 +16,7 @@ Users maintain spare capacity through balloon pods, pause containers, or NodePoo
 A pod-level capacity abstraction where users specify workload requirements and Karpenter determines optimal node configuration automatically. This should dynamically adjust as workloads scale and integrate with the standard Kubernetes SIG Autoscaling CapacityBuffer API.
 
 The feature has been requested multiple times by the community:
+
 - [#749](https://github.com/kubernetes-sigs/karpenter/issues/749)
 - [#987](https://github.com/aws/karpenter-provider-aws/issues/987)
 - [#3240](https://github.com/aws/karpenter-provider-aws/issues/3240)
@@ -46,9 +47,10 @@ Support the Kubernetes SIG Autoscaling CapacityBuffer API (`autoscaling.x-k8s.io
 - Dynamic spare capacity that scales with workload changes
 - Integration with Karpenter's provisioning and disruption systems
 
-To achieve this we will 
+To achieve this we will
 
 **Add a new Buffer Controller:**
+
 1. Watches CapacityBuffer CRDs
 2. Resolves pod template from `scalableRef` or `podTemplateRef`
 3. Calculates replica count from `replicas`, `percentage`, or `limits`
@@ -56,15 +58,15 @@ To achieve this we will
 5. Updates status conditions
 
 **Make changes to existing Provisioner:**
-1. Reads buffer status
-2. Constructs virtual pods in-memory (not actual pod objects)
+
+1. Reads precomputed virtual pods from the shared in-memory store
+2. Injects those virtual pods (in-memory only, not actual pod objects) into the scheduling simulation
 3. Runs scheduling simulation: Can these virtual pods fit on existing nodes?
    - Yes → Virtual pods can be placed on existing capacity, set `Provisioning: True`
    - No → Create NodeClaims, keep `Provisioning: False` until nodes are available
 4. Only sets buffer status to `Provisioning: True` when virtual pods can be successfully placed on existing cluster capacity without creating new NodeClaims
 
-**Key Point:** Virtual pods are reconstructed every provisioning loop from buffer status. No pod objects are created. The `Provisioning: True` status reflects actual available capacity in the cluster, ensuring the status accurately represents whether buffer capacity is ready for use even if NodeClaims fail to provision.
-
+**Key Point:** Virtual pods are precomputed by the buffer controller and read from the shared store on each provisioning loop; no pod objects are created. The `Provisioning: True` status reflects actual available capacity in the cluster, ensuring the status accurately represents whether buffer capacity is ready for use even if NodeClaims fail to provision.
 
 ## Provisioning Strategies
 
@@ -73,19 +75,22 @@ To achieve this we will
 ![](./images/active_buffer.png)
 
 **Behavior:**
+
 - Maintains dynamic spare capacity continuously
 - Reacts to workload scaling and template changes
 - Buffer size adjusts with deployment size when using `percentage`
 - Provisioner checks buffer status every provisioning cycle
-- Virtual pods reconstructed each cycle to maintain capacity
+- Virtual pods are read from the shared store each cycle to maintain capacity
 - Buffer remains active until explicitly deleted
 
 **Use Cases:**
+
 - Spare capacity / headroom for burst workloads
 - Pre-warming capacity for predictable traffic spikes
 - Reducing pod scheduling latency for critical applications
 
 **Lifecycle:**
+
 1. User creates buffer (provisioningStrategy defaults to `buffer.x-k8s.io/active-capacity`)
 2. Buffer controller resolves template and calculates replicas
 3. Every provisioning cycle, provisioner attempts to provision capacity
@@ -96,11 +101,13 @@ To achieve this we will
 ## Supported References
 
 **scalableRef:**
+
 - `apps/v1/Deployment`
 - `apps/v1/StatefulSet`
 - `apps/v1/ReplicaSet`
 
 **podTemplateRef:**
+
 - `core/v1/PodTemplate`
 
 ### ScalableRef Pod Template Resolution
@@ -108,6 +115,7 @@ To achieve this we will
 The implementation uses typed Gets against the Kubernetes API to read the workload's `spec.template.spec` directly. This gives us the full PodSpec (including init containers, sidecar containers, tolerations, affinity, etc.) without needing running pods.
 
 **Key Design Decision:** Unlike the Cluster Autoscaler (which derives templates from running pods via the scale subresource), Karpenter reads the workload spec directly. This means:
+
 - The buffer initializes immediately when the workload exists — no need to wait for running pods
 - Template changes are picked up on the next controller requeue (30s)
 - The PodSpec includes all fields the scheduler needs (tolerations, nodeSelector, affinity, resource requests)
@@ -117,10 +125,12 @@ The implementation uses typed Gets against the Kubernetes API to read the worklo
 The CapacityBuffer uses standard Kubernetes conditions to report its state:
 
 **ReadyForProvisioning:**
+
 - True: Pod template is successfully resolved and target replicas are calculated
 - False: Missing references (ScalableRefNotFound, PodTemplateNotFound), validation errors, or calculation failures
 
 **Provisioning:**
+
 - True: Capacity is actually available. Virtual pods fit onto existing nodes without requiring new NodeClaims
 - False: Virtual pods don't fit; new NodeClaims are required, limits prevent scaling (InsufficientCapacity), or provisioning failed
 
@@ -128,10 +138,10 @@ The CapacityBuffer uses standard Kubernetes conditions to report its state:
 
 When both `replicas` and `percentage` are specified, use minimum to match Cluster Autoscaler behavior. When only `limits` is specified then we determine the chunks that fit based on the ref.
 
-
 ## Provisioner Integration
 
 **Responsibilities:**
+
 - Read buffer status for active buffers
 - Construct virtual pods in-memory from buffer status
 - Combine virtual pods with pending user pods
@@ -139,49 +149,55 @@ When both `replicas` and `percentage` are specified, use minimum to match Cluste
 - Update buffer status with provisioning state
 
 **Virtual Pod Construction:**
-- Virtual pods reconstructed every provisioning loop from buffer status
+
+- Virtual pods are precomputed by the buffer controller on reconcile and stored in a shared in-memory store; the provisioner reads them each loop
 - Pods created in-memory only (NOT stored in etcd or cluster state)
 - Deterministic UUIDs assigned for logging and observability
-- No API server or etcd overhead
+- No API server or etcd overhead on the provisioner hot path
 
 ## Disruption Integration
 
 **Responsibilities:**
+
 - Include virtual buffer pods in consolidation simulation to prevent premature capacity removal
 - Treat buffer pods like real pods during scheduling simulation
 - Reject consolidation if buffer pods can't fit after node removal
 - Provide lower disruption cost for buffer pods
-	- During consolidation, Karpenter prefers to disrupt nodes with buffer pods over nodes with real workloads
-	- Real workloads are prioritized for stability; buffer capacity is more flexible
+  - During consolidation, Karpenter prefers to disrupt nodes with buffer pods over nodes with real workloads
+  - Real workloads are prioritized for stability; buffer capacity is more flexible
 
 **Active Buffers:**
+
 - Virtual pods always included in disruption simulation
 - Capacity continuously preserved as buffer reacts to workload changes
 - Buffer remains active until explicitly deleted
-
-
 
 ## Design Considerations
 
 ### Karpenter's Single-Loop Architecture
 
 Karpenter uses a single provisioning loop for all scheduling decisions. This single-loop design has important implications for buffer pods:
+
 - All pods (real + buffer) are scheduled together in one coherent decision, ensuring optimal resource utilization.
 - Cluster state remains consistent during scheduling, preventing race conditions in capacity tracking.
 - The singleton pattern helps with buffer pod tracking since there's no risk of concurrent provisioning loops interfering with each other.
 
-### Performance Trade-offs 
-
-The trade-off of this approach is that virtual pods must be reconstructed and injected into the scheduling simulation every provisioning loop. Caching virtual pods between cycles is not viable because cluster state changes between loops (pods are created/deleted, nodes scale, buffer status updates), so virtual pods must always be derived from the current buffer status to ensure correctness. That said, this reconstruction is a cheap operation.
-
-
 ### Virtual Pod Creation
 
 Virtual pods are created in-memory (not stored in cluster state) with deterministic UUIDs for observability purposes. This provides unique identifiers for tracking buffer pods through the provisioning and disruption lifecycle.
-Virtual pods are NOT stored in etcd or cluster state. They exist only in-memory during the provisioning cycle. This avoids overhead on the API server and etcd while still providing the observability benefits of unique identifiers.
+Virtual pods are NOT stored in etcd or cluster state. They exist only in-memory. This avoids overhead on the API server and etcd while still providing the observability benefits of unique identifiers.
 
-**Future Consideration:** If we implement stateful virtual pod management (caching pods between cycles), the deterministic UUIDs will enable efficient state tracking without recreating pod identities.
+### Precomputed Virtual Pod Store
 
+Rather than rebuilding virtual pods on every provisioning pass (which required a `List` of all CapacityBuffers plus a typed `Get` per buffer), the buffer controller precomputes them at reconcile time and writes them into a shared in-memory store. The provisioner's hot path becomes a lock-guarded map read with zero API calls.
+
+This is safe because virtual pods depend only on the buffer's resolved spec and replica count, not on live cluster state:
+
+- The controller re-resolves and rewrites a buffer's store entry whenever the buffer, its `podTemplateRef`, or its backing workload changes, and removes the entry when the buffer stops being ready for provisioning. So the store always reflects current buffer status.
+- Live cluster state (existing nodes, other pending pods, topology) is applied by the scheduler at simulation time, not baked into the cached pods, so cached pods remain valid across loops.
+- The store hands out shared pod pointers without deep-copying for performance. This relies on the scheduler treating input pods as read-only: `Scheduler.Solve` deep-copies each pod before relaxing its requirements, and the read-only paths never mutate the input. Callers of the store must uphold this same read-only contract.
+
+On startup the store is hydrated during manager warmup (after informer caches sync, before leader-elected controllers run) so the provisioner never reads an empty store.
 
 ## Open Questions
 
@@ -194,7 +210,6 @@ A: Yes, active buffers allow spec updates (e.g., changing replicas or percentage
 **Q: What happens if buffer can't be satisfied due to NodePool limits?**
 A: Buffer status reflects actual provisioned replicas may be less than requested. The provisioner will continue to retry provisioning in subsequent cycles. In the future, we can make the retry behavior configurable.
 
-
 ## Data Models
 
 ### CapacityBuffer CRD
@@ -202,7 +217,6 @@ A: Buffer status reflects actual provisioned replicas may be less than requested
 We copy the upstream CapacityBuffer API types from [`k8s.io/autoscaler/cluster-autoscaler/apis/capacitybuffer/autoscaling.x-k8s.io/v1alpha1`](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler/apis/capacitybuffer/autoscaling.x-k8s.io/v1alpha1) into our own package rather than taking a direct dependency. This avoids pulling in the entire autoscaler module and its transitive dependencies, while giving us full control over release cadence. The copied types include a comment referencing the upstream source for future syncing.
 
 The copied types define:
-
 
 ```go
 type CapacityBuffer struct {
@@ -287,8 +301,6 @@ type CapacityBufferStatus struct {
 
 ```
 
-
-
 ## Examples
 
 ### Example 1: Active Buffer with Fixed Replicas
@@ -330,7 +342,6 @@ spec:
   replicas: 10  # Cap at 10 pods maximum
 ```
 
-
 ### Example 3: Active Buffer with PodTemplate
 
 **Use Case:** Maintain spare capacity for batch processing jobs. Capacity will be continuously maintained until buffer is deleted.
@@ -364,7 +375,6 @@ spec:
 	name: batch-job-template
   replicas: 5
 ```
-
 
 ### Example 4: Active Buffer with Resource Limits
 
@@ -400,10 +410,10 @@ spec:
 	memory: "40Gi"
 ```
 
-
 ## Testing Strategy
 
 For testing, we will add comprehensive integration tests to ensure the feature works correctly across different scenarios:
+
 - Active buffer scales with deployment changes
 - Active buffer reacts to percentage-based sizing
 - Buffer respects NodePool limits
@@ -415,7 +425,6 @@ For testing, we will add comprehensive integration tests to ensure the feature w
 ## Observability
 
 Controller-runtime metrics already provide baseline visibility into reconcile performance and errors. We will have status fields to let customers know the status of the buffer.
-
 
 # Graduation Criteria
 
@@ -461,36 +470,37 @@ Controller-runtime metrics already provide baseline visibility into reconcile pe
 **Ephemeral Capacity Strategy:**
 
 To harden support for batch systems. Kueue can work with active buffers today, but it's racey — ephemeral strategy provides deterministic one-time capacity with completion semantics:
+
 - One-time capacity request that completes when consumed
 - Integration with external admission controllers
 - Eliminates race between buffer refill and batch job admission
 
 This is deferred to allow us to:
+
 - Validate the active buffer implementation first
 - Gather user feedback on the core functionality
 - Drive consensus with sig-autoscaling on ephemeral strategy semantics
-
-**Precomputed Virtual Pod Store:**
-
-Consider having the buffer controller precompute virtual pods into an in-memory store (similar to `pkg/controllers/state/Cluster`) so the provisioner hot path becomes a cache read instead of List + Get per scheduling pass. Currently the overhead is negligible at typical buffer counts (1-10), but may matter at scale (100+).
 
 **fulfilledBy Field (Capacity Tracking):**
 
 We propose adding a `fulfilledBy` field to track which pods are consuming buffer capacity. This would provide:
 
 **Functionality:**
+
 - Selector-based mechanism to identify pods that fulfill buffer capacity
 - Automatic tracking of buffer capacity consumption as matching pods schedule
 - Status field showing which pods are currently using buffer capacity
 - Enables more intelligent buffer sizing and capacity planning
 
 **Use Cases:**
+
 - Visibility into which workloads are using pre-provisioned capacity
 - Automatic buffer adjustment as matching pods consume capacity
 - Better integration with batch schedulers that need to know capacity allocation
 - Debugging and observability for capacity utilization
 
 **Example:**
+
 ```yaml
 apiVersion: autoscaling.x-k8s.io/v1alpha1
 kind: CapacityBuffer
@@ -503,7 +513,7 @@ spec:
     kind: Deployment
     name: web-app
   replicas: 5
-  fulfilledBy:  # Future field
+  fulfilledBy: # Future field
     matchLabels:
       app: web-app
       tier: frontend
@@ -512,11 +522,13 @@ status:
 ```
 
 **Implementation Considerations:**
+
 - Requires tracking pod-to-buffer mappings in memory
 - Need to handle pod lifecycle events (creation, deletion, updates)
 - Should work with both `scalableRef` and `podTemplateRef`
 
 **Rationale for Deferring:**
+
 - Adds complexity to initial implementation
 - Can be added incrementally without breaking existing buffers
 - Want to validate core buffer functionality first
@@ -525,14 +537,13 @@ status:
 
 ### Alternative 1: Balloon Pods/Deployments
 
-
 **Why CapacityBuffer is better:**
+
 - Virtual pods avoid scheduler preemption overhead (no actual pods to evict)
 - Automatic adaptation to workload changes
 - Pod-level abstraction with automatic node selection
 - Standard API compatible with Cluster Autoscaler
 - Clear semantics for maintaining spare capacity
-
 
 ## References
 

@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
@@ -172,9 +173,11 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).Info("deleting unhealthy node")
 	labels := map[string]string{
-		metrics.ReasonLabel:       metrics.UnhealthyReason,
-		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+		metrics.ReasonLabel:              metrics.UnhealthyReason,
+		metrics.NodePoolLabel:            node.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel:        node.Labels[v1.CapacityTypeLabelKey],
+		metrics.ConsolidationPolicyLabel: "",
+		metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 	}
 	metrics.NodeClaimsDisruptedTotal.Inc(labels)
 	// Pods on the node have not yet started draining at this point — list captures
