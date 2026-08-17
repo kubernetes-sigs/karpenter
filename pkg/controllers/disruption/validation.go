@@ -299,7 +299,9 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 	if len(candidates) == 0 {
 		return NewValidationError(fmt.Errorf("no candidates"))
 	}
-	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, v.clock, v.recorder, []scheduling.Options{scheduling.IsConsolidationSimulation}, candidates...)
+	// Validation must observe the latest cluster state (not a stale reconcile-cycle snapshot) since its purpose
+	// is to detect drift that occurred during the commandValidationDelay.
+	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, v.clock, v.recorder, v.cluster.DeepCopyNodes(), []scheduling.Options{scheduling.IsConsolidationSimulation}, candidates...)
 	if err != nil {
 		return fmt.Errorf("simluating scheduling, %w", err)
 	}

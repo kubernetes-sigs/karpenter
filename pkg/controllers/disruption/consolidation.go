@@ -61,6 +61,22 @@ type consolidation struct {
 	// evaluator is initialized non-nil at construction. SetNodePoolTotals
 	// replaces it with a balancedEvaluator carrying the new totals.
 	evaluator Evaluator
+	// nodes is a snapshot of cluster state taken once per reconcile cycle by the controller, set via
+	// SetNodes before ComputeCommands is called. Shared across all SimulateScheduling calls made within
+	// ComputeCommands (e.g. every binary search step in multi-node consolidation) to avoid redundant
+	// deep-copies of cluster state.
+	nodes state.StateNodes
+}
+
+// NodesSetter is implemented by disruption methods that call SimulateScheduling from within ComputeCommands, so
+// the controller can share a single per-reconcile cluster state snapshot across all of a method's simulations.
+type NodesSetter interface {
+	SetNodes(state.StateNodes)
+}
+
+// SetNodes stores the per-reconcile cluster state snapshot for use by ComputeCommands.
+func (c *consolidation) SetNodes(nodes state.StateNodes) {
+	c.nodes = nodes
 }
 
 // NodePoolTotalsSetter is implemented by disruption methods that use balanced scoring.
@@ -159,7 +175,7 @@ func (c *consolidation) sortCandidates(_ context.Context, candidates []*Candidat
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	var err error
 	// Run scheduling simulation to compute consolidation option
-	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.clock, c.recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, candidates...)
+	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.clock, c.recorder, c.nodes, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, candidates...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {

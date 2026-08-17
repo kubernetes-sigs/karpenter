@@ -42,6 +42,10 @@ type Drift struct {
 	provisioner *provisioning.Provisioner
 	recorder    events.Recorder
 	clock       clock.Clock
+	// nodes is a snapshot of cluster state taken once per reconcile cycle by the controller, set via
+	// SetNodes before ComputeCommands is called. Shared across all SimulateScheduling calls made within
+	// ComputeCommands to avoid redundant deep-copies of cluster state.
+	nodes state.StateNodes
 }
 
 func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock) *Drift {
@@ -57,6 +61,11 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 // ShouldDisrupt is a predicate used to filter candidates
 func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	return !c.OwnedByStaticNodePool() && c.NodeClaim.StatusConditions().Get(string(d.Reason())).IsTrue()
+}
+
+// SetNodes stores the per-reconcile cluster state snapshot for use by ComputeCommands.
+func (d *Drift) SetNodes(nodes state.StateNodes) {
+	d.nodes = nodes
 }
 
 // ComputeCommand generates a disruption command given candidates
@@ -81,7 +90,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			continue
 		}
 		// Check if we need to create any NodeClaims.
-		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, nil, candidate)
+		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, d.nodes, nil, candidate)
 		if err != nil {
 			// if a candidate is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {
