@@ -147,4 +147,10 @@ settings:
     # -- nodeRepair is ALPHA and is disabled by default.
     # Setting this to true will enable node repair.
     nodeRepair: false
+    # -- staticCapacity is ALPHA and is disabled by default.
+    # Setting this to true will enable static capacity provisioning.
+    staticCapacity: false
+    # -- capacityBuffer is ALPHA and is disabled by default.
+    # Setting this to true will enable capacity buffers.
+    capacityBuffer: false
 
