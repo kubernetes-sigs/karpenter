@@ -163,6 +163,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
 	}
 
+	// Refresh budget metrics for every reason on each pass so the gauges track budget schedules
+	// even when a reason has no candidates.
+	UpdateDisruptionBudgetMetrics(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, lo.Uniq(lo.Map(c.methods, func(m Method, _ int) v1.DisruptionReason { return m.Reason() }))...)
+
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
