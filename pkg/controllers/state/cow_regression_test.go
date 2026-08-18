@@ -189,6 +189,152 @@ func TestSnapshotIsolation_MarkForDeletion(t *testing.T) {
 	}
 }
 
+// TestSnapshotIsolation_PodUnbinding verifies the mirror of TestSnapshotIsolation_PodBinding: a snapshot taken
+// while a pod is bound must not observe that pod being unbound afterward. This exercises
+// updateNodeUsageFromPodCompletion (DeletePod), the other half of the pod-usage copy-on-write path --
+// TestSnapshotIsolation_PodBinding only covers the bind side.
+func TestSnapshotIsolation_PodUnbinding(t *testing.T) {
+	cluster, nodes, ctx := newRegressionCluster(t, 1)
+
+	pod := regressionPod(nodes[0].Name, 0)
+	if err := cluster.UpdatePod(ctx, pod); err != nil {
+		t.Fatalf("binding pod, %s", err)
+	}
+	wantCPU := resource.MustParse("100m")
+
+	before := cluster.Snapshot()
+	beforeRequests := before[0].PodRequests()
+	if got := beforeRequests.Cpu(); got.Cmp(wantCPU) != 0 {
+		t.Fatalf("expected %s requested cpu before unbind, got %s", wantCPU.String(), got.String())
+	}
+
+	cluster.DeletePod(types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name})
+
+	after := cluster.Snapshot()
+	afterRequests := after[0].PodRequests()
+	if got := afterRequests.Cpu(); !got.IsZero() {
+		t.Fatalf("expected zero requested cpu after unbind, got %s", got.String())
+	}
+
+	// The snapshot taken before the unbind must still show the pod as bound -- it's frozen, not a live view.
+	beforeRequestsAgain := before[0].PodRequests()
+	if got := beforeRequestsAgain.Cpu(); got.Cmp(wantCPU) != 0 {
+		t.Fatalf("snapshot taken before unbind must remain unchanged, got %s", got.String())
+	}
+}
+
+// TestSnapshotIsolation_UpdateNode verifies that a snapshot taken before an UpdateNode call (e.g. the node's
+// labels or allocatable capacity changing) does not observe that update -- newStateFromNode always builds a new
+// *StateNode, but this guards against a future change that mutates the existing one in place instead.
+func TestSnapshotIsolation_UpdateNode(t *testing.T) {
+	cluster, nodes, ctx := newRegressionCluster(t, 1)
+
+	before := cluster.Snapshot()
+	beforeNode := before[0].Node
+	if _, ok := beforeNode.Labels["updated"]; ok {
+		t.Fatalf("expected node to not have the 'updated' label before UpdateNode")
+	}
+
+	updated := nodes[0].DeepCopy()
+	updated.Labels["updated"] = "true"
+	if err := cluster.UpdateNode(ctx, updated); err != nil {
+		t.Fatalf("updating node, %s", err)
+	}
+
+	after := cluster.Snapshot()
+	if _, ok := after[0].Node.Labels["updated"]; !ok {
+		t.Fatalf("expected node to have the 'updated' label in a snapshot taken after UpdateNode")
+	}
+	// The snapshot taken before the update -- including the *StateNode.Node pointer it captured -- must be
+	// unaffected by the later UpdateNode call.
+	if _, ok := beforeNode.Labels["updated"]; ok {
+		t.Fatalf("snapshot taken before UpdateNode must remain unchanged")
+	}
+}
+
+// TestSnapshotIsolation_UpdateNodeClaim verifies the same isolation property as
+// TestSnapshotIsolation_UpdateNode, for the NodeClaim side (newStateFromNodeClaim).
+func TestSnapshotIsolation_UpdateNodeClaim(t *testing.T) {
+	cluster, _, _ := newRegressionCluster(t, 1)
+
+	before := cluster.Snapshot()
+	beforeNodeClaim := before[0].NodeClaim
+	if _, ok := beforeNodeClaim.Labels["updated"]; ok {
+		t.Fatalf("expected nodeclaim to not have the 'updated' label before UpdateNodeClaim")
+	}
+
+	updated := before[0].NodeClaim.DeepCopy()
+	updated.Labels["updated"] = "true"
+	cluster.UpdateNodeClaim(updated)
+
+	after := cluster.Snapshot()
+	if _, ok := after[0].NodeClaim.Labels["updated"]; !ok {
+		t.Fatalf("expected nodeclaim to have the 'updated' label in a snapshot taken after UpdateNodeClaim")
+	}
+	if _, ok := beforeNodeClaim.Labels["updated"]; ok {
+		t.Fatalf("snapshot taken before UpdateNodeClaim must remain unchanged")
+	}
+}
+
+// TestSnapshotIsolation_DeleteNodeClaim_PartialCleanup guards against a real bug found while implementing the
+// generation counter: cleanupNodeClaim's "Node still exists" branch used to do `c.nodes[id].NodeClaim = nil`
+// directly on the live map entry instead of swapping in a fresh copy. This verifies a snapshot taken before
+// DeleteNodeClaim doesn't observe the NodeClaim being cleared out from under it.
+func TestSnapshotIsolation_DeleteNodeClaim_PartialCleanup(t *testing.T) {
+	cluster, _, _ := newRegressionCluster(t, 1)
+
+	before := cluster.Snapshot()
+	if before[0].NodeClaim == nil {
+		t.Fatalf("expected nodeclaim to be present before DeleteNodeClaim")
+	}
+	nodeClaimName := before[0].NodeClaim.Name
+
+	// The Node still exists after this -- only the NodeClaim side is removed, taking the "partial cleanup"
+	// branch (ShallowCopy + nil out NodeClaim) rather than the "delete from map entirely" branch.
+	cluster.DeleteNodeClaim(nodeClaimName)
+
+	after := cluster.Snapshot()
+	if len(after) != 1 {
+		t.Fatalf("expected the node to still be tracked (Node side survives), got %d nodes", len(after))
+	}
+	if after[0].NodeClaim != nil {
+		t.Fatalf("expected nodeclaim to be nil in a snapshot taken after DeleteNodeClaim")
+	}
+	// The snapshot taken before the delete must still see the NodeClaim -- it's frozen, not a live view.
+	if before[0].NodeClaim == nil {
+		t.Fatalf("snapshot taken before DeleteNodeClaim must remain unchanged")
+	}
+	if before[0].NodeClaim.Name != nodeClaimName {
+		t.Fatalf("snapshot taken before DeleteNodeClaim must still reference the original nodeclaim")
+	}
+}
+
+// TestSnapshotIsolation_DeleteNode_FullRemoval verifies the other cleanupNodeClaim/cleanupNode branch: when
+// there's nothing left to partially clean up (the NodeClaim side is already gone), the entry is deleted from
+// c.nodes entirely. A snapshot taken beforehand must still show the now-fully-removed node.
+func TestSnapshotIsolation_DeleteNode_FullRemoval(t *testing.T) {
+	cluster, nodes, _ := newRegressionCluster(t, 1)
+
+	before := cluster.Snapshot()
+	if len(before) != 1 {
+		t.Fatalf("expected 1 node before delete, got %d", len(before))
+	}
+
+	// Delete the NodeClaim first so DeleteNode's cleanupNode takes the "nothing left, delete from map" branch
+	// instead of the partial-cleanup branch (already covered by TestSnapshotIsolation_DeleteNodeClaim_PartialCleanup).
+	cluster.DeleteNodeClaim(before[0].NodeClaim.Name)
+	cluster.DeleteNode(nodes[0].Name)
+
+	after := cluster.Snapshot()
+	if len(after) != 0 {
+		t.Fatalf("expected 0 nodes after DeleteNode removes the fully-cleaned-up entry, got %d", len(after))
+	}
+	// The snapshot taken before either delete must be completely unaffected.
+	if len(before) != 1 || before[0].Node == nil || before[0].NodeClaim == nil {
+		t.Fatalf("snapshot taken before DeleteNodeClaim/DeleteNode must remain unchanged")
+	}
+}
+
 // TestSnapshot_InvalidatesOnReset guards against a real regression found while implementing the generation
 // counter: Cluster.Reset() reassigns c.nodes to a fresh empty map, but if it doesn't also bump c.generation,
 // Snapshot()'s cache doesn't know anything changed and keeps returning the pre-Reset snapshot -- silently handing
