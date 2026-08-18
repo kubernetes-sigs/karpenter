@@ -40,10 +40,10 @@ import (
 // This file is deliberately not build-tagged test_performance: these are ordinary correctness tests, run as part
 // of the normal test suite (`go test ./pkg/controllers/state/...`), not opt-in benchmarks.
 //
-// Every test here documents an invariant that holds TODAY because DeepCopyNodes() does a full deep clone. A
-// future copy-on-write refactor (making updateForPod/cleanupForPod, Nominate, and MarkForDeletion/
-// UnmarkForDeletion swap in a new *StateNode instead of mutating in place) must preserve every one of these
-// invariants -- these tests are the regression guard for that refactor, run both before and after.
+// Every test here documents an invariant that must hold regardless of how Cluster.Snapshot() is implemented
+// underneath -- originally proven by a full deep clone (the pre-refactor DeepCopyNodes()), now by the
+// copy-on-write + generation-counter design (see cluster.go's Snapshot()). These are the regression guard for
+// that refactor, run both before and after.
 //
 // Setup is intentionally independent of the test_performance-tagged benchmark helpers (different build tag,
 // can't share code across the tag boundary) but follows the same fake-client + field-index pattern.
@@ -111,7 +111,7 @@ func regressionPod(nodeName string, seq int) *corev1.Pod {
 func TestSnapshotIsolation_PodBinding(t *testing.T) {
 	cluster, nodes, ctx := newRegressionCluster(t, 1)
 
-	before := cluster.DeepCopyNodes()
+	before := cluster.Snapshot()
 	beforeRequests := before[0].PodRequests()
 	if got := beforeRequests.Cpu(); !got.IsZero() {
 		t.Fatalf("expected zero requested cpu before binding, got %s", got)
@@ -124,7 +124,7 @@ func TestSnapshotIsolation_PodBinding(t *testing.T) {
 	wantCPU := resource.MustParse("100m")
 
 	// The live cluster reflects the new pod...
-	after := cluster.DeepCopyNodes()
+	after := cluster.Snapshot()
 	afterRequests := after[0].PodRequests()
 	if got := afterRequests.Cpu(); got.Cmp(wantCPU) != 0 {
 		t.Fatalf("expected %s requested cpu after binding, got %s", wantCPU.String(), got.String())
@@ -143,14 +143,14 @@ func TestSnapshotIsolation_Nomination(t *testing.T) {
 	cluster, nodes, ctx := newRegressionCluster(t, 1)
 	clk := &clock.RealClock{}
 
-	before := cluster.DeepCopyNodes()
+	before := cluster.Snapshot()
 	if before[0].Nominated(clk) {
 		t.Fatalf("expected node to not be nominated before NominateNodeForPod")
 	}
 
 	cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
 
-	afterNominate := cluster.DeepCopyNodes()
+	afterNominate := cluster.Snapshot()
 	if !afterNominate[0].Nominated(clk) {
 		t.Fatalf("expected node to be nominated in a snapshot taken after NominateNodeForPod")
 	}
@@ -163,14 +163,14 @@ func TestSnapshotIsolation_Nomination(t *testing.T) {
 func TestSnapshotIsolation_MarkForDeletion(t *testing.T) {
 	cluster, nodes, _ := newRegressionCluster(t, 1)
 
-	before := cluster.DeepCopyNodes()
+	before := cluster.Snapshot()
 	if before[0].MarkedForDeletion() {
 		t.Fatalf("expected node to not be marked for deletion initially")
 	}
 
 	cluster.MarkForDeletion(nodes[0].Spec.ProviderID)
 
-	afterMark := cluster.DeepCopyNodes()
+	afterMark := cluster.Snapshot()
 	if !afterMark[0].MarkedForDeletion() {
 		t.Fatalf("expected node to be marked for deletion in a snapshot taken after MarkForDeletion")
 	}
@@ -179,7 +179,7 @@ func TestSnapshotIsolation_MarkForDeletion(t *testing.T) {
 	}
 
 	cluster.UnmarkForDeletion(nodes[0].Spec.ProviderID)
-	afterUnmark := cluster.DeepCopyNodes()
+	afterUnmark := cluster.Snapshot()
 	if afterUnmark[0].MarkedForDeletion() {
 		t.Fatalf("expected node to be unmarked after UnmarkForDeletion")
 	}
@@ -199,20 +199,20 @@ func TestSnapshotIsolation_MarkForDeletion(t *testing.T) {
 func TestSnapshot_InvalidatesOnReset(t *testing.T) {
 	cluster, _, _ := newRegressionCluster(t, 3)
 
-	before := cluster.DeepCopyNodes()
+	before := cluster.Snapshot()
 	if len(before) != 3 {
 		t.Fatalf("expected 3 nodes before reset, got %d", len(before))
 	}
 
 	cluster.Reset()
 
-	after := cluster.DeepCopyNodes()
+	after := cluster.Snapshot()
 	if len(after) != 0 {
 		t.Fatalf("expected 0 nodes immediately after Reset (snapshot must not serve the stale pre-Reset cache), got %d", len(after))
 	}
 }
 
-// TestConcurrentReadWrite_NoRace exercises concurrent pod bind/unbind churn against concurrent DeepCopyNodes
+// TestConcurrentReadWrite_NoRace exercises concurrent pod bind/unbind churn against concurrent Snapshot
 // reads. Run with `go test -race` -- its purpose is to catch any regression that reintroduces a shared-mutation
 // hazard between the read and write paths.
 func TestConcurrentReadWrite_NoRace(t *testing.T) {
@@ -249,7 +249,7 @@ func TestConcurrentReadWrite_NoRace(t *testing.T) {
 				case <-stop:
 					return
 				default:
-					snap := cluster.DeepCopyNodes()
+					snap := cluster.Snapshot()
 					for _, n := range snap {
 						_ = n.PodRequests()
 						_ = n.Nominated(&clock.RealClock{})

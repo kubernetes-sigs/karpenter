@@ -85,19 +85,19 @@ type simulateSchedulingBenchFixture struct {
 func setupSimulateSchedulingBenchFixture(b *testing.B, numNodes int) *simulateSchedulingBenchFixture {
 	b.Helper()
 	ctx := context.Background()
-	env := test.NewEnvironment(test.WithCRDs(coreapis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
+	benchEnv := test.NewEnvironment(test.WithCRDs(coreapis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 
-	cloudProvider := fake.NewCloudProvider()
-	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-	clusterCost := cost.NewClusterCost(ctx, cloudProvider, env.Client)
-	cluster := state.NewCluster(env.Clock, env.Client, cloudProvider)
-	nodeStateController := informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController := informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
-	recorder := test.NewEventRecorder()
-	draController := deviceallocation.NewController(env.Client)
-	prov := provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
-	queue := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+	benchCloudProvider := fake.NewCloudProvider()
+	benchCloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
+	benchClusterCost := cost.NewClusterCost(ctx, benchCloudProvider, benchEnv.Client)
+	benchCluster := state.NewCluster(benchEnv.Clock, benchEnv.Client, benchCloudProvider)
+	benchNodeStateController := informer.NewNodeController(benchEnv.Client, benchCluster)
+	benchNodeClaimStateController := informer.NewNodeClaimController(benchEnv.Client, benchCloudProvider, benchCluster, benchClusterCost)
+	benchRecorder := test.NewEventRecorder()
+	benchDRAController := deviceallocation.NewController(benchEnv.Client)
+	benchProv := provisioning.NewProvisioner(benchEnv.Client, benchRecorder, benchCloudProvider, benchCluster, benchEnv.Clock, benchDRAController, virtualpods.NewVirtualPodCache(benchEnv.Client))
+	benchQueue := disruption.NewQueue(benchEnv.Client, benchRecorder, benchCluster, benchEnv.Clock, benchProv)
 
 	nodePool := test.NodePool(v1.NodePool{
 		Spec: v1.NodePoolSpec{
@@ -107,9 +107,9 @@ func setupSimulateSchedulingBenchFixture(b *testing.B, numNodes int) *simulateSc
 			},
 		},
 	})
-	ExpectApplied(ctx, env.Client, nodePool)
+	ExpectApplied(ctx, benchEnv.Client, nodePool)
 
-	instanceType := cloudProvider.InstanceTypes[0]
+	instanceType := benchCloudProvider.InstanceTypes[0]
 	offering := instanceType.Offerings[0]
 	nodeClaims, nodes := test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -128,30 +128,30 @@ func setupSimulateSchedulingBenchFixture(b *testing.B, numNodes int) *simulateSc
 		},
 	})
 	for i := range numNodes {
-		ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+		ExpectApplied(ctx, benchEnv.Client, nodeClaims[i], nodes[i])
 	}
-	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, benchEnv.Client, benchEnv.Clock, benchNodeStateController, benchNodeClaimStateController, nodes, nodeClaims)
 
-	pdbs, err := pdb.NewLimits(ctx, env.Client)
+	pdbs, err := pdb.NewLimits(ctx, benchEnv.Client)
 	if err != nil {
 		b.Fatalf("building pdb limits, %s", err)
 	}
-	nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, env.Client, cloudProvider)
+	nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, benchEnv.Client, benchCloudProvider)
 	if err != nil {
 		b.Fatalf("building nodepool map, %s", err)
 	}
-	stateNode := ExpectStateNodeExists(cluster, nodes[0])
-	candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
+	stateNode := ExpectStateNodeExists(benchCluster, nodes[0])
+	candidate, err := disruption.NewCandidate(ctx, benchEnv.Client, benchRecorder, benchEnv.Clock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, benchQueue, disruption.GracefulDisruptionClass)
 	if err != nil {
 		b.Fatalf("constructing candidate, %s", err)
 	}
 
 	return &simulateSchedulingBenchFixture{
 		ctx:       ctx,
-		env:       env,
-		cluster:   cluster,
-		prov:      prov,
-		recorder:  recorder,
+		env:       benchEnv,
+		cluster:   benchCluster,
+		prov:      benchProv,
+		recorder:  benchRecorder,
 		candidate: candidate,
 	}
 }
@@ -174,10 +174,10 @@ func benchmarkSimulateScheduling(b *testing.B, numNodes int) {
 	b.StopTimer() // exclude envtest teardown (in the deferred env.Stop() above) from the measured time
 }
 
-// The following two benchmarks compare cluster.DeepCopyNodes() (now an alias for the cheap, generation-cached
-// Cluster.Snapshot()) against the read-locked, zero-allocation cluster.Nodes() iterator used by
-// BuildDisruptionBudgetMapping. See pkg/controllers/state/snapshot_benchmark_test.go for the underlying
-// Cluster.Snapshot() benchmarks this end-to-end version is built on top of.
+// The following two benchmarks compare cluster.Snapshot() -- cheap, generation-cached -- against the
+// read-locked, zero-allocation cluster.Nodes() iterator used by BuildDisruptionBudgetMapping. See
+// pkg/controllers/state/snapshot_benchmark_test.go for the underlying Cluster.Snapshot() benchmarks this
+// end-to-end version is built on top of.
 
 func BenchmarkClusterDeepCopyNodes_25(b *testing.B)  { benchmarkClusterDeepCopyNodes(b, 25) }
 func BenchmarkClusterDeepCopyNodes_100(b *testing.B) { benchmarkClusterDeepCopyNodes(b, 100) }
@@ -194,7 +194,7 @@ func benchmarkClusterDeepCopyNodes(b *testing.B, numNodes int) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = f.cluster.DeepCopyNodes()
+		_ = f.cluster.Snapshot()
 	}
 	b.StopTimer() // exclude envtest teardown (in the deferred env.Stop() above) from the measured time
 }

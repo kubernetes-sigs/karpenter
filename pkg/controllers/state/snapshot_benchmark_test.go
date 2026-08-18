@@ -24,13 +24,15 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
-// BenchmarkSnapshot_* measures cluster.DeepCopyNodes() as it exists TODAY -- a full O(n) deep clone. This is the
-// baseline a future generation-counter + memoized-pointer-slice Snapshot() must be compared against.
+// BenchmarkSnapshot_* measures cluster.Snapshot() -- generation-counter cached, near-free on a cache hit, an
+// O(n) pointer-slice copy on a cache miss. This was the target the pre-refactor DeepCopyNodes() baseline (a full
+// O(n) deep clone) needed to reach; see designs/disruption-improvements/copy-on-write-baseline.md for the
+// before/after numbers.
 //
-// BenchmarkPointerSliceCopy_* measures what that future Snapshot() will do on a cache-miss: grab a []*StateNode
-// of the current live pointers under a brief lock, with no cloning at all. It's written against existing,
-// already-shipped APIs (cluster.Nodes(), the read-locked iterator) so it compiles and runs today, without
-// depending on the not-yet-written Snapshot() method.
+// BenchmarkPointerSliceCopy_* independently measures the cache-miss path -- grab a []*StateNode of the current
+// live pointers under a brief lock, with no cloning at all -- against existing, already-shipped APIs
+// (cluster.Nodes(), the read-locked iterator), so it stays a meaningful floor even if Snapshot()'s caching
+// strategy changes later.
 //
 // Run with:
 //
@@ -43,7 +45,7 @@ func benchmarkSnapshot(b *testing.B, numNodes int) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = cluster.DeepCopyNodes()
+		_ = cluster.Snapshot()
 	}
 }
 
