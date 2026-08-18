@@ -163,7 +163,7 @@ func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object
 // without re-fetching. Returns (false, nil, nil) for customer-induced errors
 // (not found, unsupported kind), or (false, nil, err) for unexpected failures
 // that should be retried.
-func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (bool, *v1.PodSpec, error) {
+func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (bool, *v1.PodTemplateSpec, error) {
 	if cb.Spec.PodTemplateRef == nil && cb.Spec.ScalableRef == nil {
 		cb.SetCondition(autoscalingv1beta1.ReadyForProvisioningCondition, metav1.ConditionFalse, ReasonResolutionFailed, "Neither podTemplateRef nor scalableRef is set")
 		return false, nil, nil
@@ -191,11 +191,10 @@ func (c *Controller) resolveAndUpdateStatus(ctx context.Context, cb *autoscaling
 	}
 
 	// Compute replicas from all applicable constraints.
-	podSpec := &result.PodSpec
-	replicas := computeReplicas(cb, podSpec, candidates)
+	replicas := computeReplicas(cb, &result.PodTemplateSpec.Spec, candidates)
 	cb.SetCondition(autoscalingv1beta1.ReadyForProvisioningCondition, metav1.ConditionTrue, ReasonResolved, "Pod template resolved successfully")
 	cb.Status.Replicas = &replicas
-	return true, podSpec, nil
+	return true, &result.PodTemplateSpec, nil
 }
 
 // computeReplicas derives the desired buffer replica count from the configured

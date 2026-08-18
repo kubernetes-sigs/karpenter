@@ -62,6 +62,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
@@ -101,6 +102,7 @@ type Operator struct {
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
 	InstanceTypeStore   *nodeoverlay.InstanceTypeStore
+	PredictionStore     *prediction.Store
 }
 
 type Options struct {
@@ -241,6 +243,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
 	instanceTypeStore := nodeoverlay.NewInstanceTypeStore()
+	predictionStore := prediction.NewStore()
 
 	return ctx, &Operator{
 		Manager:             mgr,
@@ -248,6 +251,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once events.Recorder is updated
 		Clock:               clock.RealClock{},
 		InstanceTypeStore:   instanceTypeStore,
+		PredictionStore:     predictionStore,
 	}
 }
 
