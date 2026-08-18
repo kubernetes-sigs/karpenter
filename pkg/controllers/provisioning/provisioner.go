@@ -715,14 +715,12 @@ func (p *Provisioner) isPodClaimedByInFlightNodeClaim(ctx context.Context, pod *
 
 	// Launch failure: the nodeClaim can't launch and has been stuck beyond the liveness controller's
 	// own launch-timeout bound — release the pod without waiting for the controller to actually delete the object.
-	if launched := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); launched != nil && !launched.IsTrue() &&
-		p.clock.Since(launched.LastTransitionTime.Time) > nodeclaimlifecycle.LaunchTimeout {
+	if p.nodeClaimLaunchFailed(nodeClaim) {
 		return false
 	}
 
 	// Never registered: bound by the registration timeout the liveness controller uses.
-	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() &&
-		p.clock.Since(nodeClaim.CreationTimestamp.Time) > nodeclaimlifecycle.RegistrationTimeout {
+	if p.nodeClaimRegistrationExpired(nodeClaim) {
 		return false
 	}
 
@@ -733,4 +731,19 @@ func (p *Provisioner) isPodClaimedByInFlightNodeClaim(ctx context.Context, pod *
 	}
 
 	return true
+}
+
+// nodeClaimLaunchFailed reports whether the NodeClaim can't launch and has been stuck beyond the
+// liveness controller's launch-timeout bound, without waiting for the controller to delete the object.
+func (p *Provisioner) nodeClaimLaunchFailed(nodeClaim *v1.NodeClaim) bool {
+	launched := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched)
+	return launched != nil && !launched.IsTrue() &&
+		p.clock.Since(launched.LastTransitionTime.Time) > nodeclaimlifecycle.LaunchTimeout
+}
+
+// nodeClaimRegistrationExpired reports whether the NodeClaim never registered before the
+// registration timeout the liveness controller uses.
+func (p *Provisioner) nodeClaimRegistrationExpired(nodeClaim *v1.NodeClaim) bool {
+	return !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() &&
+		p.clock.Since(nodeClaim.CreationTimestamp.Time) > nodeclaimlifecycle.RegistrationTimeout
 }
