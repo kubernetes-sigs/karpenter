@@ -373,22 +373,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if err != nil {
 		return scheduler.Results{}, err
 	}
-	// Drop pending pods whose in-flight NodeClaim is still live and healthy. The provisioner already
-	// provisioned capacity for them; without this guard the next reconciliation loop re-simulates the
-	// still-pending pods and creates duplicate NodeClaims before the first node registers/binds.
-	unclaimed := make([]*corev1.Pod, 0, len(pendingPods))
-	var claimed []*corev1.Pod
-	for _, po := range pendingPods {
-		if p.isPodClaimedByInFlightNodeClaim(ctx, po) {
-			claimed = append(claimed, po)
-		} else {
-			unclaimed = append(unclaimed, po)
-		}
-	}
-	if len(claimed) > 0 {
-		log.FromContext(ctx).V(1).WithValues("count", len(claimed)).Info("skipping pending pod(s) already claimed by in-flight nodeclaim(s)")
-	}
-	pendingPods = unclaimed
+	pendingPods = p.filterClaimedPods(ctx, pendingPods)
 
 	// Get pods from nodes that are preparing for deletion
 	// We do this after getting the pending pods so that we undershoot if pods are
@@ -668,6 +653,25 @@ func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm)
 		}
 	}
 	return errs
+}
+
+// filterClaimedPods drops pending pods whose in-flight NodeClaim is still live and healthy.
+// The provisioner already provisioned capacity for them; without this guard the next reconciliation
+// loop re-simulates the still-pending pods and creates duplicate NodeClaims before the first node registers/binds.
+func (p *Provisioner) filterClaimedPods(ctx context.Context, pods []*corev1.Pod) []*corev1.Pod {
+	unclaimed := make([]*corev1.Pod, 0, len(pods))
+	claimed := 0
+	for _, po := range pods {
+		if p.isPodClaimedByInFlightNodeClaim(ctx, po) {
+			claimed++
+		} else {
+			unclaimed = append(unclaimed, po)
+		}
+	}
+	if claimed > 0 {
+		log.FromContext(ctx).V(1).WithValues("count", claimed).Info("skipping pending pod(s) already claimed by in-flight nodeclaim(s)")
+	}
+	return unclaimed
 }
 
 // isPodClaimedByInFlightNodeClaim returns true while the pod has a mapping to a live in-flight
