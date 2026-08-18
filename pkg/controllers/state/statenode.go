@@ -20,6 +20,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -171,6 +172,23 @@ func (in *StateNode) ShallowCopy() *StateNode {
 		markedForDeletion:  in.markedForDeletion,
 		nominatedUntil:     in.nominatedUntil,
 	}
+}
+
+// CopyForMutation returns a new StateNode ready to receive the mutations updateForPod/cleanupForPod make: a
+// fresh copy of every map/usage-tracker those two methods write into, so the original (still referenced by
+// anyone holding an earlier snapshot) is never touched. Unlike DeepCopy, it does NOT clone Node, NodeClaim, or
+// individual resource.Quantity values -- those are never mutated after construction, only ever replaced
+// wholesale via UpdateNode/UpdateNodeClaim, so sharing them by reference is safe and far cheaper than cloning.
+func (in *StateNode) CopyForMutation() *StateNode {
+	out := in.ShallowCopy()
+	out.daemonSetRequests = maps.Clone(in.daemonSetRequests)
+	out.daemonSetLimits = maps.Clone(in.daemonSetLimits)
+	out.podRequests = maps.Clone(in.podRequests)
+	out.podLimits = maps.Clone(in.podLimits)
+	out.podDisruptionCosts = maps.Clone(in.podDisruptionCosts)
+	out.hostPortUsage = in.hostPortUsage.DeepCopy()
+	out.volumeUsage = in.volumeUsage.DeepCopy()
+	return out
 }
 
 func (in *StateNode) Name() string {

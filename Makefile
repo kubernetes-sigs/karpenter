@@ -139,6 +139,12 @@ e2etest-dra: ## Run DRA e2e integration tests
 benchmark: ## Run benchmark tests for node overlay store
 	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
 
+benchmark-cow: ## Run copy-on-write state/disruption benchmarks (25/100/400 nodes -- fast, excludes 5000-node variants)
+	go test -tags=test_performance -bench=. -benchmem -run=^$$ ./pkg/controllers/state/... ./pkg/controllers/disruption/...
+
+benchmark-cow-5k: ## Run the long-running 5000-node copy-on-write benchmarks (several minutes; not part of benchmark-cow)
+	go test -tags=test_performance_5000 -bench=. -benchmem -run=^$$ ./pkg/controllers/state/... ./pkg/controllers/disruption/...
+
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	go tool -modfile=go.tools.mod ginkgo \
 		--race \
@@ -187,4 +193,4 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake vulncheck licenses verify download gen_instance_types setup-kind-dra delete-kind-dra apply-with-kind-dra
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark benchmark-cow benchmark-cow-5k deflake vulncheck licenses verify download gen_instance_types setup-kind-dra delete-kind-dra apply-with-kind-dra

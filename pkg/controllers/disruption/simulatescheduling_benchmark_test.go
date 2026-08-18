@@ -1,4 +1,4 @@
-//go:build test_performance
+//go:build test_performance || test_performance_5000
 
 /*
 Copyright The Kubernetes Authors.
@@ -45,12 +45,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
-// These benchmarks quantify the deep-copy reduction made in helpers.go/controller.go: SimulateScheduling and
-// GetCandidatesWithTotals now take a pre-taken `nodes state.StateNodes` snapshot instead of each independently
-// calling cluster.DeepCopyNodes(). The "FreshCopyPerCall" variants reproduce the OLD behavior (take a fresh deep
-// copy on every call) using the current, real SimulateScheduling signature; the "SharedSnapshot" variants
-// reproduce the NEW behavior (take one copy, reuse it). The only difference between each pair is where
-// cluster.DeepCopyNodes() is called relative to the b.N loop, so the delta directly isolates the win.
+// These benchmarks measure SimulateScheduling end-to-end at increasing cluster sizes. Earlier revisions of this
+// file compared a "FreshCopyPerCall" variant against a "SharedSnapshot" variant, back when SimulateScheduling
+// took an explicit `nodes state.StateNodes` parameter that callers controlled. That distinction no longer
+// applies: SimulateScheduling now always calls cluster.Snapshot() internally, which is cheap enough (see
+// Cluster.Snapshot's doc comment and BenchmarkSnapshot_*/BenchmarkPointerSliceCopy_* in
+// pkg/controllers/state/snapshot_benchmark_test.go) that there's no meaningful difference between "fresh" and
+// "shared" anymore -- every call already gets the cheapest possible up-to-date view.
 //
 // To run:
 //
@@ -155,78 +156,36 @@ func setupSimulateSchedulingBenchFixture(b *testing.B, numNodes int) *simulateSc
 	}
 }
 
-func BenchmarkSimulateScheduling_FreshCopyPerCall_25(b *testing.B) {
-	benchmarkSimulateSchedulingFreshCopy(b, 25)
-}
-func BenchmarkSimulateScheduling_FreshCopyPerCall_100(b *testing.B) {
-	benchmarkSimulateSchedulingFreshCopy(b, 100)
-}
-func BenchmarkSimulateScheduling_FreshCopyPerCall_400(b *testing.B) {
-	benchmarkSimulateSchedulingFreshCopy(b, 400)
-}
-func BenchmarkSimulateScheduling_FreshCopyPerCall_5000(b *testing.B) {
-	benchmarkSimulateSchedulingFreshCopy(b, 5000)
-}
+func BenchmarkSimulateScheduling_25(b *testing.B)  { benchmarkSimulateScheduling(b, 25) }
+func BenchmarkSimulateScheduling_100(b *testing.B) { benchmarkSimulateScheduling(b, 100) }
+func BenchmarkSimulateScheduling_400(b *testing.B) { benchmarkSimulateScheduling(b, 400) }
 
-func BenchmarkSimulateScheduling_SharedSnapshot_25(b *testing.B) {
-	benchmarkSimulateSchedulingShared(b, 25)
-}
-func BenchmarkSimulateScheduling_SharedSnapshot_100(b *testing.B) {
-	benchmarkSimulateSchedulingShared(b, 100)
-}
-func BenchmarkSimulateScheduling_SharedSnapshot_400(b *testing.B) {
-	benchmarkSimulateSchedulingShared(b, 400)
-}
-func BenchmarkSimulateScheduling_SharedSnapshot_5000(b *testing.B) {
-	benchmarkSimulateSchedulingShared(b, 5000)
-}
-
-// benchmarkSimulateSchedulingFreshCopy reproduces the pre-change behavior: every call takes its own independent
-// deep copy of cluster state before simulating.
-func benchmarkSimulateSchedulingFreshCopy(b *testing.B, numNodes int) {
+func benchmarkSimulateScheduling(b *testing.B, numNodes int) {
 	f := setupSimulateSchedulingBenchFixture(b, numNodes)
 	defer func() { _ = f.env.Stop() }()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		nodes := f.cluster.DeepCopyNodes() // fresh copy every iteration -- the old behavior
-		if _, err := disruption.SimulateScheduling(f.ctx, f.env.Client, f.cluster, f.prov, f.env.Clock, f.recorder, nodes, nil, f.candidate); err != nil {
+		if _, err := disruption.SimulateScheduling(f.ctx, f.env.Client, f.cluster, f.prov, f.env.Clock, f.recorder, nil, f.candidate); err != nil {
 			b.Fatalf("simulating scheduling, %s", err)
 		}
 	}
 	b.StopTimer() // exclude envtest teardown (in the deferred env.Stop() above) from the measured time
 }
 
-// benchmarkSimulateSchedulingShared reproduces the post-change behavior: one deep copy is taken up front and
-// shared across every call, exactly as the reconcile-cycle snapshot is shared across a method's simulations today.
-func benchmarkSimulateSchedulingShared(b *testing.B, numNodes int) {
-	f := setupSimulateSchedulingBenchFixture(b, numNodes)
-	defer func() { _ = f.env.Stop() }()
+// The following two benchmarks compare cluster.DeepCopyNodes() (now an alias for the cheap, generation-cached
+// Cluster.Snapshot()) against the read-locked, zero-allocation cluster.Nodes() iterator used by
+// BuildDisruptionBudgetMapping. See pkg/controllers/state/snapshot_benchmark_test.go for the underlying
+// Cluster.Snapshot() benchmarks this end-to-end version is built on top of.
 
-	nodes := f.cluster.DeepCopyNodes() // taken once, shared across every iteration -- the new behavior
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := disruption.SimulateScheduling(f.ctx, f.env.Client, f.cluster, f.prov, f.env.Clock, f.recorder, nodes, nil, f.candidate); err != nil {
-			b.Fatalf("simulating scheduling, %s", err)
-		}
-	}
-	b.StopTimer() // exclude envtest teardown (in the deferred env.Stop() above) from the measured time
-}
+func BenchmarkClusterDeepCopyNodes_25(b *testing.B)  { benchmarkClusterDeepCopyNodes(b, 25) }
+func BenchmarkClusterDeepCopyNodes_100(b *testing.B) { benchmarkClusterDeepCopyNodes(b, 100) }
+func BenchmarkClusterDeepCopyNodes_400(b *testing.B) { benchmarkClusterDeepCopyNodes(b, 400) }
 
-// The following two benchmarks isolate the primitive swapped in BuildDisruptionBudgetMapping: a full
-// cluster.DeepCopyNodes() versus the read-locked, zero-copy cluster.Nodes() iterator.
-
-func BenchmarkClusterDeepCopyNodes_25(b *testing.B)   { benchmarkClusterDeepCopyNodes(b, 25) }
-func BenchmarkClusterDeepCopyNodes_100(b *testing.B)  { benchmarkClusterDeepCopyNodes(b, 100) }
-func BenchmarkClusterDeepCopyNodes_400(b *testing.B)  { benchmarkClusterDeepCopyNodes(b, 400) }
-func BenchmarkClusterDeepCopyNodes_5000(b *testing.B) { benchmarkClusterDeepCopyNodes(b, 5000) }
-
-func BenchmarkClusterNodesIterate_25(b *testing.B)   { benchmarkClusterNodesIterate(b, 25) }
-func BenchmarkClusterNodesIterate_100(b *testing.B)  { benchmarkClusterNodesIterate(b, 100) }
-func BenchmarkClusterNodesIterate_400(b *testing.B)  { benchmarkClusterNodesIterate(b, 400) }
-func BenchmarkClusterNodesIterate_5000(b *testing.B) { benchmarkClusterNodesIterate(b, 5000) }
+func BenchmarkClusterNodesIterate_25(b *testing.B)  { benchmarkClusterNodesIterate(b, 25) }
+func BenchmarkClusterNodesIterate_100(b *testing.B) { benchmarkClusterNodesIterate(b, 100) }
+func BenchmarkClusterNodesIterate_400(b *testing.B) { benchmarkClusterNodesIterate(b, 400) }
 
 func benchmarkClusterDeepCopyNodes(b *testing.B, numNodes int) {
 	f := setupSimulateSchedulingBenchFixture(b, numNodes)

@@ -100,3 +100,20 @@ func benchmarkDeepCopy(b *testing.B, podCount int) {
 		_ = n.DeepCopy()
 	}
 }
+
+// BenchmarkStateNode_CopyForMutation_* measures the new copy-on-write helper used by updateForPod/cleanupForPod
+// (see cluster.go's updateNodeUsageFromPod et al.). Compare directly against ShallowCopy (the floor -- no clone
+// at all) and DeepCopy (the ceiling -- clones everything, including Node/NodeClaim, which CopyForMutation never
+// touches) above: CopyForMutation should land much closer to ShallowCopy.
+func BenchmarkStateNode_CopyForMutation_0Pods(b *testing.B)   { benchmarkCopyForMutation(b, 0) }
+func BenchmarkStateNode_CopyForMutation_20Pods(b *testing.B)  { benchmarkCopyForMutation(b, 20) }
+func BenchmarkStateNode_CopyForMutation_100Pods(b *testing.B) { benchmarkCopyForMutation(b, 100) }
+
+func benchmarkCopyForMutation(b *testing.B, podCount int) {
+	n := newBenchStateNode(podCount)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = n.CopyForMutation()
+	}
+}

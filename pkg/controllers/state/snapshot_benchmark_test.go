@@ -1,4 +1,4 @@
-//go:build test_performance
+//go:build test_performance || test_performance_5000
 
 /*
 Copyright The Kubernetes Authors.
@@ -36,8 +36,7 @@ import (
 //
 //	go test -tags=test_performance -run=XXX -bench=. ./pkg/controllers/state/... -benchtime=10x
 
-func BenchmarkSnapshot_400(b *testing.B)  { benchmarkSnapshot(b, 400) }
-func BenchmarkSnapshot_5000(b *testing.B) { benchmarkSnapshot(b, 5000) }
+func BenchmarkSnapshot_400(b *testing.B) { benchmarkSnapshot(b, 400) }
 
 func benchmarkSnapshot(b *testing.B, numNodes int) {
 	cluster, _ := setupBenchCluster(b, numNodes, 5)
@@ -48,8 +47,7 @@ func benchmarkSnapshot(b *testing.B, numNodes int) {
 	}
 }
 
-func BenchmarkPointerSliceCopy_400(b *testing.B)  { benchmarkPointerSliceCopy(b, 400) }
-func BenchmarkPointerSliceCopy_5000(b *testing.B) { benchmarkPointerSliceCopy(b, 5000) }
+func BenchmarkPointerSliceCopy_400(b *testing.B) { benchmarkPointerSliceCopy(b, 400) }
 
 func benchmarkPointerSliceCopy(b *testing.B, numNodes int) {
 	cluster, _ := setupBenchCluster(b, numNodes, 5)

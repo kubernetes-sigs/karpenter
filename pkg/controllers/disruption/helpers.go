@@ -51,9 +51,13 @@ var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
-	nodes state.StateNodes, schedulerOpts []scheduling.Options, candidates ...*Candidate,
+	schedulerOpts []scheduling.Options, candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
+	// Snapshot is cheap now (see Cluster.Snapshot's doc comment) -- every call gets a point-in-time view that's
+	// always current as of this instant, so there's no benefit to threading a shared snapshot through callers
+	// anymore.
+	nodes := cluster.Snapshot()
 	deletingNodes := nodes.Deleting()
 	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool {
 		return !candidateNames.Has(n.Name())
@@ -181,12 +185,10 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 }
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool.
-// It always takes a fresh snapshot of cluster state, since it is used exclusively on validation paths where
-// observing the latest state (not a stale reconcile-cycle snapshot) is required.
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue,
 ) ([]*Candidate, error) {
-	candidates, _, err := GetCandidatesWithTotals(ctx, cluster, kubeClient, recorder, clk, cloudProvider, cluster.DeepCopyNodes(), shouldDisrupt, disruptionClass, queue, nil)
+	candidates, _, err := GetCandidatesWithTotals(ctx, cluster, kubeClient, recorder, clk, cloudProvider, shouldDisrupt, disruptionClass, queue, nil)
 	return candidates, err
 }
 
@@ -194,10 +196,8 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 // candidates before filtering, so balanced scoring normalizes against the full pool.
 // When clusterCost is non-nil, TotalCost is read from precomputed cluster state
 // rather than re-summed from candidates.
-// allNodes is a snapshot of cluster state; callers within a single reconcile cycle should share one snapshot
-// across all methods to avoid redundant deep-copies of cluster state.
 func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
-	cloudProvider cloudprovider.CloudProvider, allNodes state.StateNodes, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue, clusterCost *cost.ClusterCost,
+	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue, clusterCost *cost.ClusterCost,
 ) ([]*Candidate, map[string]NodePoolTotals, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
@@ -207,6 +207,7 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	if err != nil {
 		return nil, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
+	allNodes := cluster.Snapshot()
 	allCandidates := lo.FilterMap(allNodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil

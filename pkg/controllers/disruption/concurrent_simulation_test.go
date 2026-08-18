@@ -33,9 +33,11 @@ import (
 )
 
 // This spec exists specifically because of the SimulateScheduling deep-copy reduction: ExistingNode used to mutate
-// its embedded *state.StateNode directly, which meant a StateNode snapshot could never safely be shared between
-// concurrent simulations. Now that ExistingNode clones its own usage trackers, one shared snapshot should be safe
-// to hand to any number of concurrent SimulateScheduling calls. Run with `-race` to verify.
+// its embedded *state.StateNode directly, which meant cluster state could never safely be read concurrently by
+// multiple simulations. Now that ExistingNode clones its own usage trackers, and Cluster.Snapshot() memoizes a
+// pointer-slice behind a generation counter, many goroutines can call SimulateScheduling concurrently -- each
+// internally calling cluster.Snapshot(), which is itself exercised concurrently by this test (some goroutines hit
+// the cache, some race to rebuild it). Run with `-race` to verify both layers.
 var _ = Describe("Concurrent SimulateScheduling", func() {
 	It("should not race when multiple goroutines simulate scheduling against one shared snapshot", func() {
 		nodePool := test.NodePool(v1.NodePool{
@@ -83,18 +85,16 @@ var _ = Describe("Concurrent SimulateScheduling", func() {
 			candidates[i] = c
 		}
 
-		// One shared snapshot, handed to every goroutine -- this is exactly the pattern the reconcile-cycle
-		// snapshot enables: many concurrent simulations reading the same StateNodes without any of them mutating
-		// the nodes the others are relying on.
-		sharedNodes := cluster.DeepCopyNodes()
-
+		// Every goroutine calls SimulateScheduling concurrently; each internally calls cluster.Snapshot(), so this
+		// exercises concurrent readers of the generation-counter cache (some will hit it, some will race to
+		// rebuild it) without any of them mutating the nodes the others are relying on.
 		var wg sync.WaitGroup
 		errs := make([]error, numCandidates)
 		for i := range numCandidates {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
-				_, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, sharedNodes, nil, candidates[idx])
+				_, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, nil, candidates[idx])
 				errs[idx] = err
 			}(i)
 		}

@@ -189,6 +189,29 @@ func TestSnapshotIsolation_MarkForDeletion(t *testing.T) {
 	}
 }
 
+// TestSnapshot_InvalidatesOnReset guards against a real regression found while implementing the generation
+// counter: Cluster.Reset() reassigns c.nodes to a fresh empty map, but if it doesn't also bump c.generation,
+// Snapshot()'s cache doesn't know anything changed and keeps returning the pre-Reset snapshot -- silently handing
+// back nodes that no longer exist anywhere (not in the live map, and potentially not in the API server either,
+// since Reset() is typically called between test specs after real cleanup). This caused a "Node not found" 404
+// flake in an unrelated suite that only reproduced once cluster.Reset() was in the call path after a
+// cluster.Snapshot() cache had already been populated.
+func TestSnapshot_InvalidatesOnReset(t *testing.T) {
+	cluster, _, _ := newRegressionCluster(t, 3)
+
+	before := cluster.DeepCopyNodes()
+	if len(before) != 3 {
+		t.Fatalf("expected 3 nodes before reset, got %d", len(before))
+	}
+
+	cluster.Reset()
+
+	after := cluster.DeepCopyNodes()
+	if len(after) != 0 {
+		t.Fatalf("expected 0 nodes immediately after Reset (snapshot must not serve the stale pre-Reset cache), got %d", len(after))
+	}
+}
+
 // TestConcurrentReadWrite_NoRace exercises concurrent pod bind/unbind churn against concurrent DeepCopyNodes
 // reads. Run with `go test -race` -- its purpose is to catch any regression that reintroduces a shared-mutation
 // hazard between the read and write paths.

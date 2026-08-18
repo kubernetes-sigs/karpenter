@@ -1,4 +1,4 @@
-//go:build test_performance
+//go:build test_performance || test_performance_5000
 
 /*
 Copyright The Kubernetes Authors.

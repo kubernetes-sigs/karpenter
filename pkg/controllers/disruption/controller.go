@@ -144,16 +144,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
-	// Take a single snapshot of cluster state for this reconcile cycle. All methods evaluated below share this
-	// snapshot for candidate construction and scheduling simulation, avoiding a redundant deep-copy of cluster
-	// state per method. Validation paths intentionally take their own fresh snapshot later (see validation.go)
-	// since they must observe drift that occurs after this snapshot is taken.
-	nodes := c.cluster.DeepCopyNodes()
-
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process while it progresses in memory.
 	// If Karpenter restarts or fails with an error during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates that are not in the orchestration queue before continuing.
-	outdatedNodes := lo.Reject(nodes, func(s *state.StateNode, _ int) bool {
+	outdatedNodes := lo.Reject(c.cluster.Snapshot(), func(s *state.StateNode, _ int) bool {
 		return c.queue.HasAny(s.ProviderID()) || s.MarkedForDeletion()
 	})
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
@@ -172,7 +166,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
-		success, err := c.disrupt(ctx, m, nodes)
+		success, err := c.disrupt(ctx, m)
 		if err != nil {
 			if errors.IsConflict(err) {
 				return reconciler.Result{Requeue: true}, nil
@@ -188,12 +182,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
-func (c *Controller) disrupt(ctx context.Context, disruption Method, nodes state.StateNodes) (bool, error) {
+func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
-	candidates, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, nodes, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
+	candidates, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -208,11 +202,6 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method, nodes state
 	// Pass precomputed NodePool totals to consolidation methods for balanced scoring
 	if setter, ok := disruption.(NodePoolTotalsSetter); ok {
 		setter.SetNodePoolTotals(nodePoolTotals)
-	}
-	// Share this reconcile cycle's cluster state snapshot with methods that call SimulateScheduling, so every
-	// simulation within ComputeCommands reuses it instead of taking its own deep-copy.
-	if setter, ok := disruption.(NodesSetter); ok {
-		setter.SetNodes(nodes)
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
 	if err != nil {

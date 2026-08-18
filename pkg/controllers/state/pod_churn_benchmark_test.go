@@ -1,4 +1,4 @@
-//go:build test_performance
+//go:build test_performance || test_performance_5000
 
 /*
 Copyright The Kubernetes Authors.
@@ -45,11 +45,12 @@ import (
 // contention, GC pressure from the churn's allocations), which a single-event benchmark would hide.
 func BenchmarkUpdatePod_MediumCluster_MedChurn(b *testing.B)  { benchmarkPodChurn(b, 400, 8) }
 func BenchmarkUpdatePod_MediumCluster_HighChurn(b *testing.B) { benchmarkPodChurn(b, 400, 1000) }
-func BenchmarkUpdatePod_LargeCluster_MedChurn(b *testing.B)   { benchmarkPodChurn(b, 5000, 8) }
-func BenchmarkUpdatePod_LargeCluster_HighChurn(b *testing.B)  { benchmarkPodChurn(b, 5000, 1000) }
 
 // benchmarkPodChurn measures the cost of one churn round -- eventsPerRound bind-then-unbind pod events -- against
 // a cluster of numNodes nodes, each pre-populated with 20 pods (a realistic per-node pod count).
+//
+// Exported (not lowercase-package-private in spirit, just not `_test`-file-local) so the 5000-node variants in
+// pod_churn_5k_benchmark_test.go (build tag test_performance_5000) can reuse it.
 func benchmarkPodChurn(b *testing.B, numNodes, eventsPerRound int) {
 	cluster, nodes := setupBenchCluster(b, numNodes, 20)
 	ctx := benchContext()
@@ -72,8 +73,7 @@ func benchmarkPodChurn(b *testing.B, numNodes, eventsPerRound int) {
 // since neither mutates the map-shaped fields that require a real clone -- this benchmark exists to prove that
 // expectation rather than assume it.
 
-func BenchmarkMarkForDeletion_400(b *testing.B)  { benchmarkMarkForDeletion(b, 400) }
-func BenchmarkMarkForDeletion_5000(b *testing.B) { benchmarkMarkForDeletion(b, 5000) }
+func BenchmarkMarkForDeletion_400(b *testing.B) { benchmarkMarkForDeletion(b, 400) }
 
 func benchmarkMarkForDeletion(b *testing.B, numNodes int) {
 	cluster, nodes := setupBenchCluster(b, numNodes, 0)
@@ -90,8 +90,7 @@ func benchmarkMarkForDeletion(b *testing.B, numNodes int) {
 	}
 }
 
-func BenchmarkNominateNodeForPod_400(b *testing.B)  { benchmarkNominateNodeForPod(b, 400) }
-func BenchmarkNominateNodeForPod_5000(b *testing.B) { benchmarkNominateNodeForPod(b, 5000) }
+func BenchmarkNominateNodeForPod_400(b *testing.B) { benchmarkNominateNodeForPod(b, 400) }
 
 func benchmarkNominateNodeForPod(b *testing.B, numNodes int) {
 	cluster, nodes := setupBenchCluster(b, numNodes, 0)

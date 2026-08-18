@@ -65,6 +65,14 @@ type Cluster struct {
 	nodePoolResources         map[string]corev1.ResourceList  // node pool name -> resource list
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
+	// generation increments on every mutation to nodes (add/remove/replace). Snapshot() uses it to memoize the
+	// pointer-slice it returns, so repeated calls between mutations are O(1) instead of re-walking the map. This
+	// is sound only because every *StateNode published into nodes is treated as immutable from that point on --
+	// every mutation path replaces the map entry with a new *StateNode rather than mutating the existing one.
+	generation uint64
+	cachedGen  uint64
+	cachedSnap StateNodes
+
 	NodePoolState *NodePoolState
 
 	podAcks                         sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
@@ -263,15 +271,40 @@ func (c *Cluster) Nodes() iter.Seq[*StateNode] {
 	}
 }
 
-// DeepCopyNodes creates a DeepCopy of all state nodes.
-// NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
-func (c *Cluster) DeepCopyNodes() StateNodes {
+// Snapshot returns a point-in-time view of all state nodes. Every *StateNode is treated as immutable once
+// published into c.nodes (every mutation path replaces the map entry with a new *StateNode rather than mutating
+// the existing one -- see CopyForMutation/ShallowCopy call sites throughout this file), so a plain slice of the
+// current pointers is a safe, self-consistent snapshot without needing to clone anything.
+//
+// The generation counter memoizes this: if nothing has mutated c.nodes since the last call, we return the same
+// cached slice (O(1)); only the first call after a mutation pays to rebuild it, and that rebuild is O(n) pointer
+// copies, not O(n) deep clones.
+func (c *Cluster) Snapshot() StateNodes {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	if c.cachedGen == c.generation {
+		snap := c.cachedSnap
+		c.mu.RUnlock()
+		return snap
+	}
+	c.mu.RUnlock()
 
-	return lo.Map(lo.Values(c.nodes), func(n *StateNode, _ int) *StateNode {
-		return n.DeepCopy()
-	})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Re-check under the write lock: another goroutine may have already rebuilt the cache for this generation
+	// while we were waiting to acquire it.
+	if c.cachedGen != c.generation {
+		c.cachedSnap = lo.Values(c.nodes)
+		c.cachedGen = c.generation
+	}
+	return c.cachedSnap
+}
+
+// DeepCopyNodes is a deprecated alias for Snapshot. Despite the name, it no longer deep-copies anything -- see
+// Snapshot's doc comment for why that's safe now that every *StateNode is immutable once published.
+//
+// Deprecated: use Snapshot instead.
+func (c *Cluster) DeepCopyNodes() StateNodes {
+	return c.Snapshot()
 }
 
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
@@ -291,8 +324,13 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if n, ok := c.nodes[providerID]; ok {
+	if old, ok := c.nodes[providerID]; ok {
+		// Copy-on-write: swap in a fresh copy rather than mutating old in place, so anyone holding a snapshot
+		// taken before this call is unaffected.
+		n := old.ShallowCopy()
 		n.Nominate(ctx, c.clock) // extends nomination window if already nominated
+		c.nodes[providerID] = n
+		c.generation++
 	}
 }
 
@@ -329,10 +367,12 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 	defer c.mu.Unlock()
 
 	for _, id := range providerIDs {
-		if n, ok := c.nodes[id]; ok {
-			oldNode := n.ShallowCopy()
+		if old, ok := c.nodes[id]; ok {
+			n := old.ShallowCopy()
 			n.markedForDeletion = false
-			c.updateNodePoolResources(oldNode, n)
+			c.nodes[id] = n
+			c.generation++
+			c.updateNodePoolResources(old, n)
 			if n.NodeClaim != nil && n.NodeClaim.DeletionTimestamp.IsZero() {
 				c.NodePoolState.MarkNodeClaimActive(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
 			}
@@ -346,10 +386,12 @@ func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 	defer c.mu.Unlock()
 
 	for _, id := range providerIDs {
-		if n, ok := c.nodes[id]; ok {
-			oldNode := n.ShallowCopy()
+		if old, ok := c.nodes[id]; ok {
+			n := old.ShallowCopy()
 			n.markedForDeletion = true
-			c.updateNodePoolResources(oldNode, n)
+			c.nodes[id] = n
+			c.generation++
+			c.updateNodePoolResources(old, n)
 			if n.NodeClaim != nil {
 				c.NodePoolState.MarkNodeClaimDeleting(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
 			}
@@ -367,6 +409,7 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1.NodeClaim) {
 	if nodeClaim.Status.ProviderID != "" {
 		n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
 		c.nodes[nodeClaim.Status.ProviderID] = n
+		c.generation++
 	}
 
 	// Update nodepool state with NodeClaim
@@ -413,6 +456,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *corev1.Node) error {
 		return err
 	}
 	c.nodes[node.Spec.ProviderID] = n
+	c.generation++
 	c.nodeNameToProviderID[node.Name] = node.Spec.ProviderID
 	ClusterStateNodesCount.Set(float64(len(c.nodes)), nil)
 	return nil
@@ -642,6 +686,8 @@ func (c *Cluster) Reset() {
 	c.lastUnsyncedLogTime = time.Time{}
 	c.hasSynced.Store(false)
 	c.nodes = map[string]*StateNode{}
+	c.generation++
+	c.cachedSnap = nil
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
 	c.NodePoolState.Reset()
@@ -734,10 +780,14 @@ func (c *Cluster) cleanupNodeClaim(name string) {
 		if c.nodes[id].Node == nil {
 			c.updateNodePoolResources(c.nodes[id], nil)
 			delete(c.nodes, id)
+			c.generation++
 		} else {
-			oldNode := c.nodes[id].ShallowCopy()
-			c.nodes[id].NodeClaim = nil
-			c.updateNodePoolResources(oldNode, c.nodes[id])
+			old := c.nodes[id]
+			n := old.ShallowCopy()
+			n.NodeClaim = nil
+			c.nodes[id] = n
+			c.generation++
+			c.updateNodePoolResources(old, n)
 		}
 		c.MarkUnconsolidated()
 	}
@@ -788,10 +838,14 @@ func (c *Cluster) cleanupNode(name string) {
 		if c.nodes[id].NodeClaim == nil {
 			c.updateNodePoolResources(c.nodes[id], nil)
 			delete(c.nodes, id)
+			c.generation++
 		} else {
-			oldNode := c.nodes[id].ShallowCopy()
-			c.nodes[id].Node = nil
-			c.updateNodePoolResources(oldNode, c.nodes[id])
+			old := c.nodes[id]
+			n := old.ShallowCopy()
+			n.Node = nil
+			c.nodes[id] = n
+			c.generation++
+			c.updateNodePoolResources(old, n)
 		}
 		delete(c.nodeNameToProviderID, name)
 		c.MarkUnconsolidated()
@@ -891,14 +945,20 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *corev1.Pod) e
 		return nil
 	}
 
-	n, ok := c.nodes[c.nodeNameToProviderID[pod.Spec.NodeName]]
+	providerID := c.nodeNameToProviderID[pod.Spec.NodeName]
+	old, ok := c.nodes[providerID]
 	if !ok {
 		// the node must exist for us to update the resource requests on the node
 		return errors.NewNotFound(schema.GroupResource{Resource: "Node"}, pod.Spec.NodeName)
 	}
+	// Copy-on-write: mutate a fresh copy and swap it in, so any *StateNode a caller is already holding (e.g. a
+	// snapshot taken via DeepCopyNodes/Snapshot) is never touched by this update.
+	n := old.CopyForMutation()
 	if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
 		return err
 	}
+	c.nodes[providerID] = n
+	c.generation++
 	c.cleanupOldBindings(pod)
 	c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	return nil
@@ -912,12 +972,16 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	}
 
 	delete(c.bindings, podKey)
-	n, ok := c.nodes[c.nodeNameToProviderID[nodeName]]
+	providerID := c.nodeNameToProviderID[nodeName]
+	old, ok := c.nodes[providerID]
 	if !ok {
 		// we weren't tracking the node yet, so nothing to do
 		return
 	}
+	n := old.CopyForMutation()
 	n.cleanupForPod(podKey)
+	c.nodes[providerID] = n
+	c.generation++
 }
 
 func (c *Cluster) cleanupOldBindings(pod *corev1.Pod) {
@@ -928,9 +992,13 @@ func (c *Cluster) cleanupOldBindings(pod *corev1.Pod) {
 		}
 		// the pod has switched nodes, this can occur if a pod name was re-used, and it was deleted/re-created rapidly,
 		// binding to a different node the second time
-		if oldNode, ok := c.nodes[c.nodeNameToProviderID[oldNodeName]]; ok {
+		oldProviderID := c.nodeNameToProviderID[oldNodeName]
+		if oldNode, ok := c.nodes[oldProviderID]; ok {
 			// we were tracking the old node, so we need to reduce its capacity by the amount of the pod that left
-			oldNode.cleanupForPod(client.ObjectKeyFromObject(pod))
+			n := oldNode.CopyForMutation()
+			n.cleanupForPod(client.ObjectKeyFromObject(pod))
+			c.nodes[oldProviderID] = n
+			c.generation++
 			delete(c.bindings, client.ObjectKeyFromObject(pod))
 		}
 	}
