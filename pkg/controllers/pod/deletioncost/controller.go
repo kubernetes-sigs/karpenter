@@ -114,8 +114,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	}
 
 	// Cheap change-detection check runs before the DeepCopy so an
-	// unchanged cluster never pays the snapshot cost.
-	if c.shouldSkipUnchanged(ctx) {
+	// unchanged cluster never pays the snapshot cost. The state cursor is
+	// advanced at the tail of Reconcile after a successful update — if any
+	// step below errors, we retry this same state on the next reconcile
+	// rather than silently skipping it.
+	currentState := c.cluster.ConsolidationState()
+	if c.consolidationStateUnchanged(ctx, currentState) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
@@ -138,11 +142,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
-	// Drop nodes whose pod annotations already match their planned rank so
-	// the per-cycle cap admits nodes that will actually mutate at least one
-	// pod. Group A nodes carry the math.MinInt32 sentinel and are exempt
-	// from the cap already; filterNoOpNodes also preserves them so re-labels
-	// (e.g. a rare taint bounce) still fire fast.
+	// Filter before cap so the cap admits nodes that will actually mutate.
+	// See filterNoOpNodes and capNodeRanks for details.
 	nodeRanks = filterNoOpNodes(nodeRanks)
 	nodeRanks = capNodeRanks(nodeRanks, maxNodesPerCycle)
 	// nodesRanked tracks the count that actually enters UpdatePodDeletionCosts
@@ -154,6 +155,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err := UpdatePodDeletionCosts(ctx, c.kubeClient, nodeRanks); err != nil {
 		return reconciler.Result{}, fmt.Errorf("updating pod deletion costs, %w", err)
 	}
+
+	// Advance the skip cursor only after the update path returns nil so any
+	// failure above forces a retry on the same state next reconcile.
+	c.lastConsolidationState = currentState
 
 	// Only log when at least one node was ranked; the empty case is not
 	// interesting log noise at V(1).
@@ -183,7 +188,6 @@ func filterNoOpNodes(nodeRanks []NodeRank) []NodeRank {
 // entries; Group A is exempt from the pre-filter.
 func nodeMutatesAnyPod(nr NodeRank) bool {
 	if nr.HasDoNotDisrupt {
-		// Group D: any pod that still carries pod-deletion-cost needs a clear.
 		for _, pod := range nr.Pods {
 			if _, ok := pod.Annotations[corev1.PodDeletionCost]; ok {
 				return true
@@ -191,9 +195,7 @@ func nodeMutatesAnyPod(nr NodeRank) bool {
 		}
 		return false
 	}
-	// Groups B/C: any pod whose annotation differs from the planned rank
-	// needs a patch. Compare against the pre-stringified rank so the same
-	// itoa cost isn't paid per pod.
+	// Pre-stringify the rank so the itoa cost isn't paid per pod.
 	value := strconv.Itoa(nr.Rank)
 	for _, pod := range nr.Pods {
 		if pod.Annotations[corev1.PodDeletionCost] != value {
@@ -203,17 +205,21 @@ func nodeMutatesAnyPod(nr NodeRank) bool {
 	return false
 }
 
-// shouldSkipUnchanged returns true if cluster state has not changed since the last reconcile.
-// Uses the same ConsolidationState timestamp that gates the disruption controller's consolidation
-// methods, ensuring this controller reacts to the same state changes that trigger consolidation.
-func (c *Controller) shouldSkipUnchanged(ctx context.Context) bool {
-	currentState := c.cluster.ConsolidationState()
+// consolidationStateUnchanged is a pure predicate: it compares currentState to
+// the cursor advanced at the end of the last successful reconcile and does not
+// mutate the cursor. Reconcile advances lastConsolidationState only after the
+// full update path returns nil so a mid-reconcile error does not silently
+// skip the next attempt.
+//
+// Uses the same ConsolidationState timestamp that gates the disruption
+// controller's consolidation methods, ensuring this controller reacts to the
+// same state changes that trigger consolidation.
+func (c *Controller) consolidationStateUnchanged(ctx context.Context, currentState time.Time) bool {
 	if currentState.Equal(c.lastConsolidationState) {
 		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
 		reconcileSkippedTotal.Add(1, noLabels)
 		return true
 	}
-	c.lastConsolidationState = currentState
 	return false
 }
 

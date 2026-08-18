@@ -324,22 +324,40 @@ func hasNonRSOwnedPods(pods []*corev1.Pod) bool {
 // top of the ranking — the missing-lookup case should be impossible on the
 // happy path because RankNodes pre-populates the map with one entry per
 // candidate node, but the sentinel is correct-by-construction defense.
+//
+// The count excludes pods carrying DeletionTimestamp so a mostly-terminating
+// node ranks lighter than a node with the same nominal pod count but no
+// drain in progress — consolidation prefers finishing what is already ending
+// (fewer pods actually cost work to move). The full pod list is retained on
+// NodeRank so UpdatePodDeletionCosts still writes/clears annotations on
+// deleting pods until they finish terminating.
 func sortByPodCount(nodes []*state.StateNode, nodePods map[string][]*corev1.Pod) {
 	if len(nodes) <= 1 {
 		return
 	}
 	sort.Slice(nodes, func(i, j int) bool {
-		ci := math.MaxInt
-		if pods, ok := nodePods[nodes[i].Name()]; ok {
-			ci = len(pods)
-		}
-		cj := math.MaxInt
-		if pods, ok := nodePods[nodes[j].Name()]; ok {
-			cj = len(pods)
-		}
+		ci := livePodCount(nodePods, nodes[i].Name())
+		cj := livePodCount(nodePods, nodes[j].Name())
 		if ci != cj {
 			return ci < cj
 		}
 		return nodes[i].Name() < nodes[j].Name()
 	})
+}
+
+// livePodCount returns the number of pods on the named node that are not
+// terminating (DeletionTimestamp unset). Missing map entries sort last via
+// math.MaxInt; see sortByPodCount.
+func livePodCount(nodePods map[string][]*corev1.Pod, nodeName string) int {
+	pods, ok := nodePods[nodeName]
+	if !ok {
+		return math.MaxInt
+	}
+	count := 0
+	for _, pod := range pods {
+		if pod.DeletionTimestamp == nil {
+			count++
+		}
+	}
+	return count
 }

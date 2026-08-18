@@ -50,6 +50,24 @@ func (c *pdbListFailingClient) List(ctx context.Context, list client.ObjectList,
 	return c.Client.List(ctx, list, opts...)
 }
 
+// toggleablePDBListFailingClient is a pdbListFailingClient whose failure can
+// be flipped off from the outside so a single controller instance can observe
+// an initial failed reconcile followed by a successful one; used to verify
+// that the state cursor is not advanced when a reconcile step errors.
+type toggleablePDBListFailingClient struct {
+	client.Client
+	fail bool
+}
+
+func (c *toggleablePDBListFailingClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if c.fail {
+		if _, ok := list.(*policyv1.PodDisruptionBudgetList); ok {
+			return errors.New("simulated PDB list failure for test")
+		}
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
 var _ = Describe("Controller", func() {
 	var nodePool *v1.NodePool
 
@@ -139,6 +157,53 @@ var _ = Describe("Controller", func() {
 		observed := &corev1.Pod{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), observed)).To(Succeed())
 		Expect(observed.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
+	})
+
+	It("should retry on the same state after a failed reconcile (skip cursor is not advanced on error)", func() {
+		// Regression test for C3: prior to the fix, the lastConsolidationState
+		// cursor was advanced inside shouldSkipUnchanged, which ran before the
+		// remainder of Reconcile. A mid-reconcile error therefore left the
+		// cursor advanced and the next reconcile short-circuited, silently
+		// dropping the retry. The fix moves the assignment to the tail of
+		// Reconcile after UpdatePodDeletionCosts returns nil.
+		//
+		// Setup: one node with the disrupted taint so RankNodes reaches
+		// fetchPDBs. First reconcile uses a client whose PDB list fails →
+		// error. Flip the toggle so the second reconcile succeeds. The pod
+		// must end up annotated: if the cursor had been advanced by the first
+		// failed reconcile, the second reconcile would take the "unchanged"
+		// short-circuit and leave the pod unannotated.
+		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.DisruptedNoScheduleTaint)
+		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0])
+		pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+		failing := &toggleablePDBListFailingClient{Client: env.Client, fail: true}
+		controller := deletioncost.NewController(fakeClock, failing, cloudProvider, cluster)
+
+		// First reconcile fails at fetchPDBs.
+		_, err := controller.Reconcile(ctx)
+		Expect(err).To(HaveOccurred())
+
+		// Flip the failure off and reconcile again with the SAME controller
+		// instance (so lastConsolidationState is preserved). If the first
+		// reconcile had advanced the cursor, this call would short-circuit
+		// on "unchanged" and leave pod unannotated.
+		failing.fail = false
+		_, err = controller.Reconcile(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// The pod is on a disrupted-tainted node → Group A → math.MinInt32.
+		observed := &corev1.Pod{}
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), observed)).To(Succeed())
+		Expect(observed.Annotations).To(HaveKey(corev1.PodDeletionCost),
+			"second reconcile must succeed after the first failed one; if it took the unchanged short-circuit, the cursor was advanced on error")
 	})
 
 	It("should skip when change detection finds no changes", func() {
