@@ -37,11 +37,13 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -145,7 +147,7 @@ func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = SimulateScheduling(ctx, kubeClient, clusterState, prov, clk, rec, candidate)
+		_, _ = SimulateScheduling(ctx, kubeClient, clusterState, prov, clk, rec, nil, candidate)
 	}
 	b.ReportMetric(float64(len(candidate.reschedulablePods)), "pods")
 	b.ReportMetric(float64(cfg.nodeCount), "nodes")
@@ -171,7 +173,7 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 	kubeClient := fakecr.NewFakeClient()
 	clusterState := state.NewCluster(clk, kubeClient, cp)
 	rec := events.NewRecorder(&record.FakeRecorder{})
-	prov := provisioning.NewProvisioner(kubeClient, rec, cp, clusterState, clk)
+	prov := provisioning.NewProvisioner(kubeClient, rec, cp, clusterState, clk, deviceallocation.NewController(kubeClient), virtualpods.NewVirtualPodCache(kubeClient))
 
 	// Create NodePools
 	nodePools := make([]*v1.NodePool, cfg.nodePoolCount)
