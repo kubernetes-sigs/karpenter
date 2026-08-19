@@ -325,25 +325,6 @@ var _ = Describe("DefaultTopologySpreadInjector", func() {
 			Expect(selected.Spec.TopologySpreadConstraints).To(HaveLen(1))
 			Expect(other.Spec.TopologySpreadConstraints).To(BeEmpty())
 		})
-		It("should give every pod its own copy of the injected constraints", func() {
-			// A shared cached selector must not become a shared slice or selector object, since per-pod preference
-			// relaxation mutates the constraints in place.
-			replicaSet := test.ReplicaSet(test.ReplicaSetOptions{Selector: map[string]string{"app": "web"}})
-			ExpectApplied(ctx, env.Client, replicaSet)
-			owner := controllerRef("apps/v1", "ReplicaSet", replicaSet.Name, replicaSet.UID)
-
-			first := ownedPod(map[string]string{"app": "web"}, owner)
-			second := ownedPod(map[string]string{"app": "web"}, owner)
-			scheduling.NewDefaultTopologySpreadInjector(env.Client).Inject(ctx, []*corev1.Pod{first, second})
-
-			Expect(first.Spec.TopologySpreadConstraints).To(HaveLen(1))
-			Expect(second.Spec.TopologySpreadConstraints).To(HaveLen(1))
-			// Distinct backing arrays, so truncating one pod's constraints can't affect the other.
-			Expect(&first.Spec.TopologySpreadConstraints[0]).ToNot(BeIdenticalTo(&second.Spec.TopologySpreadConstraints[0]))
-			// Distinct selector objects, so mutating one pod's selector can't affect the other.
-			Expect(first.Spec.TopologySpreadConstraints[0].LabelSelector).ToNot(BeIdenticalTo(second.Spec.TopologySpreadConstraints[0].LabelSelector))
-			Expect(first.Spec.TopologySpreadConstraints[0].LabelSelector).To(Equal(second.Spec.TopologySpreadConstraints[0].LabelSelector))
-		})
 	})
 
 	Context("injection", func() {
@@ -388,10 +369,10 @@ var _ = Describe("DefaultTopologySpreadInjector", func() {
 			for _, p := range pods {
 				Expect(p.Spec.TopologySpreadConstraints).To(HaveLen(1))
 			}
-			// Relaxation mutates a pod's slice in place; the other pod must be unaffected.
-			pods[0].Spec.TopologySpreadConstraints = nil
-			Expect(pods[1].Spec.TopologySpreadConstraints).To(HaveLen(1))
-			Expect(pods[1].Spec.TopologySpreadConstraints[0].LabelSelector).ToNot(BeNil())
+			pods[0].Spec.TopologySpreadConstraints[0].MaxSkew = 99
+			pods[0].Spec.TopologySpreadConstraints[0].LabelSelector.MatchLabels = map[string]string{"mutated": "true"}
+			Expect(pods[1].Spec.TopologySpreadConstraints[0].MaxSkew).To(Equal(zoneDefault.MaxSkew))
+			Expect(pods[1].Spec.TopologySpreadConstraints[0].LabelSelector.MatchLabels).ToNot(HaveKey("mutated"))
 		})
 		It("should preserve the configured constraint fields on the injected copy", func() {
 			minDomains := int32(3)

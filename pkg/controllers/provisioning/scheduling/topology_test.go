@@ -3025,21 +3025,28 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", withSelector(hostnameDefault)).To(ConsistOf(1, 1, 1))
 		})
 		It("should NOT apply the default to a pod that declares its own constraints", func() {
-			// The default spreads on zone, but the pod declares its own hostname spread. Per the plugin's
-			// all-or-nothing semantics, only the pod's own constraint applies and the zone default is ignored.
+			// Both constraints use the hostname key and differ only in maxSkew, so which one is in effect is
+			// observable: the default would force one pod per node, the pod's own lets all three share one.
+			hostnameDefault := corev1.TopologySpreadConstraint{
+				TopologyKey:       corev1.LabelHostname,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				MaxSkew:           1,
+			}
 			ownConstraint := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelHostname,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
-				MaxSkew:           1,
+				MaxSkew:           3,
 			}}
-			setDefaults(zoneDefault)
+			setDefaults(hostnameDefault)
 			ExpectApplied(ctx, env.Client, nodePool)
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				ownedPods(3, test.PodOptions{TopologySpreadConstraints: ownConstraint})...,
-			)
-			// pod's own hostname spread applies (one per node); the zone default was not merged in
-			ExpectSkew(ctx, env.Client, "default", &ownConstraint[0]).To(ConsistOf(1, 1, 1))
+			pods := ownedPods(3, test.PodOptions{TopologySpreadConstraints: ownConstraint})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			nodeNames := sets.New[string]()
+			for _, p := range pods {
+				nodeNames.Insert(ExpectScheduled(ctx, env.Client, p).Name)
+			}
+			Expect(nodeNames.Len()).To(Equal(1))
 		})
 		It("should carry minDomains through a synthesized default", func() {
 			if env.Version.Minor() < 24 {
@@ -3062,16 +3069,42 @@ var _ = Describe("Topology", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, ownedPods(3)...)
 			ExpectSkew(ctx, env.Client, "default", withSelector(minDomainsDefault)).To(ConsistOf(1, 1))
 		})
-		It("should relax a synthesized ScheduleAnyway default when it can't be satisfied", func() {
-			// Force everything into a single zone so a hard zone spread would be unsatisfiable. A ScheduleAnyway
-			// default must ride the existing relaxation path and still allow the pods to schedule.
+		// A spread over a single domain is trivially satisfied, so minDomains is what makes the hard form fail here:
+		// with fewer eligible domains than minDomains the global minimum counts as 0, so a second pod in the only zone
+		// exceeds maxSkew. The DoNotSchedule spec proves that, so its ScheduleAnyway twin can only be relaxation.
+		singleZoneMinDomains := func(action corev1.UnsatisfiableConstraintAction) corev1.TopologySpreadConstraint {
+			var minDomains int32 = 3
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
-			setDefaults(corev1.TopologySpreadConstraint{
+			return corev1.TopologySpreadConstraint{
 				TopologyKey:       corev1.LabelTopologyZone,
-				WhenUnsatisfiable: corev1.ScheduleAnyway,
+				WhenUnsatisfiable: action,
 				MaxSkew:           1,
-			})
+				MinDomains:        &minDomains,
+			}
+		}
+		It("should NOT schedule past a synthesized DoNotSchedule default that can't be satisfied", func() {
+			if env.Version.Minor() < 24 {
+				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
+			}
+			setDefaults(singleZoneMinDomains(corev1.DoNotSchedule))
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := ownedPods(3)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			// One pod fits; a second in the only eligible zone would exceed maxSkew against a global minimum of 0.
+			scheduled := 0
+			for _, p := range pods {
+				if ExpectPodExists(ctx, env.Client, p.Name, p.Namespace).Spec.NodeName != "" {
+					scheduled++
+				}
+			}
+			Expect(scheduled).To(Equal(1))
+		})
+		It("should relax a synthesized ScheduleAnyway default when it can't be satisfied", func() {
+			if env.Version.Minor() < 24 {
+				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
+			}
+			setDefaults(singleZoneMinDomains(corev1.ScheduleAnyway))
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := ownedPods(3)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -3079,27 +3112,36 @@ var _ = Describe("Topology", func() {
 				ExpectScheduled(ctx, env.Client, p)
 			}
 		})
+		// A hostname default makes "no default was applied" observable in the next two specs: had it been applied,
+		// maxSkew=1 would force one pod per node, so pods sharing a node is the evidence.
+		hostnameDefault := corev1.TopologySpreadConstraint{
+			TopologyKey:       corev1.LabelHostname,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			MaxSkew:           1,
+		}
+		expectSharingOneNode := func(pods []*corev1.Pod) {
+			GinkgoHelper()
+			nodeNames := sets.New[string]()
+			for _, p := range pods {
+				nodeNames.Insert(ExpectScheduled(ctx, env.Client, p).Name)
+			}
+			Expect(nodeNames.Len()).To(Equal(1))
+		}
 		It("should be a no-op when no default constraints are configured", func() {
-			// No SchedulerConfig set (default test.Options), so an unconstrained pod is treated exactly as today.
+			// No SchedulerConfig set (default test.Options), so unconstrained pods are treated exactly as today.
 			ExpectApplied(ctx, env.Client, nodePool)
-			pod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}})
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node).ToNot(BeNil())
+			pods := ownedPods(3)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			expectSharingOneNode(pods)
 		})
 		It("should not apply the default to a pod with no owner and no matching service", func() {
 			// Upstream deduces an empty selector for such a pod and applies no defaults at all. Karpenter must do the
 			// same: an empty selector would otherwise count every pod in the namespace.
-			setDefaults(zoneDefault)
-			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
+			setDefaults(hostnameDefault)
 			ExpectApplied(ctx, env.Client, nodePool)
-			// All 3 pods land in the single available zone, which a zone spread of maxSkew=1 would have forbidden.
 			pods := test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}, 3)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			for _, p := range pods {
-				ExpectScheduled(ctx, env.Client, p)
-			}
+			expectSharingOneNode(pods)
 		})
 		It("should count pre-existing cluster pods through the deduced selector", func() {
 			// Every other spec in this context starts from an empty cluster, so countDomains' list always comes back
