@@ -170,11 +170,17 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 
 // CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) ([]string, error) {
+func (p *Provisioner) CreateNodeClaims(
+	ctx context.Context,
+	nodeClaims []*scheduler.NodeClaim,
+	opts ...option.Function[LaunchOptions],
+) ([]string, error) {
 	// Create capacity and bind pods
 	errs := make([]error, len(nodeClaims))
 	nodeClaimNames := make([]string, len(nodeClaims))
-	workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
+
+	const nodeClaimCreationWorkers = 20
+	workqueue.ParallelizeUntil(ctx, nodeClaimCreationWorkers, len(nodeClaims), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
 		if name, err := p.Create(ctx, nodeClaims[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("creating node claim, %w", err)
