@@ -269,6 +269,12 @@ func (p *Provisioner) NewScheduler(
 	deletingPodUIDs sets.Set[types.UID],
 	opts ...scheduler.Options,
 ) (*scheduler.Scheduler, error) {
+	strategy := scheduler.PlacementStrategyMostAllocated
+	if options.FromContext(ctx).PlacementStrategy == options.PlacementStrategyLeastAllocated {
+		strategy = scheduler.PlacementStrategyLeastAllocated
+	}
+	opts = append(opts, scheduler.WithPlacementStrategy(strategy))
+
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
 	if err != nil {
 		return nil, fmt.Errorf("listing nodepools, %w", err)
