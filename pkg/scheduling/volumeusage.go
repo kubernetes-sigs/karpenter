@@ -41,6 +41,12 @@ import (
 // translator is a CSI Translator that translates in-tree plugin names to their out-of-tree CSI driver names
 var translator = csitranslation.New()
 
+// NewVolumeLimitExceededError wraps the given error with structured details about the driver whose
+// volume limit would be exceeded.
+func NewVolumeLimitExceededError(err error, provisioner string, volumeCount int, limit int) error {
+	return serrors.Wrap(err, "provisioner", provisioner, "volume-count", volumeCount, "volume-limit", limit)
+}
+
 // +k8s:deepcopy-gen=true
 type Volumes map[string]sets.Set[string]
 
@@ -201,7 +207,7 @@ func NewVolumeUsage() *VolumeUsage {
 func (v *VolumeUsage) ExceedsLimits(vols Volumes) error {
 	for k, volumes := range v.volumes.Union(vols) {
 		if limit, hasLimit := v.limits[k]; hasLimit && len(volumes) > limit {
-			return serrors.Wrap(fmt.Errorf("would exceed volume limit"), "provisioner", k, "volume-count", len(volumes), "volume-limit", limit)
+			return NewVolumeLimitExceededError(fmt.Errorf("would exceed volume limit"), k, len(volumes), limit)
 		}
 	}
 	return nil
