@@ -42,10 +42,14 @@ type ExistingNode struct {
 	// instanceType is the resolved cloud provider instance type backing the node, used to source DRA template devices
 	// for uninitialized nodes. It is nil for unmanaged nodes or when the node's instance type is not in the current set.
 	instanceType *cloudprovider.InstanceType
+	// localHostPortUsage and localVolumeUsage are clones of the StateNode's usage trackers, taken once at
+	// construction. Add() mutates these instead of the embedded StateNode, so the StateNode passed in here does not
+	// need to be a deep copy -- only these two clones need to be independent per simulation.
+	localHostPortUsage *scheduling.HostPortUsage
+	localVolumeUsage   *scheduling.VolumeUsage
 }
 
 func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList, instanceType *cloudprovider.InstanceType, isUnderConsolidateAfter bool) *ExistingNode {
-	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	resources.SubtractFrom(daemonResources, n.DaemonSetRequests())
 	// If unexpected daemonset pods schedule to the node due to labels appearing on the node which cause the
@@ -67,6 +71,8 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 		requirements:            scheduling.NewLabelRequirements(n.Labels()),
 		isUnderConsolidateAfter: isUnderConsolidateAfter,
 		instanceType:            instanceType,
+		localHostPortUsage:      n.HostPortUsage().DeepCopy(),
+		localVolumeUsage:        n.VolumeUsage().DeepCopy(),
 	}
 	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
 	topology.Register(v1.LabelHostname, n.HostName())
@@ -85,10 +91,10 @@ func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData
 	}
 	// determine the host ports that will be used if the pod schedules
 	hostPorts := scheduling.GetHostPorts(pod)
-	if err = n.VolumeUsage().ExceedsLimits(volumes); err != nil {
+	if err = n.localVolumeUsage.ExceedsLimits(volumes); err != nil {
 		return nil, nil, fmt.Errorf("checking volume usage, %w", err)
 	}
-	if err = n.HostPortUsage().Conflicts(pod, hostPorts); err != nil {
+	if err = n.localHostPortUsage.Conflicts(pod, hostPorts); err != nil {
 		return nil, nil, fmt.Errorf("checking host port usage, %w", err)
 	}
 	// check resource requests first since that's a pretty likely reason the pod won't schedule on an in-flight
@@ -175,8 +181,8 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod, podData *PodData, n
 	resources.SubtractFrom(n.remainingResources, podData.Requests)
 	n.requirements = nodeRequirements
 	n.topology.Record(pod, n.cachedTaints, nodeRequirements)
-	n.HostPortUsage().Add(pod, scheduling.GetHostPorts(pod))
-	n.VolumeUsage().Add(pod, volumes)
+	n.localHostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
+	n.localVolumeUsage.Add(pod, volumes)
 	// Commit the DRA device allocation now that the placement decision is finalized. The Allocation handle is nil when
 	// there were no new device allocations to commit (e.g. every claim was already allocated in-cluster).
 	if allocationResult != nil && allocationResult.Allocation != nil {

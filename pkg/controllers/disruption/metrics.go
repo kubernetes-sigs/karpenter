@@ -30,6 +30,9 @@ const (
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
 	policyLabel                  = "policy"
+	StageLabel                   = "stage"
+	StageEvaluate                = "evaluate"
+	StageValidate                = "validate"
 )
 
 func init() {
@@ -48,6 +51,17 @@ var (
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{metrics.ReasonLabel, ConsolidationTypeLabel},
+	)
+	CandidateEvaluationDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "candidate_evaluation_duration_seconds",
+			Help:      "Duration of a single SimulateScheduling call for one candidate or candidate batch. Labeled by disruption reason, consolidation type, and evaluation stage.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{metrics.ReasonLabel, ConsolidationTypeLabel, StageLabel},
 	)
 	DecisionsPerformedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,

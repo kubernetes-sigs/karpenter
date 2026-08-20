@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -32,6 +33,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 type ValidationError struct {
@@ -208,7 +210,7 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 	if err != nil {
 		return err
 	}
-	if err := c.validateCommand(ctx, cmd, validatedCandidates); err != nil {
+	if err := c.validateCommand(ctx, cmd, c.validationType, validatedCandidates); err != nil {
 		return err
 	}
 	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
@@ -294,12 +296,21 @@ func (c *ConsolidationValidator) validateCandidates(ctx context.Context, candida
 }
 
 // ValidateCommand validates a command for a Method
-func (v *validation) validateCommand(ctx context.Context, cmd Command, candidates []*Candidate) error {
+func (v *validation) validateCommand(ctx context.Context, cmd Command, consolidationType string, candidates []*Candidate) error {
 	// None of the chosen candidate are valid for execution, so retry
 	if len(candidates) == 0 {
 		return NewValidationError(fmt.Errorf("no candidates"))
 	}
+	// SimulateScheduling takes its own snapshot internally, always reflecting the current generation at call
+	// time (see Cluster.Snapshot's doc comment) -- so this naturally observes any drift that occurred during
+	// the commandValidationDelay, which is validation's whole purpose.
+	stop := metrics.Measure(CandidateEvaluationDurationSeconds, map[string]string{
+		metrics.ReasonLabel:    strings.ToLower(string(v.reason)),
+		ConsolidationTypeLabel: consolidationType,
+		StageLabel:             StageValidate,
+	})
 	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, v.clock, v.recorder, []scheduling.Options{scheduling.IsConsolidationSimulation}, candidates...)
+	stop()
 	if err != nil {
 		return fmt.Errorf("simluating scheduling, %w", err)
 	}

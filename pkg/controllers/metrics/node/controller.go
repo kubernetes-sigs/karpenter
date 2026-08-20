@@ -178,7 +178,7 @@ func NewController(cluster *state.Cluster) *Controller {
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name()) //nolint:ineffassign,staticcheck
 
-	nodes := lo.Reject(c.cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) bool {
+	nodes := lo.Reject(c.cluster.Snapshot(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
 	})
 

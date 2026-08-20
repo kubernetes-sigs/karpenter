@@ -21,6 +21,7 @@ import (
 	"errors"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
@@ -81,7 +83,13 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			continue
 		}
 		// Check if we need to create any NodeClaims.
+		stop := metrics.Measure(CandidateEvaluationDurationSeconds, map[string]string{
+			metrics.ReasonLabel:    strings.ToLower(string(d.Reason())),
+			ConsolidationTypeLabel: d.ConsolidationType(),
+			StageLabel:             StageEvaluate,
+		})
 		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, nil, candidate)
+		stop()
 		if err != nil {
 			// if a candidate is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {

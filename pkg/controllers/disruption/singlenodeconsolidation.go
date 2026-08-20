@@ -90,7 +90,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		}
 
 		// compute a possible consolidation option
-		cmd, err := s.computeConsolidation(ctx, candidate)
+		cmd, err := s.computeConsolidation(ctx, s.ConsolidationType(), candidate)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed computing consolidation")
 			continue
