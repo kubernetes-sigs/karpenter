@@ -255,7 +255,11 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	for _, object := range []client.Object{
 		&corev1.Pod{},
 		&corev1.Node{},
+		&corev1.Service{},
+		&corev1.ReplicationController{},
 		&appsv1.DaemonSet{},
+		&appsv1.ReplicaSet{},
+		&appsv1.StatefulSet{},
 		&nodev1.RuntimeClass{},
 		&policyv1.PodDisruptionBudget{},
 		&corev1.PersistentVolumeClaim{},
