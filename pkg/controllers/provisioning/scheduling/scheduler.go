@@ -761,8 +761,8 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		}
 
 		_, minValuesRelaxed := lo.Find(nodeClaim.Requirements.Keys().UnsortedList(), func(k string) bool {
-			updated := r.Get(k).MinValues
-			original := nodeClaim.Requirements.Get(k).MinValues
+			updated := r.Get(k).MinValues()
+			original := nodeClaim.Requirements.Get(k).MinValues()
 			return original != nil && updated != nil && lo.FromPtr(updated) < lo.FromPtr(original)
 		})
 		if minValuesRelaxed {
