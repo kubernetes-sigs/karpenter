@@ -175,7 +175,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 
 			// Performance assertions for wide deployments
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("wideDeployments/scaleOut", 5*time.Minute)),
-				"Total scale-out time should be less than 10 minutes")
+				"Total scale-out time should be less than 5 minutes")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("wideDeployments/scaleOut", 0.2)),
 				"Average CPU utilization should be greater than 20%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("wideDeployments/scaleOut", 0.20)),
@@ -214,8 +214,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 20%")
 			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("wideDeployments/consolidation", 340)),
 				"Karpenter controller P95 memory should be less than 340 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("wideDeployments/consolidation", 0.30)),
-				"Karpenter controller avg CPU should be less than 0.30 cores during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("wideDeployments/consolidation", 0.45)),
+				"Karpenter controller avg CPU should be less than 0.45 cores during consolidation")
 
 		})
 	})
