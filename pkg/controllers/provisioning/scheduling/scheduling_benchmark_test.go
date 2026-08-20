@@ -108,6 +108,83 @@ func BenchmarkIgnorePreferences(b *testing.B) {
 	benchmarkScheduler(b, makePreferencePods(4000), scheduling.IgnorePreferences)
 }
 
+// BenchmarkSchedulingMultiNodePool exercises Scheduler.Solve over a fixture with
+// multiple NodePools to surface regressions in cross-NodePool work such as
+// buildDomainGroups (topology.go), per-NodePool instance-type fan-out, and
+// per-NodePool scheduling-template construction. The single-NodePool default in
+// BenchmarkScheduling* hides the cross-product cost of these paths.
+func BenchmarkSchedulingMultiNodePool(b *testing.B) {
+	for _, nodePoolCount := range []int{5, 10, 20} {
+		for _, podCount := range []int{100, 500, 1000} {
+			b.Run(fmt.Sprintf("%dNP_%dPods", nodePoolCount, podCount), func(b *testing.B) {
+				benchmarkSchedulerMultiNodePool(b, makeDiversePods(podCount), nodePoolCount)
+			})
+		}
+	}
+}
+
+func benchmarkSchedulerMultiNodePool(b *testing.B, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) {
+	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
+	scheduler, err := setupMultiNodePoolScheduler(ctx, pods, nodePoolCount, append(opts, scheduling.NumConcurrentReconciles(5))...)
+	if err != nil {
+		b.Fatalf("creating scheduler, %s", err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		results, err := scheduler.Solve(ctx, pods)
+		if err != nil {
+			b.Fatalf("expected scheduler to schedule all pods without error, got %s", err)
+		}
+		if len(results.PodErrors) > 0 {
+			b.Fatalf("expected all pods to schedule, got %d pods that didn't", len(results.PodErrors))
+		}
+	}
+}
+
+func setupMultiNodePoolScheduler(ctx context.Context, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
+	cloudProvider = fake.NewCloudProvider()
+	instanceTypes := fake.InstanceTypes(100)
+	cloudProvider.InstanceTypes = instanceTypes
+
+	nodePools := make([]*v1.NodePool, nodePoolCount)
+	instanceTypesByNodePool := make(map[string][]*cloudprovider.InstanceType, nodePoolCount)
+	for i := range nodePools {
+		np := test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Limits: v1.Limits{
+					corev1.ResourceCPU:    resource.MustParse("10000000"),
+					corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+				},
+			},
+		})
+		nodePools[i] = np
+		instanceTypesByNodePool[np.Name] = instanceTypes
+	}
+
+	client := fakecr.NewFakeClient()
+	clock := &clock.RealClock{}
+	cluster = state.NewCluster(clock, client, cloudProvider)
+	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, nodePools, instanceTypesByNodePool, pods, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating topology, %w", err)
+	}
+	return scheduling.NewScheduler(
+		ctx,
+		client,
+		nodePools,
+		cluster,
+		nil,
+		topology,
+		instanceTypesByNodePool,
+		nil,
+		events.NewRecorder(&record.FakeRecorder{}),
+		clock,
+		nil, // volumeReqsByPod
+		nil, // allocator
+		opts...,
+	), nil
+}
+
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions
 // go test -tags=test_performance -run=SchedulingProfile
