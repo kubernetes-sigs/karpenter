@@ -236,7 +236,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// should fail and we'll just leave the node alone. We don't need to do the same for reserved since the requirements
 	// are injected on by the scheduler.
 	ctReq := results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey)
-	if cloudprovider.HasCapacityTypeClass(ctReq, cloudprovider.CapacityTypeClassSpot) && cloudprovider.HasCapacityTypeClass(ctReq, cloudprovider.CapacityTypeClassOnDemand) {
+	if cloudprovider.HasCapacityTypeClass(ctReq, cloudprovider.CapacityTypeClassSpot) && cloudprovider.HasCapacityTypeClass(ctReq, cloudprovider.CapacityTypeClassOnDemand) && hasSpotOffering(results.NewNodeClaims[0]) {
 		results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
 	}
 
@@ -249,6 +249,13 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	cmd.EmitCandidateEvents(c.recorder)
 
 	return cmd, nil
+}
+
+// hasSpotOffering returns true if the replacement has an available Spot offering.
+func hasSpotOffering(nodeClaim *pscheduling.NodeClaim) bool {
+	return lo.ContainsBy(nodeClaim.InstanceTypeOptions, func(it *cloudprovider.InstanceType) bool {
+		return it.Offerings.Available().Compatible(nodeClaim.Requirements).HasCompatible(cloudprovider.CapacityTypeClassRequirements(cloudprovider.CapacityTypeClassSpot))
+	})
 }
 
 // Compute command to execute spot-to-spot consolidation if:
