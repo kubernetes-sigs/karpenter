@@ -17,14 +17,21 @@ limitations under the License.
 package scheduling
 
 import (
+	"context"
 	"unique"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -62,6 +69,45 @@ var _ = Describe("DRA Scheduling Internals", func() {
 			claim := corev1.PodResourceClaim{Name: "ref"}
 			_, ok := resourceClaimName(pod, &claim)
 			Expect(ok).To(BeFalse())
+		})
+	})
+
+	Describe("resolvePodClaims", func() {
+		It("should resolve a ResourceClaimTemplate for a virtual pod without claim status", func() {
+			scheme := runtime.NewScheme()
+			Expect(resourcev1.AddToScheme(scheme)).To(Succeed())
+			template := &resourcev1.ResourceClaimTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-template", Namespace: "default"},
+				Spec: resourcev1.ResourceClaimTemplateSpec{Spec: resourcev1.ResourceClaimSpec{
+					Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{{Name: "gpu"}}},
+				}},
+			}
+			scheduler := &Scheduler{
+				kubeClient:                   fake.NewClientBuilder().WithScheme(scheme).WithObjects(template).Build(),
+				cachedResourceClaimTemplates: map[types.NamespacedName]*resourcev1.ResourceClaimTemplate{},
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "capacity-buffer-gpu-1",
+					Namespace: "default",
+					UID:       "buffer-uid-1",
+					Annotations: map[string]string{
+						autoscalingv1beta1.FakePodAnnotationKey: autoscalingv1beta1.FakePodAnnotationValue,
+					},
+				},
+				Spec: corev1.PodSpec{ResourceClaims: []corev1.PodResourceClaim{{
+					Name:                      "gpu",
+					ResourceClaimTemplateName: lo.ToPtr("gpu-template"),
+				}}},
+			}
+
+			claims, err := scheduler.resolvePodClaims(context.Background(), pod)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(claims).To(HaveLen(1))
+			Expect(claims[0].Namespace).To(Equal("default"))
+			Expect(claims[0].Name).To(Equal("virtual-buffer-uid-1-gpu"))
+			Expect(claims[0].Spec).To(Equal(template.Spec.Spec))
 		})
 	})
 
