@@ -53,6 +53,10 @@ type DeviceContribution struct {
 	// ConsumedCapacity is the capacity this claim consumes on the device.
 	// nil for exclusive allocations.
 	ConsumedCapacity map[resourcev1.QualifiedName]resource.Quantity
+	// InvalidConsumedCapacity is true when any result contributing to this device reported a negative
+	// consumed-capacity value. Such a device is untrustworthy and must fail closed rather than be
+	// aggregated. See #3209.
+	InvalidConsumedCapacity bool
 }
 
 type ClaimMetadata struct {
@@ -93,6 +97,12 @@ type DeviceMetadata struct {
 	// is the per-claim view that ConsumedCapacity aggregates; consumers that need to attribute capacity to specific
 	// pods (e.g. to release only a deleting pod's share) use this instead of the aggregate.
 	Contributions []ContributionMetadata
+	// InvalidConsumedCapacity is true when any claim referencing this device reported a negative
+	// consumed-capacity value. The device's accounting cannot be trusted, so it must not be allocated on
+	// either the exclusive or the allow-multiple path until the invalid state clears. While it is set,
+	// ConsumedCapacity and Contributions hold only the results that were well-formed, so neither is the
+	// device's total and neither may be used to decide a fit. See #3209.
+	InvalidConsumedCapacity bool
 }
 
 type Controller struct {
@@ -144,6 +154,33 @@ func (c *Controller) Hydrate(ctx context.Context) {
 	})
 }
 
+// contributionsForResults folds a claim's allocation results into per-device contributions. Results that
+// share a device (distinct shares differing only by ShareID, which is not part of deviceID) have their
+// consumed capacity summed. A result with a negative per-dimension value is invalid input (a driver bug or
+// a corrupt status the API server does not yet validate, kubernetes/kubernetes#140563); it flags the DRA
+// device (the (driver, pool, device) key, which may be one partition of a physical device) as invalid
+// rather than being dropped, since a dropped negative reads as zero usage and fails open on an
+// allow-multiple device. Pure so the folding rules can be unit-tested with constructed results. See #3209.
+func contributionsForResults(results []resourcev1.DeviceRequestAllocationResult) map[cloudprovider.DeviceID]DeviceContribution {
+	contributions := make(map[cloudprovider.DeviceID]DeviceContribution, len(results))
+	for i := range results {
+		result := &results[i]
+		deviceID := cloudprovider.DeviceID{
+			Driver: unique.Make(result.Driver),
+			Pool:   unique.Make(result.Pool),
+			Device: unique.Make(result.Device),
+		}
+		contribution := contributions[deviceID]
+		if hasNegativeCapacity(result.ConsumedCapacity) {
+			contribution.InvalidConsumedCapacity = true
+		} else {
+			contribution.ConsumedCapacity = addCapacity(contribution.ConsumedCapacity, result.ConsumedCapacity)
+		}
+		contributions[deviceID] = contribution
+	}
+	return contributions
+}
+
 //nolint:gocyclo
 func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName, claim *resourcev1.ResourceClaim) {
 	if claim.Status.Allocation == nil || len(claim.Status.Allocation.Devices.Results) == 0 {
@@ -153,16 +190,7 @@ func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	contributions := make(map[cloudprovider.DeviceID]DeviceContribution, len(claim.Status.Allocation.Devices.Results))
-	for i := range claim.Status.Allocation.Devices.Results {
-		result := &claim.Status.Allocation.Devices.Results[i]
-		deviceID := cloudprovider.DeviceID{
-			Driver: unique.Make(result.Driver),
-			Pool:   unique.Make(result.Pool),
-			Device: unique.Make(result.Device),
-		}
-		contributions[deviceID] = DeviceContribution{ConsumedCapacity: result.ConsumedCapacity}
-	}
+	contributions := contributionsForResults(claim.Status.Allocation.Devices.Results)
 
 	devicesToRemove := make(sets.Set[cloudprovider.DeviceID])
 	for device := range c.claimMetadata[nn].Contributions {
@@ -284,6 +312,9 @@ func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) Device
 		meta.PodUIDs = append(meta.PodUIDs, claimMeta.PodUIDs...)
 
 		contributions := claimMeta.Contributions[device]
+		if contributions.InvalidConsumedCapacity {
+			meta.InvalidConsumedCapacity = true
+		}
 		if contributions.ConsumedCapacity != nil {
 			meta.Shared = true
 			meta.ConsumedCapacity = addCapacity(meta.ConsumedCapacity, contributions.ConsumedCapacity)
@@ -314,14 +345,30 @@ func deviceIDToString(d cloudprovider.DeviceID, _ int) string {
 	return d.String()
 }
 
+// addCapacity sums src into dest and returns the result, allocating dest lazily on the first entry. Callers
+// must reject a source containing a negative value (see hasNegativeCapacity) before summing it: addCapacity
+// itself is a plain sum and does not sanitize, so a negative here would offset a positive contribution from
+// another claim or share and under-count a shared device.
 func addCapacity(dest, src map[resourcev1.QualifiedName]resource.Quantity) map[resourcev1.QualifiedName]resource.Quantity {
-	if dest == nil {
-		dest = make(map[resourcev1.QualifiedName]resource.Quantity, len(src))
-	}
 	for name, quantity := range src {
+		if dest == nil {
+			dest = make(map[resourcev1.QualifiedName]resource.Quantity, len(src))
+		}
 		current := dest[name]
 		current.Add(quantity)
 		dest[name] = current
 	}
 	return dest
+}
+
+// hasNegativeCapacity reports whether any per-dimension quantity is negative. Consumed capacity is never
+// negative, so a negative value makes the whole DRA-device contribution invalid, not just that one
+// dimension; the caller fails the device closed rather than keeping the other dimensions. See #3209.
+func hasNegativeCapacity(capacity map[resourcev1.QualifiedName]resource.Quantity) bool {
+	for _, quantity := range capacity {
+		if quantity.Sign() < 0 {
+			return true
+		}
+	}
+	return false
 }
