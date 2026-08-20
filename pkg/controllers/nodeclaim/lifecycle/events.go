@@ -30,8 +30,18 @@ func InsufficientCapacityErrorEvent(nodeClaim *v1.NodeClaim, err error) events.E
 		InvolvedObject: nodeClaim,
 		Type:           corev1.EventTypeWarning,
 		Reason:         events.InsufficientCapacityError,
-		Message:        fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, truncateMessage(err.Error())),
+		Message:        truncateMessage(fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, err.Error())),
 		DedupeValues:   []string{string(nodeClaim.UID)},
+	}
+}
+
+func InsufficientCapacityErrorPodEvent(pod *corev1.Pod, nodeClaim *v1.NodeClaim, err error) events.Event {
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.InsufficientCapacityError,
+		Message:        truncateMessage(fmt.Sprintf("NodeClaim %s nominated for this pod failed to launch: %s", nodeClaim.Name, err.Error())),
+		DedupeValues:   []string{string(pod.UID)},
 	}
 }
 
@@ -40,7 +50,7 @@ func NodeClassNotReadyEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
 		InvolvedObject: nodeClaim,
 		Type:           corev1.EventTypeWarning,
 		Reason:         events.NodeClassNotReady,
-		Message:        fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, truncateMessage(err.Error())),
+		Message:        truncateMessage(fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, err.Error())),
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }
