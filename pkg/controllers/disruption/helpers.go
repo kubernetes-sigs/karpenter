@@ -69,11 +69,12 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return scheduling.Results{}, errCandidateDeleting
 	}
 
-	// start by getting all pending pods
-	pods, err := provisioner.GetPendingPods(ctx)
+	// start by getting pending pods that could schedule onto any of the candidates
+	pendingPods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
+	pods := filterPodsByCompatibleCandidates(pendingPods, candidates)
 
 	// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
 	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
@@ -99,7 +100,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
-	pods = append(pods, deletingNodePods...)
+	pods = append(pods, filterPodsByCompatibleCandidates(deletingNodePods, candidates)...)
 
 	var opts []scheduling.Options
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
@@ -310,6 +311,19 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		}
 	}
 	return disruptionBudgetMapping, nil
+}
+
+// filterPodsByCompatibleCandidates returns pods whose nodeSelector and tolerations match at least one candidate.
+// This is a necessary but not sufficient guard: the downstream scheduler simulation may still fail if the
+// replacement chosen for a candidate is itself incompatible with the pod (e.g. a replacement from a different
+// NodePool whose taints the pod doesn't tolerate). In that case consolidation is correctly blocked by the
+// simulator, not this filter.
+func filterPodsByCompatibleCandidates(pods []*corev1.Pod, candidates []*Candidate) []*corev1.Pod {
+	return lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
+		return lo.SomeBy(candidates, func(c *Candidate) bool {
+			return scheduling.PodCompatibleWithNode(p, c.Node.Spec.Taints, c.Node.Labels)
+		})
+	})
 }
 
 // mapCandidates maps the list of proposed candidates with the current state
