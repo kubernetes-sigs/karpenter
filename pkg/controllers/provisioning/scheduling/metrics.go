@@ -88,9 +88,7 @@ var (
 			Name:      "unschedulable_pods_count",
 			Help:      "The number of unschedulable Pods.",
 		},
-		[]string{
-			ControllerLabel,
-		},
+		[]string{},
 	)
 	PendingPodsByEffectiveZone = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
