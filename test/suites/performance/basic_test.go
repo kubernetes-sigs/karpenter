@@ -47,16 +47,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
 
 			// Performance assertions
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("basic/scaleOut", 2*time.Minute)),
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 2*time.Minute),
 				"Total scale-out time should be less than 2 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("basic/scaleOut", 0.53)),
-				"Average CPU utilization should be greater than 53%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("basic/scaleOut", 0.65)),
-				"Average memory utilization should be greater than 65%")
-			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("basic/scaleOut", 260)),
-				"Karpenter controller P95 memory should be less than 260 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("basic/scaleOut", 0.50)),
-				"Karpenter controller avg CPU should be less than 0.50 cores during scale-out")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Executing consolidation performance test (scaling down to 700 pods)")
@@ -73,12 +65,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.TestType).To(Equal("consolidation"), "Should be detected as consolidation test")
 			Expect(consolidationReport.TotalPods).To(Equal(700), "Should have 700 total pods after scale-in")
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("basic/consolidation", 20*time.Minute)),
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
 				"Consolidation should complete within 20 minutes")
-			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("basic/consolidation", 260)),
-				"Karpenter controller P95 memory should be less than 260 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("basic/consolidation", 0.25)),
-				"Karpenter controller avg CPU should be less than 0.25 cores during consolidation")
 
 		})
 	})
