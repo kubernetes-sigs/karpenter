@@ -125,6 +125,35 @@ var _ = Describe("CEL/Validation", func() {
 			Entry("invalid unit", "1hr"),
 			Entry("partial match", "FooNever"),
 		)
+		It("should succeed when driftInterval is unset", func() {
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		DescribeTable("should succeed on a valid driftInterval", func(value string) {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			lo.Must0(unstructured.SetNestedField(u, value, "spec", "disruption", "driftInterval"))
+			obj := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Succeed())
+		},
+			Entry("at the 30s floor", "30s"),
+			Entry("above the floor", "1m"),
+			Entry("multiple units", "1h30m5s"),
+		)
+		DescribeTable("should fail on an invalid driftInterval", func(value string) {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			lo.Must0(unstructured.SetNestedField(u, value, "spec", "disruption", "driftInterval"))
+			obj := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Not(Succeed()))
+		},
+			Entry("just below the 30s floor", "29s"),
+			Entry("well below the floor", "1s"),
+			Entry("zero", "0s"),
+			Entry("negative", "-1s"),
+			Entry("invalid unit", "1hr"),
+		)
 		It("should succeed when setting consolidateAfter with consolidationPolicy=WhenEmpty", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = MustParseNillableDuration("30s")
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty

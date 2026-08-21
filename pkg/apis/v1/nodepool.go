@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/mitchellh/hashstructure/v2"
@@ -80,6 +81,11 @@ type NodePoolSpec struct {
 	Replicas *int64 `json:"replicas,omitempty"`
 }
 
+// DefaultDriftInterval is the fallback drift-detection requeue cadence used when a
+// NodePool's Disruption.DriftInterval is unset. It matches Karpenter's historical
+// fixed 5 minute requeue interval so that existing NodePools are unaffected.
+const DefaultDriftInterval = 5 * time.Minute
+
 type Disruption struct {
 	//nolint:kubeapilinter
 	// ConsolidateAfter is the duration the controller will wait
@@ -113,6 +119,23 @@ type Disruption struct {
 	// +listType=atomic
 	//nolint:kubeapilinter
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+	// driftInterval controls how frequently Karpenter checks this NodePool's nodes for
+	// configuration drift. When omitted, the controller falls back to its cluster-wide
+	// DefaultDriftInterval (5 minutes).
+	//
+	// This is a guaranteed upper bound on drift detection latency, not the primary
+	// detection path: Karpenter also reacts to NodePool/NodeClass watch events, which
+	// typically catch configuration changes faster than this interval. Operators of
+	// security-sensitive NodePools (e.g. AMI or SecurityGroup changes that must be
+	// caught quickly) can set a shorter interval as a belt-and-suspenders backstop that
+	// doesn't depend on the watch event firing correctly.
+	//
+	// A shorter interval increases the frequency of drift reconciliation for this
+	// NodePool's NodeClaims; a longer interval reduces it. Values below 30s are
+	// rejected at admission to avoid excessive reconciliation churn.
+	// +kubebuilder:validation:XValidation:rule="self == '' || duration(self) >= duration('30s')",message="driftInterval must be at least 30s"
+	// +optional
+	DriftInterval *metav1.Duration `json:"driftInterval,omitempty"` //nolint:kubeapilinter // nodurations: kept as *metav1.Duration (not an integer+unit field) for consistency with the sibling TerminationGracePeriod duration field on this API; the 30s floor is enforced by the XValidation rule above rather than relying on clients to hand-roll Go-style duration parsing.
 }
 
 // Budget defines when Karpenter will restrict the

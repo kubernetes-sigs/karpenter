@@ -32,6 +32,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -51,6 +52,11 @@ type Drift struct {
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	clockOpt := status.WithClock(d.clock)
 	hasDriftedCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted) != nil
+	// requeueAfter is the drift-detection cadence for this NodeClaim's NodePool. It's the
+	// per-NodePool override, if any, or the cluster-wide default otherwise. This is a
+	// guaranteed upper bound on drift detection latency; NodePool/NodeClass watch events
+	// typically trigger reconciliation sooner than this.
+	requeueAfter := disruption.DriftIntervalFor(nodePool)
 
 	// From here there are three scenarios to handle:
 	// 1. If NodeClaim is not launched, remove the drift status condition
@@ -71,15 +77,15 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 			_ = nodeClaim.StatusConditions(clockOpt).Clear(v1.ConditionTypeDrifted)
 			log.FromContext(ctx).V(1).Info("removing drifted status condition, not drifted")
 		}
-		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+		return reconcile.Result{RequeueAfter: requeueAfter}, nil
 	}
 	// 3. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
 	nodeClaim.StatusConditions(clockOpt).SetTrueWithReason(v1.ConditionTypeDrifted, string(driftedReason), string(driftedReason))
 	if !hasDriftedCondition {
 		log.FromContext(ctx).V(1).WithValues("reason", string(driftedReason)).Info("marking drifted")
 	}
-	// Requeue after 5 minutes for the cache TTL
-	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+	// Requeue after the drift interval for the cache TTL
+	return reconcile.Result{RequeueAfter: requeueAfter}, nil
 }
 
 // isDrifted will check if a NodeClaim is drifted from the fields in the NodePool Spec and the CloudProvider

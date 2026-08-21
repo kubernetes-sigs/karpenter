@@ -163,6 +163,26 @@ spec:
                         - WhenEmptyOrUnderutilized
                         - Balanced
                       type: string
+                    driftInterval:
+                      description: |-
+                        driftInterval controls how frequently Karpenter checks this NodePool's nodes for
+                        configuration drift. When omitted, the controller falls back to its cluster-wide
+                        DefaultDriftInterval (5 minutes).
+
+                        This is a guaranteed upper bound on drift detection latency, not the primary
+                        detection path: Karpenter also reacts to NodePool/NodeClass watch events, which
+                        typically catch configuration changes faster than this interval. Operators of
+                        security-sensitive NodePools (e.g. AMI or SecurityGroup changes that must be
+                        caught quickly) can set a shorter interval as a belt-and-suspenders backstop that
+                        doesn't depend on the watch event firing correctly.
+
+                        A shorter interval increases the frequency of drift reconciliation for this
+                        NodePool's NodeClaims; a longer interval reduces it. Values below 30s are
+                        rejected at admission to avoid excessive reconciliation churn.
+                      type: string
+                      x-kubernetes-validations:
+                        - message: driftInterval must be at least 30s
+                          rule: self == '' || duration(self) >= duration('30s')
                   type: object
                 limits:
                   additionalProperties:
