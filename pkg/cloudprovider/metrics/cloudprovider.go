@@ -30,7 +30,8 @@ import (
 )
 
 const (
-	metricLabelController = "controller"
+	// metricLabelController is an alias for the shared controller dimension.
+	metricLabelController = metrics.ControllerLabel
 	metricLabelMethod     = "method"
 	metricLabelProvider   = "provider"
 	metricLabelError      = "error"
@@ -40,6 +41,28 @@ const (
 	NodeClaimNotFoundError    = "NodeClaimNotFoundError"
 	NodeClassNotReadyError    = "NodeClassNotReadyError"
 	InsufficientCapacityError = "InsufficientCapacityError"
+)
+
+// Package-local metric dimensions for the CloudProvider metrics. The controller
+// dimension reuses the shared metrics.Controller description.
+var (
+	Method = metrics.Label{
+		Name: metricLabelMethod,
+		Help: "The CloudProvider interface method that was called, e.g. `Create`, `Delete`, `Get`, `List`, `GetInstanceTypes`, `IsDrifted`.",
+	}
+	Provider = metrics.Label{
+		Name: metricLabelProvider,
+		Help: "The name of the cloud provider implementation.",
+	}
+	Error = metrics.Label{
+		Name: metricLabelError,
+		Help: "The category of error returned by the CloudProvider call.",
+		Values: []string{
+			NodeClaimNotFoundError,
+			NodeClassNotReadyError,
+			InsufficientCapacityError,
+		},
+	}
 )
 
 // decorator implements CloudProvider

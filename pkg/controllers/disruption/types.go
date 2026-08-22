@@ -253,6 +253,11 @@ var (
 	NoOpDecision    Decision = "no-op"
 	ReplaceDecision Decision = "replace"
 	DeleteDecision  Decision = "delete"
+	// ApprovedDecision and RejectedDecision are the decision label values emitted
+	// by the Balanced consolidation move metrics (consolidation_moves_total and
+	// consolidation_score).
+	ApprovedDecision Decision = "approved"
+	RejectedDecision Decision = "rejected"
 )
 
 func (c Command) Decision() Decision {

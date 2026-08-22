@@ -32,9 +32,41 @@ const (
 	policyLabel                  = "policy"
 )
 
+// Package-local metric dimensions. These are co-located with their value consts
+// (which live in this package) because import cycles prevent centralizing them in
+// pkg/metrics.
+var (
+	ConsolidationType = metrics.Label{
+		Name: ConsolidationTypeLabel,
+		Help: "The consolidation algorithm that produced the decision.",
+		Values: []string{
+			MultiNodeConsolidationType,
+			SingleNodeConsolidationType,
+		},
+	}
+	DecisionDim = metrics.Label{
+		Name: decisionLabel,
+		Help: "The disruption decision taken for the candidate(s).",
+		Values: []string{
+			string(NoOpDecision),
+			string(ReplaceDecision),
+			string(DeleteDecision),
+			string(ApprovedDecision),
+			string(RejectedDecision),
+		},
+	}
+	Policy = metrics.Label{
+		Name: policyLabel,
+		Help: "The NodePool consolidation policy in effect for the move.",
+	}
+)
+
 func init() {
-	ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: MultiNodeConsolidationType})
-	ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: SingleNodeConsolidationType})
+	// Initialize each consolidation_type series to 0. ConsolidationType.Values is
+	// the single source of truth for the set of values.
+	for _, ct := range ConsolidationType.Values {
+		ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: ct})
+	}
 }
 
 var (

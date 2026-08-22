@@ -25,10 +25,19 @@ import (
 )
 
 const (
-	ControllerLabel    = "controller"
+	// ControllerLabel is an alias for the shared controller dimension. Its
+	// canonical description (help text) lives on metrics.Controller.
+	ControllerLabel    = metrics.ControllerLabel
 	schedulingIDLabel  = "scheduling_id"
 	schedulerSubsystem = "scheduler"
 )
+
+// SchedulingID describes the scheduling_id dimension. It is co-located here
+// because its value is a package-local runtime UUID.
+var SchedulingID = metrics.Label{
+	Name: schedulingIDLabel,
+	Help: "A unique identifier for a scheduling simulation run.",
+}
 
 var (
 	DurationSeconds = opmetrics.NewPrometheusHistogram(
@@ -102,7 +111,7 @@ var (
 		},
 		[]string{
 			ControllerLabel,
-			"zone",
+			metrics.ZoneLabel,
 		},
 	)
 )

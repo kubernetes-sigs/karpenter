@@ -26,14 +26,8 @@ const (
 	// Common namespace for application metrics.
 	Namespace = "karpenter"
 
-	NodePoolLabel            = "nodepool"
-	ReasonLabel              = "reason"
-	ResourceTypeLabel        = "resource_type"
-	CapacityTypeLabel        = "capacity_type"
-	ZoneLabel                = "zone"
-	MinValuesRelaxedLabel    = "min_values_relaxed"
-	ConsolidationPolicyLabel = "consolidation_policy"
-	TerminationModeLabel     = "termination_mode"
+	// Metric label-name constants live in labels.go alongside their Label
+	// descriptions (help text and stable values).
 
 	// Reasons for CREATE/DELETE shared metrics
 	ProvisionedReason = "provisioned"

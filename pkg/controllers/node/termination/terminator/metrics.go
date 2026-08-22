@@ -31,6 +31,12 @@ const (
 	ReasonLabel = "reason"
 )
 
+// Code describes the code dimension emitted by the pod eviction metric.
+var Code = metrics.Label{
+	Name: CodeLabel,
+	Help: "The HTTP response code returned by the Kubernetes eviction API for the eviction request.",
+}
+
 var PodsEvictionRequestsTotal = opmetrics.NewPrometheusCounter(
 	crmetrics.Registry,
 	prometheus.CounterOpts{

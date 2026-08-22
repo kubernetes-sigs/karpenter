@@ -29,6 +29,20 @@ A file for [guiding coding agents](https://agents.md/).
 - KWOK reference provider (local dev): `kwok/`
 - E2E suites: `test/suites/`
 
+## Metric Labels
+
+Metric dimensions (Prometheus labels) are documented in code so the provider's
+docs generator can emit per-dimension help text and values:
+
+- Always describe a dimension with a `metrics.Label` (see `pkg/metrics/labels.go`),
+  never a bare string literal in a metric's label-names slice.
+- A Label's `Values` MUST always be a list of consts, never magic strings.
+- Before adding a new Label, check whether an existing one already describes the
+  dimension and reference it (`Label.Name`) instead of redeclaring it.
+- Shared dimensions live in `pkg/metrics/labels.go`. Dimensions that can't be
+  centralized due to import cycles are declared co-located with their value consts
+  in the owning package's `metrics.go`.
+
 ## Issue and PR Guidelines
 
 - Never create an issue.
