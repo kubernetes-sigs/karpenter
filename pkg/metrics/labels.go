@@ -17,6 +17,8 @@ limitations under the License.
 package metrics
 
 import (
+	pmetrics "github.com/awslabs/operatorpkg/metrics"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
@@ -25,21 +27,16 @@ import (
 // generator (hack/docs/metrics_gen) emit per-dimension help text and, where the
 // set of possible values is known and stable, the list of values.
 //
+// The type is defined in operatorpkg and aliased here so that Karpenter and
+// operatorpkg describe their dimensions with a single, consistent type.
+//
 // Conventions (see AGENTS.md):
 //   - Always use a Label to describe a metric dimension; never a bare string
 //     literal in the metric's label-names slice.
 //   - Values MUST always be a list of consts, never magic strings.
 //   - Before adding a new Label, check whether an existing one already describes
 //     the dimension you need and reference it instead.
-type Label struct {
-	// Name is the Prometheus label name (the dimension key), e.g. "nodepool".
-	Name string
-	// Help is human-readable documentation for the dimension.
-	Help string
-	// Values, when non-empty, enumerates the stable set of values the dimension
-	// can take. Every entry MUST be sourced from a const, never a magic string.
-	Values []string
-}
+type Label = pmetrics.Label
 
 // Label-name constants. These are kept as standalone constants (in addition to
 // the Label vars below) so that existing metric declarations that reference them
