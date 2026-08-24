@@ -22,29 +22,13 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// Label is the source-of-truth description of a Prometheus metric label (a
-// "dimension"). Declaring dimensions as Labels lets the metrics documentation
-// generator (hack/docs/metrics_gen) emit per-dimension help text and, where the
-// set of possible values is known and stable, the list of values.
-//
-// The type is defined in operatorpkg and aliased here so that Karpenter and
-// operatorpkg describe their dimensions with a single, consistent type.
-//
-// Conventions (see AGENTS.md):
-//   - Always use a Label to describe a metric dimension; never a bare string
-//     literal in the metric's label-names slice.
-//   - Values MUST always be a list of consts, never magic strings.
-//   - Before adding a new Label, check whether an existing one already describes
-//     the dimension you need and reference it instead.
+// Label documents a Prometheus metric dimension; Value documents one of its
+// stable values. Both are aliased from operatorpkg so Karpenter and operatorpkg
+// share one type. See AGENTS.md for the conventions.
 type Label = pmetrics.Label
-
-// Value documents one of the stable values a metric dimension (Label) can take.
-// Like Label, it is aliased from operatorpkg so the type is shared.
 type Value = pmetrics.Value
 
-// Label-name constants. These are kept as standalone constants (in addition to
-// the Label vars below) so that existing metric declarations that reference them
-// continue to compile unchanged.
+// Label-name constants, referenced by metric declarations.
 const (
 	NodePoolLabel            = "nodepool"
 	ReasonLabel              = "reason"
@@ -66,8 +50,6 @@ var (
 	}
 	Reason = Label{
 		Name: ReasonLabel,
-		// The concrete value set is metric-specific, so this documents the common
-		// cases rather than enumerating a fixed Values list.
 		Help: "Why the action was taken. Values are metric-specific: create/delete " +
 			"counters use `provisioned`, `expired`, or `unhealthy`; disruption metrics " +
 			"use the disruption reason such as `underutilized`, `empty`, `drifted`, or " +

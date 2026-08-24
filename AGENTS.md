@@ -31,24 +31,21 @@ A file for [guiding coding agents](https://agents.md/).
 
 ## Metric Labels
 
-Metric dimensions (Prometheus labels) are documented in code so the provider's
-docs generator can emit per-dimension help text and values:
+Metric dimensions and their values are documented in code as
+`metrics.Label{Name, Help, Values}` / `metrics.Value{Name, Help}`; the provider's
+docs generator turns them into per-dimension help and value tables.
 
-- Always describe a dimension with a `metrics.Label{Name, Help, Values}` (see
-  `pkg/metrics/labels.go`), never a bare string literal in a metric's label-names slice.
-- Document each stable value a dimension can take as a `metrics.Value{Name, Help}` in
-  the Label's `Values`. A value's `Name` MUST come from a const, never a magic string.
-  For a value that exists only as a metric dimension value (e.g. a `consolidation_type`
-  or an `error` category), prefer a first-class `metrics.Value` var and refer to it by
-  `.Name` at the emission site, so the string and its docs live in one place.
-- Before adding a new Label, check whether an existing one already describes the
-  dimension and reference it (`Label.Name`) instead of redeclaring it.
-- Shared dimensions live in `pkg/metrics/labels.go`. Dimensions that can't be
-  centralized due to import cycles are declared co-located with their values in the
-  owning package's `metrics.go`.
-- Per-object status condition types are documented in `pkg/metrics.ConditionTypeValues`
-  (keyed by Kind, referencing the `ConditionType*` consts); this is the `type` dimension
-  value set for the object's status-condition metrics.
+- Describe every dimension with a `Label`; never pass a bare string literal as a
+  metric's label name.
+- Reuse an existing `Label` when one already fits; reference its `.Name` rather
+  than redeclaring the dimension.
+- Define a `Label` in the most generic package that fits — shared dimensions in
+  `pkg/metrics`, operator-agnostic ones upstream in operatorpkg — and only
+  co-locate it in its owning package when an import cycle prevents centralizing.
+- Enumerate a dimension's stable values as `metrics.Value`s, listing the
+  well-known ones even when the set is not exhaustive. A value's `Name` comes from
+  a const, never a magic string; a value that exists only as a metric value should
+  be a first-class `metrics.Value` var that its emission site references by `.Name`.
 
 ## Issue and PR Guidelines
 

@@ -32,17 +32,11 @@ const (
 	policyLabel                  = "policy"
 )
 
-// consolidation_type dimension values. These are metric-only values, so they are
-// first-class metrics.Value vars: the value string and its documentation live in
-// one place and the consolidation controllers refer to them by .Name.
 var (
 	MultiNodeConsolidationType  = metrics.Value{Name: "multi", Help: "Consolidation that considers removing multiple nodes at once."}
 	SingleNodeConsolidationType = metrics.Value{Name: "single", Help: "Consolidation that considers removing a single node."}
 )
 
-// Package-local metric dimensions. These are co-located with their value consts
-// (which live in this package) because import cycles prevent centralizing them in
-// pkg/metrics.
 var (
 	ConsolidationType = metrics.Label{
 		Name:   ConsolidationTypeLabel,
@@ -67,8 +61,7 @@ var (
 )
 
 func init() {
-	// Initialize each consolidation_type series to 0. ConsolidationType.Values is
-	// the single source of truth for the set of values.
+	// Initialize each consolidation_type series to 0.
 	for _, ct := range ConsolidationType.Values {
 		ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: ct.Name})
 	}
