@@ -168,7 +168,7 @@ func (b *NodePoolBackoff) Snapshot(nodePool string) (level int, until time.Time)
 }
 
 // StartMetrics refreshes the decaying drift_backoff_seconds gauge on a fixed cadence until ctx is
-// cancelled. The gauge reports "seconds remaining" in the current window, a value that shrinks in
+// canceled. The gauge reports "seconds remaining" in the current window, a value that shrinks in
 // real time, so re-publishing it periodically is what makes it decay between Fail/Reset events.
 // It is intended to be run once as a manager Runnable. A real-time ticker is used deliberately:
 // the cadence is a wall-clock refresh rate, independent of the (injectable) clock used to compute
