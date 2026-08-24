@@ -80,6 +80,8 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		return len(c.reschedulablePods) == 0
 	})
 
+	backedOffNodePools := make(map[string]struct{})
+
 	// Prioritize empty candidates since we want them to get priority over non-empty candidates if the budget is constrained.
 	// Disrupting empty candidates first also helps reduce the overall churn because if a non-empty candidate is disrupted first,
 	// the pods from that node can reschedule on the empty nodes and will need to move again when those nodes get disrupted.
@@ -94,7 +96,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		// drift replacement failures. Healthy pools and pools whose back-off window has elapsed
 		// fall through to normal selection. This is a read-only check; the queue is the only
 		// place that mutates back-off state (Fail/Reset).
-		if d.backoff != nil && d.backoff.IsBackedOff(candidate.NodePool.Name) {
+		if d.isBackedOff(candidate.NodePool.Name, backedOffNodePools) {
 			level, until := d.backoff.Snapshot(candidate.NodePool.Name)
 			d.recorder.Publish(disruptionevents.NodePoolDriftBackoff(candidate.NodePool, until, level))
 			continue
@@ -124,6 +126,17 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 
 	}
 	return []Command{}, nil
+}
+
+func (d *Drift) isBackedOff(nodePool string, backedOffNodePools map[string]struct{}) bool {
+	if _, ok := backedOffNodePools[nodePool]; ok {
+		return true
+	}
+	if d.backoff != nil && d.backoff.IsBackedOff(nodePool) {
+		backedOffNodePools[nodePool] = struct{}{}
+		return true
+	}
+	return false
 }
 
 func (d *Drift) Reason() v1.DisruptionReason {
