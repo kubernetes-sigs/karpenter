@@ -57,10 +57,10 @@ var (
 	Error = metrics.Label{
 		Name: metricLabelError,
 		Help: "The category of error returned by the CloudProvider call.",
-		Values: []string{
-			NodeClaimNotFoundError,
-			NodeClassNotReadyError,
-			InsufficientCapacityError,
+		Values: []metrics.Value{
+			{Name: NodeClaimNotFoundError, Help: "The NodeClaim's backing instance was not found."},
+			{Name: NodeClassNotReadyError, Help: "The referenced NodeClass is not yet ready."},
+			{Name: InsufficientCapacityError, Help: "The cloud provider had insufficient capacity to fulfill the request."},
 		},
 	}
 )

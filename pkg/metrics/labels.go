@@ -38,6 +38,10 @@ import (
 //     the dimension you need and reference it instead.
 type Label = pmetrics.Label
 
+// Value documents one of the stable values a metric dimension (Label) can take.
+// Like Label, it is aliased from operatorpkg so the type is shared.
+type Value = pmetrics.Value
+
 // Label-name constants. These are kept as standalone constants (in addition to
 // the Label vars below) so that existing metric declarations that reference them
 // continue to compile unchanged.
@@ -76,10 +80,10 @@ var (
 	CapacityType = Label{
 		Name: CapacityTypeLabel,
 		Help: "The capacity type of the instance.",
-		Values: []string{
-			v1.CapacityTypeOnDemand,
-			v1.CapacityTypeSpot,
-			v1.CapacityTypeReserved,
+		Values: []Value{
+			{Name: v1.CapacityTypeOnDemand, Help: "On-demand capacity."},
+			{Name: v1.CapacityTypeSpot, Help: "Spot capacity, which can be reclaimed by the cloud provider."},
+			{Name: v1.CapacityTypeReserved, Help: "Reserved capacity, backed by a capacity reservation."},
 		},
 	}
 	Zone = Label{
@@ -93,19 +97,19 @@ var (
 	ConsolidationPolicy = Label{
 		Name: ConsolidationPolicyLabel,
 		Help: "The NodePool consolidation policy in effect.",
-		Values: []string{
-			string(v1.ConsolidationPolicyWhenEmpty),
-			string(v1.ConsolidationPolicyWhenEmptyOrUnderutilized),
-			string(v1.ConsolidationPolicyBalanced),
+		Values: []Value{
+			{Name: string(v1.ConsolidationPolicyWhenEmpty), Help: "Consolidate only nodes with no workload pods."},
+			{Name: string(v1.ConsolidationPolicyWhenEmptyOrUnderutilized), Help: "Consolidate empty nodes and underutilized nodes."},
+			{Name: string(v1.ConsolidationPolicyBalanced), Help: "Consolidate using the balanced algorithm."},
 		},
 	}
 	TerminationMode = Label{
 		Name: TerminationModeLabel,
 		Help: "The termination mode used to disrupt the node.",
-		Values: []string{
-			TerminationModeGraceful,
-			TerminationModeEventual,
-			TerminationModeForceful,
+		Values: []Value{
+			{Name: TerminationModeGraceful, Help: "Graceful termination that respects the node's disruption budget and drains pods."},
+			{Name: TerminationModeEventual, Help: "Eventual termination once the node's terminationGracePeriod elapses."},
+			{Name: TerminationModeForceful, Help: "Forceful termination that deletes the node immediately."},
 		},
 	}
 	Controller = Label{

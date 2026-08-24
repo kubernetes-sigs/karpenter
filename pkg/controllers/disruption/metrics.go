@@ -39,20 +39,20 @@ var (
 	ConsolidationType = metrics.Label{
 		Name: ConsolidationTypeLabel,
 		Help: "The consolidation algorithm that produced the decision.",
-		Values: []string{
-			MultiNodeConsolidationType,
-			SingleNodeConsolidationType,
+		Values: []metrics.Value{
+			{Name: MultiNodeConsolidationType, Help: "Consolidation that considers removing multiple nodes at once."},
+			{Name: SingleNodeConsolidationType, Help: "Consolidation that considers removing a single node."},
 		},
 	}
 	DecisionDim = metrics.Label{
 		Name: decisionLabel,
 		Help: "The disruption decision taken for the candidate(s).",
-		Values: []string{
-			string(NoOpDecision),
-			string(ReplaceDecision),
-			string(DeleteDecision),
-			string(ApprovedDecision),
-			string(RejectedDecision),
+		Values: []metrics.Value{
+			{Name: string(NoOpDecision), Help: "No disruption action was taken."},
+			{Name: string(ReplaceDecision), Help: "The candidate(s) were replaced with more efficient capacity."},
+			{Name: string(DeleteDecision), Help: "The candidate(s) were deleted without replacement."},
+			{Name: string(ApprovedDecision), Help: "The disruption decision was approved for execution."},
+			{Name: string(RejectedDecision), Help: "The disruption decision was rejected before execution."},
 		},
 	}
 	Policy = metrics.Label{
@@ -65,7 +65,7 @@ func init() {
 	// Initialize each consolidation_type series to 0. ConsolidationType.Values is
 	// the single source of truth for the set of values.
 	for _, ct := range ConsolidationType.Values {
-		ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: ct})
+		ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: ct.Name})
 	}
 }
 
