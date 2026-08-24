@@ -29,6 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	corev1 "k8s.io/api/core/v1"
 
 	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
@@ -61,16 +63,27 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	statenodeclaimgc "sigs.k8s.io/karpenter/pkg/controllers/state/nodeclaimgc"
 	staticdeprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
 	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
 )
 
 type ControllerOptions struct {
-	registrationHooks []cloudprovider.NodeLifecycleHook
+	registrationHooks    []cloudprovider.NodeLifecycleHook
+	disableVPAPrediction bool
+}
+
+// WithoutVPAPrediction disables the VPA prediction controller. Use this when
+// a different prediction source is registered separately.
+func WithoutVPAPrediction() option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.disableVPAPrediction = true
+	}
 }
 
 // WithRegistrationHook registers a hook that blocks Karpenter from marking a node as registered
@@ -93,12 +106,14 @@ func NewControllers(
 	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
+	predictionStore *prediction.Store,
 	opts ...option.Function[ControllerOptions],
 ) []controller.Controller {
 	o := option.Resolve(opts...)
 	deviceAllocationController := deviceallocation.NewController(kubeClient)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController)
-	evictionQueue := terminator.NewQueue(kubeClient, recorder)
+	virtualPodCache := virtualpods.NewVirtualPodCache(kubeClient)
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache)
+	evictionQueue := terminator.NewQueue(clock, kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
@@ -115,6 +130,7 @@ func NewControllers(
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
+		statenodeclaimgc.NewController(kubeClient, cluster),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		nodepoolreadiness.NewController(clock, kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(clock, kubeClient, cloudProvider, npState),
@@ -165,7 +181,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
-		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController))
+		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))
 		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock, recorder))
 	}
 
@@ -174,7 +190,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
-		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p))
+		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p, virtualPodCache))
 		if !options.FromContext(ctx).DisableClusterStateObservability {
 			// Emit the standard operator_status_condition_* metrics for CapacityBuffer.
 			// A GenericObjectController reads status.conditions reflectively, so the
@@ -193,6 +209,9 @@ func NewControllers(
 
 	if options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
 		controllers = append(controllers, deletioncost.NewController(clock, kubeClient, cloudProvider, cluster))
+	}
+	if !o.disableVPAPrediction {
+		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
 	}
 
 	return controllers

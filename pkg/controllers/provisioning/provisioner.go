@@ -30,6 +30,8 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -89,11 +91,12 @@ type Provisioner struct {
 	cm                         *pretty.ChangeMonitor
 	clock                      clock.Clock
 	deviceAllocationController *deviceallocation.Controller
+	virtualPodCache            *virtualpods.Cache
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
-	clock clock.Clock, deviceAllocationController *deviceallocation.Controller,
+	clock clock.Clock, deviceAllocationController *deviceallocation.Controller, virtualPodCache *virtualpods.Cache,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:                    NewBatcher[types.UID](clock),
@@ -105,6 +108,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		cm:                         pretty.NewChangeMonitor(),
 		clock:                      clock,
 		deviceAllocationController: deviceAllocationController,
+		virtualPodCache:            virtualPodCache,
 	}
 	return p
 }
@@ -215,7 +219,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	// run PVC topology checks on synthetic pods or pollute cluster state with
 	// their "decisions". Gated by the feature flag.
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
-		pods = p.appendVirtualPods(ctx, pods)
+		pods = append(pods, p.virtualPodCache.GetAll(ctx)...)
 	}
 	return pods, nil
 }
@@ -316,6 +320,14 @@ func (p *Provisioner) NewScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("getting volume topology requirements, %w", err)
 	}
+
+	// Inject cluster-level default topology spread constraints (from --scheduler-config) into the scheduling-time pod
+	// copies for any pod that declares none of its own, mirroring kube-scheduler's PodTopologySpread plugin. This is
+	// done here, once at ingestion (before the first topology.Update), so all downstream machinery - TopologyGroup
+	// synthesis, ScheduleAnyway relaxation, and consolidation - flows through the existing per-pod path with no new
+	// logic. The injected constraints exist only on these scheduling-time copies and are never written back to the API
+	// server.
+	scheduler.NewDefaultTopologySpreadInjector(p.kubeClient).Inject(ctx, pods)
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)

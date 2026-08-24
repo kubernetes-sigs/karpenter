@@ -29,6 +29,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
@@ -52,11 +55,13 @@ func TestCapacityBuffer(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
-	cbController = NewController(env.Client, &fakeTrigger{})
+	cbController = NewController(env.Client, &fakeTrigger{}, virtualpods.NewVirtualPodCache(env.Client))
 })
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+	Expect(env.Client.DeleteAllOf(ctx, &autoscalingv1beta1.CapacityBuffer{}, client.InNamespace("default"))).To(Succeed())
+	Expect(env.Client.DeleteAllOf(ctx, &v1.PodTemplate{}, client.InNamespace("default"))).To(Succeed())
 })
 
 var _ = AfterSuite(func() {
@@ -98,7 +103,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -125,7 +130,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -177,7 +182,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, deploy, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -206,7 +211,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -255,7 +260,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, sts, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -282,7 +287,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			Expect(ExpectObjectReconcileFailed(ctx, env.Client, cbController, cb)).To(HaveOccurred())
+			ExpectReconciledFailed(ctx, cbController, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cb)})
 		})
 
 		It("should return error for unsupported API group", func() {
@@ -301,7 +306,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			Expect(ExpectObjectReconcileFailed(ctx, env.Client, cbController, cb)).To(HaveOccurred())
+			ExpectReconciledFailed(ctx, cbController, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cb)})
 		})
 
 		It("should default to 1 replica when workload has nil Spec.Replicas", func() {
@@ -343,7 +348,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, deploy, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			cond := findCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
@@ -361,7 +366,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 		DescribeTable("should resolve buffer replicas from replicas, percentage, and limits",
 			func(backing client.Object, cb *autoscalingv1beta1.CapacityBuffer, expected int32) {
 				ExpectApplied(ctx, env.Client, backing, cb)
-				ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+				ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 				Expect(ExpectExists(ctx, env.Client, cb).Status.Replicas).To(HaveValue(Equal(expected)))
 			},
 			// podTemplateRef: replicas and limits only (percentage requires a scalableRef).
@@ -492,7 +497,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			Expect(cb.Status.PodTemplateGeneration).ToNot(BeNil())
@@ -506,7 +511,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectApplied(ctx, env.Client, pt)
 
 			// Reconcile the buffer again; podTemplateGeneration in status should update.
-			ExpectObjectReconciled(ctx, env.Client, cbController, cb)
+			ExpectReconcileSucceeded(ctx, cbController, client.ObjectKeyFromObject(cb))
 			cb = ExpectExists(ctx, env.Client, cb)
 			Expect(cb.Status.PodTemplateGeneration).ToNot(BeNil())
 			// Generation must have advanced OR stayed the same (envtest behavior varies);
@@ -520,7 +525,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 	Context("Provisioner trigger", func() {
 		It("should trigger the provisioner after a successful reconcile", func() {
 			trigger := &fakeTrigger{}
-			ctrl := NewController(env.Client, trigger)
+			ctrl := NewController(env.Client, trigger, virtualpods.NewVirtualPodCache(env.Client))
 
 			pt := &v1.PodTemplate{
 				ObjectMeta: metav1.ObjectMeta{Name: "trig-template", Namespace: "default"},
@@ -536,7 +541,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, pt, cb)
-			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
 
 			cb = ExpectExists(ctx, env.Client, cb)
 			Expect(trigger.calls).To(ContainElement(cb.UID))
@@ -544,7 +549,7 @@ var _ = Describe("CapacityBuffer Controller", func() {
 
 		It("should NOT trigger the provisioner when resolution fails", func() {
 			trigger := &fakeTrigger{}
-			ctrl := NewController(env.Client, trigger)
+			ctrl := NewController(env.Client, trigger, virtualpods.NewVirtualPodCache(env.Client))
 
 			cb := &autoscalingv1beta1.CapacityBuffer{
 				ObjectMeta: metav1.ObjectMeta{Name: "no-trig-buffer", Namespace: "default"},
@@ -554,9 +559,108 @@ var _ = Describe("CapacityBuffer Controller", func() {
 				},
 			}
 			ExpectApplied(ctx, env.Client, cb)
-			ExpectObjectReconciled(ctx, env.Client, ctrl, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
 
 			Expect(trigger.calls).To(BeEmpty())
+		})
+	})
+
+	Context("Virtual pod cache", func() {
+		It("should populate the cache after a successful reconcile", func() {
+			cache := virtualpods.NewVirtualPodCache(env.Client)
+			ctrl := NewController(env.Client, &fakeTrigger{}, cache)
+
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "cache-template", Namespace: "default"},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{Containers: []v1.Container{{Name: "c", Image: "p"}}},
+				},
+			}
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "cache-buffer", Namespace: "default"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "cache-template"},
+					Replicas:       lo.ToPtr(int32(3)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+
+			Expect(cache.GetAll(ctx)).To(HaveLen(3))
+		})
+
+		It("should remove the cache entry when resolution fails with NotFound", func() {
+			cache := virtualpods.NewVirtualPodCache(env.Client)
+			ctrl := NewController(env.Client, &fakeTrigger{}, cache)
+
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "gone-template", Namespace: "default"},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{Containers: []v1.Container{{Name: "c", Image: "p"}}},
+				},
+			}
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "gone-buffer", Namespace: "default"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "gone-template"},
+					Replicas:       lo.ToPtr(int32(2)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+			Expect(cache.GetAll(ctx)).To(HaveLen(2))
+
+			// Delete the referenced template so resolution now fails with NotFound.
+			// The buffer is no longer ready for provisioning, so its stale entry
+			// must be dropped from the cache.
+			ExpectDeleted(ctx, env.Client, pt)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
+		})
+
+		It("should evict the cache entry when the buffer is deleted", func() {
+			cache := virtualpods.NewVirtualPodCache(env.Client)
+			ctrl := NewController(env.Client, &fakeTrigger{}, cache)
+
+			pt := &v1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "del-template", Namespace: "default"},
+				Template: v1.PodTemplateSpec{
+					Spec: v1.PodSpec{Containers: []v1.Container{{Name: "c", Image: "p"}}},
+				},
+			}
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "del-buffer", Namespace: "default"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "del-template"},
+					Replicas:       lo.ToPtr(int32(3)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, pt, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+			Expect(cache.GetAll(ctx)).To(HaveLen(3))
+
+			// Delete the buffer and reconcile its key. The buffer is gone, so
+			// Reconcile hits the NotFound branch and evicts the cache entry.
+			ExpectDeleted(ctx, env.Client, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
+		})
+
+		It("should not touch the cache when a buffer has neither ref set", func() {
+			cache := virtualpods.NewVirtualPodCache(env.Client)
+			ctrl := NewController(env.Client, &fakeTrigger{}, cache)
+
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "no-ref-buffer", Namespace: "default"},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					Replicas: lo.ToPtr(int32(1)),
+				},
+			}
+			ExpectApplied(ctx, env.Client, cb)
+			ExpectReconcileSucceeded(ctx, ctrl, client.ObjectKeyFromObject(cb))
+
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
 		})
 	})
 

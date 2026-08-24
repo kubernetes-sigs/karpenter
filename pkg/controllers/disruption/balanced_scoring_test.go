@@ -33,6 +33,8 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -472,6 +474,68 @@ var _ = Describe("Balanced Scoring", func() {
 			Entry("zero savings", 0.0, 10.0, 0.0, false, false),
 			Entry("negative savings", -5.0, 10.0, 0.0, false, false),
 		)
+
+		It("should REJECT a move when EstimatedSavings excludes spot offerings for an on-demand-only NodePool", func() {
+			// Numbers such that if a spot price were to leak into an on-demand-only NodePool it would flip the 0.5 gate
+			// from reject -> approve.
+			np := makeBalancedNodePool("pool-onDemand-only", nil)
+			sourceIT := fake.NewInstanceType("source-type",
+				fake.WithOfferings(cloudprovider.Offering{
+					Available: true,
+					Price:     0.50,
+					Requirements: scheduling.NewLabelRequirements(map[string]string{
+						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone: "test-zone-1",
+					}),
+				}),
+			)
+			candidate := makeCandidate("source-node", np, sourceIT, []*corev1.Pod{
+				makePod("p1", ""), makePod("p2", ""), makePod("p3", ""),
+			})
+			destIT := fake.NewInstanceType("dest-type",
+				fake.WithOfferings(
+					cloudprovider.Offering{
+						Available: true,
+						Price:     0.10,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
+							corev1.LabelTopologyZone: "test-zone-1",
+						}),
+					},
+					cloudprovider.Offering{
+						Available: true,
+						Price:     0.40,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "test-zone-1",
+						}),
+					},
+				),
+			)
+			cmd := Command{
+				Candidates:   []*Candidate{candidate},
+				Replacements: []*Replacement{{}},
+				Results: pscheduling.Results{
+					NewNodeClaims: []*pscheduling.NodeClaim{
+						{
+							NodeClaimTemplate: pscheduling.NodeClaimTemplate{
+								InstanceTypeOptions: []*cloudprovider.InstanceType{destIT},
+								Requirements: scheduling.NewRequirements(
+									scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+								),
+							},
+						},
+					},
+				},
+			}
+			poolTotals := NodePoolTotals{TotalCost: 1.0, TotalDisruptionCost: 10.0}
+
+			savings := cmd.EstimatedSavings()
+			result := ScoreMove(savings, ComputeMoveDisruptionCost(cmd.Candidates), poolTotals, v1.BalancedK)
+
+			Expect(savings).To(BeNumerically("~", 0.10, 0.001))
+			Expect(result.Approved()).To(BeFalse())
+		})
 	})
 
 	Describe("ShouldDisrupt", func() {
