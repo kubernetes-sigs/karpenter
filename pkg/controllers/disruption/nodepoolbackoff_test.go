@@ -25,7 +25,11 @@ import (
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
+
+const driftBackoffSecondsMetric = "karpenter_nodepools_drift_backoff_seconds"
 
 var _ = Describe("NodePoolBackoff", func() {
 	const (
@@ -136,5 +140,52 @@ var _ = Describe("NodePoolBackoff", func() {
 		backoff.Fail("spark")
 		Expect(backoff.IsBackedOff("spark")).To(BeTrue())
 		Expect(backoff.IsBackedOff("ingress")).To(BeFalse())
+	})
+
+	Context("drift_backoff_seconds gauge", func() {
+		const pool = "spark-gauge"
+
+		// Ensure the global series doesn't leak into other specs.
+		AfterEach(func() {
+			backoff.Reset(pool)
+			backoff.RefreshMetrics()
+		})
+
+		It("publishes the seconds remaining while backed off and decays over time", func() {
+			backoff.Fail(pool)
+			_, until := backoff.Snapshot(pool)
+
+			backoff.RefreshMetrics()
+			ExpectMetricGaugeValue(disruption.DriftBackoffSeconds, until.Sub(fakeClock.Now()).Seconds(), map[string]string{metrics.NodePoolLabel: pool})
+
+			// Advancing the clock shrinks the reported value on the next refresh.
+			fakeClock.Step(15 * time.Second)
+			backoff.RefreshMetrics()
+			ExpectMetricGaugeValue(disruption.DriftBackoffSeconds, until.Sub(fakeClock.Now()).Seconds(), map[string]string{metrics.NodePoolLabel: pool})
+		})
+
+		It("deletes the series once the pool is reset", func() {
+			backoff.Fail(pool)
+			backoff.RefreshMetrics()
+			_, ok := FindMetricWithLabelValues(driftBackoffSecondsMetric, map[string]string{metrics.NodePoolLabel: pool})
+			Expect(ok).To(BeTrue())
+
+			backoff.Reset(pool)
+			backoff.RefreshMetrics()
+			_, ok = FindMetricWithLabelValues(driftBackoffSecondsMetric, map[string]string{metrics.NodePoolLabel: pool})
+			Expect(ok).To(BeFalse())
+		})
+
+		It("deletes the series once the back-off window elapses", func() {
+			backoff.Fail(pool)
+			backoff.RefreshMetrics()
+			_, ok := FindMetricWithLabelValues(driftBackoffSecondsMetric, map[string]string{metrics.NodePoolLabel: pool})
+			Expect(ok).To(BeTrue())
+
+			expireWindow(pool)
+			backoff.RefreshMetrics()
+			_, ok = FindMetricWithLabelValues(driftBackoffSecondsMetric, map[string]string{metrics.NodePoolLabel: pool})
+			Expect(ok).To(BeFalse())
+		})
 	})
 })
