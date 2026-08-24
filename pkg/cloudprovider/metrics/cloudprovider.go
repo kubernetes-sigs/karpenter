@@ -37,10 +37,15 @@ const (
 	metricLabelError      = "error"
 	// MetricLabelErrorDefaultVal is the default string value that represents "error type unknown"
 	MetricLabelErrorDefaultVal = ""
-	// Well-known metricLabelError values
-	NodeClaimNotFoundError    = "NodeClaimNotFoundError"
-	NodeClassNotReadyError    = "NodeClassNotReadyError"
-	InsufficientCapacityError = "InsufficientCapacityError"
+)
+
+// Well-known `error` dimension values. These are metric-only values, so they are
+// first-class metrics.Value vars: the value string and its documentation live in
+// one place and callers refer to it by .Name.
+var (
+	NodeClaimNotFoundError    = metrics.Value{Name: "NodeClaimNotFoundError", Help: "The NodeClaim's backing instance was not found."}
+	NodeClassNotReadyError    = metrics.Value{Name: "NodeClassNotReadyError", Help: "The referenced NodeClass is not yet ready."}
+	InsufficientCapacityError = metrics.Value{Name: "InsufficientCapacityError", Help: "The cloud provider had insufficient capacity to fulfill the request."}
 )
 
 // Package-local metric dimensions for the CloudProvider metrics. The controller
@@ -55,13 +60,9 @@ var (
 		Help: "The name of the cloud provider implementation.",
 	}
 	Error = metrics.Label{
-		Name: metricLabelError,
-		Help: "The category of error returned by the CloudProvider call.",
-		Values: []metrics.Value{
-			{Name: NodeClaimNotFoundError, Help: "The NodeClaim's backing instance was not found."},
-			{Name: NodeClassNotReadyError, Help: "The referenced NodeClass is not yet ready."},
-			{Name: InsufficientCapacityError, Help: "The cloud provider had insufficient capacity to fulfill the request."},
-		},
+		Name:   metricLabelError,
+		Help:   "The category of error returned by the CloudProvider call.",
+		Values: []metrics.Value{NodeClaimNotFoundError, NodeClassNotReadyError, InsufficientCapacityError},
 	}
 )
 
@@ -202,11 +203,11 @@ func getLabelsMapForError(ctx context.Context, d *decorator, method string, err 
 func GetErrorTypeLabelValue(err error) string {
 	switch {
 	case cloudprovider.IsInsufficientCapacityError(err):
-		return InsufficientCapacityError
+		return InsufficientCapacityError.Name
 	case cloudprovider.IsNodeClaimNotFoundError(err):
-		return NodeClaimNotFoundError
+		return NodeClaimNotFoundError.Name
 	case cloudprovider.IsNodeClassNotReadyError(err):
-		return NodeClassNotReadyError
+		return NodeClassNotReadyError.Name
 	default:
 		return MetricLabelErrorDefaultVal
 	}

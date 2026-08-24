@@ -32,17 +32,22 @@ const (
 	policyLabel                  = "policy"
 )
 
+// consolidation_type dimension values. These are metric-only values, so they are
+// first-class metrics.Value vars: the value string and its documentation live in
+// one place and the consolidation controllers refer to them by .Name.
+var (
+	MultiNodeConsolidationType  = metrics.Value{Name: "multi", Help: "Consolidation that considers removing multiple nodes at once."}
+	SingleNodeConsolidationType = metrics.Value{Name: "single", Help: "Consolidation that considers removing a single node."}
+)
+
 // Package-local metric dimensions. These are co-located with their value consts
 // (which live in this package) because import cycles prevent centralizing them in
 // pkg/metrics.
 var (
 	ConsolidationType = metrics.Label{
-		Name: ConsolidationTypeLabel,
-		Help: "The consolidation algorithm that produced the decision.",
-		Values: []metrics.Value{
-			{Name: MultiNodeConsolidationType, Help: "Consolidation that considers removing multiple nodes at once."},
-			{Name: SingleNodeConsolidationType, Help: "Consolidation that considers removing a single node."},
-		},
+		Name:   ConsolidationTypeLabel,
+		Help:   "The consolidation algorithm that produced the decision.",
+		Values: []metrics.Value{MultiNodeConsolidationType, SingleNodeConsolidationType},
 	}
 	DecisionDim = metrics.Label{
 		Name: decisionLabel,

@@ -34,14 +34,21 @@ A file for [guiding coding agents](https://agents.md/).
 Metric dimensions (Prometheus labels) are documented in code so the provider's
 docs generator can emit per-dimension help text and values:
 
-- Always describe a dimension with a `metrics.Label` (see `pkg/metrics/labels.go`),
-  never a bare string literal in a metric's label-names slice.
-- A Label's `Values` MUST always be a list of consts, never magic strings.
+- Always describe a dimension with a `metrics.Label{Name, Help, Values}` (see
+  `pkg/metrics/labels.go`), never a bare string literal in a metric's label-names slice.
+- Document each stable value a dimension can take as a `metrics.Value{Name, Help}` in
+  the Label's `Values`. A value's `Name` MUST come from a const, never a magic string.
+  For a value that exists only as a metric dimension value (e.g. a `consolidation_type`
+  or an `error` category), prefer a first-class `metrics.Value` var and refer to it by
+  `.Name` at the emission site, so the string and its docs live in one place.
 - Before adding a new Label, check whether an existing one already describes the
   dimension and reference it (`Label.Name`) instead of redeclaring it.
 - Shared dimensions live in `pkg/metrics/labels.go`. Dimensions that can't be
-  centralized due to import cycles are declared co-located with their value consts
-  in the owning package's `metrics.go`.
+  centralized due to import cycles are declared co-located with their values in the
+  owning package's `metrics.go`.
+- Per-object status condition types are documented in `pkg/metrics.ConditionTypeValues`
+  (keyed by Kind, referencing the `ConditionType*` consts); this is the `type` dimension
+  value set for the object's status-condition metrics.
 
 ## Issue and PR Guidelines
 
