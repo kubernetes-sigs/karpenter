@@ -53,6 +53,11 @@ func isBufferReadyForProvisioning(cb *autoscalingv1beta1.CapacityBuffer) bool {
 	if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition) {
 		return false
 	}
+	// A latched ephemeral buffer is terminal: stop producing virtual pods permanently, even
+	// though it remains ReadyForProvisioning with a positive replica count.
+	if apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1beta1.FulfilledCondition) {
+		return false
+	}
 	if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
 		return false
 	}

@@ -142,6 +142,18 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
+	// Latch ephemeral CapacityBuffers BEFORE scheduling. This must run first: Schedule() calls
+	// GetPendingPods, which injects a buffer's virtual pods into the scheduling simulation and
+	// decides NewNodeClaims. If we latched afterwards, the current cycle would already have
+	// decided to provision for an about-to-be-Fulfilled buffer's stale virtual pods, launching a
+	// node that is reclaimed moments later (observed on KWOK). Latching + evicting the cache here
+	// means Schedule() below sees zero virtual pods for any buffer filled this cycle.
+	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
+		if err := p.updateEphemeralFulfillment(ctx); err != nil {
+			log.FromContext(ctx).Error(err, "updating ephemeral CapacityBuffer fulfillment")
+		}
+	}
+
 	// Schedule pods to potential nodes, exit if nothing to do
 	results, err := p.Schedule(ctx)
 	if err != nil {
@@ -219,7 +231,10 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	// run PVC topology checks on synthetic pods or pollute cluster state with
 	// their "decisions". Gated by the feature flag.
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
-		pods = append(pods, p.virtualPodCache.GetAll(ctx)...)
+		// Shrink-as-fill: drop the virtual pods for chunks a one-shot buffer has already had
+		// consumed (Status.ConsumedReplicas), so a partially-filled ephemeral buffer only
+		// provisions its unfilled remainder rather than its full size.
+		pods = append(pods, p.trimConsumedVirtualPods(ctx, p.virtualPodCache.GetAll(ctx))...)
 	}
 	return pods, nil
 }

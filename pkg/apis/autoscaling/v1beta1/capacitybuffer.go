@@ -136,6 +136,28 @@ type CapacityBufferSpec struct {
 	// this will be used to create as many chunks as fit into these limits.
 	// +optional
 	Limits Limits `json:"limits,omitempty" protobuf:"bytes,6,opt,name=limits"` //nolint:kubeapilinter
+
+	// refillStrategy controls what happens to buffer capacity consumed by real workloads,
+	// orthogonally to provisioningStrategy (which describes the kind of capacity):
+	//   - "recreate" (default): consumed capacity is recreated to maintain the buffer size.
+	//   - "none": consumed capacity is NOT recreated (one-shot / ephemeral). The buffer
+	//     provisions its capacity once, is filled by a matching workload, then becomes terminal
+	//     (Fulfilled) and does not refill.
+	// "recreateUpToLimit" (capped) is defined by the capped buffers proposal.
+	// NOTE: field name/values are still under discussion upstream (alt: onCapacityConsumption /
+	// doNothing); see the ephemeral capacity buffers proposal.
+	// +optional
+	// +kubebuilder:validation:Enum=recreate;none
+	RefillStrategy *string `json:"refillStrategy,omitempty" protobuf:"bytes,7,opt,name=refillStrategy"`
+
+	// fillDeadlineSeconds bounds, in seconds, how long a one-shot buffer (refillStrategy=none) keeps
+	// trying to provision if it is never filled. On expiry the buffer stops producing placeholder
+	// pods and is marked Fulfilled with reason FillDeadlineExceeded; already-provisioned nodes are
+	// reclaimed only by normal consolidation when empty/underutilized. Applies only to
+	// refillStrategy=none.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	FillDeadlineSeconds *int32 `json:"fillDeadlineSeconds,omitempty" protobuf:"varint,8,opt,name=fillDeadlineSeconds"`
 }
 
 // CapacityBufferStatus defines the observed state of CapacityBuffer.
@@ -149,6 +171,14 @@ type CapacityBufferStatus struct {
 	// replicas is the actual number of buffer chunks currently provisioned.
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,2,opt,name=replicas"`
+
+	// consumedReplicas is a monotonically non-decreasing high-water mark of how many buffer chunks
+	// have been consumed by a matching workload. For a one-shot buffer (refillStrategy=none) the
+	// consumer provisions only replicas-consumedReplicas chunks (shrink-as-fill) and never recreates
+	// consumed capacity. When consumedReplicas reaches replicas the buffer becomes Fulfilled.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ConsumedReplicas *int32 `json:"consumedReplicas,omitempty" protobuf:"varint,6,opt,name=consumedReplicas"`
 
 	// podTemplateGeneration is the observed generation of the PodTemplate, used
 	// to determine if the status is up-to-date with the desired `spec.podTemplateRef`.

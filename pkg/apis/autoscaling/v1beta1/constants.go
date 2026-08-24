@@ -25,10 +25,34 @@ import "math"
 const (
 	ActiveProvisioningStrategy = "buffer.x-k8s.io/active-capacity"
 
+	// Refill-strategy values for CapacityBufferSpec.RefillStrategy. This axis is orthogonal to
+	// ProvisioningStrategy (which describes the kind of capacity). See the ephemeral buffers
+	// proposal; field name/values are still under discussion upstream.
+	//   RefillStrategyRecreate (default): consumed capacity is recreated to maintain buffer size.
+	//   RefillStrategyNone: consumed capacity is NOT recreated (one-shot / ephemeral).
+	RefillStrategyRecreate = "recreate"
+	RefillStrategyNone     = "none"
+
 	// Condition types written to CapacityBuffer status.
 	ReadyForProvisioningCondition = "ReadyForProvisioning"
 	ProvisioningCondition         = "Provisioning"
 	LimitedByQuotasCondition      = "LimitedByQuotas"
+
+	// FulfilledCondition is a terminal condition on a one-shot (RefillStrategyNone) CapacityBuffer,
+	// set once matching bound capacity covers its intended size, or once the fill deadline elapses.
+	// A Fulfilled buffer emits zero virtual pods thereafter and its nodes are no longer protected
+	// from consolidation.
+	FulfilledCondition = "Fulfilled"
+
+	// Reasons for the Fulfilled condition.
+	FulfilledReasonBufferFilled     = "BufferFilled"
+	FulfilledReasonDeadlineExceeded = "FillDeadlineExceeded"
+
+	// BufferMatchSelectorAnnotation carries a kubectl-style label selector identifying the pods
+	// (in the buffer's namespace) that count toward filling a one-shot buffer. INTERIM: the
+	// consumption-tracking / matching surface is being defined by the capped buffers proposal
+	// (expected as a spec field, e.g. matchingPodSelector); this annotation is used until it lands.
+	BufferMatchSelectorAnnotation = "karpenter.sh/buffer-match-selector"
 
 	// Supported scalableRef kinds.
 	KindDeployment  = "Deployment"
