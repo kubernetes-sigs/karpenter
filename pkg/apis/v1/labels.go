@@ -29,30 +29,47 @@ import (
 
 // Well known labels and resources
 const (
-	ArchitectureAmd64    = "amd64"
-	ArchitectureArm64    = "arm64"
-	CapacityTypeSpot     = "spot"
+	// ArchitectureAmd64 is the value used for the kubernetes.io/arch requirement to select amd64 (x86-64) nodes.
+	ArchitectureAmd64 = "amd64"
+	// ArchitectureArm64 is the value used for the kubernetes.io/arch requirement to select arm64 nodes.
+	ArchitectureArm64 = "arm64"
+	// CapacityTypeSpot is the CapacityTypeLabelKey value for interruptible, discounted capacity (e.g. spot instances).
+	CapacityTypeSpot = "spot"
+	// CapacityTypeOnDemand is the CapacityTypeLabelKey value for standard, on-demand capacity.
 	CapacityTypeOnDemand = "on-demand"
+	// CapacityTypeReserved is the CapacityTypeLabelKey value for pre-purchased, reserved capacity.
 	CapacityTypeReserved = "reserved"
 )
 
 // Karpenter specific domains and labels
 const (
-	NodePoolLabelKey            = apis.Group + "/nodepool"
-	NodeInitializedLabelKey     = apis.Group + "/initialized"
-	NodeRegisteredLabelKey      = apis.Group + "/registered"
+	// NodePoolLabelKey is set on NodeClaims and Nodes to record the NodePool that owns them.
+	NodePoolLabelKey = apis.Group + "/nodepool"
+	// NodeInitializedLabelKey is set to "true" on a Node once Karpenter considers it initialized and ready for workloads.
+	NodeInitializedLabelKey = apis.Group + "/initialized"
+	// NodeRegisteredLabelKey is set to "true" on a Node once it has registered with the cluster and been linked to its NodeClaim.
+	NodeRegisteredLabelKey = apis.Group + "/registered"
+	// NodeDoNotSyncTaintsLabelKey, when set to "true" on a Node, tells Karpenter not to sync taints from the NodeClaim,
+	// leaving taint management to the cloud provider.
 	NodeDoNotSyncTaintsLabelKey = apis.Group + "/do-not-sync-taints"
-	CapacityTypeLabelKey        = apis.Group + "/capacity-type"
+	// CapacityTypeLabelKey records the capacity type of a Node (e.g. spot, on-demand, or reserved).
+	CapacityTypeLabelKey = apis.Group + "/capacity-type"
 )
 
 // Karpenter specific annotations
 const (
-	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
-	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
-	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
-	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
+	// DoNotDisruptAnnotationKey, when set to "true" on a Node or Pod, prevents Karpenter from voluntarily disrupting it.
+	DoNotDisruptAnnotationKey = apis.Group + "/do-not-disrupt"
+	// ProviderCompatibilityAnnotationKey records provider-specific compatibility information used across Karpenter versions.
+	ProviderCompatibilityAnnotationKey = apis.CompatibilityGroup + "/provider"
+	// NodePoolHashAnnotationKey stores the hash of the owning NodePool's spec, used to detect drift.
+	NodePoolHashAnnotationKey = apis.Group + "/nodepool-hash"
+	// NodePoolHashVersionAnnotationKey records the version of the NodePool hashing algorithm used to compute NodePoolHashAnnotationKey.
+	NodePoolHashVersionAnnotationKey = apis.Group + "/nodepool-hash-version"
+	// NodeClaimTerminationTimestampAnnotationKey records the time at which a NodeClaim should be forcefully terminated.
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
-	NodeClaimMinValuesRelaxedAnnotationKey     = apis.Group + "/nodeclaim-min-values-relaxed"
+	// NodeClaimMinValuesRelaxedAnnotationKey is set to "true" when the scheduler relaxed a requirement's minValues in order to launch the NodeClaim.
+	NodeClaimMinValuesRelaxedAnnotationKey = apis.Group + "/nodeclaim-min-values-relaxed"
 	// DRADriversAnnotationKey records the comma-separated set of DRA driver names whose devices were allocated to pods
 	// scheduled to this NodeClaim. The initialization controller can gate on these drivers having published their
 	// ResourceSlices before marking the node initialized.
@@ -61,6 +78,7 @@ const (
 
 // Karpenter specific finalizers
 const (
+	// TerminationFinalizer is added to Nodes so that Karpenter can gracefully drain and clean them up before deletion.
 	TerminationFinalizer = apis.Group + "/termination"
 )
 
