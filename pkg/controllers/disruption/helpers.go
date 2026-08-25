@@ -54,7 +54,10 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	schedulerOpts []scheduling.Options, candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
-	nodes := cluster.DeepCopyNodes()
+	// Snapshot is cheap now (see Cluster.Snapshot's doc comment) -- every call gets a point-in-time view that's
+	// always current as of this instant, so there's no benefit to threading a shared snapshot through callers
+	// anymore.
+	nodes := cluster.Snapshot()
 	deletingNodes := nodes.Deleting()
 	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool {
 		return !candidateNames.Has(n.Name())
@@ -204,7 +207,7 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	if err != nil {
 		return nil, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	allNodes := cluster.DeepCopyNodes()
+	allNodes := cluster.Snapshot()
 	allCandidates := lo.FilterMap(allNodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil
@@ -263,7 +266,9 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	disruptionBudgetMapping := map[string]int{}
 	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
 	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
-	for _, node := range cluster.DeepCopyNodes() {
+	// This loop is read-only (only counts nodes), so it's safe to iterate the live cluster state directly
+	// instead of taking a deep-copy.
+	for node := range cluster.Nodes() {
 		// We only consider nodes that we own and are initialized towards the total.
 		// If a node is launched/registered, but not initialized, pods aren't scheduled
 		// to the node, and these are treated as unhealthy until they're cleaned up.
