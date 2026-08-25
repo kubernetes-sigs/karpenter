@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // Currently NodeClaims be in one of these states
@@ -195,14 +196,17 @@ func (n *NodePoolState) UpdateNodeClaim(nodeClaim *v1.NodeClaim, markedForDeleti
 		n.MarkNodeClaimDeleting(npName, nodeClaim.Name)
 		return
 	}
-	// While the disruption controller has the NodeClaim marked as disrupting (static NodeClaims only,
-	// see MarkNodeClaimPendingDisruption), it must stay out of Active. Otherwise, an informer reconcile
-	// of this NodeClaim (e.g. of the DisruptionReason condition patch itself) would race the disruption
-	// controller and move it back to Active, inflating the running count and causing the static
-	// deprovisioner to delete the in-flight replacement NodeClaim. We key off of the condition, rather
-	// than our own PendingDisruption tracking, so that this self-heals once the disruption controller
-	// clears the condition on an abandoned/failed disruption command (see ClearNodeClaimsCondition).
-	if nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue() {
+	// While the disruption controller has the NodeClaim marked as disrupting, it must stay out of
+	// Active. Otherwise, an informer reconcile of this NodeClaim (e.g. of the DisruptionReason condition
+	// patch itself) would race the disruption controller and move it back to Active, inflating the
+	// running count and causing the static deprovisioner to delete the in-flight replacement NodeClaim.
+	// This applies to any NodeClaim with the condition set, not just ones tracked via
+	// MarkNodeClaimPendingDisruption (today that's static NodeClaims only, since GetNodeCount is only
+	// consumed by static-NodePool-scoped logic: the static provisioning/deprovisioning controllers and
+	// the disruption controller's static drift check). We key off of the condition, rather than our own
+	// PendingDisruption tracking, so that this self-heals once the disruption controller clears the
+	// condition on an abandoned/failed disruption command (see ClearNodeClaimsCondition).
+	if nodeclaimutils.IsPendingDisruption(nodeClaim) {
 		return
 	}
 	n.MarkNodeClaimActive(npName, nodeClaim.Name)
