@@ -2759,6 +2759,27 @@ var _ = Describe("NodePoolState Tracking", func() {
 				Expect(deleting).To(Equal(0))
 				Expect(pendingdisruption).To(Equal(0))
 			})
+
+			It("should move a NodeClaim to Deleting rather than PendingDisruption when both markedForDeletion and DisruptionReason are set", func() {
+				cluster.NodePoolState.MarkNodeClaimPendingDisruption(nodePool.Name, nodeClaim.Name)
+				running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+				Expect(pendingdisruption).To(Equal(1))
+
+				// The deletion branch in UpdateNodeClaim must be checked before the DisruptionReason
+				// condition, so a NodeClaim that's both marked for deletion and still carrying the
+				// condition lands in Deleting, not stuck in PendingDisruption.
+				nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, "Drifted", "Drifted")
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				running, deleting, pendingdisruption = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(1))
+				Expect(pendingdisruption).To(Equal(0))
+			})
 		})
 
 		Context("DeleteNodeClaim", func() {
