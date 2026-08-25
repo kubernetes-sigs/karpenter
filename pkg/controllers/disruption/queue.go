@@ -56,6 +56,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
@@ -239,11 +240,20 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			return
 		}
 		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()))...)
-		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-			metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.Reason())),
-			metrics.NodePoolLabel:     cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel: cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-		})
+		// Drift also flows through this queue, so only report a policy for consolidation.
+		consolidationPolicy := ""
+		if cmd.ConsolidationType() != "" {
+			consolidationPolicy = pretty.ToSnakeCase(string(cmd.Candidates[i].NodePool.Spec.Disruption.ConsolidationPolicy))
+		}
+		labels := map[string]string{
+			metrics.ReasonLabel:              pretty.ToSnakeCase(string(cmd.Reason())),
+			metrics.NodePoolLabel:            cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
+			metrics.ConsolidationPolicyLabel: consolidationPolicy,
+			metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(cmd.Candidates[i].NodeClaim),
+		}
+		metrics.NodeClaimsDisruptedTotal.Inc(labels)
+		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.

@@ -271,11 +271,11 @@ func (i *InstanceType) groupOfferingsByOverride() []AllocatableOfferings {
 func (i *InstanceType) computeAllocatable(capacityOverride corev1.ResourceList, overheadOverride *InstanceTypeOverhead) corev1.ResourceList {
 	capacity := i.Capacity
 	if len(capacityOverride) > 0 {
-		capacity = resources.Merge(i.Capacity, capacityOverride)
+		capacity = lo.Assign(i.Capacity, capacityOverride)
 	}
 	overhead := i.Overhead.Total()
 	if overheadOverride != nil {
-		overhead = resources.Merge(overhead, overheadOverride.Total())
+		overhead = lo.Assign(overhead, overheadOverride.Total())
 	}
 	allocatable := resources.Subtract(capacity, overhead)
 
@@ -410,7 +410,12 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 				if _, ok := valuesForKey[req.Key]; !ok {
 					valuesForKey[req.Key] = sets.New[string]()
 				}
-				valuesForKey[req.Key] = valuesForKey[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
+				// Only count values that the requirement allows. The instance type may offer values (e.g. zones)
+				// that the requirements exclude after being narrowed by pod constraints such as volume topology
+				// or topology spread, and those values can't be satisfied by the resulting NodeClaim.
+				valuesForKey[req.Key] = valuesForKey[req.Key].Insert(lo.Filter(it.Requirements.Get(req.Key).Values(), func(value string, _ int) bool {
+					return req.Has(value)
+				})...)
 			}
 		}
 		for k, v := range valuesForKey {

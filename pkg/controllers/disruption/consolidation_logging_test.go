@@ -25,10 +25,12 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	pkgscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -150,6 +152,201 @@ func TestGetCommandEstimatedSavings_MultipleReplacements(t *testing.T) {
 	// Use tolerance for floating point comparison
 	if diff := savings - expectedSavings; diff < -floatComparisonDelta || diff > floatComparisonDelta {
 		t.Errorf("Command.EstimatedSavings() = %v, want %v (verifying multi-NodeClaim cost summing)", savings, expectedSavings)
+	}
+}
+
+func TestGetCommandEstimatedSavings_OnDemandOnlyNodePool(t *testing.T) {
+	// This test verifies that EstimatedSavings only considers offerings that are valid for the NodePool under
+	// consideration (e.g. on-demand-only NodePool)
+	candidate := mockCandidate("node-1")
+	candidate.instanceType = fake.NewInstanceType("source-type",
+		fake.WithOfferings(cloudprovider.Offering{
+			Available: true,
+			Price:     0.50,
+			Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone: "us-west-2a",
+			}),
+		}),
+	)
+	candidate.Price = 0.50
+
+	destType := fake.NewInstanceType("dest-type",
+		fake.WithOfferings(
+			cloudprovider.Offering{
+				Available: true,
+				Price:     0.10,
+				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
+					corev1.LabelTopologyZone: "us-west-2a",
+				}),
+			},
+			cloudprovider.Offering{
+				Available: true,
+				Price:     0.40,
+				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+					corev1.LabelTopologyZone: "us-west-2a",
+				}),
+			},
+		),
+	)
+
+	nodeClaimReqs := pkgscheduling.NewRequirements(
+		pkgscheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+	)
+
+	cmd := Command{
+		Candidates:   []*Candidate{candidate},
+		Replacements: []*Replacement{{}},
+		Results: scheduling.Results{
+			NewNodeClaims: []*scheduling.NodeClaim{
+				{
+					NodeClaimTemplate: scheduling.NodeClaimTemplate{
+						InstanceTypeOptions: []*cloudprovider.InstanceType{destType},
+						Requirements:        nodeClaimReqs,
+					},
+				},
+			},
+		},
+	}
+
+	// Expected: sourcePrice (0.50) - destPrice (0.40, the on-demand offering) = 0.10
+	// Without filtering: 0.50 - 0.10 = 0.40 (bug: spot price used as dest price)
+	savings := cmd.EstimatedSavings()
+	expectedSavings := 0.10
+
+	if diff := savings - expectedSavings; diff < -floatComparisonDelta || diff > floatComparisonDelta {
+		t.Errorf("Command.EstimatedSavings() = %v, want %v", savings, expectedSavings)
+	}
+}
+
+func TestGetCommandEstimatedSavings_ZoneRequirement(t *testing.T) {
+	// Verifies EstimatedSavings filters AZ requirements properly
+	candidate := mockCandidate("node-1")
+	candidate.instanceType = fake.NewInstanceType("source-type",
+		fake.WithOfferings(cloudprovider.Offering{
+			Available: true,
+			Price:     0.50,
+			Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone: "us-west-2a",
+			}),
+		}),
+	)
+	candidate.Price = 0.50
+
+	destType := fake.NewInstanceType("dest-type",
+		fake.WithOfferings(
+			cloudprovider.Offering{
+				Available: true,
+				Price:     0.05,
+				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+					corev1.LabelTopologyZone: "us-west-2b",
+				}),
+			},
+			cloudprovider.Offering{
+				Available: true,
+				Price:     0.45,
+				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+					corev1.LabelTopologyZone: "us-west-2a",
+				}),
+			},
+		),
+	)
+
+	nodeClaimReqs := pkgscheduling.NewRequirements(
+		pkgscheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+	)
+
+	cmd := Command{
+		Candidates:   []*Candidate{candidate},
+		Replacements: []*Replacement{{}},
+		Results: scheduling.Results{
+			NewNodeClaims: []*scheduling.NodeClaim{
+				{
+					NodeClaimTemplate: scheduling.NodeClaimTemplate{
+						InstanceTypeOptions: []*cloudprovider.InstanceType{destType},
+						Requirements:        nodeClaimReqs,
+					},
+				},
+			},
+		},
+	}
+
+	// Expected: sourcePrice (0.50) - destPrice (0.45, us-west-2a) = 0.05
+	// The us-west-2b offering (0.05) must be excluded because the NodePool requires us-west-2a.
+	savings := cmd.EstimatedSavings()
+	expectedSavings := 0.05
+
+	if diff := savings - expectedSavings; diff < -floatComparisonDelta || diff > floatComparisonDelta {
+		t.Errorf("Command.EstimatedSavings() = %v, want %v (compatible filter must apply to non-capacity-type requirements)", savings, expectedSavings)
+	}
+}
+
+func TestGetCommandEstimatedSavings_NoCapacityTypeRestriction(t *testing.T) {
+	// Negative control such that we consider all offerings for NodePool with no capacity-type restriction
+	candidate := mockCandidate("node-1")
+	candidate.instanceType = fake.NewInstanceType("source-type",
+		fake.WithOfferings(cloudprovider.Offering{
+			Available: true,
+			Price:     0.50,
+			Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone: "us-west-2a",
+			}),
+		}),
+	)
+	candidate.Price = 0.50
+
+	destType := fake.NewInstanceType("dest-type",
+		fake.WithOfferings(
+			cloudprovider.Offering{
+				Available: true,
+				Price:     0.10,
+				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
+					corev1.LabelTopologyZone: "us-west-2a",
+				}),
+			},
+			cloudprovider.Offering{
+				Available: true,
+				Price:     0.40,
+				Requirements: pkgscheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+					corev1.LabelTopologyZone: "us-west-2a",
+				}),
+			},
+		),
+	)
+
+	nodeClaimReqs := pkgscheduling.NewRequirements(
+		pkgscheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand, v1.CapacityTypeSpot),
+	)
+
+	cmd := Command{
+		Candidates:   []*Candidate{candidate},
+		Replacements: []*Replacement{{}},
+		Results: scheduling.Results{
+			NewNodeClaims: []*scheduling.NodeClaim{
+				{
+					NodeClaimTemplate: scheduling.NodeClaimTemplate{
+						InstanceTypeOptions: []*cloudprovider.InstanceType{destType},
+						Requirements:        nodeClaimReqs,
+					},
+				},
+			},
+		},
+	}
+
+	// Expected: sourcePrice (0.50) - destPrice (0.10, spot is legal) = 0.40
+	savings := cmd.EstimatedSavings()
+	expectedSavings := 0.40
+
+	if diff := savings - expectedSavings; diff < -floatComparisonDelta || diff > floatComparisonDelta {
+		t.Errorf("Command.EstimatedSavings() = %v, want %v (fix must not exclude legal offerings)", savings, expectedSavings)
 	}
 }
 

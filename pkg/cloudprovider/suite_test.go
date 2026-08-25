@@ -172,9 +172,9 @@ var _ = Describe("Instance Type", func() {
 		Expect(groups[0].Allocatable[extendedResource]).To(BeZero())
 		Expect(groups[0].Offerings).To(HaveLen(2)) // two base offerings
 
-		// Override allocatable: has extended resource, reduced memory due to additional overhead
+		// Override allocatable: has extended resource, reduced memory due to overhead override (replaces base)
 		Expect(groups[1].Allocatable.Cpu().MilliValue()).To(BeNumerically("==", 3900))
-		expectedOverrideMem := resource.MustParse("12Gi")
+		expectedOverrideMem := resource.MustParse("13Gi")
 		Expect(groups[1].Allocatable.Memory().Value()).To(BeNumerically("==", expectedOverrideMem.Value()))
 		slotQty := groups[1].Allocatable[extendedResource]
 		Expect(slotQty.Value()).To(BeNumerically("==", 12))

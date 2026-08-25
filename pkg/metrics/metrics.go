@@ -64,12 +64,30 @@ var (
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
 			Name:      "disrupted_total",
-			Help:      "Number of nodeclaims disrupted in total by Karpenter. Labeled by reason the nodeclaim was disrupted and the owning nodepool.",
+			Help:      "Number of nodeclaims disrupted in total by Karpenter. Labeled by reason the nodeclaim was disrupted, the owning nodepool, the capacity type, the consolidation policy, and the termination mode.",
 		},
 		[]string{
 			ReasonLabel,
 			NodePoolLabel,
 			CapacityTypeLabel,
+			ConsolidationPolicyLabel,
+			TerminationModeLabel,
+		},
+	)
+	PodsDisruptionInitiatedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: PodSubsystem,
+			Name:      "disruption_initiated_total",
+			Help:      "Number of pod disruptions initiated in total by Karpenter, incremented by the reschedulable pod count whenever the underlying nodeclaim is disrupted. Labeled by reason the nodeclaim was disrupted, the owning nodepool, the capacity type, the consolidation policy, and the termination mode. Pods owned by DaemonSets and mirror pods are excluded.",
+		},
+		[]string{
+			ReasonLabel,
+			NodePoolLabel,
+			CapacityTypeLabel,
+			ConsolidationPolicyLabel,
+			TerminationModeLabel,
 		},
 	)
 	NodesCreatedTotal = opmetrics.NewPrometheusCounter(

@@ -31,6 +31,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -134,7 +136,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 		// allocated-device tracking state. The controller must be reconciled (hydrated) before a provisioning round
 		// that relies on the in-cluster allocated-device set — see provisionDRA.
 		draController = deviceallocation.NewController(env.Client)
-		draProvisioner = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, draController)
+		draProvisioner = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
 	})
 
 	// provisionDRA reconciles the deviceallocation controller (so the allocator sees the current in-cluster allocated
@@ -330,6 +332,58 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
 			Expect(devices).To(HaveLen(2), "both requests are satisfied by attribute-sharing devices")
+		})
+	})
+
+	Context("Prioritized alternatives / FirstAvailable (H)", func() {
+		// requestRefs returns the Request field of every allocation result on a bound claim, in order.
+		requestRefs := func(namespace, name string) []string {
+			GinkgoHelper()
+			claim := &resourcev1.ResourceClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, claim)).To(Succeed())
+			Expect(claim.Status.Allocation).ToNot(BeNil(), "ResourceClaim %s/%s has no allocation", namespace, name)
+			return lo.Map(claim.Status.Allocation.Devices.Results, func(r resourcev1.DeviceRequestAllocationResult, _ int) string {
+				return r.Request
+			})
+		}
+
+		It("should bind the selected sub-request with a qualified reference when falling back (H1)", func() {
+			// Only 2 GPUs available: prefer-4 cannot be satisfied, so the claim must fall back to fallback-2.
+			// The bound result must reference the fallback sub-request via the qualified "req/fallback-2" form.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 2)}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			claim := test.ResourceClaimForRequests("gpu-claim", test.FirstAvailableDeviceRequest("req",
+				test.DeviceSubRequest("prefer-4", "gpu", 4),
+				test.DeviceSubRequest("fallback-2", "gpu", 2),
+			))
+			ExpectApplied(ctx, env.Client, claim)
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			ExpectScheduled(ctx, env.Client, pod)
+			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
+			Expect(devices).To(HaveLen(2), "fallback-2 wins on the 2-GPU instance type")
+			Expect(requestRefs("default", "gpu-claim")).To(HaveEach("req/fallback-2"))
+		})
+
+		It("should bind the preferred sub-request with a qualified reference when it fits (H2)", func() {
+			// 4 GPUs available: the preferred sub-request wins. The bound result references "req/prefer-4".
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 4)}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			claim := test.ResourceClaimForRequests("gpu-claim", test.FirstAvailableDeviceRequest("req",
+				test.DeviceSubRequest("prefer-4", "gpu", 4),
+				test.DeviceSubRequest("fallback-2", "gpu", 2),
+			))
+			ExpectApplied(ctx, env.Client, claim)
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			ExpectScheduled(ctx, env.Client, pod)
+			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
+			Expect(devices).To(HaveLen(4), "prefer-4 wins on the 4-GPU instance type")
+			Expect(requestRefs("default", "gpu-claim")).To(HaveEach("req/prefer-4"))
 		})
 	})
 

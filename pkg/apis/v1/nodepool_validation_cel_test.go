@@ -145,6 +145,18 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
+		It("should default consolidateAfter to '0s' when omitted on a dynamic NodePool", func() {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			unstructured.RemoveNestedField(u, "spec", "disruption", "consolidateAfter")
+			obj := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Succeed())
+			value, ok, err := unstructured.NestedString(obj.Object, "spec", "disruption", "consolidateAfter")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ok).To(BeTrue())
+			Expect(value).To(Equal("0s"))
+		})
 		DescribeTable("should succeed on a valid consolidationPolicy", func(value string) {
 			raw := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
 			lo.Must0(unstructured.SetNestedField(raw, value, "spec", "disruption", "consolidationPolicy"))
@@ -890,6 +902,16 @@ var _ = Describe("CEL/Validation", func() {
 				np.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 			}),
 		)
+
+		It("should succeed when consolidateAfter is omitted on a static NodePool", func() {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			lo.Must0(unstructured.SetNestedField(u, int64(3), "spec", "replicas"))
+			unstructured.RemoveNestedField(u, "spec", "disruption", "consolidateAfter")
+			obj := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Succeed())
+		})
 
 		Context("Update Scenarios", func() {
 			It("should succeed when increasing replicas in a NodePool", func() {

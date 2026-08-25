@@ -134,6 +134,26 @@ func AllDeviceRequest(name, className string) resourcev1.DeviceRequest {
 	}
 }
 
+// FirstAvailableDeviceRequest builds a DeviceRequest with an ordered FirstAvailable (prioritized
+// alternatives) list. Sub-requests are tried in order; the first satisfiable one wins. When a
+// FirstAvailable sub-request is selected, its allocation result carries the qualified
+// "<name>/<subName>" request reference.
+func FirstAvailableDeviceRequest(name string, subRequests ...resourcev1.DeviceSubRequest) resourcev1.DeviceRequest {
+	return resourcev1.DeviceRequest{
+		Name:           name,
+		FirstAvailable: subRequests,
+	}
+}
+
+// DeviceSubRequest builds a single ExactCount sub-request for a FirstAvailable list.
+func DeviceSubRequest(subName, className string, count int64) resourcev1.DeviceSubRequest {
+	return resourcev1.DeviceSubRequest{
+		Name:            subName,
+		DeviceClassName: className,
+		Count:           count,
+	}
+}
+
 // MatchAttributeConstraint builds a DeviceConstraint requiring all listed requests to share an attribute value.
 // If requests is empty, the constraint applies to all requests in the claim.
 func MatchAttributeConstraint(attribute string, requests ...string) resourcev1.DeviceConstraint {
