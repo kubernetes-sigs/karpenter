@@ -136,7 +136,7 @@ var _ = Describe("boundMatchingCapacity", func() {
 			boundPod("ns", other, "2", "4Gi"),       // non-matching -> excluded
 			boundPod("other-ns", match, "2", "4Gi"), // wrong namespace -> excluded
 		}
-		got := boundMatchingCapacity("ns", sel, pods)
+		got := boundMatchingCapacity("ns", sel, pods, time.Time{})
 		cpu := got[corev1.ResourceCPU]
 		mem := got[corev1.ResourceMemory]
 		wantCPU := resource.MustParse("4")
@@ -149,14 +149,14 @@ var _ = Describe("boundMatchingCapacity", func() {
 
 	It("does not include the injected v1.ResourcePods count", func() {
 		pods := []corev1.Pod{boundPod("ns", match, "2", "4Gi")}
-		got := boundMatchingCapacity("ns", sel, pods)
+		got := boundMatchingCapacity("ns", sel, pods, time.Time{})
 		_, hasPods := got[corev1.ResourcePods]
 		Expect(hasPods).To(BeFalse())
 	})
 
 	It("returns an empty-ish list when nothing matches", func() {
 		pods := []corev1.Pod{boundPod("ns", other, "2", "4Gi")}
-		got := boundMatchingCapacity("ns", sel, pods)
+		got := boundMatchingCapacity("ns", sel, pods, time.Time{})
 		cpu := got[corev1.ResourceCPU]
 		Expect(cpu.IsZero()).To(BeTrue())
 	})
@@ -165,7 +165,7 @@ var _ = Describe("boundMatchingCapacity", func() {
 		pods := []corev1.Pod{
 			podWith("ns", match, "2", "4Gi", "node-1", []corev1.PodSchedulingGate{{Name: "kueue.x-k8s.io/topology"}}),
 		}
-		got := boundMatchingCapacity("ns", sel, pods)
+		got := boundMatchingCapacity("ns", sel, pods, time.Time{})
 		cpu := got[corev1.ResourceCPU]
 		Expect(cpu.IsZero()).To(BeTrue())
 	})

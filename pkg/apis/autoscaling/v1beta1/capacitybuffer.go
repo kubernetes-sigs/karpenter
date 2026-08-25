@@ -201,6 +201,14 @@ type CapacityBufferStatus struct {
 	ProvisioningStrategy *string `json:"provisioningStrategy,omitempty" protobuf:"bytes,5,opt,name=provisioningStrategy"`
 }
 
+// IsTerminal reports whether a one-shot buffer has reached a terminal state — either filled
+// successfully (Fulfilled) or given up after its deadline (Expired). A terminal buffer produces no
+// further capacity. The two conditions are mutually exclusive; either means "stop provisioning".
+func (cb *CapacityBuffer) IsTerminal() bool {
+	return apimeta.IsStatusConditionTrue(cb.Status.Conditions, FulfilledCondition) ||
+		apimeta.IsStatusConditionTrue(cb.Status.Conditions, ExpiredCondition)
+}
+
 // SetCondition sets or updates a status condition on the CapacityBuffer.
 func (cb *CapacityBuffer) SetCondition(condType string, condStatus metav1.ConditionStatus, reason, message string) {
 	apimeta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{

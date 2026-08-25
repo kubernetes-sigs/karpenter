@@ -114,9 +114,11 @@ var _ = Describe("updateEphemeralFulfillment", func() {
 		}
 	}
 
-	// matchingPod builds a pod labeled app=gang, requesting cpu, optionally bound to a node.
+	// matchingPod builds a pod labeled app=gang, requesting cpu, optionally bound to a node. A bound
+	// pod carries a PodScheduled condition transitioned just after the buffer's readiness (start), so
+	// it counts past the readiness boundary; use matchingPodBoundAt to place the binding earlier.
 	matchingPod := func(name, cpu, nodeName string) *corev1.Pod {
-		return &corev1.Pod{
+		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", Labels: map[string]string{"app": "gang"}},
 			Spec: corev1.PodSpec{
 				NodeName: nodeName,
@@ -126,12 +128,45 @@ var _ = Describe("updateEphemeralFulfillment", func() {
 				}},
 			},
 		}
+		if nodeName != "" {
+			pod.Status.Conditions = []corev1.PodCondition{{
+				Type:               corev1.PodScheduled,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(start.Add(time.Minute)),
+			}}
+		}
+		return pod
 	}
 
-	fulfilled := func(c client.Client, name string) *metav1.Condition {
+	// matchingPodBoundAt is matchingPod with the PodScheduled transition set to a specific time,
+	// used to exercise the readiness boundary (pods bound before the buffer was ready).
+	//nolint:unparam // test helper kept general; cpu is constant across current callers
+	matchingPodBoundAt := func(name, cpu, nodeName string, boundAt time.Time) *corev1.Pod {
+		pod := matchingPod(name, cpu, nodeName)
+		pod.Status.Conditions = []corev1.PodCondition{{
+			Type:               corev1.PodScheduled,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: metav1.NewTime(boundAt),
+		}}
+		return pod
+	}
+
+	condOf := func(c client.Client, name, condType string) *metav1.Condition {
 		cb := &autoscalingv1beta1.CapacityBuffer{}
 		Expect(c.Get(ctx, client.ObjectKey{Namespace: "default", Name: name}, cb)).To(Succeed())
-		return apimeta.FindStatusCondition(cb.Status.Conditions, autoscalingv1beta1.FulfilledCondition)
+		return apimeta.FindStatusCondition(cb.Status.Conditions, condType)
+	}
+	fulfilled := func(c client.Client, name string) *metav1.Condition {
+		return condOf(c, name, autoscalingv1beta1.FulfilledCondition)
+	}
+	expired := func(c client.Client, name string) *metav1.Condition {
+		return condOf(c, name, autoscalingv1beta1.ExpiredCondition)
+	}
+	// consumedReplicas reads the buffer's shrink high-water mark.
+	consumedReplicas := func(c client.Client, name string) int32 {
+		cb := &autoscalingv1beta1.CapacityBuffer{}
+		Expect(c.Get(ctx, client.ObjectKey{Namespace: "default", Name: name}, cb)).To(Succeed())
+		return lo.FromPtr(cb.Status.ConsumedReplicas)
 	}
 
 	const sel = "app=gang"
@@ -203,19 +238,37 @@ var _ = Describe("updateEphemeralFulfillment", func() {
 		Expect(fulfilled(c, "gang")).To(BeNil())
 	})
 
-	It("latches Fulfilled=FillDeadlineExceeded when the deadline elapses unfilled", func() {
+	It("does NOT count pods bound before the buffer became ready (readiness boundary)", func() {
+		cb := ephemeralBufferReady("gang", 2, map[string]string{autoscalingv1beta1.BufferMatchSelectorAnnotation: sel})
+		// Both pods match and are bound, but they bound an hour BEFORE the buffer went ready — this
+		// buffer did not provision for them, so they must not consume it.
+		p, c, _ := newProv(cb, template1cpu("gang"),
+			matchingPodBoundAt("old1", "1", "node-1", start.Add(-time.Hour)),
+			matchingPodBoundAt("old2", "1", "node-1", start.Add(-time.Hour)),
+		)
+		Expect(p.updateEphemeralFulfillment(ctx)).To(Succeed())
+		Expect(fulfilled(c, "gang")).To(BeNil())
+		Expect(consumedReplicas(c, "gang")).To(Equal(int32(0)))
+	})
+
+	It("latches Expired=FillDeadlineExceeded (NOT Fulfilled) when the deadline elapses unfilled", func() {
 		cb := ephemeralBufferReady("gang", 4, map[string]string{autoscalingv1beta1.BufferMatchSelectorAnnotation: sel})
 		cb.Spec.FillDeadlineSeconds = lo.ToPtr(int32(30 * 60)) // 30m
 		p, c, _ := newProv(cb, template1cpu("gang"))           // no matching pods at all
-		// Before the deadline: no latch.
+		// Before the deadline: not terminal.
 		Expect(p.updateEphemeralFulfillment(ctx)).To(Succeed())
 		Expect(fulfilled(c, "gang")).To(BeNil())
+		Expect(expired(c, "gang")).To(BeNil())
 		// Advance past the deadline.
 		fc.SetTime(start.Add(31 * time.Minute))
 		Expect(p.updateEphemeralFulfillment(ctx)).To(Succeed())
-		cond := fulfilled(c, "gang")
+		// Deadline give-up is reported as Expired, NOT Fulfilled — consumers must distinguish
+		// success from expiry (a Fulfilled=True here would misreport an unfilled buffer as filled).
+		Expect(fulfilled(c, "gang")).To(BeNil())
+		cond := expired(c, "gang")
 		Expect(cond).ToNot(BeNil())
-		Expect(cond.Reason).To(Equal(autoscalingv1beta1.FulfilledReasonDeadlineExceeded))
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(autoscalingv1beta1.ExpiredReasonDeadlineExceeded))
 	})
 
 	It("is sticky: once Fulfilled it is not re-evaluated even if matching pods disappear", func() {
@@ -290,13 +343,6 @@ var _ = Describe("updateEphemeralFulfillment", func() {
 		// ...but the cache MUST still be empty — provisioning is halted regardless of the write.
 		Expect(cache.GetAll(ctx)).To(BeEmpty())
 	})
-
-	// consumedReplicas reads the buffer's shrink high-water mark.
-	consumedReplicas := func(c client.Client, name string) int32 {
-		cb := &autoscalingv1beta1.CapacityBuffer{}
-		Expect(c.Get(ctx, client.ObjectKey{Namespace: "default", Name: name}, cb)).To(Succeed())
-		return lo.FromPtr(cb.Status.ConsumedReplicas)
-	}
 
 	It("shrink-as-fill: partial fill advances consumedReplicas and trims virtual pods, without latching", func() {
 		cb := ephemeralBufferReady("gang", 4, map[string]string{autoscalingv1beta1.BufferMatchSelectorAnnotation: sel})

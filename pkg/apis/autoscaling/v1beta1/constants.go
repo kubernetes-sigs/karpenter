@@ -38,15 +38,19 @@ const (
 	ProvisioningCondition         = "Provisioning"
 	LimitedByQuotasCondition      = "LimitedByQuotas"
 
-	// FulfilledCondition is a terminal condition on a one-shot (RefillStrategyNone) CapacityBuffer,
-	// set once matching bound capacity covers its intended size, or once the fill deadline elapses.
-	// A Fulfilled buffer emits zero virtual pods thereafter and its nodes are no longer protected
-	// from consolidation.
-	FulfilledCondition = "Fulfilled"
+	// FulfilledCondition is set True on a one-shot (RefillStrategyNone) CapacityBuffer once matching
+	// bound capacity has covered its intended size — i.e. the buffer was filled *successfully*. It is
+	// terminal: the buffer emits zero virtual pods thereafter and its nodes are no longer protected
+	// from consolidation. It is NOT set when the fill deadline elapses unfilled — that is reported by
+	// ExpiredCondition, so consumers can distinguish success from give-up.
+	FulfilledCondition          = "Fulfilled"
+	FulfilledReasonBufferFilled = "BufferFilled"
 
-	// Reasons for the Fulfilled condition.
-	FulfilledReasonBufferFilled     = "BufferFilled"
-	FulfilledReasonDeadlineExceeded = "FillDeadlineExceeded"
+	// ExpiredCondition is set True on a one-shot buffer whose fillDeadlineSeconds elapsed before it
+	// was filled. Like Fulfilled it is terminal (provisioning stops), but it signals the buffer was
+	// NOT filled. Fulfilled and Expired are mutually exclusive terminal outcomes.
+	ExpiredCondition              = "Expired"
+	ExpiredReasonDeadlineExceeded = "FillDeadlineExceeded"
 
 	// BufferMatchSelectorAnnotation carries a kubectl-style label selector identifying the pods
 	// (in the buffer's namespace) that count toward filling a one-shot buffer. INTERIM: the
