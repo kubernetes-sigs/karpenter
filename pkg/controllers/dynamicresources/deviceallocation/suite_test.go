@@ -25,6 +25,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -136,6 +137,15 @@ func deviceResult(device string) resourcev1.DeviceRequestAllocationResult {
 		Pool:    "pool-a",
 		Device:  device,
 	}
+}
+
+// deviceResultAdmin builds an allocation result marked adminAccess, which binds for monitoring only
+// and must not be tracked as consuming the device (KEP-5018).
+func deviceResultAdmin(device string) resourcev1.DeviceRequestAllocationResult {
+	r := deviceResult(device)
+	adminAccess := true
+	r.AdminAccess = &adminAccess
+	return r
 }
 
 // deviceID constructs a cloudprovider.DeviceID using interned handles, matching the controller's representation.
@@ -260,6 +270,41 @@ var _ = Describe("DeviceAllocation Controller", func() {
 
 			_, err := controller.AllocatedDevices(cancelCtx)
 			Expect(err).To(Equal(context.Canceled))
+		})
+	})
+
+	Describe("Admin access (KEP-5018)", func() {
+		BeforeEach(func() {
+			// The apiserver rejects adminAccess allocations unless the namespace carries the label.
+			ns := &corev1.Namespace{}
+			Expect(env.Client.Get(ctx, client.ObjectKey{Name: "default"}, ns)).To(Succeed())
+			if ns.Labels == nil {
+				ns.Labels = map[string]string{}
+			}
+			ns.Labels["resource.kubernetes.io/admin-access"] = "true"
+			Expect(env.Client.Update(ctx, ns)).To(Succeed())
+			triggerHydration()
+		})
+		It("does not track a device allocated only for admin access", func() {
+			claim := resourceClaim("admin-claim", deviceResultAdmin("device-0"))
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(collectDevices(seq)).To(BeEmpty())
+		})
+		It("tracks non-admin devices while ignoring admin-access results in the same claim", func() {
+			claim := resourceClaim("mixed-claim",
+				deviceResult("device-0"),
+				deviceResultAdmin("device-1"),
+			)
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(collectDevices(seq)).To(Equal(expectedDevices(deviceID("device-0"))))
 		})
 	})
 
