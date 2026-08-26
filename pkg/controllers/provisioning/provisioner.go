@@ -175,11 +175,12 @@ func (p *Provisioner) CreateNodeClaims(
 	nodeClaims []*scheduler.NodeClaim,
 	opts ...option.Function[LaunchOptions],
 ) ([]string, error) {
+	const nodeClaimCreationWorkers = 20
+
 	// Create capacity and bind pods
 	errs := make([]error, len(nodeClaims))
 	nodeClaimNames := make([]string, len(nodeClaims))
 
-	const nodeClaimCreationWorkers = 20
 	workqueue.ParallelizeUntil(ctx, nodeClaimCreationWorkers, len(nodeClaims), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
 		if name, err := p.Create(ctx, nodeClaims[i], opts...); err != nil {
