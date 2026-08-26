@@ -160,6 +160,12 @@ func (c *Controller) reconcileClaim(ctx context.Context, nn types.NamespacedName
 	contributions := make(map[cloudprovider.DeviceID]DeviceContribution, len(claim.Status.Allocation.Devices.Results))
 	for i := range claim.Status.Allocation.Devices.Results {
 		result := &claim.Status.Allocation.Devices.Results[i]
+		// Admin-access allocations bind for privileged monitoring only; they don't consume
+		// the device and must not mark it allocated, so other claims (and Karpenter's
+		// scheduling simulation) still treat it as available (KEP-5018).
+		if lo.FromPtr(result.AdminAccess) {
+			continue
+		}
 		deviceID := cloudprovider.DeviceID{
 			Driver: unique.Make(result.Driver),
 			Pool:   unique.Make(result.Pool),
