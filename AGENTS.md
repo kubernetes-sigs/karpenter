@@ -50,3 +50,10 @@ A file for [guiding coding agents](https://agents.md/).
 - Never create an issue.
 - Never create a PR.
 - Never create or reply to comments.
+
+## Error Handling
+
+- Use `serrors` everywhere, and only use standard structured keys already
+  established in the repository.
+- For Kubernetes resources, use Kind keys such as `Node`, `NodeClaim`, and
+  `NodePool` with `klog.KObj` or `klog.KRef`.
