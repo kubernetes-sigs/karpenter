@@ -71,8 +71,8 @@ func bufferKeyOf(pod *corev1.Pod) string {
 	if !IsVirtualPod(pod) {
 		return ""
 	}
-	ns := pod.Labels[autoscalingv1beta1.BufferNamespaceLabel]
-	name := pod.Labels[autoscalingv1beta1.BufferNameLabel]
+	ns := pod.Annotations[autoscalingv1beta1.BufferNamespaceAnnotation]
+	name := pod.Annotations[autoscalingv1beta1.BufferNameAnnotation]
 	if ns == "" || name == "" {
 		return ""
 	}
