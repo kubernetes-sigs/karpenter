@@ -415,7 +415,7 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 		}
 		for k, v := range valuesForKey {
 			// Collect all the min values that are violated
-			if len(v) < lo.FromPtr((requirements.Get(k).MinValues())) {
+			if len(v) < lo.FromPtr(requirements.Get(k).MinValues()) {
 				incompatibleKeys[k] = len(v)
 			} else {
 				// If the key now satisfies min values, remove it from the map.
