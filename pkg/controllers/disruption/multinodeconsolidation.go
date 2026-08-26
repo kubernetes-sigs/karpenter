@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -130,6 +131,10 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	// duplicate emissions.
 	var lastRejectedCmd Command
 	var lastRejectedPerPool map[string]ScoreResult
+	schedulerFactory, err := NewSchedulerFactory(ctx, m.provisioner, pscheduling.IsConsolidationSimulation)
+	if err != nil {
+		return Command{}, nil, err
+	}
 	// Set a timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
@@ -138,7 +143,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		candidatesToConsolidate := candidates[0 : mid+1]
 
 		// Pass the timeout context to ensure sub-operations can be canceled
-		cmd, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
+		cmd, err := m.computeConsolidation(timeoutCtx, schedulerFactory, candidatesToConsolidate...)
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
