@@ -21,7 +21,7 @@ import (
 	"math"
 	"math/rand"
 	"strconv"
-	"sync"
+	"sync/atomic"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -41,8 +41,7 @@ type Requirement struct {
 	gte        *int // inclusive lower bound (Gt is converted to Gte)
 	lte        *int // inclusive upper bound (Lt is converted to Lte)
 	minValues  *int
-	asString   *string      // Cached result of String() to avoid repeated allocations
-	mutex      sync.RWMutex // Used to protect concurrent access to asString
+	asString   atomic.Pointer[string] // Cached result of String() to avoid repeated allocations
 }
 
 // NewRequirementWithFlexibility constructs new requirement from the combination of key, values, minValues and the operator that
@@ -299,11 +298,8 @@ func (r *Requirement) Values() []string {
 }
 
 func (r *Requirement) Insert(items ...string) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
 	r.values.Insert(items...)
-	r.asString = nil // Invalidate cached string representation
+	r.asString.Store(nil) // Invalidate cached string representation
 }
 
 func (r *Requirement) Operator() corev1.NodeSelectorOperator {
@@ -331,30 +327,17 @@ func (r *Requirement) MinValues() *int {
 }
 
 func (r *Requirement) SetMinValues(minValues int) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
 	r.minValues = &minValues
-	r.asString = nil // Invalidate cached string representation
+	r.asString.Store(nil) // Invalidate cached string representation
 }
 
 func (r *Requirement) String() string {
 	// Fast path if the string representation has already been computed
-	r.mutex.RLock()
-	if r.asString != nil {
-		defer r.mutex.RUnlock()
-		return *r.asString
-	}
-	r.mutex.RUnlock()
-
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	// Double-check if asString was set while acquiring the write lock
-	if r.asString != nil {
-		return *r.asString
+	if s := r.asString.Load(); s != nil {
+		return *s
 	}
 
+	// Compute the string representation
 	var s string
 	switch r.Operator() {
 	case corev1.NodeSelectorOpExists, corev1.NodeSelectorOpDoesNotExist:
@@ -376,7 +359,7 @@ func (r *Requirement) String() string {
 		s += fmt.Sprintf(" minValues %d", *r.minValues)
 	}
 
-	r.asString = &s // Cache the computed string representation
+	r.asString.Store(&s) // Cache the result
 
 	return s
 }

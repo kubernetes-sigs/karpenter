@@ -105,11 +105,11 @@ var _ = Describe("Requirement", func() {
 			func(existingRequirementWithoutMinValues, newRequirementWithoutMinValues, expectedRequirement *Requirement) {
 				actual := existingRequirementWithoutMinValues.Intersection(newRequirementWithoutMinValues)
 
-				// We need to provoke both requirements' String method to populate their internal cache so
-				// that the comparison of the two requirements is not affected by the cache.
 				Expect(actual.String()).To(Equal(expectedRequirement.String()))
 
-				Expect(actual).To(Equal(expectedRequirement))
+				// DeepCopy both requirements so Equal compares their semantic fields without comparing
+				// the identity of the atomic pointers used by their string caches.
+				Expect(actual.DeepCopy()).To(Equal(expectedRequirement.DeepCopy()))
 			},
 			Entry(nil, exists, exists, exists),
 			Entry(nil, exists, doesNotExist, doesNotExist),
@@ -325,11 +325,11 @@ var _ = Describe("Requirement", func() {
 			func(existingRequirementWithMinValues, newRequirementWithoutMinValues, expectedRequirement *Requirement) {
 				actual := existingRequirementWithMinValues.Intersection(newRequirementWithoutMinValues)
 
-				// We need to provoke both requirements' String method to populate their internal cache so
-				// that the comparison of the two requirements is not affected by the cache.
 				Expect(actual.String()).To(Equal(expectedRequirement.String()))
 
-				Expect(actual).To(Equal(expectedRequirement))
+				// DeepCopy both requirements so Equal compares their semantic fields without comparing
+				// the identity of the atomic pointers used by their string caches.
+				Expect(actual.DeepCopy()).To(Equal(expectedRequirement.DeepCopy()))
 			},
 			Entry(nil, existsOperatorWithFlexibility, exists, existsOperatorWithFlexibility),
 			Entry(nil, existsOperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
@@ -546,11 +546,11 @@ var _ = Describe("Requirement", func() {
 			func(existingRequirementWithMinValues, newRequirementWithMinValues, expectedRequirement *Requirement) {
 				actual := existingRequirementWithMinValues.Intersection(newRequirementWithMinValues)
 
-				// We need to provoke both requirements' String method to populate their internal cache so
-				// that the comparison of the two requirements is not affected by the cache.
 				Expect(actual.String()).To(Equal(expectedRequirement.String()))
 
-				Expect(actual).To(Equal(expectedRequirement))
+				// DeepCopy both requirements so Equal compares their semantic fields without comparing
+				// the identity of the atomic pointers used by their string caches.
+				Expect(actual.DeepCopy()).To(Equal(expectedRequirement.DeepCopy()))
 			},
 			Entry(nil, existsOperatorWithFlexibility, existsOperatorWithFlexibility, existsOperatorWithFlexibility),
 			Entry(nil, existsOperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
