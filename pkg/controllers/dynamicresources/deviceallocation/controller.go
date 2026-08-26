@@ -117,6 +117,10 @@ func NewController(kubeClient client.Client) *Controller {
 	}
 }
 
+func (c *Controller) Name() string {
+	return "dynamicresources.deviceallocation"
+}
+
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	c.Hydrate(ctx)
 
