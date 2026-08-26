@@ -191,16 +191,18 @@ func driverFromVolume(ctx context.Context, kubeClient client.Client, volumeName 
 // which nodes.
 // +k8s:deepcopy-gen=true
 type VolumeUsage struct {
-	volumes    Volumes
-	podVolumes map[types.NamespacedName]Volumes
-	limits     map[string]int
+	volumes          Volumes
+	podVolumes       map[types.NamespacedName]Volumes
+	limits           map[string]int
+	publishedDrivers sets.Set[string]
 }
 
 func NewVolumeUsage() *VolumeUsage {
 	return &VolumeUsage{
-		volumes:    Volumes{},
-		podVolumes: map[types.NamespacedName]Volumes{},
-		limits:     map[string]int{},
+		volumes:          Volumes{},
+		podVolumes:       map[types.NamespacedName]Volumes{},
+		limits:           map[string]int{},
+		publishedDrivers: sets.New[string](),
 	}
 }
 
@@ -214,7 +216,19 @@ func (v *VolumeUsage) ExceedsLimits(vols Volumes) error {
 }
 
 func (v *VolumeUsage) AddLimit(storageDriver string, value int) {
+	v.publishedDrivers.Insert(storageDriver)
 	v.limits[storageDriver] = value
+}
+
+func (v *VolumeUsage) AddUnbounded(storageDriver string) {
+	v.publishedDrivers.Insert(storageDriver)
+	delete(v.limits, storageDriver)
+}
+
+func (v *VolumeUsage) AddFallbackLimit(storageDriver string, value int) {
+	if !v.publishedDrivers.Has(storageDriver) {
+		v.limits[storageDriver] = value
+	}
 }
 
 func (v *VolumeUsage) Add(pod *v1.Pod, volumes Volumes) {

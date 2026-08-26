@@ -280,6 +280,21 @@ var _ = Describe("Volume Usage/Limits", func() {
 			csiProvider: sets.New("test"),
 		})).ToNot(BeNil())
 	})
+	DescribeTable("should treat a published driver without an attachment limit as unbounded",
+		func(allocatable *storagev1.VolumeNodeResources) {
+			csiNode.Spec.Drivers[0].Allocatable = allocatable
+			ExpectApplied(ctx, env.Client, node, csiNode)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			volumeUsage := ExpectStateNodeExists(cluster, node).VolumeUsage()
+			volumeUsage.AddFallbackLimit(csiProvider, 1)
+			Expect(volumeUsage.ExceedsLimits(scheduling.Volumes{
+				csiProvider: sets.New("volume-a", "volume-b"),
+			})).To(Succeed())
+		},
+		Entry("without allocatable data", nil),
+		Entry("without an allocatable count", &storagev1.VolumeNodeResources{}),
+	)
 	It("should maintain the volume usage state when receiving NodeClaim updates", func() {
 		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
 		for range 10 {

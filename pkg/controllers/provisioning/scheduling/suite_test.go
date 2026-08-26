@@ -3083,6 +3083,41 @@ var _ = Context("Scheduling", func() {
 				// should all be created in a single scheduling loop
 				Expect(nodeList.Items).To(HaveLen(10))
 			})
+			DescribeTable("should use instance type limits until the CSINode driver is published",
+				func(registered bool) {
+					ExpectApplied(ctx, env.Client, nodePool, storageClass)
+					nodeClaim := test.NodeClaim(v1.NodeClaim{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+						},
+					})
+					ExpectApplied(ctx, env.Client, nodeClaim)
+					if registered {
+						ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nodeClaim)
+					} else {
+						var err error
+						nodeClaim, err = ExpectNodeClaimDeployedNoNode(ctx, env.Client, cloudProvider, nodeClaim)
+						Expect(err).ToNot(HaveOccurred())
+						cluster.UpdateNodeClaim(nodeClaim)
+					}
+
+					var pods []*corev1.Pod
+					for i := range 11 {
+						pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+							StorageClassName: new(storageClass.Name),
+							ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-%d", i)},
+						})
+						ExpectApplied(ctx, env.Client, pvc)
+						pods = append(pods, test.UnschedulablePod(test.PodOptions{
+							PersistentVolumeClaims: []string{pvc.Name},
+						}))
+					}
+					ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+					Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+				},
+				Entry("before node registration", false),
+				Entry("after node registration", true),
+			)
 			It("should account for pods with multiple volumes", func() {
 				ExpectApplied(ctx, env.Client, nodePool, storageClass)
 				var pods []*corev1.Pod
