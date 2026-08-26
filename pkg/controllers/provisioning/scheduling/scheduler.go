@@ -155,7 +155,7 @@ func NewScheduler(
 	templates := lo.FilterMap(inputs.nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
 		var err error
 		nct := NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(inputs.instanceTypes[np.Name], nct.Requirements, &corev1.Pod{}, corev1.ResourceList{}, []DaemonOverheadGroup{{InstanceTypes: inputs.instanceTypes[np.Name], HostPortUsage: scheduling.NewHostPortUsage()}}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
+		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(inputs.InstanceTypes[np.Name], nct.Requirements, &corev1.Pod{}, corev1.ResourceList{}, []DaemonOverheadGroup{{InstanceTypes: inputs.InstanceTypes[np.Name], HostPortUsage: scheduling.NewHostPortUsage()}}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if len(nct.InstanceTypeOptions) == 0 {
 			if instanceTypeFilterErr, ok := lo.ErrorsAs[InstanceTypeFilterError](err); ok && instanceTypeFilterErr.minValuesIncompatibleErr != nil {
 				recorder.Publish(NoCompatibleInstanceTypes(np, true))
@@ -184,13 +184,13 @@ func NewScheduler(
 			return np.Name, corev1.ResourceList(np.Spec.Limits).DeepCopy()
 		}),
 		clock:                   clock,
-		reservationManager:      NewReservationManager(inputs.instanceTypes),
+		reservationManager:      NewReservationManager(inputs.InstanceTypes),
 		reservedOfferingMode:    option.Resolve(opts...).reservedOfferingMode,
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
 		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
 		allocator:               allocator,
-		instanceTypes:           inputs.instanceTypes,
+		instanceTypes:           inputs.InstanceTypes,
 		cachedResourceClaims:    map[types.NamespacedName]*resourcev1.ResourceClaim{},
 	}
 

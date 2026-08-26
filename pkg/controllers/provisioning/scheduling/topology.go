@@ -67,14 +67,14 @@ type Topology struct {
 
 type NodePoolInputs struct {
 	nodePools     []*v1.NodePool
-	instanceTypes map[string][]*cloudprovider.InstanceType
+	InstanceTypes map[string][]*cloudprovider.InstanceType
 	domainGroups  map[string]TopologyDomainGroup
 }
 
 func NewNodePoolInputs(nodePools []*v1.NodePool, instanceTypes map[string][]*cloudprovider.InstanceType) *NodePoolInputs {
 	return &NodePoolInputs{
 		nodePools:     nodePools,
-		instanceTypes: instanceTypes,
+		InstanceTypes: instanceTypes,
 		domainGroups:  buildDomainGroups(nodePools, instanceTypes),
 	}
 }

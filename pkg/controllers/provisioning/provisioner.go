@@ -261,59 +261,25 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
-//nolint:gocyclo
-func (p *Provisioner) NewScheduler(
-	ctx context.Context,
-	pods []*corev1.Pod,
-	stateNodes []*state.StateNode,
-	deletingPodUIDs sets.Set[types.UID],
-	opts ...scheduler.Options,
-) (*scheduler.Scheduler, error) {
-	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
+// NewSchedulerFactory Calculates the NodePoolInputs once
+// and reuses it across all scheduling simulations within a single disruption iteration.
+type SchedulerFactory struct {
+	provisioner *Provisioner
+	inputs      *scheduler.NodePoolInputs
+	opts        []scheduler.Options
+}
+
+func (p *Provisioner) NewSchedulerFactory(ctx context.Context, opts ...scheduler.Options) (*SchedulerFactory, error) {
+	nodePools, instanceTypes, err := p.listNodePoolsAndInstanceTypes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing nodepools, %w", err)
+		return nil, err
 	}
-	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
-		if nodepoolutils.IsStatic(np) {
-			return false
-		}
-		if !np.StatusConditions().IsTrue(status.ConditionReady) {
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring nodepool, not ready")
-			return false
-		}
-		return np.DeletionTimestamp.IsZero()
-	})
-	if len(nodePools) == 0 {
-		return nil, ErrNodePoolsNotFound
-	}
-
-	// nodeTemplates generated from NodePools are ordered by weight
-	// since they are stored within a slice and scheduling
-	// will always attempt to schedule on the first nodeTemplate
-	nodepoolutils.OrderByWeight(nodePools)
-
-	instanceTypes := map[string][]*cloudprovider.InstanceType{}
-	for _, np := range nodePools {
-		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
-		if err != nil {
-			if cloudprovider.IsUnevaluatedNodePoolError(err) {
-				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).V(1).Info("skipping, awaiting nodeoverlay evaluation")
-				continue
-			}
-			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, fmt.Errorf("getting instance types, %w", err)
-			}
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
-			continue
-		}
-		if len(its) == 0 {
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, no resolved instance types found")
-			continue
-		}
-		instanceTypes[np.Name] = its
-	}
-
 	inputs := scheduler.NewNodePoolInputs(nodePools, instanceTypes)
+	return &SchedulerFactory{provisioner: p, inputs: inputs, opts: opts}, nil
+}
+
+func (f *SchedulerFactory) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode, deletingPodUIDs sets.Set[types.UID]) (*scheduler.Scheduler, error) {
+	p := f.provisioner
 
 	// Get volume topology requirements WITHOUT modifying pods.
 	// Volume requirements are passed separately and added to nodeRequirements only.
@@ -332,7 +298,7 @@ func (p *Provisioner) NewScheduler(
 	scheduler.NewDefaultTopologySpreadInjector(p.kubeClient).Inject(ctx, pods)
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
-	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, inputs, pods, opts...)
+	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, f.inputs, pods, f.opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
@@ -354,11 +320,73 @@ func (p *Provisioner) NewScheduler(
 		if err != nil {
 			return nil, fmt.Errorf("gathering allocated devices, %w", err)
 		}
-		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(instanceTypes), p.kubeClient, deletingPodUIDs)
+		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(f.inputs.InstanceTypes), p.kubeClient, deletingPodUIDs)
 	}
 
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
-	return scheduler.NewScheduler(ctx, p.kubeClient, inputs, p.cluster, stateNodes, topology, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, f.inputs, p.cluster, stateNodes, topology, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, f.opts...), nil
+}
+
+func (p *Provisioner) NewScheduler(
+	ctx context.Context,
+	pods []*corev1.Pod,
+	stateNodes []*state.StateNode,
+	deletingPodUIDs sets.Set[types.UID],
+	opts ...scheduler.Options,
+) (*scheduler.Scheduler, error) {
+	factory, err := p.NewSchedulerFactory(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return factory.NewScheduler(ctx, pods, stateNodes, deletingPodUIDs)
+}
+
+//nolint:gocyclo
+func (p *Provisioner) listNodePoolsAndInstanceTypes(ctx context.Context) ([]*v1.NodePool, map[string][]*cloudprovider.InstanceType, error) {
+	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing nodepools, %w", err)
+	}
+	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
+		if nodepoolutils.IsStatic(np) {
+			return false
+		}
+		if !np.StatusConditions().IsTrue(status.ConditionReady) {
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring nodepool, not ready")
+			return false
+		}
+		return np.DeletionTimestamp.IsZero()
+	})
+	if len(nodePools) == 0 {
+		return nil, nil, ErrNodePoolsNotFound
+	}
+
+	// nodeTemplates generated from NodePools are ordered by weight
+	// since they are stored within a slice and scheduling
+	// will always attempt to schedule on the first nodeTemplate
+	nodepoolutils.OrderByWeight(nodePools)
+
+	instanceTypes := map[string][]*cloudprovider.InstanceType{}
+	for _, np := range nodePools {
+		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
+		if err != nil {
+			if cloudprovider.IsUnevaluatedNodePoolError(err) {
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).V(1).Info("skipping, awaiting nodeoverlay evaluation")
+				continue
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, nil, fmt.Errorf("getting instance types, %w", err)
+			}
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
+			continue
+		}
+		if len(its) == 0 {
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, no resolved instance types found")
+			continue
+		}
+		instanceTypes[np.Name] = its
+	}
+	return nodePools, instanceTypes, nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
