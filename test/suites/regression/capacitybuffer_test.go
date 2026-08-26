@@ -760,4 +760,110 @@ var _ = Describe("CapacityBuffer", func() {
 			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
 		})
 	})
+	Context("Anti-Affinity", func() {
+		It("should respect pod anti-affinity between virtual buffer pods", func() {
+			antiAffinityTemplate := &corev1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anti-affinity-template",
+					Namespace: "default",
+				},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "spread-buffer",
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{
+							Name:  "pause",
+							Image: "registry.k8s.io/pause:3.10",
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("1"),
+									corev1.ResourceMemory: resource.MustParse("512Mi"),
+								},
+							},
+						}},
+						Affinity: &corev1.Affinity{
+							PodAntiAffinity: &corev1.PodAntiAffinity{
+								RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+									LabelSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"app": "spread-buffer",
+										},
+									},
+									TopologyKey: "kubernetes.io/hostname",
+								}},
+							},
+						},
+					},
+				},
+			}
+
+			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "anti-affinity-template"},
+					Replicas:       lo.ToPtr(int32(3)),
+				},
+			})
+
+			env.ExpectCreated(antiAffinityTemplate, buffer)
+
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 3)
+			env.EventuallyExpectCreatedNodeClaimCount("==", 3)
+			env.EventuallyExpectInitializedNodeCount("==", 3)
+
+			EventuallyExpectCapacityBufferProvisionedWithReason(env, env.Client, buffer, "FitsExistingCapacity")
+		})
+
+		It("should respect pod anti-affinity between virtual buffer pods using scalableRef", func() {
+			deployment := test.Deployment(test.DeploymentOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "spread-deploy",
+					Namespace: "default",
+				},
+				Replicas: 1,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "spread-scalable"}},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+					PodAntiRequirements: []corev1.PodAffinityTerm{{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "spread-scalable"},
+						},
+						TopologyKey: "kubernetes.io/hostname",
+					}},
+				},
+			})
+
+			env.ExpectCreated(deployment)
+			selector := labels.SelectorFromSet(deployment.Spec.Selector.MatchLabels)
+			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, selector, 1)
+
+			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					ScalableRef: &autoscalingv1beta1.ScalableRef{
+						APIGroup: "apps",
+						Kind:     "Deployment",
+						Name:     "spread-deploy",
+					},
+					Replicas: lo.ToPtr(int32(3)),
+				},
+			})
+
+			env.ExpectCreated(buffer)
+
+			EventuallyExpectCapacityBufferReplicas(env, env.Client, buffer, 3)
+			// 1 node for the deployment pod + 3 nodes for buffer pods = 4 total
+			env.EventuallyExpectCreatedNodeClaimCount("==", 4)
+			env.EventuallyExpectInitializedNodeCount("==", 4)
+
+			EventuallyExpectCapacityBufferProvisionedWithReason(env, env.Client, buffer, "FitsExistingCapacity")
+		})
+	})
+
 })

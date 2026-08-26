@@ -321,6 +321,14 @@ func (p *Provisioner) NewScheduler(
 		return nil, fmt.Errorf("getting volume topology requirements, %w", err)
 	}
 
+	// Inject cluster-level default topology spread constraints (from --scheduler-config) into the scheduling-time pod
+	// copies for any pod that declares none of its own, mirroring kube-scheduler's PodTopologySpread plugin. This is
+	// done here, once at ingestion (before the first topology.Update), so all downstream machinery - TopologyGroup
+	// synthesis, ScheduleAnyway relaxation, and consolidation - flows through the existing per-pod path with no new
+	// logic. The injected constraints exist only on these scheduling-time copies and are never written back to the API
+	// server.
+	scheduler.NewDefaultTopologySpreadInjector(p.kubeClient).Inject(ctx, pods)
+
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
 	if err != nil {
