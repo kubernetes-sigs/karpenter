@@ -181,7 +181,8 @@ func NewScheduler(
 		recorder:             recorder,
 		preferences:          &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
-			return np.Name, corev1.ResourceList(np.Spec.Limits)
+			// The limits are copied so that scheduling never mutates the input
+			return np.Name, corev1.ResourceList(np.Spec.Limits).DeepCopy()
 		}),
 		clock:                   clock,
 		reservationManager:      NewReservationManager(instanceTypes),
