@@ -91,12 +91,13 @@ type Disruption struct {
 	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
-	// When replicas is set, ConsolidateAfter is simply ignored
+	// When replicas is set, ConsolidateAfter is simply ignored.
+	// +kubebuilder:default:="0s"
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
-	// +required
-	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
+	// +optional
+	ConsolidateAfter NillableDuration `json:"consolidateAfter,omitempty"`
 	//nolint:kubeapilinter
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified.

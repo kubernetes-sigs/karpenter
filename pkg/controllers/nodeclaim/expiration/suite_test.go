@@ -97,8 +97,10 @@ var _ = Describe("Expiration", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel:   metrics.ExpiredReason,
-				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:              metrics.ExpiredReason,
+				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
 		})
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
@@ -111,8 +113,10 @@ var _ = Describe("Expiration", func() {
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel:   metrics.ExpiredReason,
-				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:              metrics.ExpiredReason,
+				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
 		})
 		It("should fire karpenter_pods_disruption_initiated_total by the count of reschedulable pods on the node when expired", func() {
@@ -141,12 +145,16 @@ var _ = Describe("Expiration", func() {
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel:   metrics.ExpiredReason,
-				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:              metrics.ExpiredReason,
+				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
 			ExpectMetricCounterValue(metrics.PodsDisruptionInitiatedTotal, 2, map[string]string{
-				metrics.ReasonLabel:   metrics.ExpiredReason,
-				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:              metrics.ExpiredReason,
+				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
 		})
 	})
@@ -219,13 +227,17 @@ var _ = Describe("Expiration", func() {
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-			metrics.ReasonLabel:   metrics.ExpiredReason,
-			metrics.NodePoolLabel: nodePool.Name,
+			metrics.ReasonLabel:              metrics.ExpiredReason,
+			metrics.NodePoolLabel:            nodePool.Name,
+			metrics.ConsolidationPolicyLabel: "",
+			metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 		})
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-			metrics.ReasonLabel:   metrics.ExpiredReason,
-			metrics.NodePoolLabel: nodePool.Name,
+			metrics.ReasonLabel:              metrics.ExpiredReason,
+			metrics.NodePoolLabel:            nodePool.Name,
+			metrics.ConsolidationPolicyLabel: "",
+			metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 		})
 	})
 })

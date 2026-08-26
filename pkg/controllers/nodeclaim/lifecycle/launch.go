@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Launch struct {
@@ -90,9 +91,11 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 				return nil, client.IgnoreNotFound(err)
 			}
 			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-				metrics.ReasonLabel:       "insufficient_capacity",
-				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				metrics.ReasonLabel:              "insufficient_capacity",
+				metrics.NodePoolLabel:            nodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel:        nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 			})
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
@@ -101,9 +104,11 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 				return nil, client.IgnoreNotFound(err)
 			}
 			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-				metrics.ReasonLabel:       "nodeclass_not_ready",
-				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				metrics.ReasonLabel:              "nodeclass_not_ready",
+				metrics.NodePoolLabel:            nodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel:        nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 			})
 			return nil, nil
 		default:
