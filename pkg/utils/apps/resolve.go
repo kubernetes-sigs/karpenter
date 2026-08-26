@@ -31,9 +31,9 @@ import (
 
 // PodTemplateResult holds the resolved data from a PodTemplate lookup.
 type PodTemplateResult struct {
-	PodSpec    corev1.PodSpec
-	Name       string
-	Generation int64
+	PodTemplateSpec corev1.PodTemplateSpec
+	Name            string
+	Generation      int64
 }
 
 // ResolvePodTemplateRef fetches a PodTemplate by name and namespace.
@@ -43,16 +43,59 @@ func ResolvePodTemplateRef(ctx context.Context, c client.Client, name, namespace
 		return nil, err
 	}
 	return &PodTemplateResult{
-		PodSpec:    pt.Template.Spec,
-		Name:       pt.Name,
-		Generation: pt.Generation,
+		PodTemplateSpec: pt.Template,
+		Name:            pt.Name,
+		Generation:      pt.Generation,
 	}, nil
 }
 
 // ScalableRefResult holds the resolved data from a scalableRef lookup.
 type ScalableRefResult struct {
-	PodSpec          corev1.PodSpec
+	PodTemplateSpec  corev1.PodTemplateSpec
 	ScalableReplicas int32
+}
+
+// BufferResolution holds the pod spec and ref-specific metadata resolved from a
+// CapacityBuffer's spec. UsesPodTemplate distinguishes which fields are set:
+// PodTemplateName/PodTemplateGeneration for podTemplateRef, ScalableReplicas for
+// scalableRef.
+type BufferResolution struct {
+	PodTemplateSpec       corev1.PodTemplateSpec
+	UsesPodTemplate       bool
+	PodTemplateName       string
+	PodTemplateGeneration int64
+	ScalableReplicas      int32
+}
+
+// ResolveCapacityBuffer resolves a CapacityBuffer's pod spec from whichever ref
+// its spec declares (podTemplateRef or scalableRef). It centralizes the dispatch
+// shared by the buffer controller (which also reads the returned metadata to
+// update status) and the virtual pod cache (which only needs the pod spec).
+func ResolveCapacityBuffer(ctx context.Context, c client.Client, cb *autoscalingv1beta1.CapacityBuffer) (*BufferResolution, error) {
+	switch {
+	case cb.Spec.PodTemplateRef != nil:
+		result, err := ResolvePodTemplateRef(ctx, c, cb.Spec.PodTemplateRef.Name, cb.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		return &BufferResolution{
+			PodTemplateSpec:       result.PodTemplateSpec,
+			UsesPodTemplate:       true,
+			PodTemplateName:       result.Name,
+			PodTemplateGeneration: result.Generation,
+		}, nil
+	case cb.Spec.ScalableRef != nil:
+		result, err := ResolveScalableRef(ctx, c, cb.Spec.ScalableRef, cb.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		return &BufferResolution{
+			PodTemplateSpec:  result.PodTemplateSpec,
+			ScalableReplicas: result.ScalableReplicas,
+		}, nil
+	default:
+		return nil, fmt.Errorf("buffer %q has neither podTemplateRef nor scalableRef in spec", cb.Name)
+	}
 }
 
 // ResolveScalableRef fetches the workload referenced by a ScalableRef and returns
@@ -73,19 +116,19 @@ func ResolveScalableRef(ctx context.Context, c client.Client, ref *autoscalingv1
 		if err := c.Get(ctx, key, obj); err != nil {
 			return nil, err
 		}
-		return &ScalableRefResult{PodSpec: obj.Spec.Template.Spec, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
+		return &ScalableRefResult{PodTemplateSpec: obj.Spec.Template, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
 	case autoscalingv1beta1.KindStatefulSet:
 		obj := &appsv1.StatefulSet{}
 		if err := c.Get(ctx, key, obj); err != nil {
 			return nil, err
 		}
-		return &ScalableRefResult{PodSpec: obj.Spec.Template.Spec, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
+		return &ScalableRefResult{PodTemplateSpec: obj.Spec.Template, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
 	case autoscalingv1beta1.KindReplicaSet:
 		obj := &appsv1.ReplicaSet{}
 		if err := c.Get(ctx, key, obj); err != nil {
 			return nil, err
 		}
-		return &ScalableRefResult{PodSpec: obj.Spec.Template.Spec, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
+		return &ScalableRefResult{PodTemplateSpec: obj.Spec.Template, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
 	default:
 		return nil, fmt.Errorf("unsupported kind %q", ref.Kind)
 	}
