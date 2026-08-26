@@ -65,13 +65,26 @@ type Topology struct {
 	stateNodes   []*state.StateNode
 }
 
+type NodePoolInputs struct {
+	nodePools     []*v1.NodePool
+	instanceTypes map[string][]*cloudprovider.InstanceType
+	domainGroups  map[string]TopologyDomainGroup
+}
+
+func NewNodePoolInputs(nodePools []*v1.NodePool, instanceTypes map[string][]*cloudprovider.InstanceType) *NodePoolInputs {
+	return &NodePoolInputs{
+		nodePools:     nodePools,
+		instanceTypes: instanceTypes,
+		domainGroups:  buildDomainGroups(nodePools, instanceTypes),
+	}
+}
+
 func NewTopology(
 	ctx context.Context,
 	kubeClient client.Client,
 	cluster *state.Cluster,
 	stateNodes []*state.StateNode,
-	nodePools []*v1.NodePool,
-	instanceTypes map[string][]*cloudprovider.InstanceType,
+	inputs *NodePoolInputs,
 	pods []*corev1.Pod,
 	opts ...Options,
 ) (*Topology, error) {
@@ -80,7 +93,7 @@ func NewTopology(
 		preferencePolicy:      option.Resolve(opts...).preferencePolicy,
 		cluster:               cluster,
 		stateNodes:            stateNodes,
-		domainGroups:          buildDomainGroups(nodePools, instanceTypes),
+		domainGroups:          inputs.domainGroups,
 		topologyGroups:        map[uint64]*TopologyGroup{},
 		inverseTopologyGroups: map[uint64]*TopologyGroup{},
 		excludedPods:          sets.New[string](),
