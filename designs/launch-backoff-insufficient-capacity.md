@@ -276,7 +276,7 @@ func (t *Tracker) Admit(nodePoolUID types.UID, risky bool) bool
 func (t *Tracker) IsConstrained(nodePoolUID types.UID) bool // read-only; never consumes
 func (t *Tracker) FailPool(nodePoolUID types.UID)
 func (t *Tracker) SucceedPool(nodePoolUID types.UID)
-func (t *Tracker) NextAdmit(nodePoolUID types.UID) time.Time // earliest of the two windows
+func (t *Tracker) NextAdmit(nodePoolUID types.UID, risky bool) time.Time // latest applicable gate
 ```
 
 `burst` and `remaining` are **two different numbers** and collapsing them breaks both
@@ -285,10 +285,20 @@ mechanisms: consumption would erode the recovery ceiling, and
 is documented to show. `burst` changes only on `SucceedPool` / `FailPool`; `remaining`
 changes only on `Admit` and window rollover.
 
-A NodeClaim is **risky** when every offering in its compatible set has a tracker entry —
-`HasFailed` is true for all of them — meaning there is no offering it can land on without a
-recent capacity failure. The caller already computes this predicate to order admissions
-(below), so passing it to `Admit` costs nothing extra.
+A NodeClaim is **risky** when every *usable* offering in its compatible set has a tracker
+entry, meaning there is no offering it can actually land on without a recent capacity failure.
+The caller already computes this predicate to order admissions (below), so passing it to
+`Admit` costs nothing extra.
+
+**"Usable" is load-bearing.** The predicate must consider only offerings still marked
+`Available` after `FilterUnavailable` — the probe-eligible and healthy ones — and must ignore
+offerings the provider reports unavailable. Evaluating it over the full compatible set instead
+makes the risky budget silently inert: any never-failed offering has no tracker entry, so a
+single permanently-unavailable one (a retired instance type in one zone, say) would mark every
+NodeClaim in the pool non-risky forever. The partial-recovery burst returns with nothing in the
+metrics to indicate why. Concretely, `risky` is "every compatible offering with
+`Available == true` satisfies `HasFailed`", which is well-defined because `FilterUnavailable`
+has already cleared `Available` on everything inside its window.
 
 - **Unconstrained and not risky** (absent entry, or `constrained == false`): `Admit` returns
   true. The caller passes the full set into `CreateNodeClaims`, which fans out as today.
@@ -297,17 +307,19 @@ recent capacity failure. The caller already computes this predicate to order adm
   NodeClaims if another pool's ICE armed the offerings they depend on.
 - **`FailPool`:** set `constrained = true`, `burst = 1`, `remaining = 1`,
   `nextAdmit = now + probeInterval`. No-op if already constrained and `now < nextAdmit`.
-- **`Admit` while constrained:** if `now >= nextAdmit`, roll the window over
-  (`remaining = burst`, `nextAdmit = now + probeInterval`). If `remaining == 0`, return
-  false. Otherwise decrement `remaining` and continue to the risky check.
-- **`Admit` with `risky == true`:** additionally consume from the risky budget, whether or
-  not the pool is constrained. If `now >= nextRiskyAdmit`, set
-  `riskyRemaining = riskyBurst` and `nextRiskyAdmit = now + probeInterval`. If
-  `riskyRemaining == 0`, return false; otherwise decrement it. A risky admit from a
-  constrained pool consumes from **both** budgets.
+- **`Admit` evaluates every applicable gate before consuming any of them.** Roll over any
+  window whose deadline has passed (`remaining = burst` when `now >= nextAdmit`;
+  `riskyRemaining = riskyBurst` when `now >= nextRiskyAdmit`). Then test the gates that apply:
+  `remaining > 0` if the pool is constrained, and `riskyRemaining > 0` if the NodeClaim is
+  risky. If any applicable gate is closed, return false and consume **nothing**. Otherwise
+  decrement every applicable allowance and return true, so a risky admit from a constrained
+  pool debits both.
 - **`SucceedPool`:** double `burst`, which takes effect at the next window rollover. Once it
   would exceed `burstMax`, clear `constrained` and the aggregate budget disengages. The
   risky budget does not ramp and is not released — see below.
+- **`NextAdmit` mirrors `Admit`'s gates.** It takes the same `risky` argument and returns the
+  *latest* of the gates that apply, because waking at an earlier gate that was not what
+  blocked this NodeClaim buys a reconcile that admits nothing.
 - **Entry cleanup:** delete the pool entry when the NodePool is deleted, and idle-expire it
   when it is unconstrained and `now >= nextRiskyAdmit + maxDelay`. Deleting an idle entry is
   safe because a subsequent risky admit recreates it with a fresh window, which still admits
@@ -441,20 +453,18 @@ func (e OfferingsUnavailableError) Unwrap() error
 func (r Results) OfferingsUnavailableErrors() map[*corev1.Pod]error
 ```
 
-**Where it is produced.** The error is produced in `filterInstanceTypesByRequirements`, and the discriminator
-already exists there. That function deliberately does not short-circuit, so it can explain
-failures, and accumulates per-reason bookkeeping in `InstanceTypeFilterError`:
+**Where it is produced.** In `filterInstanceTypesByRequirements`. That function deliberately
+does not short-circuit, so it can explain failures, and accumulates per-reason bookkeeping in
+`InstanceTypeFilterError`. The discriminator is:
 
 ```go
-err.requirementsAndFits = err.requirementsAndFits || (itCompat && itFits && !itHasOffering)
+len(remaining) == 0 && err.requirementsMet && !err.hasOffering
 ```
 
-`requirementsAndFits` has what we need: *some* instance type matched the pod's
-requirements and had room for it, and was rejected only for lack of a usable offering.
-When `len(remaining) == 0` and that flag is set, the pod is offering-blocked, and the
-existing flags separate it from requirements, resource, and `minValues` failures at no extra
-cost. This is a wake time added to bookkeeping the scheduler already maintains, not a new
-classification scheme.
+Read: at least one instance type matched the pod's requirements, and *no* instance type had a
+usable compatible offering. That is exactly the offering-blocked case, and both fields are
+already maintained by the existing loop.
+
 
 **Deliberately layer-agnostic.** The error does *not* distinguish an offering core is
 backing off from one the provider reported unavailable, and an earlier draft's
@@ -468,7 +478,9 @@ for that case, which is why the requeue is capped at `probeInterval` regardless.
 
 **`NextEligible`** is therefore a hint, not a deadline: `min(NextEligible(key))` over the
 rejected keys that *do* have tracker entries, falling back to `now + probeInterval` when
-none do (pure provider suppression). The tracker reference the scheduler needs is only for
+none do (pure provider suppression). Where a NodeClaim was rejected by more than one gate,
+the hint is the *latest* of the gates that actually blocked it, since an earlier one waking
+first buys nothing. The tracker reference the scheduler needs is only for
 that hint — the classification comes from `InstanceTypeFilterError`. `Solve` still makes
 decisions by reading `Available` alone, so the filter stays transparent for scheduling and
 becomes visible only for *explaining* a failure. That is a genuine addition to the
@@ -507,7 +519,7 @@ the preference. Adding the short-circuit would make soft constraints behave like
 whenever capacity is short — see [Topology spread](#topology-spread).
 
 Leaving relaxation alone also makes the attribution *stronger*. `podErrors[pod]` is only
-populated after `trySchedule` has exhausted every relaxation, so `requirementsAndFits` is
+populated after `trySchedule` has exhausted every relaxation, so the discriminator is
 evaluated against the fully-relaxed pod. `OfferingsUnavailableError` therefore means "no
 usable offering even with every preference dropped," and a pod that could have escaped by
 relaxing never reaches the requeue path at all.
@@ -576,8 +588,10 @@ for pod := range pendingPods {
     return RequeueImmediately  // affinity, resources, minValues, etc.
 }
 
+// Per blocked NodeClaim or pod, the wake time is the latest gate that actually
+// blocked it; across them, the earliest such time.
 wake := min(
-    NextAdmit(pool)         for pools that omitted a NodeClaim,
+    NextAdmit(pool, risky)  for each omitted NodeClaim,
     err.NextEligible        for pods blocked on unavailable offerings,
 )
 return RequeueAfter: min(wake, probeInterval)
@@ -900,6 +914,19 @@ Test coverage, beyond unit tests of the window and `burst` transitions against a
   draft got wrong, so assert it explicitly. Assert the wrapping happens when
   `filterInstanceTypesByRequirements` empties the instance-type set, i.e. on a path that
   never reaches `offeringsToReserve`.
+- **`risky` is scoped to usable offerings.** The silent-failure test for the predicate. Give a
+  NodePool one never-failed offering that the *provider* reports unavailable alongside a set of
+  probe-eligible failed ones, then assert NodeClaims are still classified risky and still
+  throttled. A predicate written over the full compatible set passes every other test in this
+  list and fails only this one.
+- **Attribution fires at all.** The silent-failure test for the discriminator. Assert a pod
+  whose offerings are all unavailable is wrapped in `OfferingsUnavailableError` and that the
+  provisioner sleeps. Keying off `requirementsAndFits` would make this unreachable while
+  leaving every "does not wrap" assertion green, so this test has to fail if the discriminator
+  regresses to that field.
+- **`Admit` consumes nothing when it rejects.** A risky `Admit` refused because
+  `riskyRemaining == 0` leaves `remaining` unchanged on a constrained pool. Follow it with a
+  non-risky `Admit` in the same window and assert that one is admitted.
 - **Throttled pods are still accounted for.** A loop where `Solve` produced NodeClaims and
   `Admit` omitted *all* of them must `RequeueAfter`, not spin, even though those pods never
   appear in `Results.PodErrors`.
