@@ -98,13 +98,14 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: "cloudprovider",
 			Name:      "errors_total",
-			Help:      "Total number of errors returned from CloudProvider calls.",
+			Help:      "Total number of errors returned from CloudProvider calls. Labeled by the controller, method name, provider, error type, and owning NodePool when available.",
 		},
 		[]opmetrics.Label{
 			metrics.Controller,
 			Method,
 			Provider,
 			Error,
+			metrics.NodePool,
 		},
 	)
 )
@@ -126,10 +127,11 @@ func Decorate(cloudProvider cloudprovider.CloudProvider) cloudprovider.CloudProv
 
 func (d *decorator) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
 	method := "Create"
+	nodePoolName := nodePoolNameForNodeClaim(nodeClaim)
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	nodeClaim, err := d.CloudProvider.Create(ctx, nodeClaim)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodePoolName, err))
 	}
 	return nodeClaim, err
 }
@@ -139,7 +141,7 @@ func (d *decorator) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	err := d.CloudProvider.Delete(ctx, nodeClaim)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodePoolNameForNodeClaim(nodeClaim), err))
 	}
 	return err
 }
@@ -149,7 +151,7 @@ func (d *decorator) Get(ctx context.Context, id string) (*v1.NodeClaim, error) {
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	nodeClaim, err := d.CloudProvider.Get(ctx, id)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, "", err))
 	}
 	return nodeClaim, err
 }
@@ -159,7 +161,7 @@ func (d *decorator) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	nodeClaims, err := d.CloudProvider.List(ctx)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, "", err))
 	}
 	return nodeClaims, err
 }
@@ -169,7 +171,7 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool)
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	instanceType, err := d.CloudProvider.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodePoolNameForNodePool(nodePool), err))
 	}
 	return instanceType, err
 }
@@ -179,7 +181,7 @@ func (d *decorator) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (clo
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	isDrifted, err := d.CloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodePoolNameForNodeClaim(nodeClaim), err))
 	}
 	return isDrifted, err
 }
@@ -194,19 +196,32 @@ func getLabelsMapForDuration(ctx context.Context, d *decorator, method string) m
 	}
 }
 
-// getLabelsMapForError is a convenience func that constructs a map[string]string
-// for a prometheus Label map used to compose a counter metric spec
-func getLabelsMapForError(ctx context.Context, d *decorator, method string, err error) map[string]string {
+// getLabelsMapForError builds labels for CloudProvider error metrics.
+func getLabelsMapForError(ctx context.Context, d *decorator, method, nodePoolName string, err error) map[string]string {
 	return map[string]string{
 		metrics.ControllerLabel: injection.GetControllerName(ctx),
 		metricLabelMethod:       method,
 		metricLabelProvider:     d.Name(),
 		metricLabelError:        GetErrorTypeLabelValue(err),
+		metrics.NodePoolLabel:    nodePoolName,
 	}
 }
 
-// GetErrorTypeLabelValue is a convenience func that returns
-// a string representation of well-known CloudProvider error types
+func nodePoolNameForNodeClaim(nodeClaim *v1.NodeClaim) string {
+	if nodeClaim == nil {
+		return ""
+	}
+	return nodeClaim.Labels[v1.NodePoolLabelKey]
+}
+
+func nodePoolNameForNodePool(nodePool *v1.NodePool) string {
+	if nodePool == nil {
+		return ""
+	}
+	return nodePool.Name
+}
+
+// GetErrorTypeLabelValue returns the label for a known CloudProvider error.
 func GetErrorTypeLabelValue(err error) string {
 	switch {
 	case cloudprovider.IsInsufficientCapacityError(err):
