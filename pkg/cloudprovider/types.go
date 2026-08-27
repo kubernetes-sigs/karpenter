@@ -130,6 +130,10 @@ type InstanceType struct {
 	Offerings Offerings
 	// Resources are the full resource capacities for this instance type
 	Capacity corev1.ResourceList
+	// VolumeAttachmentLimits is the expected number of volumes that can be attached to nodes of this instance type, keyed by
+	// CSI driver name. Cloud providers that do not know a driver's limit ahead of time may omit it; limits reported
+	// by a node's CSINode take precedence once the node registers.
+	VolumeAttachmentLimits map[string]int
 	// DynamicResources contains DRA device metadata for this instance type.
 	// Cloud providers that do not support DRA may leave this as the zero value.
 	DynamicResources DynamicResources
@@ -181,6 +185,13 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 		*out = make(corev1.ResourceList, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val.DeepCopy()
+		}
+	}
+	if in.VolumeAttachmentLimits != nil {
+		in, out := &in.VolumeAttachmentLimits, &out.VolumeAttachmentLimits
+		*out = make(map[string]int, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
 		}
 	}
 	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
