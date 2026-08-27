@@ -63,9 +63,18 @@ var (
 		Name: CapacityTypeLabel,
 		Help: "The capacity type of the instance.",
 		Values: []Value{
-			{Name: v1.CapacityTypeOnDemand, Help: "On-demand capacity."},
-			{Name: v1.CapacityTypeSpot, Help: "Spot capacity, which can be reclaimed by the cloud provider."},
-			{Name: v1.CapacityTypeReserved, Help: "Reserved capacity, backed by a capacity reservation."},
+			{
+				Name: v1.CapacityTypeOnDemand,
+				Help: "On-demand capacity.",
+			},
+			{
+				Name: v1.CapacityTypeSpot,
+				Help: "Spot capacity, which can be reclaimed by the cloud provider.",
+			},
+			{
+				Name: v1.CapacityTypeReserved,
+				Help: "Reserved capacity, backed by a capacity reservation.",
+			},
 		},
 	}
 	Zone = Label{
@@ -80,18 +89,36 @@ var (
 		Name: ConsolidationPolicyLabel,
 		Help: "The NodePool consolidation policy in effect.",
 		Values: []Value{
-			{Name: string(v1.ConsolidationPolicyWhenEmpty), Help: "Consolidate only nodes with no workload pods."},
-			{Name: string(v1.ConsolidationPolicyWhenEmptyOrUnderutilized), Help: "Consolidate empty nodes and underutilized nodes."},
-			{Name: string(v1.ConsolidationPolicyBalanced), Help: "Consolidate using the balanced algorithm."},
+			{
+				Name: string(v1.ConsolidationPolicyWhenEmpty),
+				Help: "Consolidate only nodes with no workload pods.",
+			},
+			{
+				Name: string(v1.ConsolidationPolicyWhenEmptyOrUnderutilized),
+				Help: "Consolidate empty nodes and underutilized nodes.",
+			},
+			{
+				Name: string(v1.ConsolidationPolicyBalanced),
+				Help: "Consolidate using the balanced algorithm.",
+			},
 		},
 	}
 	TerminationMode = Label{
 		Name: TerminationModeLabel,
 		Help: "The termination mode used to disrupt the node.",
 		Values: []Value{
-			{Name: TerminationModeGraceful, Help: "Graceful termination that respects the node's disruption budget and drains pods."},
-			{Name: TerminationModeEventual, Help: "Eventual termination once the node's terminationGracePeriod elapses."},
-			{Name: TerminationModeForceful, Help: "Forceful termination that deletes the node immediately."},
+			{
+				Name: TerminationModeGraceful,
+				Help: "Graceful termination that respects the node's disruption budget and drains pods.",
+			},
+			{
+				Name: TerminationModeEventual,
+				Help: "Eventual termination once the node's terminationGracePeriod elapses.",
+			},
+			{
+				Name: TerminationModeForceful,
+				Help: "Forceful termination that deletes the node immediately.",
+			},
 		},
 	}
 	Controller = Label{

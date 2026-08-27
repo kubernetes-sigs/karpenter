@@ -30,11 +30,9 @@ import (
 )
 
 const (
-	// metricLabelController is an alias for the shared controller dimension.
-	metricLabelController = metrics.ControllerLabel
-	metricLabelMethod     = "method"
-	metricLabelProvider   = "provider"
-	metricLabelError      = "error"
+	metricLabelMethod   = "method"
+	metricLabelProvider = "provider"
+	metricLabelError    = "error"
 	// MetricLabelErrorDefaultVal is the default string value that represents "error type unknown"
 	MetricLabelErrorDefaultVal = ""
 )
@@ -43,9 +41,18 @@ const (
 // first-class metrics.Value vars: the value string and its documentation live in
 // one place and callers refer to it by .Name.
 var (
-	NodeClaimNotFoundError    = metrics.Value{Name: "NodeClaimNotFoundError", Help: "The NodeClaim's backing instance was not found."}
-	NodeClassNotReadyError    = metrics.Value{Name: "NodeClassNotReadyError", Help: "The referenced NodeClass is not yet ready."}
-	InsufficientCapacityError = metrics.Value{Name: "InsufficientCapacityError", Help: "The cloud provider had insufficient capacity to fulfill the request."}
+	NodeClaimNotFoundError = metrics.Value{
+		Name: "NodeClaimNotFoundError",
+		Help: "The NodeClaim's backing instance was not found.",
+	}
+	NodeClassNotReadyError = metrics.Value{
+		Name: "NodeClassNotReadyError",
+		Help: "The referenced NodeClass is not yet ready.",
+	}
+	InsufficientCapacityError = metrics.Value{
+		Name: "InsufficientCapacityError",
+		Help: "The cloud provider had insufficient capacity to fulfill the request.",
+	}
 )
 
 // Package-local metric dimensions for the CloudProvider metrics. The controller
@@ -78,7 +85,7 @@ var MethodDuration = opmetrics.NewPrometheusHistogram(
 		Help:      "Duration of cloud provider method calls. Labeled by the controller, method name and provider.",
 	},
 	[]string{
-		metricLabelController,
+		metrics.ControllerLabel,
 		metricLabelMethod,
 		metricLabelProvider,
 	},
@@ -94,7 +101,7 @@ var (
 			Help:      "Total number of errors returned from CloudProvider calls.",
 		},
 		[]string{
-			metricLabelController,
+			metrics.ControllerLabel,
 			metricLabelMethod,
 			metricLabelProvider,
 			metricLabelError,
@@ -181,9 +188,9 @@ func (d *decorator) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (clo
 // for a prometheus Label map used to compose a duration metric spec
 func getLabelsMapForDuration(ctx context.Context, d *decorator, method string) map[string]string {
 	return map[string]string{
-		metricLabelController: injection.GetControllerName(ctx),
-		metricLabelMethod:     method,
-		metricLabelProvider:   d.Name(),
+		metrics.ControllerLabel: injection.GetControllerName(ctx),
+		metricLabelMethod:       method,
+		metricLabelProvider:     d.Name(),
 	}
 }
 
@@ -191,10 +198,10 @@ func getLabelsMapForDuration(ctx context.Context, d *decorator, method string) m
 // for a prometheus Label map used to compose a counter metric spec
 func getLabelsMapForError(ctx context.Context, d *decorator, method string, err error) map[string]string {
 	return map[string]string{
-		metricLabelController: injection.GetControllerName(ctx),
-		metricLabelMethod:     method,
-		metricLabelProvider:   d.Name(),
-		metricLabelError:      GetErrorTypeLabelValue(err),
+		metrics.ControllerLabel: injection.GetControllerName(ctx),
+		metricLabelMethod:       method,
+		metricLabelProvider:     d.Name(),
+		metricLabelError:        GetErrorTypeLabelValue(err),
 	}
 }
 
