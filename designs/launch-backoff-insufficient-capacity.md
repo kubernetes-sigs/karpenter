@@ -51,16 +51,20 @@ the cache interval. The existing boolean has no way to express "retry slowly."
 ### Use Cases
 
 1. **Large partially-unsatisfiable scale-out.** A ~600-node GPU scale-out with thousands of
-   pending pods, where most of the requested offerings are ICE'd. Today: sustained NodeClaim
-   churn at controller throughput, saturated workqueues, and degraded provisioning for
-   unrelated NodePools. Desired: the unsatisfiable portion is retried at a bounded rate while
+   pending pods, where most of the requested offerings are ICE'd.
+    * Today: sustained NodeClaim churn at controller throughput, saturated workqueues, and degraded provisioning for
+   unrelated NodePools.
+    * Desired: the unsatisfiable portion is retried at a bounded rate while
    the satisfiable portion launches at full speed.
-2. **Burst at cache expiry.** Thousands of pods queued against a single ICE'd offering. Today:
-   a write storm every time the provider's cache entry expires. Desired: recovery is
-   rate-limited, so the first attempts after expiry are probes rather than the full batch.
+2. **Burst at cache expiry.** Thousands of pods queued against a single ICE'd offering.
+    * Today: a write storm every time the provider's cache entry expires.
+    * Desired: recovery is rate-limited, so the first attempts after expiry are probes rather than the full batch.
 3. **Zone-scoped shortage in a multi-AZ NodePool.** One AZ is out of an instance type; the
-   other three are healthy. Desired: launches into the healthy AZs are preferred and
-   delayed by at most one probe interval.
+   other three are healthy. What we want is to ensure launches into the healthy AZs are preferred and
+   delayed by at most one probe interval. Pods with a zonal spread should give up the
+   *instance type* before they give up the *spread* — see
+   [Topology spread](#topology-spread) for why that ordering is already what happens and
+   what would break it.
 
 ### Non-Goals
 
@@ -89,21 +93,25 @@ Two pieces of in-memory state, both written only from real launch outcomes:
 
 1. **Per-offering backoff** (`cloudprovider.OfferingKey`: `InstanceType`, `CapacityType`,
    `Zone`). After ICE, core treats that offering as unavailable until a backoff window
-   elapses, then one probe is allowed. Applied by `FilterUnavailable` to *DeepCopy'd*
-   instance types at the two scheduling `GetInstanceTypes` call sites. See
+   elapses, then eligible again. This filter decides whether an offering may be tried
+   at all, while the budget below decides how fast. Applied by
+   `FilterUnavailable` to DeepCopy'd instance types at the two scheduling
+   `GetInstanceTypes` call sites. See
    [Applying the backoff filter](#applying-the-backoff-filter).
-2. **Per-NodePool launch budget.** While a NodePool is constrained, the *callers* of
-   `CreateNodeClaims` (the dynamic provisioner and `static.provisioning`) `Admit` one
-   NodeClaim per `probeInterval`, ramping up as probes succeed and returning to one on any
-   failure. `CreateNodeClaims` itself is unchanged: it still creates every NodeClaim it is
-   given. Disruption only *peeks* with a read-only `CanAdmit`; it never consumes a probe.
-   Without the budget, a wide NodePool's hundreds
-   of independently expiring offering windows sum back up to the churn rate we are trying
-   to eliminate — see [Why both scopes are needed](#why-both-scopes-are-needed).
+2. **Per-NodePool launch budget**, with two parts. An aggregate budget engages only while
+   the NodePool is constrained by a recent ICE: the callers of `CreateNodeClaims` (the
+   dynamic provisioner and `static.provisioning`) `Admit` one NodeClaim per `probeInterval`,
+   ramping up as probes succeed and returning to one on any failure. A *risky* budget is
+   always engaged, even for an unconstrained pool: a NodeClaim whose every compatible
+   offering has a failure history is admitted at most `riskyBurst` per `probeInterval`. The
+   filter cannot supply that bound itself.
+   `CreateNodeClaims` itself is unchanged: it still creates every NodeClaim it is given.
+   Disruption only *peeks* with a read-only `IsConstrained`; it never consumes a probe.
 
 An offering with no recorded failures is not in the tracker, and a NodePool with no recorded
 ICE is unconstrained, so **a cluster that never hits a launch failure behaves as it does
-today.**
+today.** Entries also expire once they go quiet, so a cluster that recovers returns to that
+state rather than carrying failure history forever.
 
 ```
                     ICE                         window elapses
@@ -112,6 +120,9 @@ today.**
          |                      | ICE (no-op           | ICE
          | success              |  inside window)      v
          +----------------------+---------------- (level grows, new window)
+         |
+         |  ...also on expiry: probe-eligible and untouched for maxDelay
+         +----------------------------------------------------------------
 ```
 
 ### How It Works
@@ -122,12 +133,12 @@ New package `pkg/state/launchbackoff`. Two maps: offering entries keyed by
 `cloudprovider.OfferingKey`, pool entries keyed by NodePool UID. Written from
 `launchNodeClaim` (`Fail` / `Succeed`) and from the `Admit` callers; read from scheduling
 (`FilterUnavailable`, `IsAvailable`, `HasFailed`) and from the disruption `Queue`
-(`CanAdmit`).
+(`IsConstrained`).
 
 ```go
 type offeringEntry struct {
 	level int       // failed windows (0 == healthy / absent)
-	until time.Time // unavailable before this time
+	until time.Time // unavailable before this time; expires at until+maxDelay
 }
 
 func (t *Tracker) IsAvailable(cloudprovider.OfferingKey) bool // absent, healthy, or now >= until
@@ -168,8 +179,18 @@ until  := now + window
 
 | Parameter   | Default | Rationale |
 | ----------- | ------- | --------- |
-| `baseDelay` | `30s`   | First probe after a short delay. Fast enough to recover if ICE clears; slow enough to stop the thundering herd. Shorter than the AWS ICE cache's 3m TTL so core, not the provider cache, owns retry spacing. |
-| `maxDelay`  | `10m`   | Absolute ceiling. Reached after ~6 consecutive failed windows (`30s → 1m → 2m → 4m → 8m → 10m`). |
+| `baseDelay` | `30s`   | First probe after a short delay: fast enough to recover quickly once capacity returns, long enough that a window is a meaningful unit of escalation. Deliberately *not* chosen to outlast a provider cache — see below. |
+| `maxDelay`  | `10m`   | Absolute ceiling on a single window. Reached after 6 consecutive failed windows. |
+
+An entry **expires** — is deleted outright, level and all — once it has been continuously
+`IsAvailable` for `maxDelay`, i.e. at `until + maxDelay`. No extra field: `until` already
+carries the timestamp.
+
+**Core windows do not out-prioritize a provider cache, and are not meant to.** Usability is
+the intersection (`provider.Available && IsAvailable`), so the *longer* of the two gates
+binds. At levels 1–3 a jittered core window (15s–2m) is shorter than the AWS cache's 3m
+TTL, which means the provider decides when a retry is attempted at all and core's window
+has already elapsed by the time it happens.
 
 #### Applying the backoff filter
 
@@ -207,9 +228,8 @@ filtered `Available` set). Production call sites that feed scheduling, and only 
    leaving it unfiltered means disruption will plan replacements onto offerings core is
    backing off.
 
-A provider that reports an offering unavailable still wins. A provider whose cache entry
-has expired does *not* make the offering usable until core's window elapses. This is what
-prevents the TTL-expiry thundering herd.
+A provider that reports an offering unavailable still wins, and a provider whose cache entry
+has expired does not make the offering usable until core's window has also elapsed.
 
 #### Two NodeClaims, same pool
 
@@ -221,9 +241,10 @@ A NodeClaim carries a set of acceptable instance types and requirements, and the
   the set are simply absent; they are not charged.
 - **Every compatible offering is backed off.** The filter leaves nothing. `Solve` does not
   produce a NodeClaim for these pods. They stay pending and are surfaced by
-  `karpenter_scheduler_unschedulable_pods_count`. When the earliest `until` elapses, one
-  offering becomes probe-eligible; the NodePool budget (below) decides whether that probe
-  is admitted this loop.
+  `karpenter_scheduler_unschedulable_pods_count`. When the earliest `until` elapses, that
+  offering becomes eligible and `Solve` starts producing NodeClaims for these pods again —
+  potentially many, all targeting the one eligible key. Those NodeClaims are *risky*, and
+  the NodePool budget below is what limits how many are admitted per window.
 
 The filter therefore binds for a given pod exactly when every offering it could land on is
 backed off. The NodePool budget is coarser and can briefly delay a satisfiable NodeClaim: a
@@ -234,38 +255,72 @@ window on the NodeClaims most likely to succeed — see
 
 #### Per-NodePool launch budget
 
-The NodePool budget is a *rate limit*. A boolean window is a poor fit here, when it elapses and
-then admits the full `Solve`, the batch would reproduce the cache-expiry thundering herd at NodePool
-scope.
+The NodePool budget is a *rate limit*, not a window. A boolean window is a poor fit here:
+when it elapsed it would admit the full `Solve`, reproducing the cache-expiry thundering
+herd at NodePool scope.
 
 ```go
 type poolEntry struct {
+	// Aggregate budget. Engaged only while the pool is constrained by a recent ICE.
 	constrained bool
-	burst       int       // admits allowed per window; 1 after a failure, doubled per success
+	burst       int       // ceiling: admits allowed per window at the current recovery level
+	remaining   int       // allowance left in the current window; reset to burst on rollover
 	nextAdmit   time.Time
+
+	// Risky budget. Always engaged, including while unconstrained.
+	riskyRemaining int
+	nextRiskyAdmit time.Time
 }
 
-func (t *Tracker) Admit(nodePoolUID types.UID) bool
+func (t *Tracker) Admit(nodePoolUID types.UID, risky bool) bool
+func (t *Tracker) IsConstrained(nodePoolUID types.UID) bool // read-only; never consumes
 func (t *Tracker) FailPool(nodePoolUID types.UID)
 func (t *Tracker) SucceedPool(nodePoolUID types.UID)
-func (t *Tracker) NextAdmit(nodePoolUID types.UID) time.Time
+func (t *Tracker) NextAdmit(nodePoolUID types.UID) time.Time // earliest of the two windows
 ```
 
-- **Unconstrained** (absent or `constrained == false`): `Admit` always returns true.
-  The caller passes the full set into `CreateNodeClaims`, which fans out as it does today.
-- **`FailPool`:** set `constrained = true`, `burst = 1`, `nextAdmit = now + probeInterval`.
-  No-op if already constrained and `now < nextAdmit`.
-- **`Admit` while constrained:** admit up to `burst` NodeClaims per window. If the window's
-  allowance is spent and `now < nextAdmit`, return false; otherwise consume one and, when the
-  allowance is exhausted, set `nextAdmit = now + probeInterval`.
-- **`SucceedPool`:** double `burst`. Once it would exceed `burstMax`, clear `constrained` and
-  the pool is back to full speed.
+`burst` and `remaining` are **two different numbers** and collapsing them breaks both
+mechanisms: consumption would erode the recovery ceiling, and
+`karpenter_nodepools_launch_burst` would graph a per-window sawtooth instead of the ramp it
+is documented to show. `burst` changes only on `SucceedPool` / `FailPool`; `remaining`
+changes only on `Admit` and window rollover.
+
+A NodeClaim is **risky** when every offering in its compatible set has a tracker entry —
+`HasFailed` is true for all of them — meaning there is no offering it can land on without a
+recent capacity failure. The caller already computes this predicate to order admissions
+(below), so passing it to `Admit` costs nothing extra.
+
+- **Unconstrained and not risky** (absent entry, or `constrained == false`): `Admit` returns
+  true. The caller passes the full set into `CreateNodeClaims`, which fans out as today.
+  A risky `Admit` against an *absent* pool entry creates one, because offering entries are
+  shared across NodePools: a pool that has never failed a launch itself can still have risky
+  NodeClaims if another pool's ICE armed the offerings they depend on.
+- **`FailPool`:** set `constrained = true`, `burst = 1`, `remaining = 1`,
+  `nextAdmit = now + probeInterval`. No-op if already constrained and `now < nextAdmit`.
+- **`Admit` while constrained:** if `now >= nextAdmit`, roll the window over
+  (`remaining = burst`, `nextAdmit = now + probeInterval`). If `remaining == 0`, return
+  false. Otherwise decrement `remaining` and continue to the risky check.
+- **`Admit` with `risky == true`:** additionally consume from the risky budget, whether or
+  not the pool is constrained. If `now >= nextRiskyAdmit`, set
+  `riskyRemaining = riskyBurst` and `nextRiskyAdmit = now + probeInterval`. If
+  `riskyRemaining == 0`, return false; otherwise decrement it. A risky admit from a
+  constrained pool consumes from **both** budgets.
+- **`SucceedPool`:** double `burst`, which takes effect at the next window rollover. Once it
+  would exceed `burstMax`, clear `constrained` and the aggregate budget disengages. The
+  risky budget does not ramp and is not released — see below.
+- **Entry cleanup:** delete the pool entry when the NodePool is deleted, and idle-expire it
+  when it is unconstrained and `now >= nextRiskyAdmit + maxDelay`. Deleting an idle entry is
+  safe because a subsequent risky admit recreates it with a fresh window, which still admits
+  one.
 
 **Recovery ramps; it does not jump.** Clearing `constrained` on the *first* success would
 admit the entire `Solve` batch on the next loop. Doubling `burst` bounds the overshoot to
 `burstMax` doomed NodeClaims while still recovering quickly: successes within one window
 compound, so a recovered pool reaches full speed in two or three windows rather than one,
-avoiding a thundering herd when a launch succeeds.
+avoiding a thundering herd when a launch succeeds. Release is not the end of the bound:
+once `constrained` clears, any NodeClaim still backed only by failed offerings falls to the
+risky budget, so overshoot stays bounded in both regimes rather than only while
+constrained.
 
 When a window's admits return a mix of successes and failures, the resulting `burst` depends
 on the order the outcomes land, and a `SucceedPool` that releases the pool may be followed
@@ -281,13 +336,18 @@ land on a never-failed offering waits behind them. That would weaken use case 1'
 that the satisfiable portion launches at full speed into "launches at full speed once a
 satisfiable launch happens to be admitted and succeed."
 
-So for a constrained pool, partition the `Solve` result before admitting: NodeClaims whose
-compatible offerings include at least one key with no tracker entry go first, then the rest.
-The first group is likely to succeed, and successes are what ramp the pool back up. Note
-this is a different question from `IsAvailable`, which is also true for a probe-eligible key
-whose window just elapsed — the partition needs "never failed," not "allowed to try," so the
-tracker exposes entry presence separately. The walk runs only for pools that are actually
-constrained; an unconstrained pool admits everything and never pays for it.
+So partition the `Solve` result before admitting: NodeClaims whose compatible offerings
+include at least one key with no tracker entry go first, then the rest. The first group is
+likely to succeed, and successes are what ramp the pool back up. Note this is a different
+question from `IsAvailable`, which is also true for a probe-eligible key whose window just
+elapsed — the partition needs "never failed," not "allowed to try," so the tracker exposes
+entry presence separately.
+
+The second group *is* the risky set, so this single partition supplies both the ordering and
+the `risky` argument to `Admit`; there is no separate pass. It has to run for unconstrained
+pools too, because the risky budget applies to them, but the whole walk is skipped when the
+tracker holds no offering entries — the cluster that never fails a launch still pays
+nothing.
 
 **Admit is a caller concern, not a `CreateNodeClaims` concern.** That function is a shared
 create fan-out; `Queue.createReplacementNodeClaims` requires `len(names) ==
@@ -296,38 +356,46 @@ len(replacements)` after nodes may already be cordoned. Silently omitting inside
 
 | Caller | Behavior |
 | ------ | -------- |
-| `Provisioner.Reconcile` | `Admit` each `Solve` NodeClaim (consume), keyed by `NodeClaimTemplate.NodePoolUUID`. Pass only the admitted set into `CreateNodeClaims`. Increment `karpenter_nodepools_launch_throttled_total` once per omitted NodeClaim. |
-| `static.provisioning` | Same consume-then-create; see [Static capacity](#static-capacity). |
-| Disruption `Queue` | **Never *consume* `Admit`.** Peek with read-only `CanAdmit` before `markDisrupted` and skip the candidate while the pool is constrained. If `Create` itself ICE's, the existing `StartCommand` error path applies. |
+| `Provisioner.Reconcile` | `Admit` each `Solve` NodeClaim (consume), keyed by `NodeClaimTemplate.NodePoolUUID`, passing `risky` from the partition above. Pass only the admitted set into `CreateNodeClaims`. Increment `karpenter_nodepools_launch_throttled_total` once per omitted NodeClaim. |
+| `static.provisioning` | Same consume-then-create with `risky = false`; see [Static capacity](#static-capacity). |
+| Disruption `Queue` | **Never *consume* `Admit`.** Peek with read-only `IsConstrained` before `markDisrupted` and skip the command while any involved pool is constrained. If `Create` itself ICE's, the existing `StartCommand` error path applies. |
 
-`CanAdmit` answers "is this pool constrained right now" without decrementing `burst`, so a
-disruption peek never steals a probe from the provisioner. It must run **before**
-`markDisrupted`, which cordons the candidates ahead of launching replacements
-(`queue.go`); checking afterwards would leave a cordoned node whose replacement was
-refused. Skipping a candidate is already a supported outcome — the command is simply not
-started — whereas *consuming* would tempt an implementation to omit inside
+Static passes `risky = false` because it has no per-NodeClaim offering set to evaluate — it
+sizes a replica gap against a NodePool template and never builds a scheduler. That is
+sufficient rather than a gap: the aggregate budget only disengages after a *success*, and a
+static NodeClaim does not pin a zone (the provider picks), so a static pool whose launches
+keep failing never accumulates the successes that would release it.
+
+`IsConstrained` answers "is this pool constrained right now" without touching `remaining` or
+`nextAdmit`, so a disruption peek never steals a probe from the provisioner.
+
+**Which NodePools it checks.** A `Command` carries `Candidates []*Candidate` and
+`Replacements []*Replacement`, and multi-node consolidation deliberately builds commands
+whose candidates span NodePools. The check is keyed on the **replacement** pools —
+`Replacement.NodeClaim.NodeClaimTemplate.NodePoolUUID` — because those are the pools that
+would launch. Specifically:
+
+- A command with no replacements (pure deletion: empty, expiration, single-node
+  consolidation to zero) is **never** gated. It creates nothing, and blocking it would let a
+  capacity shortage prevent cluster cleanup.
+- A command with replacements is skipped if **any** replacement's pool is constrained. All
+  of a command's replacements must be created together to satisfy `len(names) ==
+  len(replacements)`, so partial admission is not an available outcome and the check has to
+  be all-or-nothing.
+- Candidate pools are **not** consulted. Draining a node in a constrained pool is fine and
+  often desirable; what must be throttled is the launch.
+
+The check must run **before** `markDisrupted`, which cordons the candidates ahead of
+launching replacements (`queue.go`); checking afterwards would leave a cordoned node whose
+replacement was refused. Skipping a command is already a supported outcome — it is simply
+not started — whereas *consuming* would tempt an implementation to omit inside
 `CreateNodeClaims` and break the `len(names) == len(replacements)` contract below.
 
 | Parameter       | Default | Rationale |
 | --------------- | ------- | --------- |
-| `probeInterval` | `30s`   | One window per 30s per constrained NodePool. Independent of offering `baseDelay` so a pool with 200 backed-off offerings cannot emit 200 probes when their windows line up. |
-| `burstMax`      | `8`     | Ceiling on admits per window before the pool is released outright. Caps wasted launches after a spurious recovery at 8, and reaches full speed in ~3 windows (`1 → 2 → 4 → 8`) when capacity is genuinely back. |
-
-#### Why both scopes are needed
-
-The per-offering backoff is the right *filter* — it isolates a bad zone from healthy ones
-and reuses `Available`. It is not, by itself, a sufficient *throttle*. Consider the
-observed incident: one NodePool, ~200 compatible offerings, all ICE'd. Each window elapses
-independently. Even with exponential backoff, if many keys share a `until` (they often
-will: they failed in the same first batch), expiry admits one NodeClaim per offering per
-loop, which is the blast again.
-
-Per-offering granularity is what makes the model correct for use case 3; a per-NodePool
-admit of one per `probeInterval` is what makes the aggregate bounded. With one probe per
-30s per NodePool, a fully-constrained NodePool emits ~240 NodeClaims over two hours
-instead of 39,137, a ~160× reduction. A NodePool that can still launch onto a healthy
-offering ramps back to full speed within a few windows, and admit ordering ensures those
-healthy launches are what the windows are spent on.
+| `probeInterval` | `30s`   | One window per 30s per NodePool, for both budgets. Independent of offering `baseDelay` so a pool with 200 backed-off offerings cannot emit 200 probes when their windows line up. |
+| `burstMax`      | `8`     | Ceiling on admits per window before the aggregate budget disengages. Caps wasted launches after a spurious recovery at 8, and reaches full speed in ~3 windows (`1 → 2 → 4 → 8`) when capacity is genuinely back. |
+| `riskyBurst`    | `1`     | Launches per window whose entire offering set has a failure history, regardless of `constrained`. |
 
 #### Recording outcomes
 
@@ -352,65 +420,134 @@ CreateFleet override `(InstanceType, AvailabilityZone)` the unavailable-offering
 already uses. KWOK populates `Keys` in-tree so core tests do not depend on AWS. See
 [Backward Compatibility](#backward-compatibility) and [Graduation Criteria](#graduation-criteria).
 
-#### Attributing unschedulability to backoff
+#### Attributing unschedulability to unavailable offerings
 
-The requeue below has to tell "these pods have nowhere to go until a window elapses" apart
-from "these pods are unschedulable for a reason no delay will fix." `FilterUnavailable` alone cannot
-answer that: it sets `Available = false`, which downstream is indistinguishable from an
-offering the *provider* reported unavailable. So the judgement is made where offerings are
-selected, and reported with a typed error mirroring the existing `ReservedOfferingError`:
+The requeue below has to tell "these pods have nowhere to go until capacity frees up" apart
+from "these pods are unschedulable for a reason no delay will fix." That judgement is
+reported with a typed error, in the shape of the existing `ReservedOfferingError`:
 
 ```go
 // pkg/controllers/provisioning/scheduling
-type BackoffUnschedulableError struct {
+type OfferingsUnavailableError struct {
 	error
-	NextEligible time.Time // earliest `until` across the offerings that were filtered
+	NextEligible time.Time // when it is worth trying again
 }
 
-func NewBackoffUnschedulableError(err error, nextEligible time.Time) BackoffUnschedulableError
-func IsBackoffUnschedulableError(err error) bool // errors.As, as IsReservedOfferingError does
-func (e BackoffUnschedulableError) Unwrap() error
+func NewOfferingsUnavailableError(err error, nextEligible time.Time) OfferingsUnavailableError
+func IsOfferingsUnavailableError(err error) bool // errors.As, as IsReservedOfferingError does
+func (e OfferingsUnavailableError) Unwrap() error
 
 // mirrors Results.ReservedOfferingErrors / Results.DRAErrors
-func (r Results) BackoffUnschedulableErrors() map[*corev1.Pod]error
+func (r Results) OfferingsUnavailableErrors() map[*corev1.Pod]error
 ```
 
-**Where it is produced.** The reserved-offering path already makes the same *shape* of
-judgement — compatible offerings existed, but none were usable — and reports it with a
-typed error rather than a generic one:
+**Where it is produced.** The error is produced in `filterInstanceTypesByRequirements`, and the discriminator
+already exists there. That function deliberately does not short-circuit, so it can explain
+failures, and accumulates per-reason bookkeeping in `InstanceTypeFilterError`:
 
 ```go
-if hasCompatibleOffering && len(reservedOfferings) == 0 {
-	return nil, NewReservedOfferingError(...)
-}
+err.requirementsAndFits = err.requirementsAndFits || (itCompat && itFits && !itHasOffering)
 ```
 
-Backoff attribution is the direct analogue, in that same offering-selection path. While
-filtering a NodeClaim's offerings, count those rejected because
-`HasFailed(key) && !IsAvailable(key)` — meaning `FilterUnavailable` cleared `Available`, not the
-provider. If nothing survives and that count is non-zero, the pod failed *because of*
-backoff and the error carries `min(until)` over those keys. If the count is zero, nothing
-changes: the pod gets today's error and the requeue reads it as "spin, do not sleep."
+`requirementsAndFits` has what we need: *some* instance type matched the pod's
+requirements and had room for it, and was rejected only for lack of a usable offering.
+When `len(remaining) == 0` and that flag is set, the pod is offering-blocked, and the
+existing flags separate it from requirements, resource, and `minValues` failures at no extra
+cost. This is a wake time added to bookkeeping the scheduler already maintains, not a new
+classification scheme.
 
-**What it costs.** The scheduler needs a read-only tracker reference, because
-`HasFailed` / `IsAvailable` is the only thing that can say *why* an offering is
-unavailable. The filter stays transparent for scheduling *decisions* — `Solve` still just
-reads `Available` — but is no longer transparent for *explaining* a failure. That is
-consistent with the [Invariants](#invariants) (simulation reads tracker state, never
-debits), but it is a genuine addition to the scheduler's surface, called out here rather
-than buried, since "existing call sites do not change" is otherwise one of this design's
-selling points.
+**Deliberately layer-agnostic.** The error does *not* distinguish an offering core is
+backing off from one the provider reported unavailable, and an earlier draft's
+`HasFailed && !IsAvailable` predicate was wrong to try. Both are transient capacity states
+with the same remedy, and the distinction creates a hole: after a core window elapses while
+a provider's longer cache entry persists, `HasFailed` is true and `IsAvailable` is *also*
+true, so that predicate goes false and the provisioner returns to spinning `Solve` every
+loop for the remainder of the provider's TTL — the exact CPU cost the requeue exists to
+remove. Since core cannot know a provider's TTL, it also cannot compute a precise wake time
+for that case, which is why the requeue is capped at `probeInterval` regardless.
+
+**`NextEligible`** is therefore a hint, not a deadline: `min(NextEligible(key))` over the
+rejected keys that *do* have tracker entries, falling back to `now + probeInterval` when
+none do (pure provider suppression). The tracker reference the scheduler needs is only for
+that hint — the classification comes from `InstanceTypeFilterError`. `Solve` still makes
+decisions by reading `Available` alone, so the filter stays transparent for scheduling and
+becomes visible only for *explaining* a failure. That is a genuine addition to the
+scheduler's surface, called out here rather than buried, since "existing call sites do not
+change" is otherwise one of this design's selling points.
 
 **Both directions of error are safe.** An offering may be filtered when the instance type
-would have failed on resources anyway, so a pod can be labelled backoff-blocked when a
+would have failed on resources anyway, so a pod can be labelled offering-blocked when a
 delay is not strictly the cause; the cost is bounded to one `probeInterval` of sleep on a
 pod that was not going to schedule regardless. Missing the attribution yields today's
 immediate requeue. Neither direction can cause a pod to be dropped or delayed
 indefinitely.
 
 `Record` treats it as it treats `ReservedOfferingError` — no error-level log or event per
-loop — since a backed-off offering is an expected transient state and the affected pods are
-already counted by `karpenter_scheduler_unschedulable_pods_count`.
+loop — since an unavailable offering is an expected transient state and the affected pods
+are already counted by `karpenter_scheduler_unschedulable_pods_count`.
+
+**It must not short-circuit preference relaxation.** This is the one place the
+`ReservedOfferingError` analogy must *not* be carried through, and it needs stating because
+an implementer following the analogy would carry it through by reflex. `trySchedule` returns
+early for a reserved-offering error instead of relaxing:
+
+```go
+if IsReservedOfferingError(err) {
+	return err
+}
+```
+
+`OfferingsUnavailableError` does **not** get added to that check. The reasoning behind the
+reserved-offering case does not transfer: a reservation can be released by another NodeClaim
+*within the same* `Solve`, so declining to relax costs sub-second latency and may avoid
+discarding a preference unnecessarily. A backoff window is 15s to `maxDelay` and cannot
+resolve inside the loop, so declining to relax would hold a pod pending for minutes against
+an explicit `ScheduleAnyway` or `preferred...` statement that it would rather run than keep
+the preference. Adding the short-circuit would make soft constraints behave like hard ones
+whenever capacity is short — see [Topology spread](#topology-spread).
+
+Leaving relaxation alone also makes the attribution *stronger*. `podErrors[pod]` is only
+populated after `trySchedule` has exhausted every relaxation, so `requirementsAndFits` is
+evaluated against the fully-relaxed pod. `OfferingsUnavailableError` therefore means "no
+usable offering even with every preference dropped," and a pod that could have escaped by
+relaxing never reaches the requeue path at all.
+
+#### Topology spread
+
+Use case 3 says pods with a zonal spread should give up the instance type before the spread.
+That is already the behaviour, and it falls out of ordering rather than policy:
+`nextDomainTopologySpread` returns the *single* least-loaded eligible domain, so the pod
+carries `zone in [dead-az]` as a requirement *before* instance types are filtered.
+`filterInstanceTypesByRequirements` then drops only the instance types with no usable
+offering in that zone, and price ordering ranks whatever survives. Price can never trade the
+zone away, because every candidate already satisfies the zone requirement. Under the default
+`PreferencePolicyRespect` a `ScheduleAnyway` spread is treated as required for that first
+pass, which is what pins the zone at all.
+
+So the concession order for a soft zonal spread is:
+
+1. A different (possibly pricier) instance type in the desired zone. Automatic, inside
+   `filterInstanceTypesByRequirements`, no relaxation involved.
+2. Required node-affinity terms, then preferred pod affinity, pod anti-affinity, and node
+   affinity — the order in `Preferences.Relax`.
+3. The spread itself. `removeTopologySpreadScheduleAnyway` is **last** in that list, so the
+   pod only lands in a healthy zone once nothing else can be given up.
+
+A `DoNotSchedule` spread is never relaxed, so those pods wait for their zone's window and are
+the population the requeue sleep exists for.
+
+The interaction the filter does **not** change is that a fully backed-off zone remains a
+registered topology domain. `buildDomainGroups` derives domains from
+`InstanceType.Requirements`, not from `Offerings.Available()`, so clearing `Available` leaves
+the zone in `t.domains` with a count of 0. Topology keeps electing it as least-loaded, every
+affected pod pays the full relaxation loop on every pass, and for `DoNotSchedule` the global
+`min` stays 0, so `count - min <= maxSkew` caps each healthy zone at `maxSkew` while the dead
+zone can never be filled. This is pre-existing — the provider's ICE cache clears the same
+field and produces the same result for its TTL — but core's windows reach `maxDelay`, so the
+RFC makes it last longer. Pruning the zone from `InstanceType.Requirements` would fix it and
+is deliberately **not** in scope: those requirements feed label resolution on the resulting
+NodeClaim, so pruning changes what the node advertises. See
+[Open Questions](#open-questions).
 
 #### Provisioner requeue
 
@@ -422,13 +559,27 @@ When the gate is on:
 
 ```
 created, omitted := ... // after Admit + CreateNodeClaims
+
 if len(created) > 0 {
     return RequeueImmediately  // other pools / remaining pods still need a loop
 }
-if !allPendingPodsAreBackoffBlocked(results) {
+
+// Every pending pod must be accounted for by a delay we can wait on. There are
+// two populations, because a pod on a NodeClaim that Admit omitted never
+// reached Results.PodErrors at all:
+//   1. Solve produced no NodeClaim for it   -> OfferingsUnavailableError
+//   2. Solve produced one, Admit omitted it -> pod is on an omitted NodeClaim
+for pod := range pendingPods {
+    if IsOfferingsUnavailableError(results.PodErrors[pod]) || omitted.Has(pod) {
+        continue
+    }
     return RequeueImmediately  // affinity, resources, minValues, etc.
 }
-wake := min(NextAdmit / BackoffUnschedulableError.NextEligible over pools that blocked)
+
+wake := min(
+    NextAdmit(pool)         for pools that omitted a NodeClaim,
+    err.NextEligible        for pods blocked on unavailable offerings,
+)
 return RequeueAfter: min(wake, probeInterval)
 ```
 
@@ -455,11 +606,13 @@ anywhere. Defaults `baseDelay=30s`, `maxDelay=10m`, `probeInterval=30s`.
    attribution populated, a handful of `CreateFleet` failures moves most of the 200
    offerings to `level=1, until≈now+30s` (jittered). Further ICE from the in-flight batch
    is a no-op. `FailPool` constrains the NodePool; `burst=1`, `nextAdmit≈now+30s`.
-3. **t=30s, steady state.** The filter still removes every offering until `until`. `Solve`
-   produces no launch for these pods; they remain pending. At ~30s the first offering
-   window elapses and the NodePool `Admit` allows one NodeClaim: a single probe. If it
-   ICEs, that key's level grows (`until≈now+1m`), `burst` resets to 1, and the pool's
-   `nextAdmit` moves forward 30s. Sustained cost is ~2 NodeClaim cycles/minute instead
+3. **Steady state.** The filter removes every offering until `until`. `Solve` produces no
+   launch for these pods; they remain pending. Once *both* gates open — core's window and
+   the provider's own ICE cache entry, whichever is longer, so ~3m at this level on AWS —
+   `Admit` allows one NodeClaim: a single probe, and one either way, since a NodeClaim
+   backed only by failed offerings is risky and `riskyBurst` is 1. If it ICEs, that key's
+   level grows (`until≈now+1m`), `burst` resets to 1, and both `nextAdmit` and
+   `nextRiskyAdmit` move forward 30s. Sustained cost is ~2 NodeClaim cycles/minute instead
    of ~325.
 4. **Capacity returns.** A probe succeeds. That offering leaves the tracker and
    `SucceedPool` doubles `burst` to 2. The next window admits 2, preferring NodeClaims that
@@ -470,8 +623,12 @@ anywhere. Defaults `baseDelay=30s`, `maxDelay=10m`, `probeInterval=30s`.
    batch.
 5. **Partial recovery.** If only one AZ recovers, only that AZ's keys `Succeed`. The other
    three stay backed off and are filtered out of the scheduler's set, so newly admitted
-   NodeClaims flow to the healthy AZ. Pods *pinned* to a dead AZ (topology spread, zonal
-   affinity) still wait on that AZ's backoff windows; see Edge Cases.
+   NodeClaims flow to the healthy AZ. The healthy AZ's successes release the pool, and its
+   NodeClaims are not risky (their sets include never-failed keys), so they launch at full
+   speed. Pods *pinned* to a dead AZ (topology spread, zonal affinity) become the risky set:
+   as each dead-AZ window elapses they are admitted one per `probeInterval`, rather than as
+   an unbounded batch on a pool that is no longer constrained. This is the case the risky
+   budget exists for; see Edge Cases.
 
 #### Invariants
 
@@ -483,8 +640,8 @@ If any of these stops holding, the corresponding part of the design must be revi
   actually be created, never from `CreateNodeClaims` itself and never from disruption.
   Everything else reads: scheduling simulation (`Solve`, disruption packing) via
   `FilterUnavailable` /
-  `IsAvailable` / `HasFailed`, and the disruption `Queue` via `CanAdmit`. A read must never
-  decrement `burst` or move `nextAdmit`.
+  `IsAvailable` / `HasFailed`, and the disruption `Queue` via `IsConstrained`. A read must
+  never touch `remaining`, `riskyRemaining`, `nextAdmit`, or `nextRiskyAdmit`.
 - **The filter is `FilterUnavailable`, before first precompute, at the two scheduling call
   sites.** It `DeepCopy()`s only instance types that have a backed-off offering; other
   pointers stay aliased. `fits` reads the memoized `allocatableOfferings`, not live
@@ -498,8 +655,18 @@ If any of these stops holding, the corresponding part of the design must be revi
 - **`Admit` is an atomic compare-and-consume.** Many NodeClaims from one NodePool land their
   outcomes in `launchNodeClaim` concurrently while a provisioner calls `Admit` for that same
   pool, so a read of `nextAdmit` followed by a separate write would race and overshoot the
-  budget. `Admit` takes the write lock once: re-check the window, decrement the remaining
-  burst, return the decision.
+  budget. `Admit` takes the write lock once and does the window rollover, both allowance
+  decrements, and the decision under it.
+- **No launch escapes both budgets.** Every path that creates a NodeClaim is covered by the
+  aggregate budget while its pool is constrained, by the risky budget when its offering set
+  is entirely previously-failed, or by `IsConstrained` for disruption. A launch that is
+  neither constrained nor risky is *intended* to be unthrottled — that is the "cluster that
+  never fails behaves as today" property — so any new create path must be classified
+  explicitly rather than defaulting to unthrottled.
+- **Escalation state decays.** Offering entries expire at `until + maxDelay` and pool
+  entries idle-expire or are deleted with the NodePool, so `level` and `burst` always
+  describe *recent* history. Without this, a single old failure permanently changes how an
+  offering is treated.
 - **In-memory state is sufficient.** Nothing is persisted. Discarding the trackers on
   restart at worst re-attempts a failing pool once before backing off again.
 
@@ -523,6 +690,9 @@ If any of these stops holding, the corresponding part of the design must be revi
   throttled by the same `Admit` + requeue rules as other pending pods.
 - **Static capacity** does not use the scheduler; the pool budget is the throttle. See
   [Static capacity](#static-capacity).
+- **Topology spread.** Unchanged in mechanism, but the filter makes an existing interaction
+  fire more often: soft spreads concede the instance type before the spread, and a fully
+  backed-off zone stays a topology domain. See [Topology spread](#topology-spread).
 - **`minValues`.** If filtering backed-off offerings drops an instance-type family below a
   `minValues` requirement, scheduling fails through the existing `minValues` path rather
   than silently launching something non-compliant. Under `MinValuesPolicyBestEffort` it
@@ -541,10 +711,10 @@ not duplicate the provider's per-offering availability gauge for healthy offerin
 | Signal | Type | Purpose |
 | ------ | ---- | ------- |
 | `karpenter_offerings_launch_failures_total` | counter, by `instance_type`, `capacity_type`, `zone` | Attributed launch failures. Shows *where* capacity is short, which the current NodePool-labelled metric cannot. Increment in `launchNodeClaim` on ICE, once per key in `Keys` (once with empty labels if `Keys` is empty). |
-| `karpenter_offerings_unavailable` | gauge 0/1, by `instance_type`, `capacity_type`, `zone` | 1 while `!IsAvailable(key)` for a tracker entry. Deleted when the entry is reset on success. Cardinality is "currently backed-off offerings," not the full instance-type catalog. |
-| `karpenter_nodepools_launch_constrained` | gauge 0/1, by `nodepool` | 1 while the pool's budget is constrained. The "is this NodePool being throttled" signal. |
-| `karpenter_nodepools_launch_burst` | gauge, by `nodepool` | Admits allowed per window while constrained. Deleted when the pool is released. Distinguishes "recovering" (rising) from "stuck at the floor" (pinned at 1). |
-| `karpenter_nodepools_launch_throttled_total` | counter, by `nodepool` | Incremented by the `Admit` caller (`Provisioner.Reconcile` or `static.provisioning`) once per NodeClaim not created because `Admit` returned false. Distinguishes "throttled" from "nothing to do." Not incremented from `CreateNodeClaims`. |
+| `karpenter_offerings_unavailable` | gauge 0/1, by `instance_type`, `capacity_type`, `zone` | 1 while `!IsAvailable(key)` for a tracker entry. Deleted when the entry is reset on success **or expires** at `until + maxDelay`, so the series set really is "currently backed-off offerings" rather than every offering that has ever failed. |
+| `karpenter_nodepools_launch_constrained` | gauge 0/1, by `nodepool` | 1 while the pool's aggregate budget is constrained. The "is this NodePool being throttled" signal. Note a released pool can still be throttling risky launches, which is why the counter below is labelled by reason. |
+| `karpenter_nodepools_launch_burst` | gauge, by `nodepool` | The `burst` *ceiling* at the current recovery level — not `remaining`. Deleted when the pool is released. Distinguishes "recovering" (rising) from "stuck at the floor" (pinned at 1); graphing consumption here instead would show a per-window sawtooth and hide the ramp. |
+| `karpenter_nodepools_launch_throttled_total` | counter, by `nodepool`, `reason` (`constrained`, `risky`) | Incremented by the `Admit` caller (`Provisioner.Reconcile` or `static.provisioning`) once per NodeClaim not created because `Admit` returned false. Distinguishes "throttled" from "nothing to do," and aggregate throttling from risky-probe throttling on a released pool. Not incremented from `CreateNodeClaims`. |
 
 The primary success metric needs no new instrumentation: the ratio of
 `karpenter_nodeclaims_disrupted_total{reason=insufficient_capacity}` to
@@ -572,23 +742,33 @@ should fall from >90% to near zero.
   NodePool status was considered and rejected: the offering key is cloud-scoped and shared
   across NodePools, so it does not belong in any single NodePool's status.
 - **Mixed pool, zonal pods.** "The NodePool is released after a healthy-AZ success ramp"
-  plus "the filter only removes backed-off keys" means pods pinned to a dead AZ still
-  probe as that AZ's windows elapse. Their rate is one probe per offering window (capped
-  at `maxDelay`), not the unconstrained create path. Admit ordering helps here too: while
-  the pool is constrained, healthy-AZ NodeClaims are admitted ahead of dead-AZ probes. A
-  `(NodePool, zone)` budget would close the remaining gap; it is an
+  plus "the filter only removes backed-off keys" means pods pinned to a dead AZ keep
+  probing as that AZ's windows elapse, on a pool that is no longer constrained. Their rate
+  is `riskyBurst` per `probeInterval` per NodePool — the offering window alone does not
+  bound it, since any number of NodeClaims may target the same probe-eligible key. Admit
+  ordering compounds this while the pool is constrained, admitting healthy-AZ NodeClaims
+  ahead of dead-AZ probes. The residual gap is that all dead AZs share one risky budget, so
+  a pool with three dead AZs probes them round-robin rather than one each; a
+  `(NodePool, zone)` risky budget would close it and is an
   [open question](#open-questions), not v1.
 - **Offering set churn.** Providers add and remove instance types and zones. Absent keys
-  are available, so a new offering is never penalised. Entries whose keys stop appearing
-  in `GetInstanceTypes` are inert; garbage-collect them when they have been `IsAvailable`
-  (window elapsed or succeeded) and unseen for `maxDelay` so metric series do not leak.
+  are available, so a new offering is never penalised. Entries expire at `until + maxDelay`
+  regardless of whether the key still appears in `GetInstanceTypes`, which covers both
+  directions: a withdrawn offering's entry goes away, and so does the entry for an offering
+  that is still advertised but no longer requested. Keying expiry on "unseen" alone would
+  not, because an offering the provider still lists is seen on every `GetInstanceTypes` call
+  whether or not any pod wants it.
 - **Spot and on-demand are independent.** `capacityType` is part of the key, so a spot
   shortage never throttles on-demand for the same instance type and zone, and vice versa.
   Spot-to-spot consolidation is unaffected when only on-demand is short.
 - **Shared offerings across NodePools.** Two NodePools selecting the same instance type in
   the same zone share the per-offering entry — correct, since they contend for the same
-  cloud capacity — but have independent NodePool budgets, so one NodePool's thundering herd
-  does not rate-limit another's healthy launches beyond the shared backoff.
+  cloud capacity — but have independent budgets, so one NodePool's thundering herd does not
+  constrain another's. The sharing does reach across pools in one direction: a pool that has
+  never failed a launch itself can find its NodeClaims classified risky because a *different*
+  pool's ICE armed the offerings they depend on. That is intended. The launches really are
+  aimed at capacity another pool just failed to get, and the bound is per-pool, so each pool
+  still gets its own probe.
 - **Reserved offerings with an exhausted reservation.** Provider reports the offering
   unavailable / `ReservationCapacity == 0`; it is filtered; strict mode defers and
   fallback mode falls through to on-demand/spot. Unchanged from today. ICE on a reserved
@@ -671,13 +851,15 @@ path.
 **Alpha (`LaunchBackoff=false` by default).** The mechanism changes provisioning rate
 under failure, so it needs real-cluster exposure before becoming default. Ships in core
 with: `cloudprovider.OfferingKey` and `InsufficientCapacityError.Keys`; `FilterUnavailable` at
-`NewScheduler` and `BuildNodePoolMap`; the NodePool budget including the `burst` ramp and
-admit ordering, consumed by the provisioner and static controller *not* by
-`CreateNodeClaims`; the read-only `CanAdmit` peek in the disruption `Queue`;
-[`BackoffUnschedulableError`](#attributing-unschedulability-to-backoff); metrics; static
-`RequeueAfter: NextAdmit` with the matching `ReleaseNodeCount`; and singleton provisioner
-`RequeueAfter`, capped at `probeInterval`, only when every remaining pending pod is
-backoff-blocked. Provider `Keys` population is out of scope for this alpha.
+`NewScheduler` and `BuildNodePoolMap`; the NodePool budget including the `burst` ramp, the
+risky budget, entry expiry, and admit ordering, consumed by the provisioner and static
+controller *not* by `CreateNodeClaims`; the read-only `IsConstrained` peek in the disruption
+`Queue`, keyed on replacement NodePools;
+[`OfferingsUnavailableError`](#attributing-unschedulability-to-unavailable-offerings) in
+`filterInstanceTypesByRequirements`; metrics; static `RequeueAfter: NextAdmit` with the
+matching `ReleaseNodeCount`; and singleton provisioner `RequeueAfter`, capped at
+`probeInterval`, only when every remaining pending pod is either offering-blocked or on an
+omitted NodeClaim. Provider `Keys` population is out of scope for this alpha.
 
 Test coverage, beyond unit tests of the window and `burst` transitions against a fake clock:
 
@@ -698,15 +880,40 @@ Test coverage, beyond unit tests of the window and `burst` transitions against a
 - **Recovery does not blast.** After a single successful probe against an otherwise dead
   pool, assert at most `burstMax` NodeClaims are created before the next failure re-arms
   backoff.
+- **Release does not blast either.** This is the regression test for the partial-recovery
+  hole. Drive a pool to *released* (`constrained == false`) via repeated healthy-AZ
+  successes while a dead AZ's offerings stay in the tracker, then advance the clock past
+  those offerings' windows with thousands of pods pinned to the dead AZ. Assert at most
+  `riskyBurst` NodeClaims per `probeInterval`, not one per eligible offering and not the
+  whole pending batch. Run the same assertion with the offering window expired but the fake
+  provider still reporting `Available=false`, which is the provider-cache-expiry shape of
+  the same scenario.
 - **Mixed pools make progress.** A constrained pool with one healthy AZ admits the healthy
   NodeClaims ahead of dead-AZ probes and is released within a bounded number of windows.
-  A mixed `Solve` (healthy pool A + constrained pool B) does **not** `RequeueAfter` the
-  singleton.
-- **Backoff-blocked vs other unschedulable.** A pod that fails on affinity is *not*
-  wrapped in `BackoffUnschedulableError`; a pod that fails only because `FilterUnavailable`
-  removed its offerings is. A pod whose offerings were cleared by the *provider* rather
-  than by `FilterUnavailable` is also not wrapped, since `HasFailed` is false for those
-  keys.
+  Assert healthy-AZ NodeClaims are **not** charged to the risky budget once their offerings
+  clear, so recovery is not itself rate-limited. A mixed `Solve` (healthy pool A +
+  constrained pool B) does **not** `RequeueAfter` the singleton.
+- **Offering-blocked vs other unschedulable.** A pod that fails on affinity, on resources,
+  or on `minValues` is *not* wrapped in `OfferingsUnavailableError`. A pod that fails only
+  because no usable offering remained **is**, whether the offering was cleared by
+  `FilterUnavailable` or by the provider — the layer-agnostic case is the one an earlier
+  draft got wrong, so assert it explicitly. Assert the wrapping happens when
+  `filterInstanceTypesByRequirements` empties the instance-type set, i.e. on a path that
+  never reaches `offeringsToReserve`.
+- **Throttled pods are still accounted for.** A loop where `Solve` produced NodeClaims and
+  `Admit` omitted *all* of them must `RequeueAfter`, not spin, even though those pods never
+  appear in `Results.PodErrors`.
+- **Soft constraints still relax.** With one AZ fully backed off and a pod carrying a
+  `ScheduleAnyway` zonal spread, assert the pod schedules into a healthy AZ in the *same*
+  `Solve` rather than being held pending — i.e. `OfferingsUnavailableError` did not get added
+  to `trySchedule`'s reserved-offering short-circuit. Assert the same pod prefers a pricier
+  instance type in its own AZ over relaxing, when one with a usable offering exists, so the
+  concession order is instance type before spread. A `DoNotSchedule` spread is *not* relaxed
+  and does wait for the window.
+- **State decays.** An entry untouched past `until + maxDelay` is gone: assert its metric
+  series is deleted, `HasFailed` is false, and a subsequent first failure starts at `level=1`
+  with a `baseDelay` window rather than jumping to `maxDelay`. Assert a deleted NodePool's
+  pool entry is removed.
 - **Static reservations do not leak.** A constrained static NodePool that admits fewer
   NodeClaims than its replica gap releases the difference: the pool's reserved count
   settles at the number actually created, and repeated constrained reconciles do not walk
@@ -714,8 +921,13 @@ Test coverage, beyond unit tests of the window and `burst` transitions against a
 - **A capped sleep cannot strand pods.** With an offering backed off at `maxDelay`, assert
   the provisioner requeues after `probeInterval` rather than the 10m window, so a NodePool
   created during the sleep is acted on within one interval.
-- **Disruption peeks, never consumes.** A constrained pool's `burst` is unchanged after a
-  disruption `CanAdmit`, and a candidate skipped for a constrained pool is never cordoned.
+- **Disruption peeks, never consumes.** A constrained pool's `remaining` and `nextAdmit` are
+  unchanged after a disruption `IsConstrained`, and a command skipped for a constrained pool
+  is never cordoned.
+- **Disruption gating is keyed correctly.** A multi-node consolidation command whose
+  candidates span pools is skipped when *any replacement's* pool is constrained, is admitted
+  when only a *candidate's* pool is constrained, and a replacement-free command (empty node
+  or expiration) is never gated at all.
 
 **Beta (default on).** Requires evidence from clusters that reproduce the issue that the
 ICE share of created NodeClaims drops substantially, **and** that pods which did get a
@@ -734,20 +946,38 @@ gate.
    group, or NodeClass-specific constraints. Adding NodeClass to the key would isolate those
    but fragments the signal and loses cross-NodePool sharing. Proposed: start with the
    three-tuple, matching the granularity providers' own ICE caches already use.
-2. **Should the NodePool budget be keyed by `(NodePool, zone)` as well?** That would close
-   the mixed-pool hole for zonal pods. Proposed: NodePool-only for v1; add zone if beta
-   clusters still show dead-AZ probe storms after a healthy AZ has unconstrained the pool.
-3. **Is `burstMax = 8` the right release threshold, and should `burst` decrease
+2. **Should the risky budget be keyed by `(NodePool, zone)` as well?** The rate is bounded
+   either way; what zone-keying would change is *fairness* between dead AZs, which currently
+   share one budget and are therefore probed round-robin rather than one probe each per
+   window. Proposed: NodePool-only for v1, since the bound is the correctness property and
+   the fairness gap only delays discovering that one dead AZ recovered before another.
+3. **Is a per-NodePool risky budget the right scope, or should it also be capped
+   cluster-wide?** The aggregate guarantee is `riskyBurst` per `probeInterval` *per
+   NodePool*, so a cluster with 100 simultaneously-shorted NodePools still sees ~200 doomed
+   launches per minute. That is two orders of magnitude better than the observed incident and
+   it keeps one tenant's shortage from throttling another's probes, which is why it is
+   proposed for v1 — but the scaling is linear in NodePool count and worth watching in beta.
+4. **Should a fully backed-off zone stop being a topology domain?** Today it does not:
+   `buildDomainGroups` reads `InstanceType.Requirements`, not `Offerings.Available()`, so the
+   dead zone keeps a count of 0, keeps getting elected as least-loaded, and — under
+   `DoNotSchedule` — holds the global `min` at 0 so every healthy zone is capped at
+   `maxSkew`. Pruning the zone from `InstanceType.Requirements` inside `FilterUnavailable`
+   would close it, but those requirements feed label resolution for the launched NodeClaim,
+   so pruning changes what the node advertises and risks a mismatch with the offering the
+   provider actually picks. Proposed: out of scope for v1, on the grounds that the provider's
+   own ICE cache already produces this behaviour and the RFC only extends its duration.
+   Revisit if beta clusters show spread-constrained workloads stalling rather than skewing.
+5. **Is `burstMax = 8` the right release threshold, and should `burst` decrease
    multiplicatively rather than resetting to 1?** A halving decrease would preserve more of
    a large pool's ramp across an isolated failure, at the cost of a second knob and a
    slower clamp when capacity genuinely disappears mid-recovery. Proposed: reset to 1,
    matching the "escalation tracks failed windows" rule on the offering side, revisited if
    beta clusters show recovery is too slow for large scale-outs.
-4. **Should non-ICE launch failures feed the trackers?** A NodeClass misconfiguration
+6. **Should non-ICE launch failures feed the trackers?** A NodeClass misconfiguration
    produces the same churn shape but is not a capacity problem, and
    `NodeRegistrationHealthy` already covers it — imperfectly, since it triggers on
    registration timeout rather than launch failure. Proposed: ICE only for v1.
-5. **Should registration and initialization timeouts count as failures?** A launch that
+7. **Should registration and initialization timeouts count as failures?** A launch that
    succeeds but never registers consumed real capacity, so it is not an ICE, but it is a
    NodePool we want to slow down. The drift backoff RFC chose to treat timeouts uniformly
    with ICE. Proposed: exclude for v1, since `liveness.go` already has timeout handling.
