@@ -18,6 +18,7 @@ package dynamicresources
 
 import (
 	"maps"
+	"strings"
 	"unique"
 
 	resourcev1 "k8s.io/api/resource/v1"
@@ -86,6 +87,25 @@ func (ab AttributeBindings) Bound(nodePool string, instanceType InstanceTypeID, 
 	return deviceBindings.Has(deviceB.DeviceID)
 }
 
+// canonicalAttributeName returns the fully qualified form of a binding's attribute name.
+// Claims always match on a fully qualified name, so a bare name declared by a cloud provider
+// is qualified with the bound devices' common driver. Following the same defaulting the DRA
+// API applies to bare ResourceSlice device attribute names, and the inverse of
+// LookupAttribute's fallback. Returns false when a bare name's binding spans drivers, since
+// there is no single domain to imply.
+func canonicalAttributeName(attribute resourcev1.QualifiedName, devices []cloudprovider.DeviceID) (resourcev1.QualifiedName, bool) {
+	if _, _, ok := strings.Cut(string(attribute), "/"); ok {
+		return attribute, true
+	}
+	driver := devices[0].Driver
+	for _, device := range devices[1:] {
+		if device.Driver != driver {
+			return "", false
+		}
+	}
+	return resourcev1.QualifiedName(driver.Value() + "/" + string(attribute)), true
+}
+
 // BuildAttributeBindings constructs the attribute binding graph from cloud provider instance type
 // metadata. It creates symmetric pairs for each declared binding and computes the transitive
 // closure per (attribute, nodePool, instanceType) triple.
@@ -99,10 +119,14 @@ func BuildAttributeBindings(instanceTypesByNodePool map[string][]*cloudprovider.
 				if len(itBinding.Devices) < 2 {
 					continue
 				}
-				bindingsForAttribute, ok := bindings[itBinding.Attribute]
+				attribute, ok := canonicalAttributeName(itBinding.Attribute, itBinding.Devices)
+				if !ok {
+					continue
+				}
+				bindingsForAttribute, ok := bindings[attribute]
 				if !ok {
 					bindingsForAttribute = make(map[string]map[InstanceTypeID]map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID])
-					bindings[itBinding.Attribute] = bindingsForAttribute
+					bindings[attribute] = bindingsForAttribute
 				}
 				bindingsForNodePool, ok := bindingsForAttribute[nodePool]
 				if !ok {

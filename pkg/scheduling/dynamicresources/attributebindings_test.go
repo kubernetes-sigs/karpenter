@@ -228,6 +228,21 @@ var _ = Describe("AttributeBindings", func() {
 			Expect(ab.Bound("pool-b", it, attrZone, devB, devC)).To(BeTrue())
 			Expect(ab.Bound("pool-b", it, attrZone, devA, devB)).To(BeFalse())
 		})
+		It("qualifies a bare attribute name with the bound devices' driver", func() {
+			ab := dynamicresources.BuildAttributeBindings(map[string][]*cloudprovider.InstanceType{
+				"pool-a": {itType("gpu-xl", attrBinding("parentUUID", devA, devB))},
+			})
+			it := unique.Make("gpu-xl")
+			Expect(ab.Bound("pool-a", it, "driver.example.com/parentUUID", devA, devB)).To(BeTrue())
+			Expect(ab.HasBindings("pool-a", it, "driver.example.com/parentUUID", devA)).To(BeTrue())
+			Expect(ab.Bound("pool-a", it, "parentUUID", devA, devB)).To(BeFalse())
+		})
+		It("skips a bare attribute name when the binding spans drivers", func() {
+			ab := dynamicresources.BuildAttributeBindings(map[string][]*cloudprovider.InstanceType{
+				"pool-a": {itType("gpu-xl", attrBinding("parentUUID", devA, deviceID("other.example.com", "pool-a", "device-b")))},
+			})
+			Expect(ab).To(BeEmpty())
+		})
 		It("tracks the same attribute across multiple instance types in a pool independently", func() {
 			ab := dynamicresources.BuildAttributeBindings(map[string][]*cloudprovider.InstanceType{
 				"pool-a": {

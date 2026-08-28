@@ -82,6 +82,9 @@ type AttributeBinding struct {
 	// Devices is the set of devices that share the attribute value. Must contain
 	// at least 2 devices; bindings with fewer are ignored.
 	Devices []DeviceID
-	// Attribute is the fully qualified attribute name that the devices share.
+	// Attribute is the attribute name that the devices share. As with ResourceSlice device
+	// attributes, a name without a domain prefix is assumed to be in the driver's domain, so
+	// a bare name is only valid when every bound device shares a driver; bindings that mix
+	// drivers under a bare name are ignored.
 	Attribute resourcev1.QualifiedName
 }
