@@ -308,7 +308,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 		return fmt.Errorf("adding hydration runnable, %w", err)
 	}
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("dynamicresources.deviceallocation").
+		Named(c.Name()).
 		For(&resourcev1.ResourceClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(c)
