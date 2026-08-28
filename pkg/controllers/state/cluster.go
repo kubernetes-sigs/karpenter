@@ -856,10 +856,11 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 		return client.IgnoreNotFound(serrors.Wrap(fmt.Errorf("getting CSINode to determine volume limit, %w", err), "CSINode", klog.KRef("", n.Node.Name)))
 	}
 	for _, driver := range csiNode.Spec.Drivers {
-		if driver.Allocatable == nil {
+		if driver.Allocatable == nil || driver.Allocatable.Count == nil {
+			n.volumeUsage.AddUnbounded(driver.Name)
 			continue
 		}
-		n.volumeUsage.AddLimit(driver.Name, int(lo.FromPtr(driver.Allocatable.Count)))
+		n.volumeUsage.AddLimit(driver.Name, int(*driver.Allocatable.Count))
 	}
 	return nil
 }

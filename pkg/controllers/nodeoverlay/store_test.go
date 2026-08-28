@@ -77,10 +77,13 @@ var _ = Describe("Store Apply Selective Copy", func() {
 			// For ResourceList (map), we can't directly compare map pointers
 			// The correctness tests below verify the actual behavior
 			_ = expectSharedCapacity
+
+			Expect(result.VolumeAttachmentLimits).To(Equal(instanceType.VolumeAttachmentLimits), "expected VolumeAttachmentLimits to be carried over")
 		},
 		Entry("no overlays - everything shared",
 			"no overlays - everything shared",
 			fake.NewInstanceType("m5.large",
+				fake.WithVolumeAttachmentLimits(map[string]int{"fake.csi.provider": 10}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Requirements: scheduling.NewRequirements(
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
@@ -100,7 +103,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 		Entry("price overlay only - offerings copied, others shared",
 			"price overlay only - offerings copied, others shared",
 			func() *cloudprovider.InstanceType {
-				return fake.NewInstanceType("m5.large")
+				return fake.NewInstanceType("m5.large", fake.WithVolumeAttachmentLimits(map[string]int{"fake.csi.provider": 10}))
 			}(),
 			func() map[string]*priceUpdate {
 				it := fake.NewInstanceType("m5.large")
@@ -118,6 +121,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 		Entry("capacity overlay only - capacity copied, others shared",
 			"capacity overlay only - capacity copied, others shared",
 			fake.NewInstanceType("m5.large",
+				fake.WithVolumeAttachmentLimits(map[string]int{"fake.csi.provider": 10}),
 				fake.WithOfferings(cloudprovider.Offering{
 					Requirements: scheduling.NewRequirements(
 						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
@@ -141,7 +145,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 		Entry("both overlays - only modified fields copied",
 			"both overlays - only modified fields copied",
 			func() *cloudprovider.InstanceType {
-				return fake.NewInstanceType("m5.large")
+				return fake.NewInstanceType("m5.large", fake.WithVolumeAttachmentLimits(map[string]int{"fake.csi.provider": 10}))
 			}(),
 			func() map[string]*priceUpdate {
 				it := fake.NewInstanceType("m5.large")
@@ -213,6 +217,33 @@ var _ = Describe("Store Apply Correctness", func() {
 
 			// Verify original instance type was not mutated
 			Expect(instanceType.Offerings[0].Price).To(BeNumerically("==", originalPrice), "original instance type should not be mutated")
+		})
+	})
+
+	Context("with DRA templates", func() {
+		It("should carry over DynamicResources when overlays are applied", func() {
+			instanceType := fake.GPUInstanceType("m5.large", 2)
+
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
+			store.updates = map[string]map[string]*instanceTypeUpdate{
+				"default": {
+					instanceType.Name: &instanceTypeUpdate{
+						Price: map[string]*priceUpdate{
+							instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
+						},
+						Capacity: &capacityUpdate{
+							OverlayUpdate: corev1.ResourceList{
+								"hugepages-2Mi": resource.MustParse("100Mi"),
+							},
+						},
+					},
+				},
+			}
+
+			result := store.apply("default", instanceType)
+
+			Expect(result.DynamicResources).To(Equal(instanceType.DynamicResources), "expected DynamicResources to be carried over")
 		})
 	})
 
