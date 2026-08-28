@@ -126,10 +126,11 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 
 	// Create a shallow copy of the instance type, sharing immutable fields
 	overriddenInstanceType := &cloudprovider.InstanceType{
-		Name:         it.Name,
-		Requirements: it.Requirements, // Shared - never modified
-		Overhead:     it.Overhead,     // Shared - never modified
-		Capacity:     it.Capacity,
+		Name:                   it.Name,
+		Requirements:           it.Requirements,           // Shared - never modified
+		Overhead:               it.Overhead,               // Shared - never modified
+		VolumeAttachmentLimits: it.VolumeAttachmentLimits, // Shared - never modified
+		Capacity:               it.Capacity,
 	}
 
 	// Handle capacity overlay - only deep copy if we're modifying it
