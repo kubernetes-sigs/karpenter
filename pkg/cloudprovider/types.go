@@ -417,7 +417,7 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 	// If minValue requirement fails, we return an error that indicates the first requirement key that couldn't be satisfied.
 	for i, it := range its {
 		for _, req := range requirements {
-			if req.MinValues != nil {
+			if req.MinValues() != nil {
 				if _, ok := valuesForKey[req.Key]; !ok {
 					valuesForKey[req.Key] = sets.New[string]()
 				}
@@ -431,7 +431,7 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 		}
 		for k, v := range valuesForKey {
 			// Collect all the min values that are violated
-			if len(v) < lo.FromPtr(requirements.Get(k).MinValues) {
+			if len(v) < lo.FromPtr(requirements.Get(k).MinValues()) {
 				incompatibleKeys[k] = len(v)
 			} else {
 				// If the key now satisfies min values, remove it from the map.

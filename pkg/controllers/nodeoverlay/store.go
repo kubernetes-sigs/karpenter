@@ -254,11 +254,12 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 	}
 
 	for _, of := range offerings {
-		if update, foundOfferingUpdate := i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()]; foundOfferingUpdate {
+		requirementKey := of.Requirements.String()
+		if update, foundOfferingUpdate := i.updates[nodePoolName][instanceTypeName].Price[requirementKey]; foundOfferingUpdate {
 			update.lowestWeight = nodeOverlay.Spec.Weight
 			continue
 		}
-		i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()] = &priceUpdate{
+		i.updates[nodePoolName][instanceTypeName].Price[requirementKey] = &priceUpdate{
 			OverlayUpdate: price,
 			lowestWeight:  nodeOverlay.Spec.Weight,
 		}
