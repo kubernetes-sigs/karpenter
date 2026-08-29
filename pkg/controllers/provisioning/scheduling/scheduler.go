@@ -446,7 +446,9 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
 	podErrors := map[*corev1.Pod]error{}
 	// Reset the metric for the controller, so we don't keep old ids around
-	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
+	// UnschedulablePodsCount is intentionally not touched here: it carries no scheduling-run-scoped
+	// labels, and it's only ever set from the provisioning controller (see provisioner.go), which
+	// resets it to 0 directly once there's nothing left to schedule.
 	PendingPodsByEffectiveZone.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	podCountByZone := make(map[string]int)
