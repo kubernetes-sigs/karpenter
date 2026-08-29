@@ -352,16 +352,23 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
-		It("should not allow cpu resources override", func() {
+		It("should allow cpu resources override", func() {
 			nodeOverlay.Spec.Capacity = corev1.ResourceList{
 				corev1.ResourceCPU: resource.MustParse("1"),
 			}
-			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
-			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should not allow memory resources override", func() {
 			nodeOverlay.Spec.Capacity = corev1.ResourceList{
 				corev1.ResourceMemory: resource.MustParse("34Gi"),
+			}
+			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+		})
+		It("should not allow ephemeral-storage resources override", func() {
+			nodeOverlay.Spec.Capacity = corev1.ResourceList{
+				corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
