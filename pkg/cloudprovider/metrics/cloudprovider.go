@@ -151,7 +151,7 @@ func (d *decorator) Get(ctx context.Context, id string) (*v1.NodeClaim, error) {
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	nodeClaim, err := d.CloudProvider.Get(ctx, id)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, "", err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodePoolNameForNodeClaim(nodeClaim), err))
 	}
 	return nodeClaim, err
 }
@@ -161,6 +161,7 @@ func (d *decorator) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	nodeClaims, err := d.CloudProvider.List(ctx)
 	if err != nil {
+		// List can cover multiple NodePools, so there is no single NodePool to label.
 		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, "", err))
 	}
 	return nodeClaims, err

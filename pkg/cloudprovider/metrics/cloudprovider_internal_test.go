@@ -63,6 +63,32 @@ var _ = Describe("CloudProvider error metric labels", func() {
 		}))
 	})
 
+	It("should expose the NodePool returned with a Get error", func() {
+		ctx := injection.WithControllerName(context.Background(), "nodeclaim-lifecycle")
+		providerErr := errors.New("get failed")
+		decorated := Decorate(&erroringCloudProvider{
+			getNodeClaim: &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1.NodePoolLabelKey: "default"},
+			}},
+			getErr: providerErr,
+		})
+		_, err := decorated.Get(ctx, "nodeclaim-id")
+		Expect(err).To(MatchError(providerErr))
+
+		metricFamilies, err := crmetrics.Registry.Gather()
+		Expect(err).ToNot(HaveOccurred())
+		metricFamily := findMetricFamily(metricFamilies, "karpenter_cloudprovider_errors_total")
+		Expect(metricFamily).ToNot(BeNil())
+		Expect(metricFamily.Metric).To(HaveLen(1))
+		Expect(metricLabels(metricFamily.Metric[0])).To(Equal(map[string]string{
+			"controller": "nodeclaim-lifecycle",
+			"error":      "",
+			"method":     "Get",
+			"nodepool":   "default",
+			"provider":   "fake",
+		}))
+	})
+
 	It("should derive the NodePool from available CloudProvider arguments", func() {
 		Expect(nodePoolNameForNodeClaim(&v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{v1.NodePoolLabelKey: "nodeclaim-pool"},
@@ -75,7 +101,9 @@ var _ = Describe("CloudProvider error metric labels", func() {
 
 type erroringCloudProvider struct {
 	cloudprovider.CloudProvider
-	createErr error
+	createErr    error
+	getNodeClaim *v1.NodeClaim
+	getErr       error
 }
 
 func (erroringCloudProvider) Name() string {
@@ -84,6 +112,10 @@ func (erroringCloudProvider) Name() string {
 
 func (e erroringCloudProvider) Create(context.Context, *v1.NodeClaim) (*v1.NodeClaim, error) {
 	return nil, e.createErr
+}
+
+func (e erroringCloudProvider) Get(context.Context, string) (*v1.NodeClaim, error) {
+	return e.getNodeClaim, e.getErr
 }
 
 func findMetricFamily(metricFamilies []*dto.MetricFamily, name string) *dto.MetricFamily {
