@@ -208,6 +208,9 @@ var _ = Describe("Pod Metrics", func() {
 	})
 	DescribeTable("should label the pod binding metrics with dynamic_resources",
 		func(pod *corev1.Pod, expected string) {
+			if expected == "true" && env.Version.Minor() < 34 {
+				Skip("DRA is only available in K8s versions >= 1.34.x")
+			}
 			pod.Status.Phase = corev1.PodPending
 
 			env.Clock.Step(1 * time.Hour)
