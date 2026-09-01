@@ -108,11 +108,12 @@ func BenchmarkIgnorePreferences(b *testing.B) {
 	benchmarkScheduler(b, makePreferencePods(4000), scheduling.IgnorePreferences)
 }
 
-// BenchmarkSchedulingMultiNodePool exercises Scheduler.Solve over a fixture with
-// multiple NodePools to surface regressions in cross-NodePool work such as
-// buildDomainGroups (topology.go), per-NodePool instance-type fan-out, and
-// per-NodePool scheduling-template construction. The single-NodePool default in
-// BenchmarkScheduling* hides the cross-product cost of these paths.
+// BenchmarkSchedulingMultiNodePool extends the existing BenchmarkScheduling*
+// family with a (NodePoolCount, PodCount) grid so per-NodePool cost inside
+// Scheduler.Solve surfaces in the numbers. The single-NodePool benches average
+// that cost into a single number. Solve fans out over s.nodeClaimTemplates per
+// pod inside parallelizeUntil, so a regression there lands on the row of the
+// grid that exercises it.
 func BenchmarkSchedulingMultiNodePool(b *testing.B) {
 	for _, nodePoolCount := range []int{5, 10, 20} {
 		for _, podCount := range []int{100, 500, 1000} {
@@ -146,6 +147,7 @@ func benchmarkSchedulerMultiNodePool(b *testing.B, pods []*corev1.Pod, nodePoolC
 
 func setupMultiNodePoolScheduler(ctx context.Context, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
 	cloudProvider = fake.NewCloudProvider()
+	// Reduced to 100 (vs 400 for the single-NodePool benches) so the 20-NodePool x 1000-pod cell stays within CI wall-clock budget.
 	instanceTypes := fake.InstanceTypes(100)
 	cloudProvider.InstanceTypes = instanceTypes
 
