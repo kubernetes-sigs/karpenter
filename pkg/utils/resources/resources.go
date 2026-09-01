@@ -180,6 +180,17 @@ func IsZero(r resource.Quantity) bool {
 	return r.IsZero()
 }
 
+// UtilizationRatio returns the ratio of utilized resources to allocatable resources.
+func UtilizationRatio(resourceName v1.ResourceName, utilized, allocatable resource.Quantity) float64 {
+	if allocatable.IsZero() {
+		return 0
+	}
+	if resourceName == v1.ResourceCPU {
+		return float64(utilized.MilliValue()) / float64(allocatable.MilliValue())
+	}
+	return float64(utilized.Value()) / float64(allocatable.Value())
+}
+
 func Cmp(lhs resource.Quantity, rhs resource.Quantity) int {
 	return lhs.Cmp(rhs)
 }

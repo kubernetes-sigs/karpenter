@@ -666,7 +666,6 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, p *corev1.Pod) error 
 	// If we set the existingNode to something valid, this means that we successfully scheduled to one of these nodes
 	if existingNode != nil {
 		existingNode.Add(ctx, p, s.cachedPodData[p.UID], requirements, volumes, allocationResult)
-		s.sortExistingNodes()
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to existing nodes")
@@ -860,34 +859,21 @@ func (s *Scheduler) updateRemainingResources(node *state.StateNode) {
 
 func nodeUtilizationRatio(node *ExistingNode) float64 {
 	allocatable := node.Allocatable()
-	if len(allocatable) == 0 {
-		return 0.0
-	}
+	utilized := node.PodRequests()
 	var sum float64
-	var count float64
-
-	if cpuAllocQ, ok := allocatable[corev1.ResourceCPU]; ok {
-		cpuAllocVal := cpuAllocQ.AsApproximateFloat64()
-		if cpuAllocVal > 0 {
-			podReqs := node.PodRequests()
-			cpuReqQ := podReqs[corev1.ResourceCPU]
-			sum += cpuReqQ.AsApproximateFloat64() / cpuAllocVal
-			count++
+	var count int
+	for _, resourceName := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+		allocatableResource, ok := allocatable[resourceName]
+		if !ok || allocatableResource.Sign() <= 0 {
+			continue
 		}
-	}
-	if memAllocQ, ok := allocatable[corev1.ResourceMemory]; ok {
-		memAllocVal := memAllocQ.AsApproximateFloat64()
-		if memAllocVal > 0 {
-			podReqs := node.PodRequests()
-			memReqQ := podReqs[corev1.ResourceMemory]
-			sum += memReqQ.AsApproximateFloat64() / memAllocVal
-			count++
-		}
+		sum += resources.UtilizationRatio(resourceName, utilized[resourceName], allocatableResource)
+		count++
 	}
 	if count == 0 {
-		return 0.0
+		return 0
 	}
-	return sum / count
+	return sum / float64(count)
 }
 
 // sortExistingNodes sorts existing nodes with initialized nodes first, ordered by PlacementStrategy
