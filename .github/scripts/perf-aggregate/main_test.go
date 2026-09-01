@@ -77,15 +77,28 @@ func TestExtractValuesUnitConversions(t *testing.T) {
 
 func TestRunEndToEnd(t *testing.T) {
 	tmp := t.TempDir()
-	// Fabricate three iterations of two test suites. Values are chosen so
-	// median/mean/min/max are trivially checkable in the assertions below.
 	iters := 3
+	seedSyntheticIterations(t, tmp, iters)
+
+	if err := run(tmp, iters, os.Stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	assertMetricGrouping(t, tmp)
+	assertSummaryMedians(t, tmp)
+}
+
+// seedSyntheticIterations lays down iter_1..iter_N per-test performance
+// reports whose values are chosen so median/mean/min/max are trivial to
+// check in the assertions below.
+func seedSyntheticIterations(t *testing.T, root string, iters int) {
+	t.Helper()
 	for i := 1; i <= iters; i++ {
-		iterDir := filepath.Join(tmp, "iter_"+strconv.Itoa(i))
+		iterDir := filepath.Join(root, "iter_"+strconv.Itoa(i))
 		if err := os.MkdirAll(iterDir, 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		// Test A: total_time is > 1e9 to force the ns->s conversion path.
+		// Test A: total_time > 1e9 to force the ns->s conversion path.
 		// Values 2e9,3e9,4e9 -> 2,3,4 seconds; median = 3.
 		writeReport(t, filepath.Join(iterDir, "test_a_performance_report.json"), map[string]any{
 			"total_time":                        float64(i+1) * 1e9,
@@ -101,14 +114,16 @@ func TestRunEndToEnd(t *testing.T) {
 			"total_nodes":         float64(20 + i),
 		})
 	}
+}
 
-	if err := run(tmp, iters, os.Stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	// benchmark-results-smaller.json should hold the smaller-is-better set.
-	smaller := loadEntries(t, filepath.Join(tmp, "benchmark-results-smaller.json"))
-	bigger := loadEntries(t, filepath.Join(tmp, "benchmark-results-bigger.json"))
+// assertMetricGrouping verifies utilization / efficiency metrics land in the
+// bigger-is-better file and latency / resource-cost metrics land in the
+// smaller-is-better file. This is the metric-direction regression Ryan
+// flagged on PR#2994.
+func assertMetricGrouping(t *testing.T, dir string) {
+	t.Helper()
+	smaller := loadEntries(t, filepath.Join(dir, "benchmark-results-smaller.json"))
+	bigger := loadEntries(t, filepath.Join(dir, "benchmark-results-bigger.json"))
 	if len(smaller) == 0 {
 		t.Fatal("expected at least one smaller-is-better entry")
 	}
@@ -121,14 +136,16 @@ func TestRunEndToEnd(t *testing.T) {
 		}
 	}
 	for _, e := range bigger {
-		if !(strings.Contains(e.Name, "Utilization") || strings.Contains(e.Name, "Efficiency")) {
+		if !strings.Contains(e.Name, "Utilization") && !strings.Contains(e.Name, "Efficiency") {
 			t.Errorf("bigger group has non-utilization metric: %s", e.Name)
 		}
 	}
+}
 
-	// aggregated_summary.json should contain both tests with the expected duration median.
+func assertSummaryMedians(t *testing.T, dir string) {
+	t.Helper()
 	var summary map[string]map[string]stats
-	loadJSON(t, filepath.Join(tmp, "aggregated_summary.json"), &summary)
+	loadJSON(t, filepath.Join(dir, "aggregated_summary.json"), &summary)
 	testA := summary["test_a_performance_report.json"]
 	if testA == nil {
 		t.Fatal("summary missing test_a")
@@ -195,7 +212,7 @@ func loadEntries(t *testing.T, path string) []benchmarkEntry {
 
 func loadJSON(t *testing.T, path string, v any) {
 	t.Helper()
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G304: test-controlled tempdir path
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
@@ -203,4 +220,3 @@ func loadJSON(t *testing.T, path string, v any) {
 		t.Fatalf("unmarshal %s: %v", path, err)
 	}
 }
-

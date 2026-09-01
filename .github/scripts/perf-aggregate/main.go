@@ -204,7 +204,9 @@ func collectReports(outputDir string, iterations int) (map[string][]map[string]a
 }
 
 func readReport(path string) (map[string]any, error) {
-	b, err := os.ReadFile(path)
+	// path is the output of filepath.Glob under OUTPUT_DIR, which the CI
+	// workflow creates via mktemp -d. Not attacker-controlled.
+	b, err := os.ReadFile(path) //nolint:gosec // G304: path is scoped to CI-created OUTPUT_DIR
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +319,9 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	// path is constructed from OUTPUT_DIR (CI-created via mktemp -d) plus a
+	// literal filename. Not attacker-controlled.
+	return os.WriteFile(path, b, 0o600) //nolint:gosec // G304: path is scoped to CI-created OUTPUT_DIR
 }
 
 func printTable(out *os.File, testKeys []string, summary map[string]map[string]stats) {
