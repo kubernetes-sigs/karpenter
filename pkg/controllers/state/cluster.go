@@ -298,7 +298,7 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	if n, ok := c.nodes[providerID]; ok {
 		n.Nominate(ctx, c.clock) // extends nomination window if already nominated
 		c.clusterStateMu.Lock()
-		if n.nominatedUntil.Time.After(c.latestNominationExpiry) {
+		if n.nominatedUntil.After(c.latestNominationExpiry) {
 			c.latestNominationExpiry = n.nominatedUntil.Time
 		}
 		c.clusterStateMu.Unlock()
