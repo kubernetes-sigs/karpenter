@@ -21,6 +21,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -79,7 +81,7 @@ func TestRunEndToEnd(t *testing.T) {
 	// median/mean/min/max are trivially checkable in the assertions below.
 	iters := 3
 	for i := 1; i <= iters; i++ {
-		iterDir := filepath.Join(tmp, "iter_"+itoa(i))
+		iterDir := filepath.Join(tmp, "iter_"+strconv.Itoa(i))
 		if err := os.MkdirAll(iterDir, 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
@@ -114,12 +116,12 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatal("expected at least one bigger-is-better entry")
 	}
 	for _, e := range smaller {
-		if contains(e.Name, "Utilization") || contains(e.Name, "Efficiency") {
+		if strings.Contains(e.Name, "Utilization") || strings.Contains(e.Name, "Efficiency") {
 			t.Errorf("smaller group leaked bigger-is-better metric: %s", e.Name)
 		}
 	}
 	for _, e := range bigger {
-		if !(contains(e.Name, "Utilization") || contains(e.Name, "Efficiency")) {
+		if !(strings.Contains(e.Name, "Utilization") || strings.Contains(e.Name, "Efficiency")) {
 			t.Errorf("bigger group has non-utilization metric: %s", e.Name)
 		}
 	}
@@ -202,36 +204,3 @@ func loadJSON(t *testing.T, path string, v any) {
 	}
 }
 
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	var buf [20]byte
-	pos := len(buf)
-	for i > 0 {
-		pos--
-		buf[pos] = byte('0' + i%10)
-		i /= 10
-	}
-	if neg {
-		pos--
-		buf[pos] = '-'
-	}
-	return string(buf[pos:])
-}
-
-func contains(s, sub string) bool {
-	if len(sub) == 0 {
-		return true
-	}
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}

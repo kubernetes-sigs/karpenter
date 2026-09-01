@@ -36,6 +36,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // direction distinguishes benchmark metrics whose regression alarm fires on
@@ -300,48 +301,15 @@ func round1(f float64) float64 { return math.Round(f*10) / 10 }
 // prettifyTestName reverses the report-file naming convention so table rows
 // and benchmark entries read as human titles rather than snake_case slugs.
 func prettifyTestName(fileBasename string) string {
-	base := stripSuffix(fileBasename, "_performance_report.json")
-	runes := []rune(base)
-	for i, r := range runes {
-		if r == '_' {
-			runes[i] = ' '
+	base := strings.TrimSuffix(fileBasename, "_performance_report.json")
+	words := strings.Split(base, "_")
+	for i, w := range words {
+		if w == "" {
+			continue
 		}
+		words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
 	}
-	// Title-case each word to mirror Python's str.title().
-	inWord := false
-	for i, r := range runes {
-		switch {
-		case r == ' ':
-			inWord = false
-		case !inWord:
-			runes[i] = toUpper(r)
-			inWord = true
-		default:
-			runes[i] = toLower(r)
-		}
-	}
-	return string(runes)
-}
-
-func stripSuffix(s, suffix string) string {
-	if len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix {
-		return s[:len(s)-len(suffix)]
-	}
-	return s
-}
-
-func toUpper(r rune) rune {
-	if r >= 'a' && r <= 'z' {
-		return r - 32
-	}
-	return r
-}
-
-func toLower(r rune) rune {
-	if r >= 'A' && r <= 'Z' {
-		return r + 32
-	}
-	return r
+	return strings.Join(words, " ")
 }
 
 func writeJSON(path string, v any) error {
@@ -357,7 +325,7 @@ func printTable(out *os.File, testKeys []string, summary map[string]map[string]s
 		"Test / Metric", "n", "Median", "Mean", "Stddev", "CV")
 	fmt.Fprintln(out, "----------------------------------------------------------------------------------------------------")
 	for _, testKey := range testKeys {
-		testName := stripSuffix(testKey, "_performance_report.json")
+		testName := strings.TrimSuffix(testKey, "_performance_report.json")
 		testSummary, ok := summary[testKey]
 		if !ok {
 			continue
