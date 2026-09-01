@@ -1748,6 +1748,31 @@ var _ = Describe("Consolidated State", func() {
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
+	It("should cause consolidation state to change when a NodeClaim's Consolidatable condition changes", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		env.Clock.Step(time.Minute)
+		state := cluster.ConsolidationState()
+
+		// An update with no relevant change shouldn't invalidate
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.ConsolidationState()).To(Equal(state))
+
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
+	})
 })
 
 var _ = Describe("Data Races", func() {

@@ -969,6 +969,10 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
+	if old.Consolidatable() != new.Consolidatable() {
+		c.MarkUnconsolidated()
+		return
+	}
 }
 
 // HasSynced returns whether the cluster state has been synchronized at least once.

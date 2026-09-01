@@ -356,6 +356,11 @@ func (in *StateNode) Initialized() bool {
 	return true
 }
 
+// Consolidatable reports whether the disruption controllers would treat this node as a consolidation candidate.
+func (in *StateNode) Consolidatable() bool {
+	return in.NodeClaim != nil && in.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
+}
+
 func (in *StateNode) Capacity() corev1.ResourceList {
 	if !in.Initialized() && in.NodeClaim != nil {
 		// Override any zero quantity values in the node status
