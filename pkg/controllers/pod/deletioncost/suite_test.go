@@ -50,6 +50,7 @@ var fakeClock *clock.FakeClock
 var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var recorder *test.EventRecorder
+var queue *deletioncost.Queue
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -84,6 +85,7 @@ var _ = BeforeEach(func() {
 	cloudProvider.Reset()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	recorder.Reset()
+	queue = deletioncost.NewQueue(env.Client)
 })
 
 var _ = AfterEach(func() {
@@ -111,14 +113,4 @@ func rsOwnedPod(opts ...test.PodOptions) *corev1.Pod {
 	// with any user-supplied ObjectMeta fields.
 	opts[0].OwnerReferences = append(opts[0].OwnerReferences, rsOwner)
 	return test.Pod(opts...)
-}
-
-// nodeRankWithPods builds a NodeRank populated with the pods currently on the
-// given state node. RankNodes normally fills the Pods field; direct-call tests
-// that construct NodeRank literals go through this helper so they see the
-// same shape.
-func nodeRankWithPods(sn *state.StateNode, rank int, hasDND bool) deletioncost.NodeRank {
-	pods, err := sn.Pods(ctx, env.Client)
-	Expect(err).ToNot(HaveOccurred())
-	return deletioncost.NodeRank{Node: sn, Rank: rank, HasDoNotDisrupt: hasDND, Pods: pods}
 }

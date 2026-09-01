@@ -104,14 +104,17 @@ var _ = Describe("Controller", func() {
 		ExpectApplied(ctx, env.Client, pod0, pod1)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 		result, err := controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
+		// Fire-and-forget shape: controller.Reconcile enqueued the pods; drive
+		// queue.Reconcile against each so the annotation write actually happens.
+		ExpectObjectReconciled(ctx, env.Client, queue, pod0)
+		ExpectObjectReconciled(ctx, env.Client, queue, pod1)
 
-		// Verify the controller wrote a sensible negative integer rank, not
-		// just any value: ranks for ordinary disruptable nodes start at
-		// -(B+C+D) and increase, so they are always strictly negative.
+		// Ranks for ordinary disruptable nodes start at -(B+C+D) and
+		// increase, so they are always strictly negative.
 		updatedPod0 := &corev1.Pod{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod0), updatedPod0)).To(Succeed())
 		Expect(updatedPod0.Annotations).To(HaveKeyWithValue(corev1.PodDeletionCost, MatchRegexp(`^-\d+$`)))
@@ -122,7 +125,7 @@ var _ = Describe("Controller", func() {
 	})
 
 	It("should skip reconciliation when no nodes exist", func() {
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 		result, err := controller.Reconcile(ctx)
 		Expect(err).To(Succeed())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
@@ -147,7 +150,7 @@ var _ = Describe("Controller", func() {
 		// state.Cluster does not observe the applied node/nodeclaim.
 		cluster.SetSynced(false)
 
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 		result, err := controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.RequeueAfter).To(Equal(time.Second))
@@ -185,7 +188,7 @@ var _ = Describe("Controller", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 		failing := &toggleablePDBListFailingClient{Client: env.Client, fail: true}
-		controller := deletioncost.NewController(fakeClock, failing, cloudProvider, cluster)
+		controller := deletioncost.NewController(fakeClock, failing, cloudProvider, cluster, queue)
 
 		// First reconcile fails at fetchPDBs.
 		_, err := controller.Reconcile(ctx)
@@ -194,12 +197,14 @@ var _ = Describe("Controller", func() {
 		// Flip the failure off and reconcile again with the SAME controller
 		// instance (so lastConsolidationState is preserved). If the first
 		// reconcile had advanced the cursor, this call would short-circuit
-		// on "unchanged" and leave pod unannotated.
+		// on "unchanged" and leave the pod unenqueued.
 		failing.fail = false
 		_, err = controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
-
 		// The pod is on a disrupted-tainted node → Group A → math.MinInt32.
+		// Drive the queue so the annotation write actually lands on the pod.
+		ExpectObjectReconciled(ctx, env.Client, queue, pod)
+
 		observed := &corev1.Pod{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), observed)).To(Succeed())
 		Expect(observed.Annotations).To(HaveKey(corev1.PodDeletionCost),
@@ -219,31 +224,31 @@ var _ = Describe("Controller", func() {
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 
-		// First reconcile — should process (change detected). The pod's
-		// ResourceVersion bumps because the controller writes the
-		// pod-deletion-cost annotation.
+		// First reconcile — should enqueue (change detected). Drive the queue
+		// so the annotation write lands and the pod's ResourceVersion bumps.
 		result, err := controller.Reconcile(ctx)
 		Expect(err).To(Succeed())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
+		ExpectObjectReconciled(ctx, env.Client, queue, pod)
 
 		afterFirst := &corev1.Pod{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), afterFirst)).To(Succeed())
 		Expect(afterFirst.Annotations).To(HaveKey(corev1.PodDeletionCost))
 
-		// Second reconcile — should skip (no changes). Verify by
-		// confirming the pod's ResourceVersion is unchanged: if the
-		// short-circuit failed and the controller patched again, the
-		// ResourceVersion would bump even on a no-op patch.
+		// Second reconcile — should short-circuit at the ConsolidationState
+		// check and NOT enqueue. Verified by the queue being empty and the
+		// pod's ResourceVersion unchanged (no follow-up patch fires).
 		result, err = controller.Reconcile(ctx)
 		Expect(err).To(Succeed())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
+		Expect(queue.Has(pod)).To(BeFalse())
 
 		afterSecond := &corev1.Pod{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), afterSecond)).To(Succeed())
 		Expect(afterSecond.ResourceVersion).To(Equal(afterFirst.ResourceVersion),
-			"second reconcile should have taken the change-detection short-circuit and not patched the pod")
+			"second reconcile should have taken the change-detection short-circuit and not enqueued the pod")
 	})
 
 	Context("Bounded labeling", func() {
@@ -264,10 +269,14 @@ var _ = Describe("Controller", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			result, err := controller.Reconcile(ctx)
 			Expect(err).To(Succeed())
 			Expect(result.RequeueAfter).To(Equal(time.Minute))
+			// Drive the queue so the fire-and-forget writes actually land.
+			for _, pod := range pods {
+				ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			}
 
 			// All 3 pods should be annotated (under the 50 limit)
 			for _, pod := range pods {
@@ -347,7 +356,7 @@ var _ = Describe("Controller", func() {
 			// Wrap env.Client to fail the PDB list. All other traffic (nodepool
 			// list, pod list, patches) flows through unchanged.
 			failing := &pdbListFailingClient{Client: env.Client}
-			controller := deletioncost.NewController(fakeClock, failing, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, failing, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).To(HaveOccurred(), "current behavior: PDB list failure aborts the whole reconcile")
 

@@ -38,11 +38,23 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
+// drainQueueForPod reconciles the shared queue against pod so a fire-and-forget
+// enqueue from Controller.Reconcile becomes an observable annotation write.
+// No-op when pod is not enqueued (queue.Reconcile short-circuits on miss).
+func drainQueueForPod(pod *corev1.Pod) {
+	GinkgoHelper()
+	if queue.Has(pod) {
+		ExpectObjectReconciled(ctx, env.Client, queue, pod)
+	}
+}
+
 // expectPodRank reads pod via the live client and returns the integer value of
 // its pod-deletion-cost annotation. Fails the spec if the annotation is missing
-// or non-integer; use expectPodAnnotationCleared for the Group D case.
+// or non-integer; use expectPodAnnotationCleared for the Group D case. Drains
+// the queue first so fire-and-forget writes have landed.
 func expectPodRank(pod *corev1.Pod) int {
 	GinkgoHelper()
+	drainQueueForPod(pod)
 	updated := &corev1.Pod{}
 	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
 	raw, ok := updated.Annotations[corev1.PodDeletionCost]
@@ -53,9 +65,11 @@ func expectPodRank(pod *corev1.Pod) int {
 }
 
 // expectPodAnnotationCleared asserts the pod has no pod-deletion-cost
-// annotation (Group D semantics: the controller clears the value).
+// annotation (Group D semantics: the controller clears the value). Drains the
+// queue first so fire-and-forget clears have landed.
 func expectPodAnnotationCleared(pod *corev1.Pod) {
 	GinkgoHelper()
+	drainQueueForPod(pod)
 	updated := &corev1.Pod{}
 	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
 	Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),
@@ -111,7 +125,7 @@ var _ = Describe("Ranking", func() {
 				}
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-				controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+				controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 				_, err := controller.Reconcile(ctx)
 				Expect(err).ToNot(HaveOccurred())
 
@@ -147,7 +161,7 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -191,7 +205,7 @@ var _ = Describe("Ranking", func() {
 			ExpectApplied(ctx, env.Client, stsPod, normalPod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -233,7 +247,7 @@ var _ = Describe("Ranking", func() {
 			ExpectApplied(ctx, env.Client, pdb)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -336,7 +350,7 @@ var _ = Describe("Ranking", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -392,7 +406,7 @@ var _ = Describe("Ranking", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -435,7 +449,7 @@ var _ = Describe("Ranking", func() {
 			ExpectApplied(ctx, env.Client, podA, podB)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nA, nB}, []*v1.NodeClaim{ncA, ncB})
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -467,12 +481,13 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			annotated := 0
 			for _, p := range pods {
+				drainQueueForPod(p)
 				updated := &corev1.Pod{}
 				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(p), updated)).To(Succeed())
 				if _, ok := updated.Annotations[corev1.PodDeletionCost]; ok {
@@ -527,7 +542,7 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -586,7 +601,7 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -598,6 +613,7 @@ var _ = Describe("Ranking", func() {
 			// remainder is untouched.
 			annotatedC := 0
 			for _, p := range groupCPods {
+				drainQueueForPod(p)
 				updated := &corev1.Pod{}
 				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(p), updated)).To(Succeed())
 				if _, ok := updated.Annotations[corev1.PodDeletionCost]; ok {
@@ -649,7 +665,7 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -889,7 +905,7 @@ var _ = Describe("Ranking", func() {
 			ExpectApplied(ctx, env.Client, pdb)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -1009,7 +1025,7 @@ var _ = Describe("Ranking", func() {
 			// No nodes applied to the cluster. The Reconcile path's
 			// len(nodes)==0 check fires before RankNodes; no pod patches are
 			// issued.
-			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster)
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
 			result, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.RequeueAfter).ToNot(BeZero())

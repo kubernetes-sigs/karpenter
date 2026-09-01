@@ -18,7 +18,6 @@ package deletioncost_test
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -33,18 +32,16 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 // throttlingClient wraps a client.Client and returns 429 TooManyRequests for
-// the first N Patch calls, then delegates normally. Used to exercise the
-// per-pod retry-with-backoff path in applyRankToPods / clearRanksFromPods.
+// the first N Patch calls. Used to verify the queue's Reconcile surfaces
+// retryable errors to controller-runtime.
 type throttlingClient struct {
 	client.Client
 	remaining atomic.Int64
-	seen      atomic.Int64
 }
 
 func newThrottlingClient(inner client.Client, throttleFirst int) *throttlingClient {
@@ -54,16 +51,13 @@ func newThrottlingClient(inner client.Client, throttleFirst int) *throttlingClie
 }
 
 func (c *throttlingClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-	c.seen.Add(1)
-	// Serve 429 for the first N calls, then fall through.
 	if c.remaining.Add(-1) >= 0 {
 		return apierrors.NewTooManyRequests("throttled by test client", 1)
 	}
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
-// countingClient wraps a client.Client and counts Patch invocations so tests
-// can verify parallel dispatch actually issued the expected number of calls.
+// countingClient wraps a client.Client and counts Patch invocations.
 type countingClient struct {
 	client.Client
 	mu    sync.Mutex
@@ -81,6 +75,16 @@ func (c *countingClient) PatchCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.count
+}
+
+// enqueueAndReconcile is the standard test flow: enqueue a pod on the shared
+// suite queue and immediately drive the queue's Reconcile against it. Returns
+// after a single Reconcile, mirroring what controller-runtime does per work
+// item.
+func enqueueAndReconcile(pod *corev1.Pod, rank int, clear bool) {
+	GinkgoHelper()
+	queue.Add(pod, rank, clear)
+	ExpectObjectReconciled(ctx, env.Client, queue, pod)
 }
 
 var _ = Describe("Annotation", func() {
@@ -104,14 +108,8 @@ var _ = Describe("Annotation", func() {
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
 			const rank = -10
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
+			enqueueAndReconcile(pod, rank, false)
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
@@ -119,8 +117,8 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should overwrite customer-set pod-deletion-cost values", func() {
-			// v4 RFC: gate-ON state means the user is OK with Karpenter managing the
-			// pod-deletion-cost annotation. There is no overwrite-protection.
+			// v4 RFC: gate-ON = user is OK with Karpenter managing PDC. No
+			// overwrite-protection.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -130,24 +128,14 @@ var _ = Describe("Annotation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			pod := rsOwnedPod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						corev1.PodDeletionCost: "100",
-					},
-				},
-				NodeName: nodes[0].Name,
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{corev1.PodDeletionCost: "100"}},
+				NodeName:   nodes[0].Name,
 			})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
 			const rank = -10
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
+			enqueueAndReconcile(pod, rank, false)
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
@@ -164,51 +152,14 @@ var _ = Describe("Annotation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			pod := rsOwnedPod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						corev1.PodDeletionCost: "-5",
-					},
-				},
-				NodeName: nodes[0].Name,
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{corev1.PodDeletionCost: "-5"}},
+				NodeName:   nodes[0].Name,
 			})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
 
 			const rank = -20
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
-
-			updatedPod := &corev1.Pod{}
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal(strconv.Itoa(rank)))
-		})
-
-		It("should handle pods without any annotations", func() {
-			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
-				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range nodeClaims {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
-			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			const rank = -3
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
+			enqueueAndReconcile(pod, rank, false)
 
 			updatedPod := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
@@ -231,41 +182,16 @@ var _ = Describe("Annotation", func() {
 			}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
 			const rank = -7
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
+			for _, pod := range pods {
+				enqueueAndReconcile(pod, rank, false)
+			}
 
 			for _, pod := range pods {
 				updatedPod := &corev1.Pod{}
 				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
 				Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal(strconv.Itoa(rank)))
 			}
-		})
-
-		It("should handle nodes with no pods", func() {
-			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
-				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range nodeClaims {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], -1, false)}
-			// Should not error even with no pods
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
 		})
 
 		It("should update pods across multiple ranked nodes", func() {
@@ -282,163 +208,24 @@ var _ = Describe("Annotation", func() {
 			ExpectApplied(ctx, env.Client, pod0, pod1)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-			Expect(stateNodes).To(HaveLen(2))
+			enqueueAndReconcile(pod0, -10, false)
+			enqueueAndReconcile(pod1, -9, false)
 
-			nodeRanks := []deletioncost.NodeRank{
-				nodeRankWithPods(stateNodes[0], -10, false),
-				nodeRankWithPods(stateNodes[1], -9, false),
-			}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
-
-			// Both pods should have their respective node's rank
-			for _, sn := range stateNodes {
-				var expectedRank string
-				for _, nr := range nodeRanks {
-					if nr.Node.Node.Name == sn.Node.Name {
-						expectedRank = fmt.Sprintf("%d", nr.Rank)
-					}
-				}
-				pods, err := sn.Pods(ctx, env.Client)
-				Expect(err).ToNot(HaveOccurred())
-				for _, p := range pods {
-					updatedPod := &corev1.Pod{}
-					Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(p), updatedPod)).To(Succeed())
-					Expect(updatedPod.Annotations[corev1.PodDeletionCost]).To(Equal(expectedRank))
-				}
-			}
+			updated0 := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod0), updated0)).To(Succeed())
+			Expect(updated0.Annotations[corev1.PodDeletionCost]).To(Equal("-10"))
+			updated1 := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod1), updated1)).To(Succeed())
+			Expect(updated1.Annotations[corev1.PodDeletionCost]).To(Equal("-9"))
 		})
 	})
 
-	Context("Parallelize and 429 backoff", func() {
-		It("should patch many pods on a node via the parallel workqueue", func() {
-			// Fan out enough pods to exceed podPatchWorkers (10) so we
-			// exercise the workqueue's own scheduling, not just a serial
-			// pass. All patches must complete under a single
-			// UpdatePodDeletionCosts call.
-			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
-				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("32"), corev1.ResourceMemory: resource.MustParse("64Gi")}},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range nodeClaims {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			const numPods = 25
-			pods := make([]*corev1.Pod, numPods)
-			for i := range pods {
-				pods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
-				ExpectApplied(ctx, env.Client, pods[i])
-			}
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			counter := &countingClient{Client: env.Client}
-			const rank = -42
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, counter, nodeRanks)).To(Succeed())
-
-			// Every pod got exactly one patch through the counting client
-			// (25 pods, 25 patches). The parallel dispatch cannot skip pods.
-			Expect(counter.PatchCount()).To(Equal(numPods))
-			for _, pod := range pods {
-				updatedPod := &corev1.Pod{}
-				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-				Expect(updatedPod.Annotations).To(HaveKeyWithValue(corev1.PodDeletionCost, strconv.Itoa(rank)))
-			}
-		})
-
-		It("should retry 429 responses per-pod and eventually succeed", func() {
-			// Inject a throttling client that serves 429 for the first two
-			// patch calls, then falls through. The per-pod retry loop
-			// retries with podPatchRetryBackoff and should converge before
-			// the outer function returns.
-			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
-				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range nodeClaims {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
-			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			// Throttle the first 2 patches; the third and later succeed.
-			throttler := newThrottlingClient(env.Client, 2)
-
-			const rank = -11
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, throttler, nodeRanks)).To(Succeed())
-
-			// The patch retried at least twice (2 throttled attempts + 1
-			// success = 3 total). Some slack for jitter/reordering.
-			Expect(throttler.seen.Load()).To(BeNumerically(">=", int64(3)))
-
-			updatedPod := &corev1.Pod{}
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations).To(HaveKeyWithValue(corev1.PodDeletionCost, strconv.Itoa(rank)))
-		})
-
-		It("should give up after exhausting per-pod retries and return an error", func() {
-			// Throttle enough calls to blow through the entire retry budget
-			// (podPatchRetryBackoff.Steps is 4, so 5 calls exhausts it).
-			// Set the throttle count high enough that no attempt succeeds.
-			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
-				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range nodeClaims {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
-			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
-			// Throttle any conceivable retry attempt.
-			throttler := newThrottlingClient(env.Client, 100)
-
-			const rank = -12
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			// The unretried 429 falls out of retry.OnError once the backoff
-			// steps are exhausted, and 429 is not a NotFound/Conflict, so it
-			// becomes a pod-level error and surfaces to the caller.
-			err := deletioncost.UpdatePodDeletionCosts(ctx, throttler, nodeRanks)
-			Expect(err).To(HaveOccurred())
-			Expect(apierrors.IsTooManyRequests(err)).To(BeTrue())
-
-			// The pod was not updated (all retries throttled).
-			updatedPod := &corev1.Pod{}
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
-		})
-
+	Context("Queue semantics", func() {
 		It("should skip the API call when the pod's annotation already matches the desired value", func() {
-			// applyRankToPods computes value = strconv.Itoa(rank) once per
-			// node and each per-pod dispatch short-circuits when the
-			// annotation already equals that value, so the patch never fires.
-			// Verify by counting patches through a countingClient: a pod
-			// whose current value matches the desired rank should not be
-			// patched.
+			// The queue's Reconcile checks matchesDesired before patching so
+			// the reconcile completes without a Patch call. Count via a
+			// counting client that wraps env.Client and drives it as the
+			// queue's kubeClient.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -448,7 +235,6 @@ var _ = Describe("Annotation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			const rank = -19
-			// Pod already has the exact desired value.
 			pod := rsOwnedPod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{corev1.PodDeletionCost: strconv.Itoa(rank)}},
 				NodeName:   nodes[0].Name,
@@ -456,17 +242,120 @@ var _ = Describe("Annotation", func() {
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
-
 			counter := &countingClient{Client: env.Client}
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], rank, false)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, counter, nodeRanks)).To(Succeed())
+			q := deletioncost.NewQueue(counter)
+			q.Add(pod, rank, false)
+			ExpectObjectReconciled(ctx, env.Client, q, pod)
 
-			// Short-circuit hit; no patch was issued.
 			Expect(counter.PatchCount()).To(Equal(0))
+		})
+
+		It("should surface 429 errors from Reconcile so controller-runtime can retry", func() {
+			// Under the queue swap the per-pod retry loop is gone; controller-
+			// runtime's rate limiter re-enqueues on error. Verify the queue
+			// returns the raw 429 error rather than swallowing it or classifying
+			// it as skipped.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			throttler := newThrottlingClient(env.Client, 1)
+			q := deletioncost.NewQueue(throttler)
+			q.Add(pod, -11, false)
+			err := ExpectObjectReconcileFailed(ctx, env.Client, q, pod)
+			Expect(apierrors.IsTooManyRequests(err)).To(BeTrue())
+			// The item stays enqueued on retryable errors so controller-runtime
+			// picks it back up on its next tick.
+			Expect(q.Has(pod)).To(BeTrue())
+
+			// Second reconcile succeeds now that the throttler is drained.
+			ExpectObjectReconciled(ctx, env.Client, q, pod)
+			Expect(q.Has(pod)).To(BeFalse())
+
+			updated := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+			Expect(updated.Annotations[corev1.PodDeletionCost]).To(Equal("-11"))
+		})
+
+		It("should treat NotFound on the patch as skipped and drop the item from the queue", func() {
+			// Apply a pod, enqueue it, then delete it before Reconcile runs.
+			// The Patch call now 404s and the queue must treat that as
+			// terminal (drop the item, return nil) so controller-runtime does
+			// not retry a ghost pod indefinitely.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			// Snapshot the applied pod so it carries a ResourceVersion (required
+			// by the optimistic-lock merge patch). Then delete it and call
+			// Reconcile with the snapshot — the Patch API call will 404.
+			live := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), live)).To(Succeed())
+			queue.Add(live, -1, false)
+			Expect(env.Client.Delete(ctx, live)).To(Succeed())
+			_, err := queue.Reconcile(ctx, live)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(queue.Has(live)).To(BeFalse())
+		})
+
+		It("should treat a UID mismatch as a race and drop the reconcile silently", func() {
+			// The queue is keyed by (namespace, name, UID). A pod that arrives
+			// through the fetch adapter with a different UID than what was
+			// enqueued is a different pod entirely and must exit without
+			// evicting or annotating.
+			pod := rsOwnedPod(test.PodOptions{})
+			queue.Add(pod, -1, false)
+			Expect(queue.Has(pod)).To(BeTrue())
+
+			// Fabricate a same-name replacement with a fresh UID: the map
+			// lookup misses and Reconcile returns nil.
+			replacement := pod.DeepCopy()
+			replacement.UID = "different-uid"
+			result, err := queue.Reconcile(ctx, replacement)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).To(BeZero())
+			// Original entry still enqueued for its own eventual reconcile.
+			Expect(queue.Has(pod)).To(BeTrue())
+		})
+
+		It("should collapse repeated Adds for the same pod into a single reconcile with the latest state", func() {
+			// Overwrite-on-Add: enqueue with rank -1, then -5, then Reconcile
+			// once. The persisted annotation reflects the latest add.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			queue.Add(pod, -1, false)
+			queue.Add(pod, -5, false)
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+
+			updated := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+			Expect(updated.Annotations[corev1.PodDeletionCost]).To(Equal("-5"))
 		})
 	})
 
@@ -481,30 +370,22 @@ var _ = Describe("Annotation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			pod := rsOwnedPod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						corev1.PodDeletionCost: "5",
-					},
-				},
-				NodeName: nodes[0].Name,
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{corev1.PodDeletionCost: "5"}},
+				NodeName:   nodes[0].Name,
 			})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
+			enqueueAndReconcile(pod, 0, true)
 
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], 10, true)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
-
-			updatedPod := &corev1.Pod{}
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
+			updated := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+			Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
 		})
 
 		It("should skip pods without annotations on do-not-disrupt nodes", func() {
+			// Already-cleared pods take the matchesDesired short-circuit and
+			// issue no Patch call.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -517,17 +398,15 @@ var _ = Describe("Annotation", func() {
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var stateNodes []*state.StateNode
-			for n := range cluster.Nodes() {
-				stateNodes = append(stateNodes, n)
-			}
+			counter := &countingClient{Client: env.Client}
+			q := deletioncost.NewQueue(counter)
+			q.Add(pod, 0, true)
+			ExpectObjectReconciled(ctx, env.Client, q, pod)
 
-			nodeRanks := []deletioncost.NodeRank{nodeRankWithPods(stateNodes[0], 10, true)}
-			Expect(deletioncost.UpdatePodDeletionCosts(ctx, env.Client, nodeRanks)).To(Succeed())
-
-			updatedPod := &corev1.Pod{}
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod)).To(Succeed())
-			Expect(updatedPod.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
+			Expect(counter.PatchCount()).To(Equal(0))
+			updated := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+			Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
 		})
 	})
 })
