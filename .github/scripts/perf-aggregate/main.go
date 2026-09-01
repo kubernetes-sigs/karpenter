@@ -59,10 +59,14 @@ type metricSpec struct {
 
 // metrics is the ordered list of report fields we aggregate. Order controls
 // the print-table row order and the emitted benchmark-action array order.
+//
+// Memory and CPU use the p95 percentile from types.go rather than max because
+// p95 tracks the controller's steady-state resource envelope; max is dominated
+// by transient spikes that make regression signals noisy.
 var metrics = []metricSpec{
 	{"total_time", "Duration", "seconds", smallerIsBetter},
-	{"karpenter_memory_mb", "Controller Peak Memory", "MB", smallerIsBetter},
-	{"karpenter_cpu_nanos", "Controller CPU", "cpu-ms", smallerIsBetter},
+	{"karpenter_p95_memory_mb", "Controller Peak Memory", "MB", smallerIsBetter},
+	{"karpenter_p95_cpu_cores", "Controller CPU", "cores", smallerIsBetter},
 	{"total_nodes", "Final Nodes", "nodes", smallerIsBetter},
 	{"total_reserved_cpu_utilization", "CPU Utilization", "percent", biggerIsBetter},
 	{"resource_efficiency_score", "Efficiency Score", "score", biggerIsBetter},
@@ -219,7 +223,8 @@ func readReport(path string) (map[string]any, error) {
 
 // extractValues pulls the numeric value at jsonField from each report,
 // applying the unit conversions we inherited from the prior Python script:
-// nanosecond durations become seconds, cpu-nanoseconds become milliseconds.
+// nanosecond durations become seconds. The controller CPU field is already
+// in cores in types.go, so no CPU conversion is needed here.
 func extractValues(datas []map[string]any, jsonField string) []float64 {
 	values := make([]float64, 0, len(datas))
 	for _, d := range datas {
@@ -231,13 +236,8 @@ func extractValues(datas []map[string]any, jsonField string) []float64 {
 		if !ok {
 			continue
 		}
-		switch jsonField {
-		case "total_time":
-			if v > 1e9 {
-				v = v / 1e9
-			}
-		case "karpenter_cpu_nanos":
-			v = v / 1e6
+		if jsonField == "total_time" && v > 1e9 {
+			v = v / 1e9
 		}
 		values = append(values, v)
 	}

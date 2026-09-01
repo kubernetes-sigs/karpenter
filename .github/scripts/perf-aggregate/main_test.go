@@ -60,18 +60,20 @@ func TestComputeStatsEvenN(t *testing.T) {
 
 func TestExtractValuesUnitConversions(t *testing.T) {
 	// total_time > 1e9 is interpreted as nanoseconds and converted to seconds.
+	// karpenter_p95_cpu_cores is already in cores in types.go, so it passes
+	// through unchanged.
 	datas := []map[string]any{
 		{"total_time": 2e9},
 		{"total_time": 3e9},
-		{"karpenter_cpu_nanos": 5e6},
+		{"karpenter_p95_cpu_cores": 0.5},
 	}
 	tt := extractValues(datas, "total_time")
 	if len(tt) != 2 || tt[0] != 2.0 || tt[1] != 3.0 {
 		t.Errorf("total_time conversion: got %v, want [2 3]", tt)
 	}
-	cpu := extractValues(datas, "karpenter_cpu_nanos")
-	if len(cpu) != 1 || cpu[0] != 5.0 {
-		t.Errorf("karpenter_cpu_nanos conversion: got %v, want [5]", cpu)
+	cpu := extractValues(datas, "karpenter_p95_cpu_cores")
+	if len(cpu) != 1 || cpu[0] != 0.5 {
+		t.Errorf("karpenter_p95_cpu_cores passthrough: got %v, want [0.5]", cpu)
 	}
 }
 
@@ -108,10 +110,11 @@ func seedSyntheticIterations(t *testing.T, root string, iters int) {
 			"total_reserved_memory_utilization": 0.6 + float64(i)*0.05,
 			"rounds":                            i,
 		})
-		// Test B: karpenter_cpu_nanos = i*1e6 -> i ms; median = 2.
+		// Test B: karpenter_p95_cpu_cores = i*0.1 -> 0.1, 0.2, 0.3; median = 0.2.
+		// No conversion applied, types.go emits cores directly.
 		writeReport(t, filepath.Join(iterDir, "test_b_performance_report.json"), map[string]any{
-			"karpenter_cpu_nanos": float64(i) * 1e6,
-			"total_nodes":         float64(20 + i),
+			"karpenter_p95_cpu_cores": float64(i) * 0.1,
+			"total_nodes":             float64(20 + i),
 		})
 	}
 }
@@ -160,8 +163,8 @@ func assertSummaryMedians(t *testing.T, dir string) {
 	if testB == nil {
 		t.Fatal("summary missing test_b")
 	}
-	if got := testB["Controller CPU"].Median; got != 2 {
-		t.Errorf("test_b Controller CPU median (post ns->ms): got %v, want 2", got)
+	if got := testB["Controller CPU"].Median; got != 0.2 {
+		t.Errorf("test_b Controller CPU median (cores passthrough): got %v, want 0.2", got)
 	}
 }
 
