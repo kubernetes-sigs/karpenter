@@ -272,6 +272,39 @@ func TestDeltaHistogram_MissingMetric(t *testing.T) {
 	}
 }
 
+// Test 10a. Prometheus text-parser retains the +Inf bucket. The reducer must
+// exclude it from percentile / Max derivation and derive truncation from the
+// last finite bucket instead. Regression for a subtle bug where percentiles
+// beyond the finite tail returned +Inf and truncation-rate silently
+// returned 0.
+func TestReduceHistogramDelta_InfBucketExcludedFromPercentiles(t *testing.T) {
+	end := mkHistogram(100, 800.0, []*dto.Bucket{
+		mkBucket(1.0, 0),
+		mkBucket(5.0, 20),
+		mkBucket(10.0, 50),
+		mkBucket(math.Inf(+1), 100),
+	})
+	stats := reduceHistogramDelta(end, nil)
+	if stats.Count != 100 {
+		t.Errorf("Count: got %d, want 100", stats.Count)
+	}
+	if math.IsInf(stats.P95, +1) {
+		t.Errorf("P95 leaked +Inf: got %v", stats.P95)
+	}
+	if math.Abs(stats.P95-10.0) > 1e-9 {
+		t.Errorf("P95 under truncation: got %v, want 10.0 (last finite bound)", stats.P95)
+	}
+	if math.IsInf(stats.Max, +1) {
+		t.Errorf("Max leaked +Inf: got %v", stats.Max)
+	}
+	if math.Abs(stats.Max-10.0) > 1e-9 {
+		t.Errorf("Max: got %v, want 10.0 (tightest non-zero finite bucket)", stats.Max)
+	}
+	if math.Abs(stats.BucketTruncationRate-0.5) > 1e-9 {
+		t.Errorf("BucketTruncationRate: got %v, want 0.5", stats.BucketTruncationRate)
+	}
+}
+
 // Test 10. compactFamilies keeps only the target metric families.
 func TestCompactFamilies(t *testing.T) {
 	families := map[string]*dto.MetricFamily{

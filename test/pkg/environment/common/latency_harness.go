@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -293,11 +294,21 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 		}
 		deltaCum[i] = endCum - startCum
 	}
-	// The +Inf bucket count is deltaCount (per Prometheus contract). Truncation
-	// rate is what escaped the finite tail.
+	// Prometheus's text parser retains the +Inf bucket in end.GetBucket().
+	// Percentile / Max derivation must run against the finite tail only;
+	// truncation rate is what the finite tail failed to capture.
+	finiteBuckets, finiteCum := endBuckets, deltaCum
+	if n := len(endBuckets); n > 0 && math.IsInf(endBuckets[n-1].GetUpperBound(), +1) {
+		finiteBuckets = endBuckets[:n-1]
+		finiteCum = deltaCum[:n-1]
+	}
+	lastFiniteCum := uint64(0)
+	if len(finiteCum) > 0 {
+		lastFiniteCum = finiteCum[len(finiteCum)-1]
+	}
 	trunc := 0.0
-	if len(deltaCum) > 0 && deltaCount > deltaCum[len(deltaCum)-1] {
-		trunc = float64(deltaCount-deltaCum[len(deltaCum)-1]) / float64(deltaCount)
+	if deltaCount > lastFiniteCum {
+		trunc = float64(deltaCount-lastFiniteCum) / float64(deltaCount)
 	}
 	deltaSum := endSum - startSum
 	if deltaSum < 0 {
@@ -307,11 +318,11 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 		Count:                deltaCount,
 		Sum:                  deltaSum,
 		Mean:                 deltaSum / float64(deltaCount),
-		P50:                  interpolatePercentile(endBuckets, deltaCum, deltaCount, 0.50),
-		P90:                  interpolatePercentile(endBuckets, deltaCum, deltaCount, 0.90),
-		P95:                  interpolatePercentile(endBuckets, deltaCum, deltaCount, 0.95),
-		P99:                  interpolatePercentile(endBuckets, deltaCum, deltaCount, 0.99),
-		Max:                  inferMaxBound(endBuckets, deltaCum),
+		P50:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.50),
+		P90:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.90),
+		P95:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.95),
+		P99:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.99),
+		Max:                  inferMaxBound(finiteBuckets, finiteCum),
 		BucketTruncationRate: trunc,
 	}
 }
