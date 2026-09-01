@@ -235,6 +235,9 @@ var _ = Describe("Queue", func() {
 			Expect(cmd.ConsolidationType()).To(Equal(disruption.SingleNodeConsolidationType))
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
+			// This metric isn't reset between specs, so clear it to isolate this failure.
+			disruption.DisruptionQueueFailuresTotal.Reset()
+
 			// Step the clock to trigger the timeout so the command fails.
 			env.Clock.Step(11 * time.Minute)
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
