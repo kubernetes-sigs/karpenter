@@ -497,8 +497,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	controllerName := injection.GetControllerName(ctx)
 	for zone, count := range podCountByZone {
 		PendingPodsByEffectiveZone.Set(float64(count), map[string]string{
-			ControllerLabel: controllerName,
-			"zone":          zone,
+			ControllerLabel:   controllerName,
+			metrics.ZoneLabel: zone,
 		})
 	}
 

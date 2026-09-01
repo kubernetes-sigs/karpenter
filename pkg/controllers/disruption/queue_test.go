@@ -232,7 +232,7 @@ var _ = Describe("Queue", func() {
 				Replacements:      replacements,
 			}
 			Expect(cmd.Decision()).To(Equal(disruption.ReplaceDecision))
-			Expect(cmd.ConsolidationType()).To(Equal(disruption.SingleNodeConsolidationType))
+			Expect(cmd.ConsolidationType()).To(Equal(disruption.SingleNodeConsolidationType.Name))
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 
 			// This metric isn't reset between specs, so clear it to isolate this failure.
@@ -243,7 +243,7 @@ var _ = Describe("Queue", func() {
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 
 			ExpectMetricCounterValue(disruption.DisruptionQueueFailuresTotal, 1, map[string]string{
-				disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType,
+				disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType.Name,
 			})
 		})
 		It("should fully handle a command when replacements are initialized", func() {
