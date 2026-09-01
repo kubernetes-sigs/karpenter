@@ -59,14 +59,26 @@ var (
 
 type DriftReason string
 
+// RepairAction identifies the operation requested by a repair policy.
+type RepairAction string
+
+const (
+	// RebootNode requests recovery of the existing Node through the provider reboot lifecycle.
+	RebootNode RepairAction = "RebootNode"
+	// ReplaceNode requests replacement of the unhealthy Node.
+	ReplaceNode RepairAction = "ReplaceNode"
+)
+
+// RepairPolicy defines when and how Karpenter repairs a provider-supported unhealthy condition.
 type RepairPolicy struct {
-	// ConditionType of unhealthy state that is found on the node
+	// ConditionType identifies the NodeCondition to evaluate.
 	ConditionType corev1.NodeConditionType
-	// ConditionStatus condition when a node is unhealthy
+	// ConditionStatus identifies the unhealthy condition state.
 	ConditionStatus corev1.ConditionStatus
-	// TolerationDuration is the duration the controller will wait
-	// before repairing nodes that are unhealthy. It is a confidence delay: eligibility (and repair
-	// ordering age) is counted only after it elapses.
+	// ReasonRegex is a Go regular expression matched against the current NodeCondition reason using regexp.MatchString.
+	// An empty value defines the condition-level fallback.
+	ReasonRegex string
+	// TolerationDuration is added to the NodeCondition LastTransitionTime to determine when this policy becomes eligible.
 	TolerationDuration time.Duration
 	// TerminationGracePeriod is the Axis-2 drain bound for repair of this condition:
 	//   nil      -> inherit the NodePool/NodeClaim TerminationGracePeriod
@@ -78,6 +90,8 @@ type RepairPolicy struct {
 	// Priority is an ordering weight (0-100) for repair. Higher repairs first. Collisions are expected and
 	// unresolved; only the ordering matters, not the magnitude (it is compressed to a dense rank).
 	Priority int
+	// Action is the repair operation requested by this policy.
+	Action RepairAction
 }
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
@@ -101,8 +115,7 @@ type CloudProvider interface {
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
-	// RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter
-	// to monitor on the node.
+	// RepairPolicies returns the complete static set of provider-supported unhealthy-condition repair policies.
 	RepairPolicies() []RepairPolicy
 	// Name returns the CloudProvider implementation name.
 	Name() string

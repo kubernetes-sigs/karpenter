@@ -106,6 +106,7 @@ func (c *CloudProvider) Reset() {
 			ConditionType:      "BadNode",
 			ConditionStatus:    corev1.ConditionFalse,
 			TolerationDuration: 30 * time.Minute,
+			Action:             cloudprovider.ReplaceNode,
 		},
 	}
 }
