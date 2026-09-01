@@ -129,6 +129,9 @@ func benchmarkSchedulerMultiNodePool(b *testing.B, pods []*corev1.Pod, nodePoolC
 	if err != nil {
 		b.Fatalf("creating scheduler, %s", err)
 	}
+	// ReportAllocs is required for B/op and allocs/op to appear;
+	// .github/workflows/run-bench-test.yaml does not pass -benchmem.
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results, err := scheduler.Solve(ctx, pods)
