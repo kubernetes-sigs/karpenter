@@ -79,10 +79,6 @@ type benchConfig struct {
 	topologySpreadFraction float64
 }
 
-// --- Consolidation scheduling simulation benchmarks ---
-// These benchmark the rescheduling simulation that runs when evaluating whether
-// a node's pods can be placed elsewhere. This is the inner loop of consolidation.
-
 func BenchmarkConsolidation_10Nodes_NoTopology(b *testing.B) {
 	benchmarkConsolidationSim(b, benchConfig{10, 10, 1, 0.0})
 }
