@@ -42,43 +42,44 @@ import (
 
 const (
 	reconcileInterval = time.Minute
-	// maxNodesPerCycle bounds the number of Group B/C/D nodes actually
-	// annotated per reconcile. The pre-filter drops no-op nodes before the
-	// cap applies, so this is a ceiling on nodes-that-mutate rather than on
-	// nodes-considered. With ~30 pods/node this bounds worst-case per-cycle
-	// pod writes near the RFC's 1,500 write target. Group A nodes are
-	// exempt (see capNodeRanks).
+	// maxNodesPerCycle bounds the Group B/C/D nodes actually annotated per
+	// reconcile. The pre-filter drops no-op nodes before the cap, so this
+	// is a ceiling on nodes-that-mutate. With ~30 pods/node this bounds
+	// worst-case per-cycle pod writes near the RFC's 1,500 write target.
+	// Group A nodes are exempt (see capNodeRanks).
 	maxNodesPerCycle = 50
 )
 
-// Controller manages pod deletion cost annotations for Karpenter-managed nodes.
-// Reconcile is serialized by the singleton reconciler helper, so the
+// Controller ranks Karpenter-managed nodes by consolidation preference each
+// cycle and enqueues per-pod annotation writes on the fire-and-forget Queue.
+// Reconcile is serialized by the singleton reconciler adapter, so the
 // per-controller fields below are written without explicit synchronization.
 type Controller struct {
 	clock         clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
+	queue         *Queue
 
 	lastConsolidationState time.Time
 }
 
-// NewController creates a new pod deletion cost controller.
 func NewController(
 	clk clock.Clock,
 	kubeClient client.Client,
 	cloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
+	queue *Queue,
 ) *Controller {
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		cluster:       cluster,
+		queue:         queue,
 	}
 }
 
-// Register registers the controller with the manager
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
@@ -86,49 +87,41 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
-// Name returns the controller name
 func (c *Controller) Name() string {
 	return "pod.deletioncost"
 }
 
-// Reconcile reconciles the cluster state and updates pod deletion cost
-// annotations. Returns errors from the constituent steps so controller-runtime
-// logs them once and applies exponential backoff via the workqueue rate
-// limiter; on error the operatorpkg reconciler adapter drops the RequeueAfter
-// (see operatorpkg/reconciler.AsReconcilerWithRateLimiter) so the explicit
-// reconcileInterval here only takes effect on the success and skip paths.
-//
-// The PodDeletionCostManagement feature gate is enforced at registration in
-// pkg/controllers/controllers.go. The gate is read once at process start and
-// is not dynamic (a Karpenter restart is required to change it), so if the
-// gate is off this controller is never instantiated and Reconcile is never
-// invoked. No runtime gate check is needed here.
+// Reconcile ranks the cluster's nodes and enqueues annotation writes on the
+// Queue. Feature-gate enforcement is at registration (see
+// pkg/controllers/controllers.go); if the gate is off this method is never
+// invoked. Annotation writes are fire-and-forget: this Reconcile does not
+// wait for the Queue to drain, so a stuck annotation write does not stall
+// the ranking loop.
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
-	// Wait for cluster state to sync before ranking. Same convention the
-	// disruption controller uses (pkg/controllers/disruption/controller.go)
-	// so we don't rank against a partial node view during initial hydration.
+	// Match the disruption controller's convention: wait for cluster sync
+	// before ranking so we don't rank against a partial node view during
+	// initial hydration.
 	if !c.cluster.Synced(ctx) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
-	// Cheap change-detection check runs before the DeepCopy so an
-	// unchanged cluster never pays the snapshot cost. The state cursor is
-	// advanced at the tail of Reconcile after a successful update — if any
-	// step below errors, we retry this same state on the next reconcile
-	// rather than silently skipping it.
 	currentState := c.cluster.ConsolidationState()
 	if c.consolidationStateUnchanged(ctx, currentState) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	// DeepCopyNodes matches the disruption controller convention: it takes
-	// a snapshot under the cluster mutex so downstream calls that outlive
-	// the iterator can't observe torn state. The alternative is iterating
-	// c.cluster.Nodes() and appending pointers, which relies on an implicit
-	// invariant that state.Cluster never mutates a StateNode in place.
-	nodes := c.cluster.DeepCopyNodes()
+	// Best-effort snapshot: iterate the state.Cluster under its RLock and
+	// accumulate pointer aliases. state.Cluster occasionally mutates
+	// StateNode fields in place (e.g. clearing .Node on delete), so torn
+	// reads are possible mid-cycle. That is acceptable here because
+	// annotation writes are best-effort — the next reconcile picks up any
+	// drift.
+	var nodes []*state.StateNode
+	for n := range c.cluster.Nodes() {
+		nodes = append(nodes, n)
+	}
 	if len(nodes) == 0 {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
@@ -142,36 +135,38 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
-	// Filter before cap so the cap admits nodes that will actually mutate.
-	// See filterNoOpNodes and capNodeRanks for details.
 	nodeRanks = filterNoOpNodes(nodeRanks)
 	nodeRanks = capNodeRanks(nodeRanks, maxNodesPerCycle)
-	// nodesRanked tracks the count that actually enters UpdatePodDeletionCosts
-	// — i.e. after filterNoOpNodes drops no-op nodes and capNodeRanks bounds
-	// the per-cycle mutations. Reporting the pre-filter partition size here
-	// would overstate work done on quiescent clusters.
 	nodesRanked.Set(float64(len(nodeRanks)), noLabels)
 
-	if err := UpdatePodDeletionCosts(ctx, c.kubeClient, nodeRanks); err != nil {
-		return reconciler.Result{}, fmt.Errorf("updating pod deletion costs, %w", err)
-	}
+	c.enqueueAnnotationWrites(nodeRanks)
 
-	// Advance the skip cursor only after the update path returns nil so any
-	// failure above forces a retry on the same state next reconcile.
+	// Advance the skip cursor only after enqueueing succeeded. If a future
+	// error path is introduced above this line, this ordering preserves
+	// retry-on-same-state semantics.
 	c.lastConsolidationState = currentState
 
-	// Only log when at least one node was ranked; the empty case is not
-	// interesting log noise at V(1).
 	if len(nodeRanks) > 0 {
-		log.FromContext(ctx).V(1).WithValues("nodeCount", len(nodeRanks)).Info("updated pod deletion costs")
+		log.FromContext(ctx).V(1).WithValues("nodeCount", len(nodeRanks)).Info("enqueued pod deletion cost annotation writes")
 	}
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }
 
+// enqueueAnnotationWrites hands each pod's desired annotation state off to
+// the fire-and-forget Queue. The Queue's Reconcile method decides
+// per-pod whether to write or skip and handles retry via controller-runtime.
+func (c *Controller) enqueueAnnotationWrites(nodeRanks []NodeRank) {
+	for i := range nodeRanks {
+		nr := &nodeRanks[i]
+		for _, pod := range nr.Pods {
+			c.queue.Add(pod, nr.Rank, nr.HasDoNotDisrupt)
+		}
+	}
+}
+
 // filterNoOpNodes drops entries whose per-pod annotations already match the
-// planned rank (or, for Group D entries, whose pods already lack the
-// annotation). Otherwise these no-op nodes would consume slots in the
-// per-cycle cap without actually mutating any pod. Group A nodes carry the
+// planned state. Otherwise these no-op nodes would consume slots in the
+// per-cycle cap without mutating any pod. Group A nodes carry the
 // math.MinInt32 sentinel and are always admitted so they annotate promptly.
 func filterNoOpNodes(nodeRanks []NodeRank) []NodeRank {
 	filtered := nodeRanks[:0]
@@ -183,9 +178,6 @@ func filterNoOpNodes(nodeRanks []NodeRank) []NodeRank {
 	return filtered
 }
 
-// nodeMutatesAnyPod reports whether applying nr's planned annotation state
-// would change at least one pod on the node. Called only for non-Group-A
-// entries; Group A is exempt from the pre-filter.
 func nodeMutatesAnyPod(nr NodeRank) bool {
 	if nr.HasDoNotDisrupt {
 		for _, pod := range nr.Pods {
@@ -195,7 +187,6 @@ func nodeMutatesAnyPod(nr NodeRank) bool {
 		}
 		return false
 	}
-	// Pre-stringify the rank so the itoa cost isn't paid per pod.
 	value := strconv.Itoa(nr.Rank)
 	for _, pod := range nr.Pods {
 		if pod.Annotations[corev1.PodDeletionCost] != value {
@@ -205,15 +196,10 @@ func nodeMutatesAnyPod(nr NodeRank) bool {
 	return false
 }
 
-// consolidationStateUnchanged is a pure predicate: it compares currentState to
-// the cursor advanced at the end of the last successful reconcile and does not
-// mutate the cursor. Reconcile advances lastConsolidationState only after the
-// full update path returns nil so a mid-reconcile error does not silently
-// skip the next attempt.
-//
-// Uses the same ConsolidationState timestamp that gates the disruption
-// controller's consolidation methods, ensuring this controller reacts to the
-// same state changes that trigger consolidation.
+// consolidationStateUnchanged compares currentState to the cursor advanced at
+// the end of the last successful reconcile. It does not mutate the cursor —
+// Reconcile advances lastConsolidationState only after enqueueing succeeds so
+// a mid-reconcile error retries against the same state next cycle.
 func (c *Controller) consolidationStateUnchanged(ctx context.Context, currentState time.Time) bool {
 	if currentState.Equal(c.lastConsolidationState) {
 		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
@@ -223,9 +209,6 @@ func (c *Controller) consolidationStateUnchanged(ctx context.Context, currentSta
 	return false
 }
 
-// buildNodePoolMap lists all managed NodePools and returns a map keyed by
-// name. kubeClient.List reads from the shared informer cache, so this is
-// cheap on the reconcile hot path.
 func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodePool, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
@@ -239,8 +222,8 @@ func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodeP
 // disruption and expected to be stable once labeled, so labeling churn stays
 // bounded even when Group A exceeds limit.
 func capNodeRanks(nodeRanks []NodeRank, limit int) []NodeRank {
-	// RankNodes emits Group A first (see ranking.go). Walk the prefix so the
-	// split is O(len) without a second pass.
+	// RankNodes emits Group A first; walk the prefix so the split is O(len)
+	// without a second pass.
 	groupACount := 0
 	for _, r := range nodeRanks {
 		if r.Rank != math.MinInt32 {
@@ -252,6 +235,5 @@ func capNodeRanks(nodeRanks []NodeRank, limit int) []NodeRank {
 	if len(tail) > limit {
 		tail = tail[:limit]
 	}
-	// Reslice from the underlying array so we avoid a fresh allocation.
 	return nodeRanks[:groupACount+len(tail)]
 }

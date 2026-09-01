@@ -22,16 +22,14 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
-// NodeRank pairs a state node with the rank value the controller plans to
-// write to its pods. HasDoNotDisrupt indicates Group D, where the controller
-// clears the annotation rather than writing rank. Pods carries the pod list
-// captured during RankNodes so UpdatePodDeletionCosts does not have to re-list
-// pods from the apiserver.
+// NodeRank pairs a state node with the rank the controller plans to enqueue
+// for its pods. HasDoNotDisrupt indicates Group D — the queue clears the
+// annotation instead of writing Rank. Pods carries the pod list captured
+// during RankNodes so the queue does not need to re-list pods.
 //
 // Rank is only meaningful when HasDoNotDisrupt=false; Group D entries leave
-// Rank at its zero value and UpdatePodDeletionCosts ignores it. Group D nodes
-// are excluded from the sequential-rank walk so the range of annotated ranks
-// is contiguous.
+// Rank at its zero value and the queue ignores it. Group D nodes are excluded
+// from the sequential-rank walk so the annotated range is contiguous.
 type NodeRank struct {
 	Node            *state.StateNode
 	Rank            int

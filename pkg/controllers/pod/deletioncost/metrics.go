@@ -29,15 +29,13 @@ const (
 	resultLabel              = "result"
 )
 
-// noLabels is shared by all label-less metric calls so we don't allocate a
-// fresh empty map on every increment.
+// noLabels is shared by all label-less metric calls so we don't allocate an
+// empty map on every increment.
 var noLabels = map[string]string{}
 
 var (
-	// nodes_ranked is a gauge of the number of nodes ranked in the most
-	// recent reconcile cycle. RFC §"Observability" calls for a gauge so
-	// operators can see the current managed-node footprint, not a monotonic
-	// total.
+	// RFC §"Observability" calls for a gauge (current footprint), not a
+	// monotonic total.
 	nodesRanked = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
@@ -69,13 +67,16 @@ var (
 		},
 		[]string{},
 	)
+	// Per-pod queue-reconcile duration. Previously per-cycle when
+	// UpdatePodDeletionCosts ran synchronously; after the queue swap this
+	// measures each Queue.Reconcile call (single-pod write, retry, or skip).
 	annotationDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
 			Name:      "annotation_duration_seconds",
-			Help:      "Duration of pod annotation update operations in seconds.",
+			Help:      "Duration of a single pod annotation update operation in seconds.",
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{},

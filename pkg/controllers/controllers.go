@@ -208,7 +208,11 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
-		controllers = append(controllers, deletioncost.NewController(clock, kubeClient, cloudProvider, cluster))
+		deletionCostQueue := deletioncost.NewQueue(kubeClient)
+		controllers = append(controllers,
+			deletionCostQueue,
+			deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, deletionCostQueue),
+		)
 	}
 	if !o.disableVPAPrediction {
 		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
