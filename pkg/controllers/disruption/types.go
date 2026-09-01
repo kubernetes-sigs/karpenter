@@ -172,7 +172,11 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 		}
-		return nil, err
+		err = fmt.Errorf("validating node for disruption, %w", err)
+		if node.Node == nil || !node.Registered() {
+			return nil, serrors.Wrap(err, "NodeClaim", klog.KObj(node.NodeClaim))
+		}
+		return nil, serrors.Wrap(err, "Node", klog.KObj(node.Node))
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
@@ -193,7 +197,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		eventualDisruptionCandidate := node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass
 		if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
-			return nil, err
+			return nil, serrors.Wrap(fmt.Errorf("validating pod disruption, %w", err), "Node", klog.KObj(node.Node))
 		}
 	}
 	reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) })

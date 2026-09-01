@@ -46,6 +46,11 @@ type ExistingNode struct {
 
 func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList, instanceType *cloudprovider.InstanceType, isUnderConsolidateAfter bool) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
+	if instanceType != nil {
+		for driver, limit := range instanceType.VolumeAttachmentLimits {
+			n.VolumeUsage().AddFallbackLimit(driver, limit)
+		}
+	}
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	resources.SubtractFrom(daemonResources, n.DaemonSetRequests())
 	// If unexpected daemonset pods schedule to the node due to labels appearing on the node which cause the
