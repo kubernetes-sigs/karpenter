@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -137,14 +138,16 @@ func BenchmarkConsolidation_500Nodes_HostnameSpread_9NP(b *testing.B) {
 // --- Implementation ---
 
 func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
-	ctx, kubeClient, clk, clusterState, _, prov, candidates := setupConsolidationBench(b, cfg)
+	// Setup runs once per BenchmarkFn invocation; b.ResetTimer below excludes it
+	// from measurement. With -count=N the harness re-invokes the whole function
+	// N times to give benchstat independent samples, which is intentional.
+	ctx, kubeClient, clk, clusterState, prov, candidates := setupConsolidationBench(b, cfg)
 	rec := events.NewRecorder(&record.FakeRecorder{})
 
 	// Benchmark SimulateScheduling for a single candidate node removal.
-	// This exercises the full rescheduling path: collect pods from the candidate,
-	// create a scheduler with topology constraints, and solve placement.
 	candidate := candidates[0]
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = SimulateScheduling(ctx, kubeClient, clusterState, prov, clk, rec, nil, candidate)
@@ -157,9 +160,13 @@ func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
 
 // --- Setup ---
 
+// Parameters (node counts, TSC fraction, pod requests) are intentionally
+// deterministic and seeded so benchstat can compare runs across commits with
+// low variance. Randomizing configuration inside a microbenchmark defeats that
+// signal; broader coverage belongs in the kind-cluster benchmarks (PR #2994).
 func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 	context.Context, client.Client, *clock.FakeClock, *state.Cluster,
-	*fake.CloudProvider, *provisioning.Provisioner, []*Candidate,
+	*provisioning.Provisioner, []*Candidate,
 ) {
 	b.Helper()
 	ctx := TestContextWithLogger(b)
@@ -170,12 +177,18 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 	instanceTypes := fake.InstanceTypes(100)
 	cp.InstanceTypes = instanceTypes
 
-	kubeClient := fakecr.NewFakeClient()
+	// The fake client needs the spec.nodeName field index registered so that
+	// GetProvisionablePods and StateNode.Pods (both use a field selector) work
+	// against the in-memory store; NewFakeClient() alone doesn't provide it.
+	kubeClient := fakecr.NewClientBuilder().
+		WithIndex(&corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+			return []string{o.(*corev1.Pod).Spec.NodeName}
+		}).
+		Build()
 	clusterState := state.NewCluster(clk, kubeClient, cp)
 	rec := events.NewRecorder(&record.FakeRecorder{})
 	prov := provisioning.NewProvisioner(kubeClient, rec, cp, clusterState, clk, deviceallocation.NewController(kubeClient), virtualpods.NewVirtualPodCache(kubeClient))
 
-	// Create NodePools
 	nodePools := make([]*v1.NodePool, cfg.nodePoolCount)
 	for i := 0; i < cfg.nodePoolCount; i++ {
 		np := test.NodePool(v1.NodePool{
@@ -193,22 +206,28 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 		}
 	}
 
-	// Build candidates with pods
 	var candidates []*Candidate
 	for i := 0; i < cfg.nodeCount; i++ {
 		np := nodePools[i%cfg.nodePoolCount]
 		it := instanceTypes[i%len(instanceTypes)]
+		zone := fmt.Sprintf("zone-%d", i%3)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.NodePoolLabelKey:            np.Name,
 					corev1.LabelInstanceTypeStable: it.Name,
-					corev1.LabelTopologyZone:       fmt.Sprintf("zone-%d", i%3),
+					corev1.LabelTopologyZone:       zone,
+					v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
 				},
 			},
 			Status: v1.NodeClaimStatus{
 				ProviderID: fmt.Sprintf("fake://node-%d", i),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("16"),
+					corev1.ResourceMemory: resource.MustParse("64Gi"),
+					corev1.ResourcePods:   resource.MustParse("110"),
+				},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("16"),
 					corev1.ResourceMemory: resource.MustParse("64Gi"),
@@ -216,23 +235,64 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 				},
 			},
 		})
+		// Mirror ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated: mark the
+		// NodeClaim and Node as launched/registered/initialized so cluster state
+		// treats them as active capacity available for rescheduling. Without this,
+		// SimulateScheduling sees an empty cluster and returns fast.
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
+		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
+			return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
+		})
+		node.Labels[v1.NodeRegisteredLabelKey] = "true"
+		node.Labels[v1.NodeInitializedLabelKey] = "true"
+
+		if err := kubeClient.Create(ctx, nodeClaim); err != nil {
+			b.Fatal(err)
+		}
+		if err := kubeClient.Create(ctx, node); err != nil {
+			b.Fatal(err)
+		}
+		clusterState.UpdateNodeClaim(nodeClaim)
+		if err := clusterState.UpdateNode(ctx, node); err != nil {
+			b.Fatal(err)
+		}
 
 		pods := makeBenchPods(cfg.podsPerNode, cfg.topologySpreadFraction, node.Name)
+		for _, p := range pods {
+			if err := kubeClient.Create(ctx, p); err != nil {
+				b.Fatal(err)
+			}
+			if err := clusterState.UpdatePod(ctx, p); err != nil {
+				b.Fatal(err)
+			}
+		}
+
+		// Grab the StateNode that cluster.DeepCopyNodes will return so the
+		// candidate name filter in SimulateScheduling matches (see helpers.go).
+		var sn *state.StateNode
+		for n := range clusterState.Nodes() {
+			if n.Node != nil && n.Node.Name == node.Name {
+				sn = n
+				break
+			}
+		}
+		if sn == nil {
+			b.Fatalf("state node for %s not found after UpdateNode", node.Name)
+		}
 
 		candidates = append(candidates, &Candidate{
-			StateNode: &state.StateNode{
-				Node:      node,
-				NodeClaim: nodeClaim,
-			},
+			StateNode:         sn,
 			instanceType:      it,
 			NodePool:          np,
-			zone:              fmt.Sprintf("zone-%d", i%3),
+			zone:              zone,
 			capacityType:      v1.CapacityTypeOnDemand,
 			reschedulablePods: pods,
 		})
 	}
 
-	return ctx, kubeClient, clk, clusterState, cp, prov, candidates
+	return ctx, kubeClient, clk, clusterState, prov, candidates
 }
 
 func makeBenchPods(count int, topologyFraction float64, nodeName string) []*corev1.Pod {
