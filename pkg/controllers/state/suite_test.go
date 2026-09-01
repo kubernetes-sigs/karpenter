@@ -1773,6 +1773,32 @@ var _ = Describe("Consolidated State", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
+	It("should cause consolidation state to change when a node's nomination expires", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		env.Clock.Step(time.Minute)
+		state := cluster.ConsolidationState()
+
+		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
+		Expect(cluster.ConsolidationState()).To(Equal(state))
+
+		// Nomination window is 20s; expiry should invalidate exactly once
+		env.Clock.Step(time.Second * 21)
+		Expect(ExpectStateNodeExists(cluster, node).Nominated(env.Clock)).To(BeFalse())
+		newState := cluster.ConsolidationState()
+		Expect(newState).ToNot(Equal(state))
+		Expect(cluster.ConsolidationState()).To(Equal(newState))
+	})
 })
 
 var _ = Describe("Data Races", func() {
