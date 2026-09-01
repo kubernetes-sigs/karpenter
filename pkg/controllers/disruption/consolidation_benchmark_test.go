@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -206,93 +207,96 @@ func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 		}
 	}
 
-	var candidates []*Candidate
+	candidates := make([]*Candidate, 0, cfg.nodeCount)
 	for i := 0; i < cfg.nodeCount; i++ {
-		np := nodePools[i%cfg.nodePoolCount]
-		it := instanceTypes[i%len(instanceTypes)]
-		zone := fmt.Sprintf("zone-%d", i%3)
-
-		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey:            np.Name,
-					corev1.LabelInstanceTypeStable: it.Name,
-					corev1.LabelTopologyZone:       zone,
-					v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
-				},
-			},
-			Status: v1.NodeClaimStatus{
-				ProviderID: fmt.Sprintf("fake://node-%d", i),
-				Capacity: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("16"),
-					corev1.ResourceMemory: resource.MustParse("64Gi"),
-					corev1.ResourcePods:   resource.MustParse("110"),
-				},
-				Allocatable: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("16"),
-					corev1.ResourceMemory: resource.MustParse("64Gi"),
-					corev1.ResourcePods:   resource.MustParse("110"),
-				},
-			},
-		})
-		// Mirror ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated: mark the
-		// NodeClaim and Node as launched/registered/initialized so cluster state
-		// treats them as active capacity available for rescheduling. Without this,
-		// SimulateScheduling sees an empty cluster and returns fast.
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
-		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
-			return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
-		})
-		node.Labels[v1.NodeRegisteredLabelKey] = "true"
-		node.Labels[v1.NodeInitializedLabelKey] = "true"
-
-		if err := kubeClient.Create(ctx, nodeClaim); err != nil {
-			b.Fatal(err)
-		}
-		if err := kubeClient.Create(ctx, node); err != nil {
-			b.Fatal(err)
-		}
-		clusterState.UpdateNodeClaim(nodeClaim)
-		if err := clusterState.UpdateNode(ctx, node); err != nil {
-			b.Fatal(err)
-		}
-
-		pods := makeBenchPods(cfg.podsPerNode, cfg.topologySpreadFraction, node.Name)
-		for _, p := range pods {
-			if err := kubeClient.Create(ctx, p); err != nil {
-				b.Fatal(err)
-			}
-			if err := clusterState.UpdatePod(ctx, p); err != nil {
-				b.Fatal(err)
-			}
-		}
-
-		// Grab the StateNode that cluster.DeepCopyNodes will return so the
-		// candidate name filter in SimulateScheduling matches (see helpers.go).
-		var sn *state.StateNode
-		for n := range clusterState.Nodes() {
-			if n.Node != nil && n.Node.Name == node.Name {
-				sn = n
-				break
-			}
-		}
-		if sn == nil {
-			b.Fatalf("state node for %s not found after UpdateNode", node.Name)
-		}
-
-		candidates = append(candidates, &Candidate{
-			StateNode:         sn,
-			instanceType:      it,
-			NodePool:          np,
-			zone:              zone,
-			capacityType:      v1.CapacityTypeOnDemand,
-			reschedulablePods: pods,
-		})
+		candidates = append(candidates, addCandidateNode(b, ctx, kubeClient, clusterState, cfg, i,
+			nodePools[i%cfg.nodePoolCount], instanceTypes[i%len(instanceTypes)]))
 	}
 
 	return ctx, kubeClient, clk, clusterState, prov, candidates
+}
+
+// addCandidateNode creates one NodeClaim/Node/pods in the fake client, updates
+// cluster state, and returns a Candidate pointing at the resulting StateNode.
+func addCandidateNode(b *testing.B, ctx context.Context, kubeClient client.Client, clusterState *state.Cluster,
+	cfg benchConfig, i int, np *v1.NodePool, it *cloudprovider.InstanceType,
+) *Candidate {
+	zone := fmt.Sprintf("zone-%d", i%3)
+	alloc := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("16"),
+		corev1.ResourceMemory: resource.MustParse("64Gi"),
+		corev1.ResourcePods:   resource.MustParse("110"),
+	}
+	nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				v1.NodePoolLabelKey:            np.Name,
+				corev1.LabelInstanceTypeStable: it.Name,
+				corev1.LabelTopologyZone:       zone,
+				v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+			},
+		},
+		Status: v1.NodeClaimStatus{
+			ProviderID:  fmt.Sprintf("fake://node-%d", i),
+			Capacity:    alloc,
+			Allocatable: alloc,
+		},
+	})
+	// Mirror ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated: mark the
+	// NodeClaim and Node as launched/registered/initialized so cluster state
+	// treats them as active capacity available for rescheduling. Without this,
+	// SimulateScheduling sees an empty cluster and returns fast.
+	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
+	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
+		return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
+	})
+	node.Labels[v1.NodeRegisteredLabelKey] = "true"
+	node.Labels[v1.NodeInitializedLabelKey] = "true"
+
+	if err := kubeClient.Create(ctx, nodeClaim); err != nil {
+		b.Fatal(err)
+	}
+	if err := kubeClient.Create(ctx, node); err != nil {
+		b.Fatal(err)
+	}
+	clusterState.UpdateNodeClaim(nodeClaim)
+	if err := clusterState.UpdateNode(ctx, node); err != nil {
+		b.Fatal(err)
+	}
+
+	pods := makeBenchPods(cfg.podsPerNode, cfg.topologySpreadFraction, node.Name)
+	for _, p := range pods {
+		if err := kubeClient.Create(ctx, p); err != nil {
+			b.Fatal(err)
+		}
+		if err := clusterState.UpdatePod(ctx, p); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// Grab the StateNode that cluster.DeepCopyNodes will return so the
+	// candidate name filter in SimulateScheduling matches (see helpers.go).
+	var sn *state.StateNode
+	for n := range clusterState.Nodes() {
+		if n.Node != nil && n.Node.Name == node.Name {
+			sn = n
+			break
+		}
+	}
+	if sn == nil {
+		b.Fatalf("state node for %s not found after UpdateNode", node.Name)
+	}
+
+	return &Candidate{
+		StateNode:         sn,
+		instanceType:      it,
+		NodePool:          np,
+		zone:              zone,
+		capacityType:      v1.CapacityTypeOnDemand,
+		reschedulablePods: pods,
+	}
 }
 
 func makeBenchPods(count int, topologyFraction float64, nodeName string) []*corev1.Pod {
