@@ -161,4 +161,9 @@ settings:
     # -- nodeRepair is ALPHA and is disabled by default.
     # Setting this to true will enable node repair.
     nodeRepair: false
+    # -- podDeletionCostManagement is ALPHA and is disabled by default.
+    # Setting this to true will enable Karpenter to manage pod-deletion-cost annotations
+    # on pods it schedules, influencing which pods are preferred for eviction during
+    # consolidation/disruption.
+    podDeletionCostManagement: false
 
