@@ -39,6 +39,7 @@ func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
+		ReportOverhead()
 	})
 	AfterSuite(func() {
 		env.Stop()
