@@ -455,6 +455,30 @@ func (c *Cluster) UnlaunchedNodeClaimExists(nodeClaimName string) bool {
 	return ok && providerID == ""
 }
 
+// DeletePodNodeClaimMapping removes only the pod→nodeClaim mapping for a given pod. Unlike
+// ClearPodSchedulingMappings it leaves the pod's metric-relevant state (podAcks, podsSchedulableTimes,
+// podsSchedulingAttempted, podHealthyNodePoolScheduledTime) intact so callers can drop a stale mapping
+// without resetting scheduling-latency observations for still-pending pods.
+func (c *Cluster) DeletePodNodeClaimMapping(podKey types.NamespacedName) {
+	c.podToNodeClaim.Delete(podKey)
+}
+
+// NodeClaimMarkedForDeletion reports whether the node backing a nodeClaim is marked for deletion in
+// cluster state. It covers the state-level mark applied by MarkForDeletion (used by disruption and
+// test helpers to simulate node termination before the nodeClaim API object carries a deletionTimestamp)
+// and any lag between API deletion and informer visibility.
+func (c *Cluster) NodeClaimMarkedForDeletion(nodeClaimName string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	providerID, ok := c.nodeClaimNameToProviderID[nodeClaimName]
+	if !ok || providerID == "" {
+		return false
+	}
+	n, ok := c.nodes[providerID]
+	return ok && n.MarkedForDeletion()
+}
+
 // AckPods marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
 func (c *Cluster) AckPods(pods ...*corev1.Pod) {
 	now := c.clock.Now()
@@ -652,6 +676,8 @@ func (c *Cluster) Reset() {
 	c.podAcks = sync.Map{}
 	c.podsSchedulingAttempted = sync.Map{}
 	c.podsSchedulableTimes = sync.Map{}
+	c.podHealthyNodePoolScheduledTime = sync.Map{}
+	c.podToNodeClaim = sync.Map{}
 	c.bufferPodCounts = map[string]int{}
 }
 
