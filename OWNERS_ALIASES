@@ -1,7 +1,7 @@
 # See the OWNERS_ALIASES docs: https://git.k8s.io/community/contributors/guide/owners.md#owners_aliases
 
 aliases:
-  # Keep in sync with https://github.com/kubernetes/org/blob/master/config/kubernetes-sigs/sig-autoscaling/teams.yaml#:~:text=sig%2Dautoscaling%2Dleads
+  # Keep in sync with https://github.com/kubernetes/org/blob/main/config/kubernetes-sigs/sig-autoscaling/teams.yaml#:~:text=sig%2Dautoscaling%2Dleads
   sig-autoscaling-leads:
     - adrianmoisey
     - jackfrancis
