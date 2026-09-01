@@ -34,10 +34,6 @@ jobs:
         echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
         echo "Workflow run name: ${{ github.event.workflow_run.name }}"
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - name: Set up Python 3.10
-      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-      with:
-        python-version: "3.10"
     - uses: ./.github/actions/install-deps
       with:
           k8sVersion: ${{ inputs.k8s_version }}
@@ -94,24 +90,34 @@ jobs:
       if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
       env:
         ITERATIONS: ${{ inputs.repeat }}
-        IS_MAIN_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       shell: bash
       run: |
-        python3 .github/scripts/perf-aggregate.py
-    - name: Download previous benchmark data
+        go run ./.github/scripts/perf-aggregate
+    - name: Download previous benchmark data (smaller-is-better)
       if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
-        path: ./cache
-        key: ${{ runner.os }}-perf-benchmark-${{ inputs.test_name || inputs.suite }}
-    - name: Compare against performance baseline
+        path: ./cache-smaller
+        key: ${{ runner.os }}-perf-benchmark-smaller-${{ inputs.test_name || inputs.suite }}
+    - name: Download previous benchmark data (bigger-is-better)
       if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
-      uses: benchmark-action/github-action-benchmark@v1
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
-        name: Karpenter Performance (${{ inputs.test_name || inputs.suite }})
+        path: ./cache-bigger
+        key: ${{ runner.os }}-perf-benchmark-bigger-${{ inputs.test_name || inputs.suite }}
+    # Regression thresholds are on the batch median only. A variance-gate
+    # (e.g. failing when the batch CV grows beyond the historical CV) is
+    # tracked as future work — see PR#2994 discussion. Adding it here would
+    # require carrying CV across baselines, which the current cache schema
+    # does not persist.
+    - name: Compare smaller-is-better metrics
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+      with:
+        name: Karpenter Performance (${{ inputs.test_name || inputs.suite }}) - smaller-is-better
         tool: customSmallerIsBetter
-        output-file-path: ${{ env.OUTPUT_DIR }}/benchmark-results.json
-        external-data-json-path: ./cache/benchmark-data.json
+        output-file-path: ${{ env.OUTPUT_DIR }}/benchmark-results-smaller.json
+        external-data-json-path: ./cache-smaller/benchmark-data.json
         github-token: ${{ secrets.GITHUB_TOKEN }}
         # Alert if batch median is 50% worse than previous batch median.
         # At n=10 with observed CV ~48%, batch median CV is ~15%. A 130%
@@ -121,7 +127,22 @@ jobs:
         fail-on-alert: true
         comment-on-alert: true
         alert-comment-cc-users: '@nathangeology'
-        # Show comparison in job summary
+        summary-always: true
+    - name: Compare bigger-is-better metrics
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+      with:
+        name: Karpenter Performance (${{ inputs.test_name || inputs.suite }}) - bigger-is-better
+        # Utilization and efficiency-score metrics fail when they DROP,
+        # so they must not share a group with latency/resource-cost metrics.
+        tool: customBiggerIsBetter
+        output-file-path: ${{ env.OUTPUT_DIR }}/benchmark-results-bigger.json
+        external-data-json-path: ./cache-bigger/benchmark-data.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        alert-threshold: '150%'
+        fail-on-alert: true
+        comment-on-alert: true
+        alert-comment-cc-users: '@nathangeology'
         summary-always: true
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
@@ -131,7 +152,8 @@ jobs:
         path: |
           ${{ env.OUTPUT_DIR }}/**/*_performance_report.json
           ${{ env.OUTPUT_DIR }}/aggregated_summary.json
-          ${{ env.OUTPUT_DIR }}/benchmark-results.json
+          ${{ env.OUTPUT_DIR }}/benchmark-results-smaller.json
+          ${{ env.OUTPUT_DIR }}/benchmark-results-bigger.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
         retention-days: 30

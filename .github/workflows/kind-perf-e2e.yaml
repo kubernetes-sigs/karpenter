@@ -23,7 +23,8 @@ jobs:
         ((contains(github.event.pull_request.labels.*.name, 'size/XL') ||
           contains(github.event.pull_request.labels.*.name, 'size/XXL')) &&
          (startsWith(github.event.pull_request.title, 'feat:') ||
-          startsWith(github.event.pull_request.title, 'fix:')))))
+          startsWith(github.event.pull_request.title, 'fix:') ||
+          startsWith(github.event.pull_request.title, 'perf:')))))
     permissions:
       issues: write
     strategy:
