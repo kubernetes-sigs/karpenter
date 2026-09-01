@@ -191,6 +191,37 @@ var _ = Describe("Simulate Scheduling", func() {
 			},
 		})
 	})
+	It("should retain volume topology for pending pods that prefer non-Karpenter capacity", func() {
+		storageClass := test.StorageClass()
+		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{
+			Zones:            []string{"test-zone-3"},
+			StorageClassName: storageClass.Name,
+		})
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+			VolumeName:       persistentVolume.Name,
+			StorageClassName: &storageClass.Name,
+		})
+		pod := test.UnschedulablePod(test.PodOptions{
+			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+		})
+		pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+				{
+					Weight: 50,
+					Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+						{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist},
+					}},
+				},
+			},
+		}}
+		ExpectApplied(ctx, env.Client, nodePool, storageClass, persistentVolume, persistentVolumeClaim, pod)
+
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, nil)
+		Expect(err).To(Succeed())
+		Expect(results.PodErrors).To(BeEmpty())
+		Expect(results.NewNodeClaims).To(HaveLen(1))
+		Expect(results.NewNodeClaims[0].Requirements.Get(corev1.LabelTopologyZone).Values()).To(ConsistOf("test-zone-3"))
+	})
 	It("should allow pods on deleting nodes to reschedule to uninitialized nodes", func() {
 		numNodes := 10
 		nodeClaims, nodes := test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
