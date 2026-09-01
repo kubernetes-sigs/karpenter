@@ -24,12 +24,10 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -92,32 +90,53 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 }
 
 // Drain evicts pods from the node and returns true when all pods are evicted
-// https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
+// https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
 func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time) error {
 	pods, err := nodeutils.GetPods(ctx, t.kubeClient, node.Name)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-	podsToDelete := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return podutil.IsWaitingEviction(p, t.clock) && (!podutil.IsTerminating(p) || podutil.IsPodEligibleForForcedEviction(p, nodeGracePeriodExpirationTime))
-	})
-	if err := t.DeleteExpiringPods(ctx, podsToDelete, nodeGracePeriodExpirationTime); err != nil {
-		return fmt.Errorf("deleting expiring pods, %w", err)
+	waiting := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) })
+
+	// Split waiting pods into two disjoint sets:
+	//   - deleteEligible: past the force-delete threshold. Enqueue across ALL tiers
+	//     immediately — at the hard deadline we must not gate deletion behind
+	//     graceful eviction of an earlier tier (a PDB on a noncritical pod would
+	//     otherwise hold up a past-deadline critical pod).
+	//   - gracefulCandidates: candidates for the PDB-respecting eviction API.
+	//     Tier-gated so noncritical/non-daemon pods drain before critical/daemon
+	//     ones (k8s graceful shutdown ordering).
+	// The queue re-evaluates needsForceDelete on every reconcile, so a graceful
+	// candidate whose deadline crosses while it's enqueued upgrades to force-delete
+	// naturally.
+	var deleteEligible, gracefulCandidates []*corev1.Pod
+	for _, p := range waiting {
+		if needsForceDelete(p, nodeGracePeriodExpirationTime, t.clock) {
+			deleteEligible = append(deleteEligible, p)
+		} else {
+			gracefulCandidates = append(gracefulCandidates, p)
+		}
 	}
-	// Monitor pods in pod groups that either haven't been evicted or are actively evicting
-	podGroups := t.groupPodsByPriority(lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) }))
+	if len(deleteEligible) > 0 {
+		t.evictionQueue.Add(nodeGracePeriodExpirationTime, deleteEligible...)
+	}
+	podGroups := t.groupPodsByPriority(gracefulCandidates)
 	for _, group := range podGroups {
 		if len(group) > 0 {
-			// Only add pods to the eviction queue that haven't been evicted yet
-			t.evictionQueue.Add(lo.Filter(group, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p, t.clock, t.recorder) })...)
-			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", lo.SumBy(podGroups, func(pods []*corev1.Pod) int { return len(pods) })))
+			t.evictionQueue.Add(nodeGracePeriodExpirationTime, group...)
+			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(waiting)))
 		}
+	}
+	// No graceful candidates remain, but we may still be waiting on the
+	// delete-eligible batch to finish being removed.
+	if len(deleteEligible) > 0 {
+		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(waiting)))
 	}
 	return nil
 }
 
 func (t *Terminator) groupPodsByPriority(pods []*corev1.Pod) [][]*corev1.Pod {
-	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
+	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
 	var nonCriticalNonDaemon, nonCriticalDaemon, criticalNonDaemon, criticalDaemon []*corev1.Pod
 	for _, pod := range pods {
 		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
@@ -135,44 +154,4 @@ func (t *Terminator) groupPodsByPriority(pods []*corev1.Pod) [][]*corev1.Pod {
 		}
 	}
 	return [][]*corev1.Pod{nonCriticalNonDaemon, nonCriticalDaemon, criticalNonDaemon, criticalDaemon}
-}
-
-func (t *Terminator) DeleteExpiringPods(ctx context.Context, pods []*corev1.Pod, nodeGracePeriodTerminationTime *time.Time) error {
-	for _, pod := range pods {
-		// check if the node has an expiration time and the pod needs to be deleted
-		deleteTime := t.podDeleteTimeWithGracePeriod(nodeGracePeriodTerminationTime, pod)
-		if deleteTime != nil && t.clock.Now().After(*deleteTime) {
-			// delete pod proactively to give as much of its terminationGracePeriodSeconds as possible for deletion
-			// ensure that we clamp the maximum pod terminationGracePeriodSeconds to the node's remaining expiration time in the delete command
-			// clamp to a minimum of 1s to prevent force-deletion from etcd (which would violate at-most-one pod semantics)
-			gracePeriodSeconds := lo.ToPtr(max(int64(nodeGracePeriodTerminationTime.Sub(t.clock.Now()).Seconds()), 1))
-			t.recorder.Publish(terminatorevents.DisruptPodDelete(pod, gracePeriodSeconds, nodeGracePeriodTerminationTime))
-			opts := &client.DeleteOptions{
-				GracePeriodSeconds: gracePeriodSeconds,
-			}
-			if err := t.kubeClient.Delete(ctx, pod, opts); err != nil && !apierrors.IsNotFound(err) { // ignore 404, not a problem
-				return fmt.Errorf("deleting pod, %w", err) // otherwise, bubble up the error
-			}
-			log.FromContext(ctx).WithValues(
-				"namespace", pod.Namespace,
-				"name", pod.Name,
-				"pod.terminationGracePeriodSeconds", *pod.Spec.TerminationGracePeriodSeconds,
-				"delete.gracePeriodSeconds", *gracePeriodSeconds,
-				"nodeclaim.terminationTime", *nodeGracePeriodTerminationTime,
-			).V(1).Info("deleting pod")
-		}
-	}
-	return nil
-}
-
-// if a pod should be deleted to give it the full terminationGracePeriodSeconds of time before the node will shut down, return the time the pod should be deleted
-func (t *Terminator) podDeleteTimeWithGracePeriod(nodeGracePeriodExpirationTime *time.Time, pod *corev1.Pod) *time.Time {
-	if nodeGracePeriodExpirationTime == nil || pod.Spec.TerminationGracePeriodSeconds == nil { // k8s defaults to 30s, so we should never see a nil TerminationGracePeriodSeconds
-		return nil
-	}
-
-	// calculate the time the pod should be deleted to allow it's full grace period for termination, equal to its terminationGracePeriodSeconds before the node's expiration time
-	// eg: if a node will be force terminated in 30m, but the current pod has a grace period of 45m, we return a time of 15m ago
-	deleteTime := nodeGracePeriodExpirationTime.Add(time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second * -1)
-	return &deleteTime
 }
