@@ -67,6 +67,15 @@ func (b *Batcher[T]) Trigger(elem T) {
 	b.mu.Unlock()
 }
 
+// TriggerNow should be used when there is no reliable dedupe key. Callers with stable trigger keys should
+// prefer Trigger in order to utilize batching semantics to reduce repeated work.
+func (b *Batcher[T]) TriggerNow() {
+	select {
+	case b.trigger <- struct{}{}:
+	default:
+	}
+}
+
 // Wait starts a batching window and continues waiting as long as it continues receiving triggers within
 // the idleDuration, up to the maxDuration
 func (b *Batcher[T]) Wait(ctx context.Context) bool {
