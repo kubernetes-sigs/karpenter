@@ -53,6 +53,22 @@ type NodePoolStatus struct {
 	// +listMapKey=type
 	//nolint:kubeapilinter
 	Conditions []status.Condition `json:"conditions,omitempty"`
+	// NodeClaimConditions contains summary of nodeclaim conditions with this nodepool
+	// +optional
+	// +listType=map
+	// +listMapKey=conditionType
+	//nolint:kubeapilinter
+	NodeClaimConditions []NodeClaimConditions `json:"nodeClaimConditions,omitempty"`
+}
+
+// NodeClaimConditions is a summary of nodeclaim conditions with this nodepool
+type NodeClaimConditions struct {
+	// conditionType is the type of the condition
+	// +required
+	ConditionType *string `json:"conditionType,omitempty"`
+	// count is the number of nodeclaims in this nodepool with this condition
+	// +required
+	Count *int64 `json:"count,omitempty"`
 }
 
 func (in *NodePool) StatusConditions(opts ...status.ForOption) status.ConditionSet {
