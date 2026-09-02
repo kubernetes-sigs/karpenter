@@ -674,6 +674,66 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 		})
 	})
 
+	Context("Admin access against existing nodes (Y)", func() {
+		// The apiserver rejects adminAccess claims unless the namespace carries the allowlist label.
+		BeforeEach(func() {
+			ns := &corev1.Namespace{}
+			Expect(env.Client.Get(ctx, client.ObjectKey{Name: "default"}, ns)).To(Succeed())
+			if ns.Labels == nil {
+				ns.Labels = map[string]string{}
+			}
+			ns.Labels["resource.kubernetes.io/admin-access"] = "true"
+			Expect(env.Client.Update(ctx, ns)).To(Succeed())
+		})
+
+		// heldDeviceNode creates an initialized gpu-it node publishing one in-cluster device that is already held by a
+		// live pod, so the device is tracked as allocated. Returns the node.
+		heldDeviceNode := func() *corev1.Node {
+			GinkgoHelper()
+			node := existingNode("gpu-it", true, corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourcePods: resource.MustParse("10"),
+			})
+			ExpectApplied(ctx, env.Client, nodeLocalSlice(node, gpuDriver, "incluster-gpu-0"))
+			livePod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Name: "live-pod"}})
+			ExpectApplied(ctx, env.Client, livePod)
+			ExpectApplied(ctx, env.Client, allocatedClusterWideClaim("held-claim",
+				test.NodeLocalPoolName(gpuDriver, node.Name), gpuDriver, "incluster-gpu-0", podConsumer(livePod)))
+			return node
+		}
+
+		It("should bind an admin-access claim to a held device on an existing node without launching a new node (Y1)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			node := heldDeviceNode()
+
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("admin-claim", test.AdminExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "admin-claim")
+			provisionDRA(pod)
+
+			// Admin access binds to the already-held in-cluster device, so the pod fits the existing node and no new
+			// NodeClaim is provisioned — the core ask of the issue.
+			scheduled := ExpectScheduled(ctx, env.Client, pod)
+			Expect(scheduled.Name).To(Equal(node.Name))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		})
+
+		It("should launch a new node for a normal claim when the existing node's only device is held (Y2)", func() {
+			// Same setup as Y1 but with a normal (non-admin) claim: the held device is unavailable, so Karpenter must
+			// provision a new node. This is the contrast that proves admin access changed the outcome.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			node := heldDeviceNode()
+
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("normal-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+			pod := draPod("gpu", "normal-claim")
+			provisionDRA(pod)
+
+			scheduled := ExpectScheduled(ctx, env.Client, pod)
+			Expect(scheduled.Name).ToNot(Equal(node.Name))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		})
+	})
+
 	Context("Topology propagation from node-local devices (D)", func() {
 		It("should tighten a new NodeClaim to the zone of a zoned in-cluster device (D1)", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}

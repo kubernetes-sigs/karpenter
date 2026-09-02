@@ -560,6 +560,9 @@ type deviceAllocationMetadata struct {
 	deviceWithID     DeviceWithID
 	consumedCapacity map[resourcev1.QualifiedName]resource.Quantity
 	requestName      RequestName
+	// adminAccess marks an allocation that binds for privileged monitoring without
+	// consuming the device (KEP-5018). Excluded from the committed device set.
+	adminAccess bool
 }
 
 // allocate runs a per-instance-type DFS over in-cluster and template devices.
@@ -633,10 +636,14 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			a.allocatingCapacity = nil
 			a.templateAllocatingCapacity = nil
 
-			deviceIDsByIT[itID] = make([]DeviceID, len(a.allocatedDevicesMetadata))
+			deviceIDsByIT[itID] = make([]DeviceID, 0, len(a.allocatedDevicesMetadata))
 			itReqs := scheduling.NewRequirements()
-			for di, da := range a.allocatedDevicesMetadata {
-				deviceIDsByIT[itID][di] = da.deviceWithID.ID
+			for _, da := range a.allocatedDevicesMetadata {
+				// Admin-access devices are part of the solution but don't consume the device,
+				// so they're excluded from the set the tracker commits as allocated (KEP-5018).
+				if !da.adminAccess {
+					deviceIDsByIT[itID] = append(deviceIDsByIT[itID], da.deviceWithID.ID)
+				}
 				meta := claimAllocMeta[da.claimIndex]
 				// Update the contributed requirements for the device, each devices contributed requirements are intersected to
 				// find the contributed requirements for the instance type.
@@ -853,15 +860,22 @@ func (a *allocator) tryDevice(
 	deviceID := dw.ID
 
 	// 1. Availability check — multi-alloc devices use capacity as the gatekeeper;
-	//    exclusive devices use binary allocation tracking.
+	//    exclusive devices use binary allocation tracking. Admin-access requests bypass
+	//    both: they may bind to already-allocated devices and don't consume capacity
+	//    (KEP-5018). The in-DFS dedupe still applies so a request gets distinct devices.
 	var consumed map[resourcev1.QualifiedName]resource.Quantity
-	if dw.AllowMultipleAllocations {
+	switch {
+	case rd.AdminAccess:
+		if a.allocatedDevices.Has(deviceID) {
+			return false
+		}
+	case dw.AllowMultipleAllocations:
 		var ok bool
 		consumed, ok = a.checkCapacity(dw.Device, deviceID, rd)
 		if !ok {
 			return false
 		}
-	} else {
+	default:
 		if a.allocationTracker.IsAllocated(deviceID, a.nodeClaim, a.itID) {
 			return false
 		}
@@ -870,8 +884,9 @@ func (a *allocator) tryDevice(
 		}
 	}
 
-	// 2. Counter verification — check shared counter budgets.
-	if len(dw.ConsumesCounters) > 0 {
+	// 2. Counter verification — check shared counter budgets. Admin-access requests
+	//    ignore resource allocations, so counters are neither checked nor consumed.
+	if !rd.AdminAccess && len(dw.ConsumesCounters) > 0 {
 		poolKey := PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}
 		var remainingCounterSets map[string]map[string]resourcev1.Counter
 		if deviceID.Template {
@@ -943,17 +958,22 @@ func (a *allocator) tryDevice(
 		deviceWithID:     dw,
 		consumedCapacity: consumed,
 		requestName:      rd.Name,
+		adminAccess:      rd.AdminAccess,
 	})
-	if dw.AllowMultipleAllocations {
-		// Ensures a multi-allocatable device has a allocating capacity map, even if it has no capacity dimensions.
-		// This is needed so that Commit() can identify multi-alloc devices via capacityConsumptionByIT presence.
-		allocatingCapacityMap := lo.Ternary(deviceID.Template, a.templateAllocatingCapacity, a.allocatingCapacity)
-		if allocatingCapacityMap[deviceID] == nil {
-			allocatingCapacityMap[deviceID] = make(map[resourcev1.QualifiedName]resource.Quantity)
+	// Admin-access allocations don't consume the device, so skip all capacity/counter
+	// bookkeeping (KEP-5018).
+	if !rd.AdminAccess {
+		if dw.AllowMultipleAllocations {
+			// Ensures a multi-allocatable device has a allocating capacity map, even if it has no capacity dimensions.
+			// This is needed so that Commit() can identify multi-alloc devices via capacityConsumptionByIT presence.
+			allocatingCapacityMap := lo.Ternary(deviceID.Template, a.templateAllocatingCapacity, a.allocatingCapacity)
+			if allocatingCapacityMap[deviceID] == nil {
+				allocatingCapacityMap[deviceID] = make(map[resourcev1.QualifiedName]resource.Quantity)
+			}
 		}
+		a.deductAllocatingCapacity(consumed, deviceID, deviceID.Template)
+		a.deductAllocatingCounters(dw.Device, PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}, deviceID.Template)
 	}
-	a.deductAllocatingCapacity(consumed, deviceID, deviceID.Template)
-	a.deductAllocatingCounters(dw.Device, PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}, deviceID.Template)
 
 	// Recurse.
 	if a.dfs(claimIdx, reqIdx, subReqIdx, slotIdx+1) {
@@ -962,8 +982,10 @@ func (a *allocator) tryDevice(
 
 	// Backtrack — undo in reverse order of application: capacity, counters, allocation, then
 	// requirements/pools, then constraints.
-	a.restoreAllocatingCapacity(consumed, deviceID, deviceID.Template)
-	a.restoreAllocatingCounters(dw.Device, PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}, deviceID.Template)
+	if !rd.AdminAccess {
+		a.restoreAllocatingCapacity(consumed, deviceID, deviceID.Template)
+		a.restoreAllocatingCounters(dw.Device, PoolKey{Driver: deviceID.Driver, Pool: deviceID.Pool}, deviceID.Template)
+	}
 	a.allocatedDevicesMetadata = a.allocatedDevicesMetadata[:len(a.allocatedDevicesMetadata)-1]
 	a.allocatedDevices.Delete(deviceID)
 
