@@ -255,8 +255,10 @@ func ensureStatus(key string, buffers map[string]*autoscalingv1beta1.CapacityBuf
 	s, ok := out[key]
 	if !ok {
 		s = &bufferProvisioningStatus{}
-		if cb, found := buffers[key]; found && cb.Status.Replicas != nil {
-			s.desiredReplicas = int(*cb.Status.Replicas)
+		if cb, found := buffers[key]; found {
+			// For a one-shot buffer the virtual pod set is its unfilled remainder, so that is
+			// the count every pod must be accounted against.
+			s.desiredReplicas = int(cb.RemainingReplicas())
 		}
 		out[key] = s
 	}

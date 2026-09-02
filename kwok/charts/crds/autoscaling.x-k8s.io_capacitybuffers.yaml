@@ -79,9 +79,9 @@ spec:
                 description: |-
                   fillDeadlineSeconds bounds, in seconds, how long a one-shot buffer (refillStrategy=none) keeps
                   trying to provision if it is never filled. On expiry the buffer stops producing placeholder
-                  pods and is marked Fulfilled with reason FillDeadlineExceeded; already-provisioned nodes are
-                  reclaimed only by normal consolidation when empty/underutilized. Applies only to
-                  refillStrategy=none.
+                  pods and is marked Expired with reason FillDeadlineExceeded; already-provisioned nodes are
+                  reclaimed only by normal consolidation when empty/underutilized. The deadline is measured from
+                  status.fillStartTime. Applies only to refillStrategy=none.
                 format: int32
                 minimum: 1
                 type: integer
@@ -259,6 +259,14 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              fillStartTime:
+                description: |-
+                  fillStartTime records when a one-shot buffer's fill window opened: the ReadyForProvisioning
+                  transition the provisioner observed the first time it evaluated the buffer. It is written once
+                  and never moves, so a transient loss of readiness (for example a PodTemplate lookup failure)
+                  neither restarts the fill deadline nor changes which bound pods count toward the fill.
+                format: date-time
+                type: string
               podTemplateGeneration:
                 description: |-
                   podTemplateGeneration is the observed generation of the PodTemplate, used

@@ -84,10 +84,12 @@ func resolveVirtualPodSpec(ctx context.Context, kubeClient client.Client, cb *au
 // Deterministic names and UIDs let downstream components associate results back
 // to the owning buffer without additional bookkeeping.
 func BuildVirtualPods(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodTemplateSpec) []*corev1.Pod {
-	if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
+	// For a one-shot buffer this is the unfilled remainder (status.replicas - status.consumedReplicas),
+	// so the cache itself is shrink-aware and consumed capacity is never re-provisioned.
+	count := int(cb.RemainingReplicas())
+	if count <= 0 {
 		return nil
 	}
-	count := int(*cb.Status.Replicas)
 	out := make([]*corev1.Pod, 0, count)
 	// Strip anything that would make the scheduler call the API server.
 	strippedSpec := sanitizeVirtualPodSpec(spec.Spec)

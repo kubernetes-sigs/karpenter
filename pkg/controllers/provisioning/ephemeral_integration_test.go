@@ -337,10 +337,15 @@ var _ = Describe("updateEphemeralFulfillment", func() {
 
 		Expect(cache.GetAll(ctx)).To(HaveLen(2))
 
-		// The patch will conflict on every retry, so the call returns an error...
-		err := p.updateEphemeralFulfillment(ctx)
-		Expect(err).To(HaveOccurred())
+		// A conflict is not an error: the write is simply left for the next cycle (retrying here
+		// would re-read the same informer cache and conflict again)...
+		Expect(p.updateEphemeralFulfillment(ctx)).To(Succeed())
 		// ...but the cache MUST still be empty — provisioning is halted regardless of the write.
+		Expect(cache.GetAll(ctx)).To(BeEmpty())
+
+		// And the latch survives a stale rebuild by the buffer controller: UpdateEntry with a copy
+		// that predates the terminal patch must not resurrect the virtual pods.
+		cache.UpdateEntry(cb, template1cpu("gang").Template)
 		Expect(cache.GetAll(ctx)).To(BeEmpty())
 	})
 
@@ -357,9 +362,93 @@ var _ = Describe("updateEphemeralFulfillment", func() {
 		Expect(fulfilled(c, "gang")).To(BeNil())
 		Expect(consumedReplicas(c, "gang")).To(Equal(int32(2)))
 
-		// Shrink: injection should now emit only the 2 unfilled chunks.
-		trimmed := p.trimConsumedVirtualPods(ctx, cache.GetAll(ctx))
-		Expect(trimmed).To(HaveLen(2))
+		// Shrink lands in the cache within the same cycle: only the 2 unfilled chunks remain.
+		Expect(cache.GetAll(ctx)).To(HaveLen(2))
+
+		// And once the buffer controller rebuilds from the patched status, the cache holds the
+		// same remainder rather than the full size.
+		latest := &autoscalingv1beta1.CapacityBuffer{}
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(cb), latest)).To(Succeed())
+		cache.UpdateEntry(latest, template1cpu("gang").Template)
+		Expect(cache.GetAll(ctx)).To(HaveLen(2))
+	})
+
+	It("latches fillStartTime once from the readiness transition and keeps it across readiness flaps", func() {
+		cb := ephemeralBufferReady("gang", 2, map[string]string{autoscalingv1beta1.BufferMatchSelectorAnnotation: sel})
+		cb.Spec.FillDeadlineSeconds = lo.ToPtr(int32(30 * 60))
+		p, c, _ := newProv(cb, template1cpu("gang"))
+
+		// First evaluation persists the fill window start, taken from ReadyForProvisioning.
+		Expect(p.updateEphemeralFulfillment(ctx)).To(Succeed())
+		latest := &autoscalingv1beta1.CapacityBuffer{}
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(cb), latest)).To(Succeed())
+		Expect(latest.Status.FillStartTime).ToNot(BeNil())
+		Expect(latest.Status.FillStartTime.Time).To(BeTemporally("==", start))
+
+		// Simulate the buffer controller flapping readiness (e.g. transient PodTemplate lookup
+		// failure) so ReadyForProvisioning transitions again 20 minutes later.
+		fc.SetTime(start.Add(20 * time.Minute))
+		stored := latest.DeepCopy()
+		apimeta.FindStatusCondition(latest.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition).LastTransitionTime = metav1.NewTime(start.Add(20 * time.Minute))
+		Expect(c.Status().Patch(ctx, latest, client.MergeFrom(stored))).To(Succeed())
+
+		// 31 minutes after the ORIGINAL readiness the deadline has elapsed, even though the
+		// (re-)transition was only 11 minutes ago. A deadline keyed on the condition would still
+		// be running; one keyed on fillStartTime expires.
+		fc.SetTime(start.Add(31 * time.Minute))
+		Expect(p.updateEphemeralFulfillment(ctx)).To(Succeed())
+		Expect(expired(c, "gang")).ToNot(BeNil())
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(cb), latest)).To(Succeed())
+		Expect(latest.Status.FillStartTime.Time).To(BeTemporally("==", start))
+	})
+
+	It("does not list pods or write status when no ephemeral buffer is a candidate", func() {
+		recreate := autoscalingv1beta1.RefillStrategyRecreate
+		cb := ephemeralBufferReady("gang", 2, map[string]string{autoscalingv1beta1.BufferMatchSelectorAnnotation: sel})
+		cb.Spec.RefillStrategy = &recreate
+		base := fakecr.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(cb, template1cpu("gang"), matchingPod("p1", "1", "node-1")).
+			WithStatusSubresource(&autoscalingv1beta1.CapacityBuffer{}).
+			Build()
+		podLists := 0
+		counting := interceptor.NewClient(base, interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, isPods := list.(*corev1.PodList); isPods {
+					podLists++
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		})
+		p := &Provisioner{kubeClient: counting, clock: fc, virtualPodCache: virtualpods.NewVirtualPodCache(counting)}
+		Expect(p.updateEphemeralFulfillment(ctx)).To(Succeed())
+		Expect(podLists).To(Equal(0))
+	})
+
+	It("scopes the pod list to the buffer's namespace and selector", func() {
+		cb := ephemeralBufferReady("gang", 2, map[string]string{autoscalingv1beta1.BufferMatchSelectorAnnotation: sel})
+		base := fakecr.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(cb, template1cpu("gang"), matchingPod("p1", "1", "node-1")).
+			WithStatusSubresource(&autoscalingv1beta1.CapacityBuffer{}).
+			Build()
+		var seen []client.ListOptions
+		recording := interceptor.NewClient(base, interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, isPods := list.(*corev1.PodList); isPods {
+					applied := client.ListOptions{}
+					applied.ApplyOptions(opts)
+					seen = append(seen, applied)
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		})
+		p := &Provisioner{kubeClient: recording, clock: fc, virtualPodCache: virtualpods.NewVirtualPodCache(recording)}
+		Expect(p.updateEphemeralFulfillment(ctx)).To(Succeed())
+		Expect(seen).To(HaveLen(1))
+		Expect(seen[0].Namespace).To(Equal("default"))
+		Expect(seen[0].LabelSelector).ToNot(BeNil())
+		Expect(seen[0].LabelSelector.String()).To(Equal(sel))
 	})
 
 	It("shrink is monotonic: consumed does not decrease if matching pods later disappear", func() {

@@ -14,27 +14,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// New file: pkg/controllers/provisioning/ephemeral.go (karpenter @ eb62f77).
 // Implements the one-shot ("ephemeral", refillStrategy=none) CapacityBuffer behavior with
 // monotonic shrink-as-fill: as a matching workload consumes the buffer's capacity, the buffer
 // provisions only its unfilled remainder (Status.ConsumedReplicas is a monotonically-increasing
-// high-water mark, so consumed capacity is never recreated). When fully consumed — or when the
-// optional fillDeadline elapses — the buffer latches the terminal Fulfilled condition and stops
-// producing virtual pods.
+// high-water mark, so consumed capacity is never recreated). When fully consumed the buffer
+// latches the terminal Fulfilled condition; when the optional fillDeadline elapses unfilled it
+// latches Expired. Either way it stops producing virtual pods.
 
 package provisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -43,174 +43,173 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-// updateEphemeralFulfillment evaluates every ephemeral (refillStrategy=none) CapacityBuffer and,
-// per cycle, advances its Status.ConsumedReplicas high-water mark toward the amount of matching,
-// bound capacity observed (monotonic — never decreases, so consumed capacity is not recreated).
-// When consumed reaches the desired replica count — or the fillDeadline elapses — the buffer is
-// latched terminal (Fulfilled) and its virtual pods evicted.
+// fulfillmentUpdate is the outcome of evaluating one ephemeral buffer for one cycle.
+type fulfillmentUpdate struct {
+	// consumed is the new monotonic high-water mark of consumed chunks.
+	consumed int32
+	// fillStart is when the fill window opened; zero if not yet known.
+	fillStart time.Time
+	// condType/reason name the terminal condition to latch, or "" if not terminal this cycle.
+	condType, reason string
+}
+
+func (u fulfillmentUpdate) terminal() bool { return u.condType != "" }
+
+// needsPersist reports whether the update changes anything worth writing to the buffer's status.
+func (u fulfillmentUpdate) needsPersist(cb *autoscalingv1beta1.CapacityBuffer) bool {
+	return u.terminal() ||
+		u.consumed > lo.FromPtr(cb.Status.ConsumedReplicas) ||
+		(cb.Status.FillStartTime == nil && !u.fillStart.IsZero())
+}
+
+// updateEphemeralFulfillment evaluates every non-terminal ephemeral (refillStrategy=none)
+// CapacityBuffer and, per cycle, advances its Status.ConsumedReplicas high-water mark toward the
+// amount of matching, bound capacity observed (monotonic — never decreases, so consumed capacity
+// is not recreated). When consumed reaches the desired replica count — or the fillDeadline
+// elapses — the buffer is latched terminal and its virtual pods evicted.
 //
 // Called from Provisioner.Reconcile BEFORE Schedule(), under the FeatureGates.CapacityBuffer
-// guard, so the same cycle's GetPendingPods sees the updated consumed count (via trimming) and a
-// filled buffer contributes zero virtual pods.
+// guard, so the same cycle's GetPendingPods sees the shrunken virtual pod set and a filled buffer
+// contributes zero virtual pods. Pods are only listed when at least one candidate buffer exists,
+// and then per buffer, scoped to the buffer's namespace and match selector.
 func (p *Provisioner) updateEphemeralFulfillment(ctx context.Context) error {
 	buffers, err := p.listAllBuffers(ctx)
 	if err != nil {
 		return err
 	}
-
-	// List all pods once. We query pods directly (not GetProvisionablePods) because consumption is
-	// measured from BOUND pods (spec.nodeName != ""), which the provisionable filter excludes.
-	podList := &corev1.PodList{}
-	if err := p.kubeClient.List(ctx, podList); err != nil {
-		return fmt.Errorf("listing pods for ephemeral buffer fulfillment, %w", err)
+	candidates := lo.Filter(buffers, func(cb *autoscalingv1beta1.CapacityBuffer, _ int) bool {
+		return cb.IsEphemeral() && !cb.IsTerminal()
+	})
+	if len(candidates) == 0 {
+		return nil
 	}
-
 	var errs []error
-	for _, cb := range buffers {
-		if !isEphemeral(cb) || cb.IsTerminal() {
-			continue // not one-shot, or already terminal (Fulfilled or Expired)
+	for _, cb := range candidates {
+		upd := p.evaluateFulfillment(ctx, cb)
+		if !upd.needsPersist(cb) {
+			continue
 		}
-		consumed, condType, reason := p.evaluateFulfillment(ctx, cb, podList.Items)
-		if consumed == lo.FromPtr(cb.Status.ConsumedReplicas) && condType == "" {
-			continue // no shrink progress and not going terminal this cycle — nothing to persist
-		}
-		if err := p.persistFulfillment(ctx, cb, consumed, condType, reason); err != nil {
+		if err := p.persistFulfillment(ctx, cb, upd); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("updating ephemeral buffer fulfillment: %v", errs)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
-// persistFulfillment advances the buffer's monotonic ConsumedReplicas high-water mark and, when the
-// buffer goes terminal (condType != ""), evicts its virtual pods and sets that condition (Fulfilled
-// for a successful fill, Expired for deadline give-up). The cache eviction happens FIRST and
-// unconditionally — it is the load-bearing action that halts provisioning and must not be gated on
-// the status write succeeding (the buffer controller patches status concurrently, so conflicts are
-// routine). The status patch retries on conflict so it lands this cycle.
-func (p *Provisioner) persistFulfillment(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer, consumed int32, condType, reason string) error {
-	terminal := condType != ""
-	if terminal {
-		p.virtualPodCache.RemoveEntry(client.ObjectKeyFromObject(cb))
+// persistFulfillment applies the update to the virtual pod cache and then to the buffer's status.
+// The cache update happens FIRST and unconditionally — it is the load-bearing action that halts
+// or shrinks provisioning for this cycle and must not be gated on the status write succeeding.
+//
+// The status patch is a single optimistic-lock attempt. The buffer controller patches status
+// concurrently, so conflicts are routine; retrying here would re-read the same informer cache and
+// keep conflicting, so a conflict is simply left for the next cycle, which re-evaluates from a
+// fresher cache and re-applies the (idempotent) cache update.
+func (p *Provisioner) persistFulfillment(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer, upd fulfillmentUpdate) error {
+	key := client.ObjectKeyFromObject(cb)
+	if upd.terminal() {
+		p.virtualPodCache.MarkTerminal(cb)
+	} else if upd.consumed > lo.FromPtr(cb.Status.ConsumedReplicas) {
+		p.virtualPodCache.Truncate(key, int(max(lo.FromPtr(cb.Status.Replicas)-upd.consumed, 0)))
 	}
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &autoscalingv1beta1.CapacityBuffer{}
-		if err := p.kubeClient.Get(ctx, client.ObjectKeyFromObject(cb), latest); err != nil {
-			return err
-		}
-		if latest.IsTerminal() {
-			return nil // already terminal
-		}
-		stored := latest.DeepCopy()
-		latest.Status.ConsumedReplicas = lo.ToPtr(max(lo.FromPtr(latest.Status.ConsumedReplicas), consumed)) // monotonic
-		if terminal {
-			latest.SetCondition(condType, metav1.ConditionTrue, reason,
-				fmt.Sprintf("Ephemeral buffer terminal: %s", reason))
-		}
-		return p.kubeClient.Status().Patch(ctx, latest, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
-	}); err != nil {
-		return fmt.Errorf("patching ephemeral buffer %q: %w", cb.Namespace+"/"+cb.Name, err)
+
+	stored := cb.DeepCopy()
+	cb.Status.ConsumedReplicas = lo.ToPtr(max(lo.FromPtr(cb.Status.ConsumedReplicas), upd.consumed)) // monotonic
+	if cb.Status.FillStartTime == nil && !upd.fillStart.IsZero() {
+		cb.Status.FillStartTime = lo.ToPtr(metav1.NewTime(upd.fillStart))
 	}
-	if terminal {
-		log.FromContext(ctx).WithValues("capacitybuffer", cb.Namespace+"/"+cb.Name, "condition", condType, "reason", reason).
+	if upd.terminal() {
+		cb.SetCondition(upd.condType, metav1.ConditionTrue, upd.reason, fmt.Sprintf("Ephemeral buffer terminal: %s", upd.reason))
+	}
+	if err := p.kubeClient.Status().Patch(ctx, cb, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+		if apierrors.IsConflict(err) {
+			log.FromContext(ctx).WithValues("capacitybuffer", key).V(1).Info("ephemeral buffer status conflict; retrying next cycle")
+			return nil
+		}
+		return fmt.Errorf("patching ephemeral buffer %q: %w", key, err)
+	}
+	if upd.terminal() {
+		log.FromContext(ctx).WithValues("capacitybuffer", key, "condition", upd.condType, "reason", upd.reason).
 			Info("ephemeral capacity buffer terminal; halting provisioning")
 	}
 	return nil
 }
 
-// evaluateFulfillment returns the buffer's new (monotonic) consumed-chunk count for this cycle and,
-// if the buffer should go terminal, the condition type + reason to set: Fulfilled/BufferFilled when
-// consumed reaches the desired replica count, or Expired/FillDeadlineExceeded when the optional
-// fillDeadline elapses unfilled. condType is "" when the buffer is not yet terminal.
-func (p *Provisioner) evaluateFulfillment(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer, pods []corev1.Pod) (consumed int32, condType, reason string) {
-	prev := lo.FromPtr(cb.Status.ConsumedReplicas)
+// evaluateFulfillment computes the buffer's fulfillmentUpdate for this cycle: the new (monotonic)
+// consumed-chunk count, the fill-window start, and, if the buffer should go terminal, the
+// condition to latch: Fulfilled/BufferFilled when consumed reaches the desired replica count, or
+// Expired/FillDeadlineExceeded when the optional fillDeadline elapses unfilled.
+func (p *Provisioner) evaluateFulfillment(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) fulfillmentUpdate {
+	upd := fulfillmentUpdate{consumed: lo.FromPtr(cb.Status.ConsumedReplicas)}
 	// Only consider buffers the controller has marked ready with a positive replica count.
 	if !apimeta.IsStatusConditionTrue(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition) {
-		return prev, "", ""
+		return upd
 	}
 	if cb.Status.Replicas == nil || *cb.Status.Replicas <= 0 {
-		return prev, "", ""
+		return upd
 	}
 	replicas := *cb.Status.Replicas
-	consumed = prev
-	// Readiness boundary: only pods that became scheduled at/after the buffer went
-	// ReadyForProvisioning count toward its fill. This excludes pods that were already bound when
-	// the buffer became ready (which this buffer did not provision for) from consuming it. Guaranteed
-	// found here because the ReadyForProvisioning=True guard above already passed.
-	readySince, _ := readyForProvisioningSince(cb)
+	// Fill window: latched once in status; before that, the ReadyForProvisioning transition (which
+	// is guaranteed present because the guard above passed). Pods bound before this instant were
+	// not provisioned for by this buffer and must not consume it.
+	upd.fillStart, _ = fillStartOf(cb)
 
+	logger := log.FromContext(ctx).WithValues("capacitybuffer", client.ObjectKeyFromObject(cb))
 	// Consumption path (requires a match selector). Advance the high-water mark by the number of
 	// whole chunks currently covered by matching bound capacity.
 	if selector, ok, err := matchSelector(cb); err != nil {
-		log.FromContext(ctx).WithValues("capacitybuffer", cb.Namespace+"/"+cb.Name).
-			Error(err, "invalid buffer-match-selector annotation; skipping consumption tracking")
+		logger.Error(err, "invalid buffer-match-selector annotation; skipping consumption tracking")
 	} else if ok {
-		perChunk, err := p.perChunkRequests(ctx, cb)
-		if err != nil {
-			log.FromContext(ctx).WithValues("capacitybuffer", cb.Namespace+"/"+cb.Name).
-				Error(err, "resolving per-chunk requests")
+		if n, err := p.boundChunks(ctx, cb, selector, replicas, upd.fillStart); err != nil {
+			logger.Error(err, "tracking ephemeral buffer consumption")
 		} else {
-			bound := boundMatchingCapacity(cb.Namespace, selector, pods, readySince)
-			consumed = max(consumed, consumedChunks(bound, perChunk, replicas)) // monotonic
+			upd.consumed = max(upd.consumed, n) // monotonic
 		}
 	}
 
-	if consumed >= replicas {
-		return replicas, autoscalingv1beta1.FulfilledCondition, autoscalingv1beta1.FulfilledReasonBufferFilled
+	if upd.consumed >= replicas {
+		upd.consumed = replicas
+		upd.condType, upd.reason = autoscalingv1beta1.FulfilledCondition, autoscalingv1beta1.FulfilledReasonBufferFilled
+		return upd
 	}
 	// Deadline path (optional; independent of the selector).
-	if deadline, ok := fillDeadline(cb); ok {
-		if since, found := readyForProvisioningSince(cb); found && p.clock.Since(since) >= deadline {
-			return consumed, autoscalingv1beta1.ExpiredCondition, autoscalingv1beta1.ExpiredReasonDeadlineExceeded
-		}
+	if deadline, ok := fillDeadline(cb); ok && !upd.fillStart.IsZero() && p.clock.Since(upd.fillStart) >= deadline {
+		upd.condType, upd.reason = autoscalingv1beta1.ExpiredCondition, autoscalingv1beta1.ExpiredReasonDeadlineExceeded
 	}
-	return consumed, "", ""
+	return upd
 }
 
-// trimConsumedVirtualPods implements shrink-as-fill: for each ephemeral buffer, it drops
-// Status.ConsumedReplicas of that buffer's virtual pods, so a partially-filled one-shot buffer
-// contributes only its unfilled remainder to the scheduling simulation. Because ConsumedReplicas
-// is monotonic, the emitted count only ever decreases (consumed capacity is not recreated).
-func (p *Provisioner) trimConsumedVirtualPods(ctx context.Context, vpods []*corev1.Pod) []*corev1.Pod {
-	buffers, err := p.listAllBuffers(ctx)
+// boundChunks returns how many whole chunks of the buffer are currently covered by matching bound
+// capacity (capped at replicas). Pods are listed scoped to the buffer's namespace and selector so
+// the informer's namespace index bounds the copy instead of materializing every pod in the
+// cluster.
+func (p *Provisioner) boundChunks(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer, selector labels.Selector, replicas int32, fillStart time.Time) (int32, error) {
+	perChunk, err := p.perChunkRequests(ctx, cb)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "listing buffers to trim consumed virtual pods")
-		return vpods
+		return 0, fmt.Errorf("resolving per-chunk requests, %w", err)
 	}
-	toDrop := map[string]int32{}
-	for _, cb := range buffers {
-		if isEphemeral(cb) {
-			if c := lo.FromPtr(cb.Status.ConsumedReplicas); c > 0 {
-				toDrop[cb.Namespace+"/"+cb.Name] = c
-			}
-		}
+	podList := &corev1.PodList{}
+	if err := p.kubeClient.List(ctx, podList, client.InNamespace(cb.Namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
+		return 0, fmt.Errorf("listing matching pods, %w", err)
 	}
-	if len(toDrop) == 0 {
-		return vpods
-	}
-	out := make([]*corev1.Pod, 0, len(vpods))
-	for _, pod := range vpods {
-		key := bufferKeyOf(pod)
-		if n, ok := toDrop[key]; ok && n > 0 {
-			toDrop[key] = n - 1
-			continue // this chunk has been consumed — do not provision for it
-		}
-		out = append(out, pod)
-	}
-	return out
+	bound := boundMatchingCapacity(cb.Namespace, selector, podList.Items, fillStart)
+	return consumedChunks(bound, perChunk, replicas), nil
 }
 
-// perChunkRequests returns the resource requests of a single buffer chunk (one virtual pod),
-// derived from the resolved pod template / scalable ref. The injected v1.ResourcePods count is
-// dropped so consumption is measured purely by capacity.
+// perChunkRequests returns the resource requests of a single buffer chunk (one virtual pod). It
+// reads the already-resolved virtual pods from the cache when present and falls back to resolving
+// the pod template / scalable ref. The injected v1.ResourcePods count is dropped so consumption
+// is measured purely by capacity.
 func (p *Provisioner) perChunkRequests(ctx context.Context, cb *autoscalingv1beta1.CapacityBuffer) (corev1.ResourceList, error) {
-	res, err := apps.ResolveCapacityBuffer(ctx, p.kubeClient, cb)
-	if err != nil {
-		return nil, err
+	var req corev1.ResourceList
+	if cached := p.virtualPodCache.Get(ctx, client.ObjectKeyFromObject(cb)); len(cached) > 0 {
+		req = resources.RequestsForPods(cached[0])
+	} else {
+		res, err := apps.ResolveCapacityBuffer(ctx, p.kubeClient, cb)
+		if err != nil {
+			return nil, err
+		}
+		req = resources.RequestsForPods(&corev1.Pod{Spec: res.PodTemplateSpec.Spec})
 	}
-	req := resources.RequestsForPods(&corev1.Pod{Spec: res.PodTemplateSpec.Spec})
 	delete(req, corev1.ResourcePods)
 	return req, nil
 }
@@ -242,11 +241,11 @@ func consumedChunks(bound, perChunk corev1.ResourceList, replicas int32) int32 {
 
 // boundMatchingCapacity sums the resource requests of pods that (a) are in the buffer's
 // namespace, (b) match the selector, (c) are bound to a node (spec.nodeName != ""), (d) have
-// no remaining scheduling gates, and (e) became scheduled at/after readySince (the buffer's
-// readiness boundary). The gate check matters for Kueue, which holds pods behind
-// kueue.x-k8s.io/admission and (with TAS) kueue.x-k8s.io/topology gates. The readiness boundary
-// stops pods that were already bound when the buffer became ready from counting toward its fill.
-func boundMatchingCapacity(namespace string, selector labels.Selector, pods []corev1.Pod, readySince time.Time) corev1.ResourceList {
+// no remaining scheduling gates, and (e) became scheduled at/after fillStart (the buffer's
+// fill-window boundary). The gate check matters for Kueue, which holds pods behind
+// kueue.x-k8s.io/admission and (with TAS) kueue.x-k8s.io/topology gates. The namespace and
+// selector checks are normally already satisfied by the scoped list and act as a safety net.
+func boundMatchingCapacity(namespace string, selector labels.Selector, pods []corev1.Pod, fillStart time.Time) corev1.ResourceList {
 	matched := make([]*corev1.Pod, 0, len(pods))
 	for i := range pods {
 		pod := &pods[i]
@@ -262,10 +261,10 @@ func boundMatchingCapacity(namespace string, selector labels.Selector, pods []co
 		if !selector.Matches(labels.Set(pod.Labels)) {
 			continue
 		}
-		// Exclude pre-readiness bindings: a pod whose known bind time precedes the buffer's
-		// readiness did not consume this buffer's provisioned capacity. When the bind time is
-		// unknown (zero) we count the pod rather than under-report real capacity.
-		if bt := podBoundSince(pod); !bt.IsZero() && bt.Before(readySince) {
+		// Exclude pre-window bindings: a pod whose known bind time precedes the fill window did
+		// not consume this buffer's provisioned capacity. When the bind time is unknown (zero) we
+		// count the pod rather than under-report real capacity.
+		if bt := podBoundSince(pod); !bt.IsZero() && bt.Before(fillStart) {
 			continue
 		}
 		matched = append(matched, pod)
@@ -287,13 +286,6 @@ func podBoundSince(pod *corev1.Pod) time.Time {
 }
 
 // --- small helpers -------------------------------------------------------------------------
-
-// isEphemeral reports whether the buffer is one-shot, i.e. its refill strategy is "none".
-// This is orthogonal to provisioningStrategy (which describes the kind of capacity).
-func isEphemeral(cb *autoscalingv1beta1.CapacityBuffer) bool {
-	return cb.Spec.RefillStrategy != nil &&
-		*cb.Spec.RefillStrategy == autoscalingv1beta1.RefillStrategyNone
-}
 
 // matchSelector parses the buffer-match-selector annotation. Returns (selector, true, nil) when
 // present and valid, (nil, false, nil) when absent, (nil, false, err) when present but invalid.
@@ -318,8 +310,17 @@ func fillDeadline(cb *autoscalingv1beta1.CapacityBuffer) (time.Duration, bool) {
 	return time.Duration(*cb.Spec.FillDeadlineSeconds) * time.Second, true
 }
 
+// fillStartOf returns when the buffer's fill window opened: status.fillStartTime once latched,
+// otherwise the ReadyForProvisioning=True transition time.
+func fillStartOf(cb *autoscalingv1beta1.CapacityBuffer) (time.Time, bool) {
+	if cb.Status.FillStartTime != nil && !cb.Status.FillStartTime.IsZero() {
+		return cb.Status.FillStartTime.Time, true
+	}
+	return readyForProvisioningSince(cb)
+}
+
 // readyForProvisioningSince returns the lastTransitionTime of the ReadyForProvisioning=True
-// condition, used as the start of the fill-deadline clock.
+// condition.
 func readyForProvisioningSince(cb *autoscalingv1beta1.CapacityBuffer) (time.Time, bool) {
 	c := apimeta.FindStatusCondition(cb.Status.Conditions, autoscalingv1beta1.ReadyForProvisioningCondition)
 	if c == nil || c.Status != metav1.ConditionTrue {

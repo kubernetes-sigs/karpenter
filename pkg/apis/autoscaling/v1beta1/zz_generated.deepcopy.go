@@ -159,6 +159,10 @@ func (in *CapacityBufferStatus) DeepCopyInto(out *CapacityBufferStatus) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.FillStartTime != nil {
+		in, out := &in.FillStartTime, &out.FillStartTime
+		*out = (*in).DeepCopy()
+	}
 	if in.PodTemplateGeneration != nil {
 		in, out := &in.PodTemplateGeneration, &out.PodTemplateGeneration
 		*out = new(int64)

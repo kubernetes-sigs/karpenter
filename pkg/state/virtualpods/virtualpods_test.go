@@ -180,6 +180,84 @@ var _ = Describe("VirtualPodCache", func() {
 		})
 	})
 
+	Describe("MarkTerminal", func() {
+		It("should evict the entry and ignore a stale UpdateEntry for the same UID", func() {
+			cb := test.ReadyBuffer("web", 3)
+			cache := NewVirtualPodCache(fakeClient(podTemplateFor(cb)))
+			cache.warmed = true
+			resolveAndUpdate(ctx, cache, cb)
+			Expect(cache.GetAll(ctx)).To(HaveLen(3))
+
+			cache.MarkTerminal(cb)
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
+
+			// The buffer controller rebuilding from a copy that predates the terminal status
+			// patch must not resurrect the virtual pods.
+			resolveAndUpdate(ctx, cache, cb)
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
+		})
+
+		It("should release the latch when a buffer with the same name but a new UID appears", func() {
+			cb := test.ReadyBuffer("web", 3)
+			cache := NewVirtualPodCache(fakeClient(podTemplateFor(cb)))
+			cache.warmed = true
+			cache.MarkTerminal(cb)
+
+			recreated := test.ReadyBuffer("web", 2)
+			recreated.UID = "uid-web-recreated"
+			resolveAndUpdate(ctx, cache, recreated)
+			Expect(cache.GetAll(ctx)).To(HaveLen(2))
+		})
+
+		It("should release the latch on RemoveEntry", func() {
+			cb := test.ReadyBuffer("web", 3)
+			cache := NewVirtualPodCache(fakeClient(podTemplateFor(cb)))
+			cache.warmed = true
+			cache.MarkTerminal(cb)
+			cache.RemoveEntry(client.ObjectKeyFromObject(cb))
+
+			resolveAndUpdate(ctx, cache, cb)
+			Expect(cache.GetAll(ctx)).To(HaveLen(3))
+		})
+	})
+
+	Describe("Truncate", func() {
+		It("should keep at most n pods for the buffer", func() {
+			cb := test.ReadyBuffer("web", 4)
+			cache := NewVirtualPodCache(fakeClient(podTemplateFor(cb)))
+			cache.warmed = true
+			resolveAndUpdate(ctx, cache, cb)
+
+			cache.Truncate(client.ObjectKeyFromObject(cb), 2)
+			Expect(cache.GetAll(ctx)).To(HaveLen(2))
+			// Never grows an entry.
+			cache.Truncate(client.ObjectKeyFromObject(cb), 10)
+			Expect(cache.GetAll(ctx)).To(HaveLen(2))
+			// Zero drops the entry.
+			cache.Truncate(client.ObjectKeyFromObject(cb), 0)
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
+		})
+
+		It("should be a no-op for an unknown entry", func() {
+			cache := NewVirtualPodCache(fakeClient())
+			cache.warmed = true
+			cache.Truncate(types.NamespacedName{Namespace: "default", Name: "nope"}, 1)
+			Expect(cache.GetAll(ctx)).To(BeEmpty())
+		})
+	})
+
+	Describe("Get", func() {
+		It("should return only the requested buffer's pods and hydrate on first use", func() {
+			web := test.ReadyBuffer("web", 3)
+			api := test.ReadyBuffer("api", 2)
+			cache := NewVirtualPodCache(fakeClient(web, api, podTemplateFor(web), podTemplateFor(api)))
+
+			Expect(cache.Get(ctx, client.ObjectKeyFromObject(api))).To(HaveLen(2))
+			Expect(cache.Get(ctx, types.NamespacedName{Namespace: "default", Name: "nope"})).To(BeEmpty())
+			Expect(cache.GetAll(ctx)).To(HaveLen(5))
+		})
+	})
+
 	Describe("hydrateCache", func() {
 		It("should populate the cache from all ready buffers in the cluster", func() {
 			web := test.ReadyBuffer("web", 3)

@@ -14,11 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// DRAFT — pkg/controllers/provisioning/ephemeral_test.go (karpenter @ eb62f77).
-// Ginkgo/Gomega, matching the existing buffers_test.go style. These cover the pure-function
-// latch logic (no live client needed). The client-dependent updateEphemeralFulfillment /
-// evaluateFulfillment paths (which resolve pod templates and patch status) are better exercised
-// by the suite-level integration tests described in PRD §8; a sketch is included at the bottom.
+// Pure-function tests for the ephemeral (one-shot) buffer latch logic; no client needed. The
+// client-dependent updateEphemeralFulfillment path is covered by ephemeral_integration_test.go.
 
 package provisioning
 
@@ -173,20 +170,49 @@ var _ = Describe("boundMatchingCapacity", func() {
 
 // --- isEphemeral --------------------------------------------------------------------------
 
-var _ = Describe("isEphemeral", func() {
+var _ = Describe("IsEphemeral", func() {
 	It("is true when refillStrategy is none (one-shot)", func() {
-		Expect(isEphemeral(ephemeralBuffer("ns", "b", 1, nil))).To(BeTrue())
+		Expect(ephemeralBuffer("ns", "b", 1, nil).IsEphemeral()).To(BeTrue())
 	})
 
 	It("is false when refillStrategy is nil (defaulted recreate)", func() {
 		cb := &autoscalingv1beta1.CapacityBuffer{}
-		Expect(isEphemeral(cb)).To(BeFalse())
+		Expect(cb.IsEphemeral()).To(BeFalse())
 	})
 
 	It("is false for refillStrategy=recreate", func() {
 		recreate := autoscalingv1beta1.RefillStrategyRecreate
 		cb := &autoscalingv1beta1.CapacityBuffer{Spec: autoscalingv1beta1.CapacityBufferSpec{RefillStrategy: &recreate}}
-		Expect(isEphemeral(cb)).To(BeFalse())
+		Expect(cb.IsEphemeral()).To(BeFalse())
+	})
+})
+
+// --- RemainingReplicas --------------------------------------------------------------------
+
+var _ = Describe("RemainingReplicas", func() {
+	It("is replicas minus consumed for a one-shot buffer", func() {
+		cb := ephemeralBuffer("ns", "b", 4, nil)
+		cb.Status.ConsumedReplicas = lo.ToPtr(int32(3))
+		Expect(cb.RemainingReplicas()).To(Equal(int32(1)))
+	})
+
+	It("never goes negative", func() {
+		cb := ephemeralBuffer("ns", "b", 2, nil)
+		cb.Status.ConsumedReplicas = lo.ToPtr(int32(5))
+		Expect(cb.RemainingReplicas()).To(Equal(int32(0)))
+	})
+
+	It("ignores consumed for a recreate buffer", func() {
+		recreate := autoscalingv1beta1.RefillStrategyRecreate
+		cb := ephemeralBuffer("ns", "b", 4, nil)
+		cb.Spec.RefillStrategy = &recreate
+		cb.Status.ConsumedReplicas = lo.ToPtr(int32(3))
+		Expect(cb.RemainingReplicas()).To(Equal(int32(4)))
+	})
+
+	It("is zero when status.replicas is unset", func() {
+		cb := &autoscalingv1beta1.CapacityBuffer{}
+		Expect(cb.RemainingReplicas()).To(Equal(int32(0)))
 	})
 })
 
@@ -273,29 +299,3 @@ var _ = Describe("readyForProvisioningSince", func() {
 		Expect(ts.IsZero()).To(BeFalse())
 	})
 })
-
-/*
-Suite-level integration sketch (PRD §8) — belongs in the existing suite_test.go harness which
-already wires a fake client, cluster state, and Provisioner. Outline only:
-
-  It("latches Fulfilled once matching pods cover intended capacity and then stops provisioning", func() {
-    // 1. Create PodTemplate (1cpu chunk) + ephemeral CapacityBuffer replicas=4, selector app=trainer.
-    //    Mark ReadyForProvisioning=True, Status.Replicas=4  => intended = 4 cpu.
-    // 2. First Reconcile: expect scale-up (virtual pods injected); Fulfilled not set.
-    // 3. Create 4 bound pods labeled app=trainer (nodeName set) => bound = 4 cpu.
-    // 4. Reconcile: expect Fulfilled=True/BufferFilled.
-    // 5. Reconcile again: expect GetPendingPods injects ZERO virtual pods for this buffer
-    //    (assert via virtualPodCache.GetAll or that no new NodeClaims are created).
-    // 6. Delete the bound pods (gang finished): expect buffer stays Fulfilled and does NOT refill.
-  })
-
-  It("latches on deadline when never filled", func() {
-    // ephemeral buffer, no matching pods, fill-deadline=1m, ReadyForProvisioning transitioned >1m ago
-    // (advance fakeClock). Reconcile => Fulfilled=True/FillDeadlineExceeded.
-  })
-
-  It("does not latch a buffer with no match selector and no deadline", func() {
-    // ephemeral buffer, replicas=4, no selector, no deadline, bound matching pods present.
-    // Reconcile => Fulfilled NOT set (capacity path needs a selector).
-  })
-*/

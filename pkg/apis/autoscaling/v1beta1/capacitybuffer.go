@@ -152,9 +152,9 @@ type CapacityBufferSpec struct {
 
 	// fillDeadlineSeconds bounds, in seconds, how long a one-shot buffer (refillStrategy=none) keeps
 	// trying to provision if it is never filled. On expiry the buffer stops producing placeholder
-	// pods and is marked Fulfilled with reason FillDeadlineExceeded; already-provisioned nodes are
-	// reclaimed only by normal consolidation when empty/underutilized. Applies only to
-	// refillStrategy=none.
+	// pods and is marked Expired with reason FillDeadlineExceeded; already-provisioned nodes are
+	// reclaimed only by normal consolidation when empty/underutilized. The deadline is measured from
+	// status.fillStartTime. Applies only to refillStrategy=none.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	FillDeadlineSeconds *int32 `json:"fillDeadlineSeconds,omitempty" protobuf:"varint,8,opt,name=fillDeadlineSeconds"`
@@ -179,6 +179,13 @@ type CapacityBufferStatus struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	ConsumedReplicas *int32 `json:"consumedReplicas,omitempty" protobuf:"varint,6,opt,name=consumedReplicas"`
+
+	// fillStartTime records when a one-shot buffer's fill window opened: the ReadyForProvisioning
+	// transition the provisioner observed the first time it evaluated the buffer. It is written once
+	// and never moves, so a transient loss of readiness (for example a PodTemplate lookup failure)
+	// neither restarts the fill deadline nor changes which bound pods count toward the fill.
+	// +optional
+	FillStartTime *metav1.Time `json:"fillStartTime,omitempty" protobuf:"bytes,7,opt,name=fillStartTime"`
 
 	// podTemplateGeneration is the observed generation of the PodTemplate, used
 	// to determine if the status is up-to-date with the desired `spec.podTemplateRef`.
@@ -207,6 +214,25 @@ type CapacityBufferStatus struct {
 func (cb *CapacityBuffer) IsTerminal() bool {
 	return apimeta.IsStatusConditionTrue(cb.Status.Conditions, FulfilledCondition) ||
 		apimeta.IsStatusConditionTrue(cb.Status.Conditions, ExpiredCondition)
+}
+
+// IsEphemeral reports whether the buffer is one-shot, i.e. its refill strategy is "none". This is
+// orthogonal to provisioningStrategy (which describes the kind of capacity).
+func (cb *CapacityBuffer) IsEphemeral() bool {
+	return cb.Spec.RefillStrategy != nil && *cb.Spec.RefillStrategy == RefillStrategyNone
+}
+
+// RemainingReplicas returns how many chunks the buffer should still provision: status.replicas
+// less, for a one-shot buffer, the consumed high-water mark (shrink-as-fill). Never negative.
+func (cb *CapacityBuffer) RemainingReplicas() int32 {
+	if cb.Status.Replicas == nil {
+		return 0
+	}
+	remaining := *cb.Status.Replicas
+	if cb.IsEphemeral() && cb.Status.ConsumedReplicas != nil {
+		remaining -= *cb.Status.ConsumedReplicas
+	}
+	return max(remaining, 0)
 }
 
 // SetCondition sets or updates a status condition on the CapacityBuffer.
