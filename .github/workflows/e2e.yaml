@@ -38,6 +38,10 @@ jobs:
           k8sVersion: ${{ inputs.k8s_version }}
     - name: Kind Cluster
       uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+      with:
+        # Configures the cluster's kube-scheduler with the default topology spread constraints the
+        # DefaultTopologySpreadConstraints specs mirror into Karpenter. Everything else is a default cluster.
+        config: hack/kind/cluster.yaml
     - name: check kind cluster and taint nodes
       shell: bash
       run: |
