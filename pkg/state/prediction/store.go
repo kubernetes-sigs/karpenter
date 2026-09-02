@@ -82,6 +82,12 @@ func (s *Store) Reset() {
 	s.bySource = make(map[types.NamespacedName]types.UID)
 }
 
+func (s *Store) Len() int {
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.byTarget)
+}
+
 // Set stores a prediction from the given source for the given target.
 // If the source previously targeted a different workload, the old entry is removed.
 func (s *Store) Set(source types.NamespacedName, targetUID types.UID, p *Prediction, createdAt time.Time) {

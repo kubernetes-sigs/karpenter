@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -92,11 +93,13 @@ type Provisioner struct {
 	clock                      clock.Clock
 	deviceAllocationController *deviceallocation.Controller
 	virtualPodCache            *virtualpods.Cache
+	predictionStore            *prediction.Store
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
 	clock clock.Clock, deviceAllocationController *deviceallocation.Controller, virtualPodCache *virtualpods.Cache,
+	predictionStore *prediction.Store,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:                    NewBatcher[types.UID](clock),
@@ -109,8 +112,13 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		clock:                      clock,
 		deviceAllocationController: deviceAllocationController,
 		virtualPodCache:            virtualPodCache,
+		predictionStore:            predictionStore,
 	}
 	return p
+}
+
+func (p *Provisioner) PredictionStoreHydrated(ctx context.Context) bool {
+	return p.predictionStore.Hydrated(ctx)
 }
 
 func (p *Provisioner) Trigger(uid types.UID) {
@@ -139,6 +147,9 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !p.cluster.Synced(ctx) {
+		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+	}
+	if options.FromContext(ctx).FeatureGates.PredictionEnabled && !p.predictionStore.Hydrated(ctx) {
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
@@ -356,7 +367,7 @@ func (p *Provisioner) NewScheduler(
 	}
 
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, deletingPodUIDs, p.predictionStore, opts...), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
