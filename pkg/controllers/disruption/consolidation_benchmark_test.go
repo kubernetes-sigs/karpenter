@@ -71,6 +71,14 @@ var benchRand = rand.New(rand.NewSource(42))
 // These benchmarks exercise the SimulateScheduling path, which is the hot path
 // for consolidation. This is where PR#2671's regression occurred: adding per-pod
 // NodePool compatibility checks inside the topology domain evaluation loop.
+//
+// Sub-benchmarks are named vector=<name>/<param>=<n>/... where "vector" is the
+// primary axis being swept and remaining path segments pin the other axes as
+// filters. This shape is compatible with slope-based benchstat gates (see PR
+// #3299's perf_fixtures_test.go) which parse the vector to group points and
+// gate on per-vector growth slope instead of a single-point cost. The current
+// 20% p<0.05 gate is level-based per sub-benchmark; the vector naming is
+// forward-compatible with an eventual slope gate.
 
 type benchConfig struct {
 	nodeCount              int
@@ -79,57 +87,59 @@ type benchConfig struct {
 	topologySpreadFraction float64
 }
 
-func BenchmarkConsolidation_10Nodes_NoTopology(b *testing.B) {
-	benchmarkConsolidationSim(b, benchConfig{10, 10, 1, 0.0})
-}
-
-func BenchmarkConsolidation_50Nodes_NoTopology(b *testing.B) {
-	benchmarkConsolidationSim(b, benchConfig{50, 10, 1, 0.0})
-}
-
-func BenchmarkConsolidation_100Nodes_NoTopology(b *testing.B) {
-	benchmarkConsolidationSim(b, benchConfig{100, 10, 1, 0.0})
-}
-
-func BenchmarkConsolidation_100Nodes_HostnameSpread(b *testing.B) {
-	benchmarkConsolidationSim(b, benchConfig{100, 10, 1, 1.0})
-}
-
-func BenchmarkConsolidation_100Nodes_HostnameSpread_3NP(b *testing.B) {
-	benchmarkConsolidationSim(b, benchConfig{100, 10, 3, 1.0})
-}
-
-func BenchmarkConsolidation_100Nodes_HostnameSpread_9NP(b *testing.B) {
-	// This is the case that PR#2671 regressed: O(pods * domains * NodePools)
-	benchmarkConsolidationSim(b, benchConfig{100, 10, 9, 1.0})
-}
-
-func BenchmarkConsolidation_500Nodes_NoTopology(b *testing.B) {
-	if testing.Short() {
-		b.Skip("skipping 500-node benchmark in short mode")
+// BenchmarkConsolidation is the top-level benchmark for consolidation
+// SimulateScheduling. Sub-benchmarks are organized by vector:
+//
+//   - vector=nodes: sweep node count at fixed (np=1, topo=none). Detects
+//     per-node cost scaling and node-index build regressions.
+//   - vector=nodepools: sweep NodePool count at fixed (topo=hostname). This
+//     is the R1 replay axis — the np=9/n=100 case is the #2671 replay
+//     target that trips the 20% wall-time gate at p=0.002.
+//   - vector=topology: sweep topology spread fraction. Currently a single
+//     data point at frac=50 (n=500, np=1) for measurement-only coverage.
+//
+// 500-node sub-benchmarks are gated by testing.Short() to avoid CI timeouts
+// on shared runners; they run in local profiling.
+func BenchmarkConsolidation(b *testing.B) {
+	// vector=nodes: sweep node count at (topo=none, np=1).
+	for _, n := range []int{10, 50, 100, 500} {
+		cfg := benchConfig{nodeCount: n, podsPerNode: 10, nodePoolCount: 1, topologySpreadFraction: 0.0}
+		b.Run(fmt.Sprintf("vector=nodes/n=%d/topo=none/np=1", n), func(b *testing.B) {
+			if n >= 500 && testing.Short() {
+				b.Skip("skipping 500-node benchmark in short mode")
+			}
+			benchmarkConsolidationSim(b, cfg)
+		})
 	}
-	benchmarkConsolidationSim(b, benchConfig{500, 10, 1, 0.0})
-}
 
-func BenchmarkConsolidation_500Nodes_HalfTopology(b *testing.B) {
-	if testing.Short() {
-		b.Skip("skipping 500-node benchmark in short mode")
+	// vector=nodepools at n=100 (topo=hostname). The np=9 case is the #2671
+	// (R1) regression pattern: O(pods * domains * NodePools).
+	for _, np := range []int{1, 3, 9} {
+		cfg := benchConfig{nodeCount: 100, podsPerNode: 10, nodePoolCount: np, topologySpreadFraction: 1.0}
+		b.Run(fmt.Sprintf("vector=nodepools/np=%d/topo=hostname/n=100", np), func(b *testing.B) {
+			benchmarkConsolidationSim(b, cfg)
+		})
 	}
-	benchmarkConsolidationSim(b, benchConfig{500, 10, 1, 0.5})
-}
 
-func BenchmarkConsolidation_500Nodes_HostnameSpread_3NP(b *testing.B) {
-	if testing.Short() {
-		b.Skip("skipping 500-node benchmark in short mode")
+	// vector=nodepools at n=500 (topo=hostname), short-gated. Extends the
+	// nodepools sweep to larger cluster scale for local profiling.
+	for _, np := range []int{3, 9} {
+		cfg := benchConfig{nodeCount: 500, podsPerNode: 10, nodePoolCount: np, topologySpreadFraction: 1.0}
+		b.Run(fmt.Sprintf("vector=nodepools/np=%d/topo=hostname/n=500", np), func(b *testing.B) {
+			if testing.Short() {
+				b.Skip("skipping 500-node benchmark in short mode")
+			}
+			benchmarkConsolidationSim(b, cfg)
+		})
 	}
-	benchmarkConsolidationSim(b, benchConfig{500, 10, 3, 1.0})
-}
 
-func BenchmarkConsolidation_500Nodes_HostnameSpread_9NP(b *testing.B) {
-	if testing.Short() {
-		b.Skip("skipping 500-node benchmark in short mode")
-	}
-	benchmarkConsolidationSim(b, benchConfig{500, 10, 9, 1.0})
+	// vector=topology at (n=500, np=1). Half-fraction topology spread.
+	b.Run("vector=topology/frac=50/n=500/np=1", func(b *testing.B) {
+		if testing.Short() {
+			b.Skip("skipping 500-node benchmark in short mode")
+		}
+		benchmarkConsolidationSim(b, benchConfig{nodeCount: 500, podsPerNode: 10, nodePoolCount: 1, topologySpreadFraction: 0.5})
+	})
 }
 
 // --- Implementation ---
