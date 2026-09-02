@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -54,6 +55,24 @@ func (c *throttlingClient) Patch(ctx context.Context, obj client.Object, patch c
 	if c.remaining.Add(-1) >= 0 {
 		return apierrors.NewTooManyRequests("throttled by test client", 1)
 	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
+// blockingPatchClient blocks the first Patch invocation in-flight until the
+// caller closes proceed, signaling test setup that Patch has entered via the
+// entered channel. Subsequent Patch calls pass through unblocked. Used to
+// drive queue-contention specs where a caller must observe the reconcile
+// loop mid-Patch to exercise concurrent Add/Reconcile interleavings.
+type blockingPatchClient struct {
+	client.Client
+	entered chan struct{}
+	proceed chan struct{}
+	once    sync.Once
+}
+
+func (c *blockingPatchClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	c.once.Do(func() { close(c.entered) })
+	<-c.proceed
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
@@ -285,6 +304,53 @@ var _ = Describe("Annotation", func() {
 			Expect(updated.Annotations[corev1.PodDeletionCost]).To(Equal("-11"))
 		})
 
+		It("should treat 409 Conflict on the patch as skipped and drop the item from the queue", func() {
+			// A racing writer bumps the live pod's ResourceVersion after the
+			// queue captured its snapshot. MergeFromWithOptimisticLock sends
+			// the snapshot's stale RV as a precondition, and the apiserver
+			// responds with 409 Conflict. The queue must treat that as
+			// terminal (drop the item, return nil) so controller-runtime does
+			// not retry a permanently-lost race. Mirrors the NotFound spec
+			// below.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			// Snapshot the pod at its current ResourceVersion, then bump the
+			// live pod so a stale-RV patch will 409.
+			snapshot := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), snapshot)).To(Succeed())
+			live := snapshot.DeepCopy()
+			if live.Labels == nil {
+				live.Labels = map[string]string{}
+			}
+			live.Labels["racing-writer"] = "true"
+			Expect(env.Client.Update(ctx, live)).To(Succeed())
+
+			queue.Add(snapshot, -1, false)
+			result, err := queue.Reconcile(ctx, snapshot)
+			Expect(err).ToNot(HaveOccurred(), "409 must not surface as an error; the queue treats it as terminal")
+			Expect(result).To(BeZero())
+			Expect(queue.Has(snapshot)).To(BeFalse(), "queue must drop the item after Conflict")
+
+			// Live state preserved: the racing writer's label update stuck,
+			// and the queue's stale-RV patch never landed the annotation.
+			updated := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+			Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),
+				"racing writer won; the queue's stale-RV patch must not have applied the annotation")
+			Expect(updated.Labels).To(HaveKeyWithValue("racing-writer", "true"),
+				"racing writer's label update must be preserved")
+		})
+
 		It("should treat NotFound on the patch as skipped and drop the item from the queue", func() {
 			// Apply a pod, enqueue it, then delete it before Reconcile runs.
 			// The Patch call now 404s and the queue must treat that as
@@ -356,6 +422,113 @@ var _ = Describe("Annotation", func() {
 			updated := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
 			Expect(updated.Annotations[corev1.PodDeletionCost]).To(Equal("-5"))
+		})
+
+		// PENDING: The current Queue implementation cannot preserve a mid-flight
+		// Add(pod, newRank) when the Add races an in-progress Reconcile. Add's
+		// "no source push when already enqueued" combined with complete()'s
+		// unconditional delete drops the newer desired state — the queue is
+		// empty after the racing Reconcile returns, and controller-runtime is
+		// never told to re-enqueue the pod. The 60s Controller.Reconcile cycle
+		// re-Adds and eventually converges, so real-world impact is bounded,
+		// but the queue itself does not guarantee lossless mid-flight updates.
+		//
+		// This spec asserts the intended lossless behavior. Un-Pending it once
+		// the queue is repaired (e.g. always push to source, or version-check
+		// during complete). See gc-a82ehs report for the trace + design options.
+		PIt("should preserve a mid-flight Add's desired state so the next reconcile lands the newer value", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			blocker := &blockingPatchClient{
+				Client:  env.Client,
+				entered: make(chan struct{}),
+				proceed: make(chan struct{}),
+			}
+			q := deletioncost.NewQueue(blocker)
+			q.Add(pod, -1, false)
+
+			done := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				_, err := q.Reconcile(ctx, pod)
+				done <- err
+			}()
+
+			// Wait for the first Patch to be in flight, then update the
+			// desired state before it returns.
+			Eventually(blocker.entered).WithTimeout(5 * time.Second).Should(BeClosed())
+			q.Add(pod, -5, false)
+			close(blocker.proceed)
+			Expect(<-done).ToNot(HaveOccurred())
+
+			// The queue must still have work outstanding for the pod; the
+			// mid-flight Add published a newer desired state that has not
+			// yet been persisted to the apiserver. Drain the queue against
+			// the pod to land the -5.
+			Expect(q.Has(pod)).To(BeTrue(),
+				"mid-flight Add(pod,-5) must leave the pod enqueued so the next Reconcile picks up the newer desired state")
+			ExpectObjectReconciled(ctx, env.Client, q, pod)
+
+			updated := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+			Expect(updated.Annotations[corev1.PodDeletionCost]).To(Equal("-5"),
+				"final annotation should reflect the latest Add, not the value written by the racing patch")
+		})
+
+		It("should leave every pod enqueued when a shared throttle window rejects each pod's first patch", func() {
+			// Two pods, both draining through a throttler primed to reject
+			// the next two Patch calls. Each pod's Reconcile surfaces a 429,
+			// so both entries stay in the map for controller-runtime's next
+			// tick. Guards against a regression where a shared-error path
+			// might accidentally clear other pods' entries.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			podA := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			podB := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			ExpectApplied(ctx, env.Client, podA, podB)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			throttler := newThrottlingClient(env.Client, 2)
+			q := deletioncost.NewQueue(throttler)
+			q.Add(podA, -3, false)
+			q.Add(podB, -3, false)
+
+			// Drive both reconciles in parallel through the shared throttle.
+			var wg sync.WaitGroup
+			wg.Add(2)
+			errs := make(chan error, 2)
+			for _, p := range []*corev1.Pod{podA, podB} {
+				go func(pod *corev1.Pod) {
+					defer GinkgoRecover()
+					defer wg.Done()
+					err := ExpectObjectReconcileFailed(ctx, env.Client, q, pod)
+					errs <- err
+				}(p)
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				Expect(apierrors.IsTooManyRequests(err)).To(BeTrue(),
+					"each parallel reconcile should surface the throttler's 429 rather than a mismatched error")
+			}
+			Expect(q.Has(podA)).To(BeTrue(), "podA should stay enqueued after the throttled failure")
+			Expect(q.Has(podB)).To(BeTrue(), "podB should stay enqueued after the throttled failure")
 		})
 	})
 

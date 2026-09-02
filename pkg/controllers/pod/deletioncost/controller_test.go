@@ -360,14 +360,18 @@ var _ = Describe("Controller", func() {
 			_, err := controller.Reconcile(ctx)
 			Expect(err).To(HaveOccurred(), "current behavior: PDB list failure aborts the whole reconcile")
 
-			// None of the pods, on either NodePool, got annotated. This is the
-			// property the follow-up bead (kp-dses9q) will change.
-			for _, pod := range []*corev1.Pod{podOnDisrupted, podOnHealthy1, podOnHealthy2} {
-				observed := &corev1.Pod{}
-				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), observed)).To(Succeed())
-				Expect(observed.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),
-					"pod %s on healthy or affected NodePool should not have been annotated during the aborted reconcile", pod.Name)
-			}
+			// Assert only on the affected NodePool. The current abort-all
+			// behavior also leaves healthy-pool pods unannotated, but under
+			// kp-dses9q that changes: healthy pools continue to rank. Locking
+			// in the abort-all shape for healthy pools here would create a
+			// false regression signal when the reshape lands — so this spec
+			// deliberately stays silent on podOnHealthy1/podOnHealthy2.
+			observedDisrupted := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(podOnDisrupted), observedDisrupted)).To(Succeed())
+			Expect(observedDisrupted.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),
+				"pod on the affected NodePool must not be annotated when its NodePool aborts")
+			_ = podOnHealthy1
+			_ = podOnHealthy2
 		})
 	})
 })

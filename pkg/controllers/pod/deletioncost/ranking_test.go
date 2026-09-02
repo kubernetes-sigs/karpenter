@@ -458,6 +458,113 @@ var _ = Describe("Ranking", func() {
 			Expect(expectPodRank(podA)).To(BeNumerically("<", 0))
 			expectPodAnnotationCleared(podB)
 		})
+
+		It("should send drifted-node overflow past the drift budget to Group D", func() {
+			// Mirrors the consolidation-budget spec above, but exercises the
+			// drift path: two drifted nodes on a pool whose budget admits only
+			// one drift. The first drifted node lands in Group B (negative
+			// rank); the second overflows into Group D (annotation cleared).
+			// Guards the driftBudget/driftOverflow branch of
+			// applyPerNodePoolBudget which the consolidation-budget test does
+			// not touch.
+			pool := test.NodePool()
+			pool.Name = "drift-pool"
+			pool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
+			pool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+			ExpectApplied(ctx, env.Client, pool)
+
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: pool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			// Mark both nodeclaims drifted so RankNodes routes them through
+			// the drift budget rather than the consolidation budget.
+			for i := range nodeClaims {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			}
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			podFirst := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+			podSecond := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
+			ExpectApplied(ctx, env.Client, podFirst, podSecond)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Deterministic which node lands in Group B vs. Group D depends
+			// on the sort tie-break, so read both pods and assert on the set:
+			// exactly one carries a strictly-negative rank (Group B) and the
+			// other has no annotation (Group D overflow).
+			// Drain both pods so the fire-and-forget writes have landed.
+			drainQueueForPod(podFirst)
+			drainQueueForPod(podSecond)
+			updated := make([]*corev1.Pod, 2)
+			for i, p := range []*corev1.Pod{podFirst, podSecond} {
+				updated[i] = &corev1.Pod{}
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(p), updated[i])).To(Succeed())
+			}
+			var ranked, cleared int
+			for _, u := range updated {
+				if _, ok := u.Annotations[corev1.PodDeletionCost]; ok {
+					ranked++
+				} else {
+					cleared++
+				}
+			}
+			Expect(ranked).To(Equal(1), "exactly one drifted node should fit inside the Nodes=\"1\" drift budget (Group B)")
+			Expect(cleared).To(Equal(1), "the second drifted node should overflow to Group D and clear its pod's annotation")
+		})
+	})
+
+	Context("ConsolidateAfter=nil (consolidation disabled)", func() {
+		// The outer BeforeEach forces ConsolidateAfter=0s so tests exercise
+		// active partitioning. This Context leaves it unset so
+		// isConsolidationDisabled fires and routes the pool to Group D — the
+		// steady-state branch that the shared fixture would otherwise mask.
+		It("should route a nil-ConsolidateAfter pool to Group D while a 0s pool stays in Group C", func() {
+			// Two NodePools side by side:
+			//   nilPool: ConsolidateAfter unset (nil Duration) → Group D
+			//   activePool: ConsolidateAfter "0s" → Group C
+			// Fresh pools inline rather than reusing the outer nodePool because
+			// the outer BeforeEach's ConsolidateAfter=0s is exactly what we
+			// need to bypass here.
+			nilPool := test.NodePool()
+			nilPool.Name = "nil-consolidate-pool"
+			nilPool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+
+			activePool := test.NodePool()
+			activePool.Name = "active-consolidate-pool"
+			activePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
+			activePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+			ExpectApplied(ctx, env.Client, nilPool, activePool)
+
+			ncNil, nNil := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nilPool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ncActive, nActive := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: activePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, ncNil, nNil, ncActive, nActive)
+			podNil := rsOwnedPod(test.PodOptions{NodeName: nNil.Name})
+			podActive := rsOwnedPod(test.PodOptions{NodeName: nActive.Name})
+			ExpectApplied(ctx, env.Client, podNil, podActive)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nNil, nActive}, []*v1.NodeClaim{ncNil, ncActive})
+
+			controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Nil-pool pod routes through isConsolidationDisabled to Group D
+			// (annotation cleared); active-pool pod lands in Group C (negative
+			// rank).
+			expectPodAnnotationCleared(podNil)
+			Expect(expectPodRank(podActive)).To(BeNumerically("<", 0))
+		})
 	})
 
 	Context("Bounded labeling: cap applies to Groups B/C/D only", func() {
