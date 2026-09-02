@@ -148,7 +148,6 @@ var _ = Describe("Budgets", func() {
 		})
 
 		It("should get the minimum budget for each reason", func() {
-
 			nodePool.Spec.Disruption.Budgets = append(nodePool.Spec.Disruption.Budgets,
 				[]Budget{
 					{
@@ -172,7 +171,6 @@ var _ = Describe("Budgets", func() {
 			Expect(err).To(BeNil())
 			Expect(underutilizedAllowedDisruption).To(Equal(10))
 		})
-
 	})
 
 	Context("AllowedDisruptions", func() {
@@ -208,7 +206,7 @@ var _ = Describe("Budgets", func() {
 	})
 
 	Context("IsActive", func() {
-		It("should always consider a schedule and time in UTC", func() {
+		It("should consider a schedule and time in UTC when no timezone is specified", func() {
 			// Set the time to start of June 2000 in a time zone 1 hour ahead of UTC
 			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 0, 0, 0, 0, 0, time.FixedZone("fake-zone", 3600)))
 			budgets[0].Schedule = new("@daily")
@@ -217,6 +215,78 @@ var _ = Describe("Budgets", func() {
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
 			Expect(active).To(BeFalse())
+		})
+		It("should consider a schedule in UTC when timeZone is not set", func() {
+			budgets[0].Schedule = new("0 2 * * *")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 2, 30, 0, 0, time.UTC))
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 6, 30, 0, 0, time.UTC))
+			active, err = budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeFalse())
+		})
+		It("should consider a schedule in the configured timeZone", func() {
+			// In June New York is in EDT (UTC-4), so the 02:00 local schedule hit occurs at 06:00 UTC.
+			budgets[0].Schedule = new("0 2 * * *")
+			budgets[0].TimeZone = new("America/New_York")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 6, 30, 0, 0, time.UTC))
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 2, 30, 0, 0, time.UTC))
+			active, err = budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeFalse())
+		})
+		It("should not be active when the schedule hit falls in the spring-forward DST gap", func() {
+			// On 2024-03-10 in America/New_York, clocks jump from 02:00 to 03:00, so 02:00 never occurs.
+			budgets[0].Schedule = new("0 2 * * *")
+			budgets[0].TimeZone = new("America/New_York")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+			// 07:30 UTC is 03:30 EDT; without the gap the 02:00 hit would still be in its window.
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.March, 10, 7, 30, 0, 0, time.UTC))
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeFalse())
+			// The next day the 02:00 hit occurs normally: 06:30 UTC is 02:30 EDT.
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.March, 11, 6, 30, 0, 0, time.UTC))
+			active, err = budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should be active at both offsets when the schedule hit falls in the fall-back DST overlap", func() {
+			// On 2024-11-03 in America/New_York, clocks fall back from 02:00 EDT to 01:00 EST,
+			// so 01:30 occurs twice: 05:30 UTC (EDT) and 06:30 UTC (EST).
+			budgets[0].Schedule = new("30 1 * * *")
+			budgets[0].TimeZone = new("America/New_York")
+			budgets[0].Duration = new(metav1.Duration{Duration: lo.Must(time.ParseDuration("15m"))})
+			// Within the window of the first occurrence.
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.November, 3, 5, 40, 0, 0, time.UTC))
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+			// Between the two occurrences.
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.November, 3, 6, 0, 0, 0, time.UTC))
+			active, err = budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeFalse())
+			// Within the window of the second occurrence.
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.November, 3, 6, 40, 0, 0, time.UTC))
+			active, err = budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return an error for an invalid timeZone", func() {
+			budgets[0].TimeZone = new("Foo/Bar")
+			_, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(MatchError(ContainSubstring("invalid time zone")))
+			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			Expect(err).ToNot(Succeed())
+			Expect(val).To(BeNumerically("==", 0))
 		})
 		It("should return that a schedule is active when schedule and duration are nil", func() {
 			budgets[0].Schedule = nil
@@ -235,6 +305,29 @@ var _ = Describe("Budgets", func() {
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
 			Expect(active).To(BeFalse())
+		})
+		It("should return that a schedule is active with a timezone", func() {
+			// Set the time to the middle of the year of 2000 as KST, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 12, 30, 30, 0, time.FixedZone("Asia/Seoul", 9*3600)))
+			budgets[0].TimeZone = lo.ToPtr("Asia/Seoul")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive with a timezone", func() {
+			// Set the time to the middle of the year of 2000 as KST, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 12, 30, 30, 0, time.FixedZone("Asia/Seoul", 9*3600)))
+			budgets[0].Schedule = lo.ToPtr("@yearly")
+			budgets[0].TimeZone = lo.ToPtr("Asia/Seoul")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeFalse())
+		})
+		It("should return an error if the timezone is invalid", func() {
+			budgets[0].TimeZone = lo.ToPtr("Invalid/Timezone")
+			_, err := budgets[0].IsActive(fakeClock)
+			Expect(err).ToNot(Succeed())
+			Expect(err.Error()).To(ContainSubstring("invalid time zone"))
 		})
 		It("should return that a schedule is active when the schedule hit is in the middle of the duration", func() {
 			// Set the date to the start of the year 1000, the best year ever
