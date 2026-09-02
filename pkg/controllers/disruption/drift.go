@@ -96,9 +96,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		// drift replacement failures. Healthy pools and pools whose back-off window has elapsed
 		// fall through to normal selection. This is a read-only check; the queue is the only
 		// place that mutates back-off state (Fail/Reset).
-		if d.isBackedOff(candidate.NodePool.Name, backedOffNodePools) {
-			level, until := d.backoff.Snapshot(candidate.NodePool.Name)
-			d.recorder.Publish(disruptionevents.NodePoolDriftBackoff(candidate.NodePool, until, level))
+		if d.isBackedOff(candidate.NodePool, backedOffNodePools) {
 			continue
 		}
 		// Check if we need to create any NodeClaims.
@@ -128,12 +126,14 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 	return []Command{}, nil
 }
 
-func (d *Drift) isBackedOff(nodePool string, backedOffNodePools map[string]struct{}) bool {
-	if _, ok := backedOffNodePools[nodePool]; ok {
+func (d *Drift) isBackedOff(nodePool *v1.NodePool, backedOffNodePools map[string]struct{}) bool {
+	if _, ok := backedOffNodePools[nodePool.Name]; ok {
 		return true
 	}
-	if d.backoff != nil && d.backoff.IsBackedOff(nodePool) {
-		backedOffNodePools[nodePool] = struct{}{}
+	if d.backoff != nil && d.backoff.IsBackedOff(nodePool.Name) {
+		backedOffNodePools[nodePool.Name] = struct{}{}
+		level, until := d.backoff.Snapshot(nodePool.Name)
+		d.recorder.Publish(disruptionevents.NodePoolDriftBackoff(nodePool, until, level))
 		return true
 	}
 	return false
