@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -144,20 +145,98 @@ func BenchmarkConsolidation(b *testing.B) {
 
 // --- Implementation ---
 
+// cachedBench holds the heavy setup fixture built by setupConsolidationBench
+// so that -count=N re-invocations of the same benchConfig can reuse it.
+// The ctx is deliberately NOT cached: TestContextWithLogger binds a zaptest
+// logger to a specific *testing.B via t.Cleanup(), so using a stale ctx from
+// a finished testing.B in a later invocation would emit logs on a completed
+// test frame. We re-derive ctx per invocation (cheap) and share only the
+// expensive-to-build objects.
+type cachedBench struct {
+	kubeClient   client.Client
+	clk          *clock.FakeClock
+	clusterState *state.Cluster
+	prov         *provisioning.Provisioner
+	candidates   []*Candidate
+}
+
+// benchCache memoizes setupConsolidationBench output keyed on benchConfig so
+// that -count=N re-invocations of the same sub-benchmark share the fixture
+// built by the first invocation.
+//
+// Safety: SimulateScheduling is read-only over its inputs on the timed path
+// (verified in pkg/controllers/disruption/helpers.go:53-154 as of PR 2998's
+// tip):
+//
+//   - cluster.DeepCopyNodes() (helpers.go:57) makes a fresh copy of node
+//     state before use; clusterState itself is not mutated.
+//   - provisioner.GetPendingPods reads pending pods (spec.nodeName="") from
+//     kubeClient — but the bench pods are all pre-scheduled onto nodes, so
+//     the pending-pod list is empty and the p.Validate/MarkPodScheduling
+//     Decisions branch never fires. See provisioner.go:196.
+//   - pdb.NewLimits and deletingNodes.CurrentlyReschedulablePods only read.
+//   - provisioner.NewScheduler is constructed fresh per call, and Solve
+//     mutates only its own local scheduling state; the input pods,
+//     stateNodes, and cluster/kubeClient pointers are not written back to.
+//
+// Because the current b.N inner loop already reuses these fixtures across
+// 100+ SimulateScheduling calls per BenchmarkFn invocation without affecting
+// correctness or ns/op stability, extending that reuse across -count=N
+// invocations is semantically equivalent to what b.N already does — the
+// harness just gets more samples per computed fixture.
+//
+// If a mutating consolidation-related function is added to the timed path
+// in the future (e.g. Scheduler.Solve becomes stateful over clusterState, a
+// new SimulateScheduling variant writes back to kubeClient, or p.Validate
+// starts firing in the bench pod shape), this cache MUST be revisited or
+// removed. The load-bearing invariant is: the timed path is read-only over
+// kubeClient / clusterState / candidates / prov.
+var benchCache sync.Map // benchConfig → *cachedBench
+
+// setupOrLoadBench returns a fresh ctx (always) and either the cached
+// fixture for cfg or a freshly built one that is then stored in the cache.
+// sync.Map.LoadOrStore handles the race case where two goroutines
+// concurrently miss (defensive — bench iterations are sequential by
+// default). See benchCache doc for the safety invariant that makes sharing
+// setup across -count=N safe.
+func setupOrLoadBench(b *testing.B, cfg benchConfig) (context.Context, *cachedBench) {
+	// Always derive ctx fresh: it holds a zaptest logger bound to THIS b via
+	// t.Cleanup(), so it must not outlive the current invocation.
+	ctx := TestContextWithLogger(b)
+	ctx = options.ToContext(ctx, test.Options())
+
+	if v, ok := benchCache.Load(cfg); ok {
+		return ctx, v.(*cachedBench)
+	}
+	// Cache miss: do the heavy setup. We discard setupConsolidationBench's
+	// internal ctx (bound to the FIRST b that populated the cache) since
+	// subsequent cache hits use our fresh ctx anyway.
+	_, kubeClient, clk, clusterState, prov, candidates := setupConsolidationBench(b, cfg)
+	fresh := &cachedBench{
+		kubeClient:   kubeClient,
+		clk:          clk,
+		clusterState: clusterState,
+		prov:         prov,
+		candidates:   candidates,
+	}
+	actual, _ := benchCache.LoadOrStore(cfg, fresh)
+	return ctx, actual.(*cachedBench)
+}
+
 func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
-	// Setup runs once per BenchmarkFn invocation; b.ResetTimer below excludes it
-	// from measurement. With -count=N the harness re-invokes the whole function
-	// N times to give benchstat independent samples, which is intentional.
-	ctx, kubeClient, clk, clusterState, prov, candidates := setupConsolidationBench(b, cfg)
+	// Setup is cached per benchConfig across -count=N invocations; b.ResetTimer
+	// below excludes both the fresh-ctx derivation and any cache-miss setup
+	// from the timed section. See benchCache for the safety invariant.
+	ctx, setup := setupOrLoadBench(b, cfg)
 	rec := events.NewRecorder(&record.FakeRecorder{})
 
 	// Benchmark SimulateScheduling for a single candidate node removal.
-	candidate := candidates[0]
+	candidate := setup.candidates[0]
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = SimulateScheduling(ctx, kubeClient, clusterState, prov, clk, rec, nil, candidate)
+		_, _ = SimulateScheduling(ctx, setup.kubeClient, setup.clusterState, setup.prov, setup.clk, rec, nil, candidate)
 	}
 	b.ReportMetric(float64(len(candidate.reschedulablePods)), "pods")
 	b.ReportMetric(float64(cfg.nodeCount), "nodes")
