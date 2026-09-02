@@ -33,6 +33,7 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
     - [Officially supported and maintained by Oracle](https://github.com/oracle/karpenter-provider-oci)
     - [Maintained by Zoom](https://github.com/zoom/karpenter-oci)
 - [Akamai/Linode](https://github.com/linode/karpenter-provider-linode) (Alpha)
+- [UpCloud](https://github.com/kubekanvas/karpenter-provider-upcloud) (Beta)
 
 ## Community, discussion, contribution, and support
 
