@@ -44,7 +44,7 @@ var (
 			Name:      "nodes_ranked",
 			Help:      "Number of nodes ranked in the most recent reconcile cycle by the pod deletion cost controller.",
 		},
-		[]string{},
+		[]opmetrics.Label{},
 	)
 	podsUpdatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -54,7 +54,7 @@ var (
 			Name:      "pods_updated_total",
 			Help:      "Number of pod deletion cost annotations updated in total. Labeled by result (updated, skipped_unchanged, error). The error label counts per-pod patch failures.",
 		},
-		[]string{resultLabel},
+		[]opmetrics.Label{{Name: resultLabel, Help: "Outcome of the annotation write (updated, skipped_unchanged, error)."}},
 	)
 	rankingDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
@@ -65,7 +65,7 @@ var (
 			Help:      "Duration of node ranking computation in seconds.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{},
+		[]opmetrics.Label{},
 	)
 	// Per-pod queue-reconcile duration. Previously per-cycle when
 	// UpdatePodDeletionCosts ran synchronously; after the queue swap this
@@ -79,7 +79,7 @@ var (
 			Help:      "Duration of a single pod annotation update operation in seconds.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{},
+		[]opmetrics.Label{},
 	)
 	reconcileSkippedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -89,6 +89,6 @@ var (
 			Name:      "reconcile_skipped_total",
 			Help:      "Number of reconcile loops skipped due to no changes detected in cluster state.",
 		},
-		[]string{},
+		[]opmetrics.Label{},
 	)
 )
