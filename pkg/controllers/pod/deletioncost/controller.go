@@ -100,9 +100,6 @@ func (c *Controller) Name() string {
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
-	// Match the disruption controller's convention: wait for cluster sync
-	// before ranking so we don't rank against a partial node view during
-	// initial hydration.
 	if !c.cluster.Synced(ctx) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
@@ -222,8 +219,6 @@ func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodeP
 // disruption and expected to be stable once labeled, so labeling churn stays
 // bounded even when Group A exceeds limit.
 func capNodeRanks(nodeRanks []NodeRank, limit int) []NodeRank {
-	// RankNodes emits Group A first; walk the prefix so the split is O(len)
-	// without a second pass.
 	groupACount := 0
 	for _, r := range nodeRanks {
 		if r.Rank != math.MinInt32 {

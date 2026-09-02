@@ -22,14 +22,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
-// NodeRank pairs a state node with the rank the controller plans to enqueue
-// for its pods. HasDoNotDisrupt indicates Group D — the queue clears the
-// annotation instead of writing Rank. Pods carries the pod list captured
-// during RankNodes so the queue does not need to re-list pods.
-//
-// Rank is only meaningful when HasDoNotDisrupt=false; Group D entries leave
-// Rank at its zero value and the queue ignores it. Group D nodes are excluded
-// from the sequential-rank walk so the annotated range is contiguous.
+// NodeRank is produced by RankNodes and consumed by the annotation Queue to
+// derive per-pod PDC values. HasDoNotDisrupt=true marks Group D entries whose
+// annotations get cleared rather than written; Rank is unused in that case.
 type NodeRank struct {
 	Node            *state.StateNode
 	Rank            int

@@ -166,9 +166,6 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		return reconcile.Result{}, nil
 	}
 
-	// Skip the API call when the observed pod already matches the desired
-	// annotation state. Same short-circuit the previous synchronous path
-	// used in runPodOp.shouldSkip.
 	if q.matchesDesired(pod, item) {
 		q.complete(qk)
 		podsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_unchanged"})

@@ -66,9 +66,6 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 		return nil, fmt.Errorf("listing pod disruption budgets, %w", err)
 	}
 
-	// Sort once by pod count ascending with a deterministic name tie-break.
-	// partitionNodes preserves input order, so each partition inherits this
-	// ordering — one sort instead of four.
 	sortByPodCount(nodes, nodePods)
 
 	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(clk, nodes, nodePoolMap, nodePods, pdbs)
@@ -218,8 +215,6 @@ func hasNodeDoNotDisrupt(node *state.StateNode) bool {
 	return annotations[v1.DoNotDisruptAnnotationKey] == "true"
 }
 
-// isConsolidationDisabled reports whether the node's NodePool has
-// consolidateAfter set to Never (nil Duration).
 func isConsolidationDisabled(node *state.StateNode, nodePoolMap map[string]*v1.NodePool) bool {
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
 	if nodePoolName == "" {
@@ -232,8 +227,6 @@ func isConsolidationDisabled(node *state.StateNode, nodePoolMap map[string]*v1.N
 	return np.Spec.Disruption.ConsolidateAfter.Duration == nil
 }
 
-// isDisrupted reports whether Karpenter has committed to disrupting this node
-// (karpenter.sh/disrupted taint present).
 func isDisrupted(node *state.StateNode) bool {
 	if node.Node == nil {
 		return false
