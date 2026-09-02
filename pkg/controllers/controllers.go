@@ -149,14 +149,8 @@ func NewControllers(
 	}
 
 	if !options.FromContext(ctx).DisableClusterStateObservability {
-		// Refresh the decaying per-NodePool drift_backoff_seconds gauge on a fixed cadence. This
-		// runs as a manager Runnable (not a reconciler) since it is driven by wall-clock time
-		// rather than by object events.
-		lo.Must0(mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-			disruptionQueue.NodePoolBackoff().StartMetrics(ctx)
-			return nil
-		})))
 		controllers = append(controllers,
+			disruptionQueue.NodePoolBackoff(),
 			metricspod.NewController(kubeClient, cluster),
 			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost),
 			metricsnode.NewController(cluster),
