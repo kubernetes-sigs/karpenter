@@ -28,8 +28,55 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
+
+// PerNodeBaseDisruptionCost is the inherent cost of draining a node (cordon,
+// drain, API calls, replacement latency). Sets the minimum reschedule cost
+// so an "empty" node still costs something to disrupt. See
+// designs/balanced-consolidation.md.
+const PerNodeBaseDisruptionCost = 1.0
+
+// ResolveOfferingPrice returns the price of the offering that matches the
+// node's zone and capacity-type labels. Returns 0 when the instance type is
+// nil, no matching offering exists, or the resolved price is NaN — callers
+// treat 0 as "unpriced" and SavingsRatio degrades to 0 in that case rather
+// than panicking on divide-by-zero.
+func ResolveOfferingPrice(labels map[string]string, instanceType *cloudprovider.InstanceType) float64 {
+	if instanceType == nil {
+		return 0
+	}
+	price, ok := instanceType.OfferingPrice(labels[corev1.LabelTopologyZone], labels[v1.CapacityTypeLabelKey])
+	if !ok {
+		return 0
+	}
+	if math.IsNaN(price) {
+		return 0
+	}
+	return price
+}
+
+// ComputeRescheduleDisruptionCost is PerNodeBaseDisruptionCost plus the sum of
+// positive per-pod EvictionCosts. The base term keeps SavingsRatio finite for
+// empty nodes; negative EvictionCosts are clamped to 0 so a low-cost pod
+// doesn't discount the base.
+func ComputeRescheduleDisruptionCost(ctx context.Context, reschedulablePods []*corev1.Pod) float64 {
+	cost := PerNodeBaseDisruptionCost
+	for _, p := range reschedulablePods {
+		cost += math.Max(0, EvictionCost(ctx, p))
+	}
+	return cost
+}
+
+// SavingsRatio returns Price / RescheduleDisruptionCost (higher = prefer to
+// disrupt). Callers must guarantee a positive rescheduleDisruptionCost — use
+// ComputeRescheduleDisruptionCost which is floored at PerNodeBaseDisruptionCost.
+// Both the balanced-consolidation candidate sort and the pod-deletion-cost
+// ranking read this ratio so their orderings agree.
+func SavingsRatio(price, rescheduleDisruptionCost float64) float64 {
+	return price / rescheduleDisruptionCost
+}
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the ExpireAfter
 // is non-zero, we use it to scale down the disruption costs of candidates that are going to expire.  Just after creation, the

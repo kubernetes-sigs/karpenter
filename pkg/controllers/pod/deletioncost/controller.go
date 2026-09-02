@@ -25,7 +25,6 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -33,11 +32,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 const (
@@ -123,12 +121,15 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	nodePoolMap, err := c.buildNodePoolMap(ctx)
+	// Delegate map construction to the disruption package so the two
+	// controllers share instance-type lookups and stay in lockstep on which
+	// NodePools/instance types feed price + reschedule-cost math.
+	nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("building node pool map, %w", err)
 	}
 
-	nodeRanks, err := RankNodes(ctx, c.kubeClient, c.clock, nodes, nodePoolMap)
+	nodeRanks, err := RankNodes(ctx, c.kubeClient, c.clock, nodes, nodePoolMap, nodePoolToInstanceTypesMap)
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
@@ -204,14 +205,6 @@ func (c *Controller) consolidationStateUnchanged(ctx context.Context, currentSta
 		return true
 	}
 	return false
-}
-
-func (c *Controller) buildNodePoolMap(ctx context.Context) (map[string]*v1.NodePool, error) {
-	nodePools, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
-	if err != nil {
-		return nil, fmt.Errorf("listing node pools, %w", err)
-	}
-	return lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) { return np.Name, np }), nil
 }
 
 // capNodeRanks admits every Group A node (Rank == math.MinInt32) and caps the

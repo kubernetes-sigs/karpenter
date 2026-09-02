@@ -22,19 +22,26 @@ import (
 	"math"
 	"sort"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
+	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-// RankNodes ranks nodes using PodCount strategy with four-tier partitioning:
+// RankNodes partitions Karpenter-managed nodes into four disruption tiers and
+// assigns each node the pod-deletion-cost value that steers the ReplicaSet
+// controller toward evicting the right pods first. See RFC #2935 §31.
+//
 //   - Group A: Nodes carrying the karpenter.sh/disrupted taint (Draining per
 //     RFC #2935), get math.MinInt32. Do not consume budget.
 //   - Group B: Drifted nodes, sequential ranks deleted first.
@@ -43,18 +50,21 @@ import (
 //     pod, consolidation disabled, PDB-blocked pods, or non-RS-owned pods).
 //     Annotations are cleared; RS controller uses default scale-down ordering.
 //
-// Per-NodePool disruption budgets bound Groups B and C. Nodes exceeding either
-// budget overflow into Group D. nodes is a best-effort pointer slice from
-// state.Cluster; RankNodes and NodePoolStatsFromNodes reuse it so we don't
-// pay for two cluster iterations.
-func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool) ([]NodeRank, error) {
+// Within Groups B and C the sort mirrors the disruption controller's
+// SavingsRatio DESC ordering (see disruption.consolidation.sortCandidates and
+// disruptionutils.SavingsRatio) so PDC's ranking always agrees with which
+// nodes Karpenter would consolidate first. Per-NodePool disruption budgets
+// bound Groups B and C. Nodes exceeding either budget overflow into Group D.
+// nodes is a best-effort pointer slice from state.Cluster; RankNodes and
+// NodePoolStatsFromNodes reuse it so we don't pay for two cluster iterations.
+func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) ([]NodeRank, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
 	defer metrics.Measure(rankingDurationSeconds, noLabels)()
 
-	// Pre-fetch pods per node once so partition and sortByPodCount don't
-	// repeat the API call.
+	// Pre-fetch pods per node once so partitionNodes and sortBySavingsRatio
+	// don't repeat the API call.
 	nodePods, err := fetchNodePods(ctx, kubeClient, nodes)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods on candidate nodes, %w", err)
@@ -66,9 +76,9 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 		return nil, fmt.Errorf("listing pod disruption budgets, %w", err)
 	}
 
-	sortByPodCount(nodes, nodePods)
+	sortBySavingsRatio(ctx, nodes, nodePods, nodePoolToInstanceTypesMap)
 
-	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(clk, nodes, nodePoolMap, nodePods, pdbs)
+	disruptedBlocked, drifted, normal, doNotDisrupt := partitionNodes(clk, nodes, nodePoolMap, nodePoolToInstanceTypesMap, nodePods, pdbs)
 
 	// Per-NodePool budget limits move overflow from B/C into D.
 	// NodePoolStatsFromNodes is the shared helper disruption also uses (via
@@ -112,7 +122,7 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 
 	log.FromContext(ctx).V(1).WithValues(
 		"totalNodes", len(result),
-		"disruptedBlockedNodes", len(disruptedBlocked),
+		"disruptedNodes", len(disruptedBlocked),
 		"driftedNodes", len(drifted),
 		"normalNodes", len(normal),
 		"doNotDisruptNodes", len(doNotDisrupt),
@@ -137,8 +147,8 @@ func applyPerNodePoolBudget(nodes []*state.StateNode, budget map[string]int) (bo
 	return bounded, overflow
 }
 
-// fetchNodePods gathers the pod list per node so partition and sortByPodCount
-// don't repeat the API call.
+// fetchNodePods gathers the pod list per node so partitionNodes and
+// sortBySavingsRatio don't repeat the API call.
 func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode) (map[string][]*corev1.Pod, error) {
 	out := make(map[string][]*corev1.Pod, len(nodes))
 	for _, node := range nodes {
@@ -156,7 +166,7 @@ func fetchNodePods(ctx context.Context, kubeClient client.Client, nodes []*state
 // no longer re-checks do-not-disrupt (see disruption/queue.go and
 // validation.go — both pre-taint only), so a tainted node stays in Group A
 // regardless of any other signal.
-func partitionNodes(clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePods map[string][]*corev1.Pod, pdbs pdb.Limits) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
+func partitionNodes(clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, nodePods map[string][]*corev1.Pod, pdbs pdb.Limits) (disruptedBlocked, drifted, normal, doNotDisrupt []*state.StateNode) {
 	for _, node := range nodes {
 		pods := nodePods[node.Name()]
 		if isDisrupted(node) {
@@ -171,6 +181,16 @@ func partitionNodes(clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[s
 			doNotDisrupt = append(doNotDisrupt, node)
 			continue
 		}
+		// Consolidation excludes nodes whose NodePool has no resolvable
+		// instance-type map (disruption.NewCandidate rejects with
+		// "NodePool not found"), so PDC must too. Otherwise a
+		// GetInstanceTypes failure or an unevaluated overlay would leave
+		// PDC steering RS eviction toward a node consolidation can never
+		// pick.
+		if isInstanceTypeUnresolvable(node, nodePoolToInstanceTypesMap) {
+			doNotDisrupt = append(doNotDisrupt, node)
+			continue
+		}
 		if hasDoNotDisruptPods(pods) {
 			doNotDisrupt = append(doNotDisrupt, node)
 			continue
@@ -182,6 +202,38 @@ func partitionNodes(clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[s
 		}
 	}
 	return disruptedBlocked, drifted, normal, doNotDisrupt
+}
+
+// isInstanceTypeUnresolvable reports whether disruption.NewCandidate would
+// reject the node because its NodePool has no resolvable entry in the
+// instance-type map (from cloudProvider.GetInstanceTypes failure or an
+// unevaluated overlay). Consolidation excludes such nodes entirely, so
+// routing them to Group D keeps PDC in lockstep and avoids steering RS
+// eviction toward a node consolidation can never pick.
+//
+// Guards:
+//   - nil map: treated as "unknown, skip filter" for direct-helper tests
+//     that don't wire cloudProvider through. Production always passes the
+//     non-nil map produced by disruption.BuildNodePoolMap.
+//   - empty NodePoolLabelKey / empty LabelInstanceTypeStable: same
+//     "unknown, skip filter" treatment; production nodes always carry both.
+func isInstanceTypeUnresolvable(node *state.StateNode, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) bool {
+	if nodePoolToInstanceTypesMap == nil {
+		return false
+	}
+	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
+	itName := node.Labels()[corev1.LabelInstanceTypeStable]
+	if nodePoolName == "" || itName == "" {
+		return false
+	}
+	instanceTypeMap, ok := nodePoolToInstanceTypesMap[nodePoolName]
+	if !ok || instanceTypeMap == nil {
+		return true
+	}
+	if _, ok := instanceTypeMap[itName]; !ok {
+		return true
+	}
+	return false
 }
 
 // buildBudgetForReason returns allowed - already-disrupting per NodePool.
@@ -290,42 +342,42 @@ func hasNonRSOwnedPods(pods []*corev1.Pod) bool {
 	return false
 }
 
-// sortByPodCount sorts nodes by live pod count ascending with a deterministic
-// name tie-break. Nodes with a missing pod-list lookup sort last (math.MaxInt
-// sentinel) so a transient lookup failure doesn't skew the top of the
-// ranking.
+// sortBySavingsRatio orders nodes by disruptionutils.SavingsRatio DESC with a
+// node-name tie-break for determinism. Nodes with an unresolved price
+// (missing NodePool, missing instance type, or a NaN offering price) fall to
+// a ratio of 0 alongside truly zero-priced nodes; the name tie-break keeps
+// the resulting order reproducible across reconciles. Mirrors
+// disruption.consolidation.sortCandidates so a node PDC prefers to evict
+// pods from is the same node the disruption controller would consolidate
+// first.
 //
-// DeletionTimestamp'd pods are excluded from the count so a mostly-terminating
-// node ranks lighter than a same-count node with no drain in progress —
-// consolidation prefers finishing what is already ending. The full pod list
-// is retained on NodeRank so the queue still writes/clears annotations on
-// deleting pods until they finish terminating.
-func sortByPodCount(nodes []*state.StateNode, nodePods map[string][]*corev1.Pod) {
+// Reschedulable pods (per pod.IsReschedulable) drive the disruption cost:
+// DaemonSet pods and RS-owned terminating pods contribute 0, so a
+// mostly-drained node scores higher than a same-priced node still carrying
+// its full pod set. The full pod list is retained on NodeRank so the queue
+// still writes/clears annotations on deleting pods until they finish
+// terminating.
+func sortBySavingsRatio(ctx context.Context, nodes []*state.StateNode, nodePods map[string][]*corev1.Pod, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) {
 	if len(nodes) <= 1 {
 		return
 	}
+	ratio := make(map[string]float64, len(nodes))
+	for _, n := range nodes {
+		labels := n.Labels()
+		var it *cloudprovider.InstanceType
+		if m := nodePoolToInstanceTypesMap[labels[v1.NodePoolLabelKey]]; m != nil {
+			it = m[labels[corev1.LabelInstanceTypeStable]]
+		}
+		price := disruptionutils.ResolveOfferingPrice(labels, it)
+		reschedulable := lo.Filter(nodePods[n.Name()], func(p *corev1.Pod, _ int) bool { return podutils.IsReschedulable(p) })
+		cost := disruptionutils.ComputeRescheduleDisruptionCost(ctx, reschedulable)
+		ratio[n.Name()] = disruptionutils.SavingsRatio(price, cost)
+	}
 	sort.Slice(nodes, func(i, j int) bool {
-		ci := livePodCount(nodePods, nodes[i].Name())
-		cj := livePodCount(nodePods, nodes[j].Name())
-		if ci != cj {
-			return ci < cj
+		ri, rj := ratio[nodes[i].Name()], ratio[nodes[j].Name()]
+		if ri != rj {
+			return ri > rj
 		}
 		return nodes[i].Name() < nodes[j].Name()
 	})
-}
-
-// livePodCount returns the number of non-terminating pods on the named node.
-// Missing map entries sort last via math.MaxInt; see sortByPodCount.
-func livePodCount(nodePods map[string][]*corev1.Pod, nodeName string) int {
-	pods, ok := nodePods[nodeName]
-	if !ok {
-		return math.MaxInt
-	}
-	count := 0
-	for _, pod := range pods {
-		if pod.DeletionTimestamp == nil {
-			count++
-		}
-	}
-	return count
 }

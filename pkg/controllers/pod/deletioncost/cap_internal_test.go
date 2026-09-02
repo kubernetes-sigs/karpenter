@@ -19,7 +19,6 @@ package deletioncost
 import (
 	"math"
 	"strconv"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -47,20 +46,10 @@ func podWithCost(value string) *corev1.Pod {
 	return pod
 }
 
-// deletingPod returns a pod with a non-nil DeletionTimestamp (terminating).
-func deletingPod() *corev1.Pod {
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &metav1.Time{Time: time.Unix(0, 0)}}}
-}
-
-// livePod returns a pod without a DeletionTimestamp.
-func livePod() *corev1.Pod {
-	return &corev1.Pod{}
-}
-
 // Internal-package Ginkgo specs for the deletioncost helpers that access
-// unexported symbols (capNodeRanks, filterNoOpNodes, livePodCount, NodeRank).
-// The dot import shares Ginkgo's global spec registry with the external
-// suite_test.go, so these run under the same RunSpecs entrypoint.
+// unexported symbols (capNodeRanks, filterNoOpNodes, NodeRank). The dot import
+// shares Ginkgo's global spec registry with the external suite_test.go, so
+// these run under the same RunSpecs entrypoint.
 var _ = Describe("capNodeRanks", func() {
 	DescribeTable("admits every Group A node and caps only the tail",
 		func(input []NodeRank, limit, expectedLen int) {
@@ -173,31 +162,5 @@ var _ = Describe("filterNoOpNodes", func() {
 		got := filterNoOpNodes(in)
 		Expect(got).To(HaveLen(1))
 		Expect(got[0].Rank).To(Equal(int(math.MinInt32)))
-	})
-})
-
-var _ = Describe("livePodCount", func() {
-	It("counts only non-terminating pods", func() {
-		// Node A has 5 pods, 3 already terminating: live count = 2.
-		// Node B has 3 live pods only: live count = 3.
-		// sortByPodCount should place A before B despite the raw count 5 > 3.
-		pods := map[string][]*corev1.Pod{
-			"a": {livePod(), livePod(), deletingPod(), deletingPod(), deletingPod()},
-			"b": {livePod(), livePod(), livePod()},
-		}
-		Expect(livePodCount(pods, "a")).To(Equal(2))
-		Expect(livePodCount(pods, "b")).To(Equal(3))
-	})
-
-	It("maps missing entries to math.MaxInt so lookup failures sort last", func() {
-		pods := map[string][]*corev1.Pod{"a": {livePod()}}
-		Expect(livePodCount(pods, "not-present")).To(Equal(math.MaxInt))
-	})
-
-	It("returns 0 when every pod on the node is terminating", func() {
-		pods := map[string][]*corev1.Pod{
-			"draining": {deletingPod(), deletingPod(), deletingPod()},
-		}
-		Expect(livePodCount(pods, "draining")).To(Equal(0))
 	})
 })

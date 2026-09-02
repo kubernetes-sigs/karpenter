@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 )
 
 // makeOffering creates an Offering with the given price, zone, and capacity type.
@@ -88,8 +89,8 @@ func makeCandidate(nodeName string, np *v1.NodePool, it *cloudprovider.InstanceT
 		instanceType:             it,
 		NodePool:                 np,
 		reschedulablePods:        pods,
-		Price:                    resolveNodePrice(sn, it),
-		RescheduleDisruptionCost: computeRescheduleDisruptionCost(options.ToContext(context.Background(), &options.Options{}), pods),
+		Price:                    disruptionutils.ResolveOfferingPrice(sn.Labels(), it),
+		RescheduleDisruptionCost: disruptionutils.ComputeRescheduleDisruptionCost(options.ToContext(context.Background(), &options.Options{}), pods),
 	}
 }
 
@@ -181,7 +182,7 @@ func makeShouldDisruptCandidate(np *v1.NodePool, policy v1.ConsolidationPolicy) 
 		},
 		instanceType:             it,
 		NodePool:                 np,
-		RescheduleDisruptionCost: PerNodeBaseDisruptionCost + 1, // non-empty so consolidation ShouldDisrupt accepts it
+		RescheduleDisruptionCost: disruptionutils.PerNodeBaseDisruptionCost + 1, // non-empty so consolidation ShouldDisrupt accepts it
 	}
 }
 

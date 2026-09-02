@@ -32,8 +32,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -291,7 +293,7 @@ var _ = Describe("Ranking", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool}, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(2))
 
@@ -795,7 +797,7 @@ var _ = Describe("Ranking", func() {
 	// bypass explicit for reviewers.
 	Context("Edge: direct-helper partition checks", func() {
 		It("should _Edge_ leave RankNodes a no-op on empty node list", func() {
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, nil, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, nil, map[string]*v1.NodePool{nodePool.Name: nodePool}, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(BeEmpty())
 		})
@@ -831,7 +833,7 @@ var _ = Describe("Ranking", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool}, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(2))
 
@@ -847,7 +849,7 @@ var _ = Describe("Ranking", func() {
 			}
 		})
 
-		It("should _Edge_ rank multiple disrupted+PDB-blocked nodes by pod count ascending", func() {
+		It("should _Edge_ keep every disrupted+PDB-blocked node at MinInt32 regardless of relative sort order", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -895,7 +897,7 @@ var _ = Describe("Ranking", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool}, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(3))
 
@@ -954,7 +956,7 @@ var _ = Describe("Ranking", func() {
 					stateNodes = append(stateNodes, n)
 				}
 
-				ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+				ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool}, nil)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(ranks).To(HaveLen(2))
 
@@ -1023,15 +1025,23 @@ var _ = Describe("Ranking", func() {
 			Expect(expectPodRank(normalPod)).To(BeNumerically(">", math.MinInt32))
 		})
 
-		It("should _Edge_ rank a node with only terminating pods lighter than a node with live pods", func() {
-			// Regression test for C4: sortByPodCount counts non-terminating
-			// pods only, so a mostly-drained node ranks ahead of a node with
-			// the same nominal pod count but no drain in progress. This
-			// reflects "how many pods will actually cost to move" rather than
-			// the raw pod list length. Both nodes route to Group C in this
-			// setup, so the assertion is on the relative rank ordering.
+		It("should _Edge_ rank a node with only terminating pods ahead of a node with live pods (higher SavingsRatio)", func() {
+			// Under the SavingsRatio DESC sort mirroring disruption.consolidation.sortCandidates:
+			// reschedulable pods (per pod.IsReschedulable) drive RescheduleDisruptionCost;
+			// RS-owned terminating pods are NOT reschedulable and drop out of the sum.
+			// With identical prices, the mostly-drained node's cost floor (base 1.0)
+			// yields a strictly higher ratio than the same-priced node still hosting a
+			// reschedulable pod, so it sorts first and receives the more-negative rank.
+			// DaemonSet pods and node-owned pods are treated the same way.
+			const it, zone, ct = "test-it", "test-zone-1", v1.CapacityTypeOnDemand
+			nodeLabels := map[string]string{
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: it,
+				corev1.LabelTopologyZone:       zone,
+				v1.CapacityTypeLabelKey:        ct,
+			}
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				ObjectMeta: metav1.ObjectMeta{Labels: nodeLabels},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1039,10 +1049,8 @@ var _ = Describe("Ranking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
-			// Node 0: three RS-owned pods, all with DeletionTimestamp set via
-			// finalizer + Delete (the standard test.expectations helper).
-			// Live count is 0 → this node sorts before node 1 in the
-			// pod-count-ascending ordering that feeds Group C rank assignment.
+			// Node 0: three RS-owned pods, all terminating. IsReschedulable
+			// filters them out → RescheduleDisruptionCost = 1.0 base → ratio Price/1.0.
 			terminatingPods := make([]*corev1.Pod, 3)
 			for i := range terminatingPods {
 				terminatingPods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
@@ -1052,19 +1060,35 @@ var _ = Describe("Ranking", func() {
 				ExpectDeletionTimestampSet(ctx, env.Client, p)
 			}
 
-			// Node 1: one RS-owned pod, no DeletionTimestamp. Live count is 1.
-			// Without the fix, its raw count (1) would rank BELOW node 0's
-			// raw count (3) — the assertion below would flip.
+			// Node 1: one live RS-owned pod. Reschedulable → adds ≥1 to the cost →
+			// ratio Price/(1.0 + evictionCost) < ratio for Node 0.
 			livePod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
 			ExpectApplied(ctx, env.Client, livePod)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
+			// Fake instance-type map so ResolveOfferingPrice returns a positive
+			// price for both nodes — otherwise Price=0 collapses both ratios to 0
+			// and the tie-break drops to node name, which is non-deterministic.
+			itMap := map[string]map[string]*cloudprovider.InstanceType{
+				nodePool.Name: {it: &cloudprovider.InstanceType{
+					Name: it,
+					Offerings: cloudprovider.Offerings{{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  ct,
+							corev1.LabelTopologyZone: zone,
+						}),
+						Price: 1.0,
+					}},
+				}},
+			}
+
 			var stateNodes []*state.StateNode
 			for n := range cluster.Nodes() {
 				stateNodes = append(stateNodes, n)
 			}
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool}, itMap)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(2))
 
@@ -1077,10 +1101,10 @@ var _ = Describe("Ranking", func() {
 					node1Rank = r.Rank
 				}
 			}
-			// Node 0 has zero live pods; node 1 has one. Node 0 must rank
-			// strictly deeper (more negative → higher delete priority).
+			// Node 0 (no reschedulable pods, ratio=1.0/1.0=1.0) must rank strictly
+			// deeper than Node 1 (one reschedulable pod, ratio=1.0/≥2.0≤0.5).
 			Expect(node0Rank).To(BeNumerically("<", node1Rank),
-				"terminating-only node (live count 0) must rank ahead of node with live pods (live count 1)")
+				"terminating-only node (higher SavingsRatio) must rank ahead of node with live reschedulable pod (lower ratio)")
 		})
 
 		It("should _Edge_ exclude kube-system bare pods from Group D", func() {
@@ -1112,7 +1136,7 @@ var _ = Describe("Ranking", func() {
 				stateNodes = append(stateNodes, n)
 			}
 
-			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool})
+			ranks, err := deletioncost.RankNodes(ctx, env.Client, fakeClock, stateNodes, map[string]*v1.NodePool{nodePool.Name: nodePool}, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ranks).To(HaveLen(2))
 			for _, r := range ranks {
