@@ -106,7 +106,8 @@ func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Clien
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
 		NewStaticDrift(cluster, provisioner, cp),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-		NewDrift(kubeClient, cluster, provisioner, recorder, clk),
+		// The drift method shares the Queue's per-NodePool back-off tracker: the Queue writes outcomes, Drift reads them.
+		NewDrift(kubeClient, cluster, provisioner, recorder, clk, queue.NodePoolBackoff()),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 		NewMultiNodeConsolidation(c),
 		// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
