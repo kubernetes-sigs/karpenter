@@ -22,9 +22,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reconciler"
+	"github.com/awslabs/operatorpkg/singleton"
 	"k8s.io/utils/clock"
+	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
 const (
@@ -34,20 +39,19 @@ const (
 	driftBackoffBaseDelay = 1 * time.Minute
 	// driftBackoffMaxDelay is the absolute ceiling on the (pre-jitter) back-off window.
 	driftBackoffMaxDelay = 10 * time.Minute
-	// driftBackoffGaugeInterval is how often StartMetrics refreshes the decaying
+	// driftBackoffGaugeInterval is how often the singleton controller re-publishes the decaying
 	// drift_backoff_seconds gauge. The gauge reports "seconds remaining", which shrinks in
 	// real time, so it must be re-published on a cadence rather than only on Fail/Reset.
 	driftBackoffGaugeInterval = 5 * time.Second
 )
 
-// NodePoolBackoff tracks per-NodePool drift replacement back-off. It is entirely in-memory
-// and safe for concurrent use. See designs/drift-per-nodepool-backoff.md for the rationale.
-//
+// NodePoolBackoff tracks per-NodePool drift replacement back-off.
+
 // A NodePool with persistently failing drift replacements is skipped during drift candidate
 // selection while it is backed off, so it stops monopolizing the single per-pass drift command
 // and stops burning wasted launch attempts. Once the window elapses the pool becomes eligible
 // again; a successful replacement resets it and a failure grows the window exponentially (with
-// jitter, capped at driftBackoffMaxDelay).
+// jitter, capped at driftBackoffMaxDelay). See designs/drift-per-nodepool-backoff.md for details.
 type NodePoolBackoff struct {
 	mu       sync.Mutex
 	clock    clock.Clock
@@ -57,8 +61,6 @@ type NodePoolBackoff struct {
 	maxLevel int
 	state    map[string]*backoffEntry // keyed by NodePool name
 
-	// gaugeInterval is how often StartMetrics refreshes the drift_backoff_seconds gauge.
-	gaugeInterval time.Duration
 	// published records the NodePools that currently have a drift_backoff_seconds series so
 	// stale series can be deleted once a pool becomes eligible again (reset or window elapsed).
 	published map[string]struct{}
@@ -87,23 +89,15 @@ func WithBackoffDelays(base, max time.Duration) NodePoolBackoffOption {
 	}
 }
 
-// WithGaugeInterval overrides how often StartMetrics refreshes the drift_backoff_seconds gauge.
-func WithGaugeInterval(d time.Duration) NodePoolBackoffOption {
-	return func(b *NodePoolBackoff) {
-		b.gaugeInterval = d
-	}
-}
-
 // NewNodePoolBackoff constructs a per-NodePool drift back-off tracker.
 func NewNodePoolBackoff(clk clock.Clock, opts ...NodePoolBackoffOption) *NodePoolBackoff {
 	b := &NodePoolBackoff{
-		clock:         clk,
-		rand:          rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // jitter does not need a cryptographic source
-		base:          driftBackoffBaseDelay,
-		max:           driftBackoffMaxDelay,
-		state:         map[string]*backoffEntry{},
-		gaugeInterval: driftBackoffGaugeInterval,
-		published:     map[string]struct{}{},
+		clock:     clk,
+		rand:      rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // jitter does not need a cryptographic source
+		base:      driftBackoffBaseDelay,
+		max:       driftBackoffMaxDelay,
+		state:     map[string]*backoffEntry{},
+		published: map[string]struct{}{},
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -167,31 +161,32 @@ func (b *NodePoolBackoff) Snapshot(nodePool string) (level int, until time.Time)
 	return 0, time.Time{}
 }
 
-// StartMetrics refreshes the decaying drift_backoff_seconds gauge on a fixed cadence until ctx is
-// canceled. The gauge reports "seconds remaining" in the current window, a value that shrinks in
-// real time, so re-publishing it periodically is what makes it decay between Fail/Reset events.
-// It is intended to be run once as a manager Runnable. A real-time ticker is used deliberately:
-// the cadence is a wall-clock refresh rate, independent of the (injectable) clock used to compute
-// window expiry, so tests can drive RefreshMetrics directly under a fake clock.
-func (b *NodePoolBackoff) StartMetrics(ctx context.Context) {
-	ticker := time.NewTicker(b.gaugeInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			b.clearMetrics()
-			return
-		case <-ticker.C:
-			b.RefreshMetrics()
-		}
-	}
+func (b *NodePoolBackoff) Name() string {
+	return "metrics.nodepool.driftbackoff"
 }
 
-// RefreshMetrics recomputes drift_backoff_seconds for every tracked NodePool: it publishes the
+// Reconcile refreshes the decaying drift_backoff_seconds gauge. The gauge reports "seconds
+// remaining" in the current window, a value that shrinks in real time, so re-publishing it
+// periodically is what makes it decay between Fail/Reset events. RequeueAfter (wall-clock) is
+// independent of the injectable clock used to compute window expiry, so tests can drive a single
+// reconcile under a fake clock.
+func (b *NodePoolBackoff) Reconcile(ctx context.Context) (reconciler.Result, error) {
+	ctx = injection.WithControllerName(ctx, b.Name()) //nolint:ineffassign,staticcheck
+	b.refreshMetrics()
+	return reconciler.Result{RequeueAfter: driftBackoffGaugeInterval}, nil
+}
+
+func (b *NodePoolBackoff) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named(b.Name()).
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(b))
+}
+
+// refreshMetrics recomputes drift_backoff_seconds for every tracked NodePool: it publishes the
 // seconds remaining for pools that are currently backed off and deletes the series for pools that
 // have become eligible again (reset, window elapsed) so the gauge never reports a stale value.
-// Exposed so it can run one iteration in tests without the ticker.
-func (b *NodePoolBackoff) RefreshMetrics() {
+func (b *NodePoolBackoff) refreshMetrics() {
 	now := b.clock.Now()
 
 	b.mu.Lock()
@@ -221,18 +216,6 @@ func (b *NodePoolBackoff) RefreshMetrics() {
 		DriftBackoffSeconds.Set(seconds, map[string]string{metrics.NodePoolLabel: nodePool})
 	}
 	for _, nodePool := range stale {
-		DriftBackoffSeconds.Delete(map[string]string{metrics.NodePoolLabel: nodePool})
-	}
-}
-
-// clearMetrics deletes every drift_backoff_seconds series this tracker has published. Called on
-// shutdown so a restarted process starts from a clean slate rather than leaving stale gauges.
-func (b *NodePoolBackoff) clearMetrics() {
-	b.mu.Lock()
-	published := b.published
-	b.published = map[string]struct{}{}
-	b.mu.Unlock()
-	for nodePool := range published {
 		DriftBackoffSeconds.Delete(map[string]string{metrics.NodePoolLabel: nodePool})
 	}
 }

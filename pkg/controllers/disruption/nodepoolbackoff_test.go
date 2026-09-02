@@ -148,42 +148,43 @@ var _ = Describe("NodePoolBackoff", func() {
 		// Ensure the global series doesn't leak into other specs.
 		AfterEach(func() {
 			backoff.Reset(pool)
-			backoff.RefreshMetrics()
+			ExpectSingletonReconciled(ctx, backoff)
 		})
 
 		It("publishes the seconds remaining while backed off and decays over time", func() {
 			backoff.Fail(pool)
 			_, until := backoff.Snapshot(pool)
 
-			backoff.RefreshMetrics()
+			result := ExpectSingletonReconciled(ctx, backoff)
+			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
 			ExpectMetricGaugeValue(disruption.DriftBackoffSeconds, until.Sub(fakeClock.Now()).Seconds(), map[string]string{metrics.NodePoolLabel: pool})
 
-			// Advancing the clock shrinks the reported value on the next refresh.
+			// Advancing the clock shrinks the reported value on the next reconcile.
 			fakeClock.Step(15 * time.Second)
-			backoff.RefreshMetrics()
+			ExpectSingletonReconciled(ctx, backoff)
 			ExpectMetricGaugeValue(disruption.DriftBackoffSeconds, until.Sub(fakeClock.Now()).Seconds(), map[string]string{metrics.NodePoolLabel: pool})
 		})
 
 		It("deletes the series once the pool is reset", func() {
 			backoff.Fail(pool)
-			backoff.RefreshMetrics()
+			ExpectSingletonReconciled(ctx, backoff)
 			_, ok := FindMetricWithLabelValues(driftBackoffSecondsMetric, map[string]string{metrics.NodePoolLabel: pool})
 			Expect(ok).To(BeTrue())
 
 			backoff.Reset(pool)
-			backoff.RefreshMetrics()
+			ExpectSingletonReconciled(ctx, backoff)
 			_, ok = FindMetricWithLabelValues(driftBackoffSecondsMetric, map[string]string{metrics.NodePoolLabel: pool})
 			Expect(ok).To(BeFalse())
 		})
 
 		It("deletes the series once the back-off window elapses", func() {
 			backoff.Fail(pool)
-			backoff.RefreshMetrics()
+			ExpectSingletonReconciled(ctx, backoff)
 			_, ok := FindMetricWithLabelValues(driftBackoffSecondsMetric, map[string]string{metrics.NodePoolLabel: pool})
 			Expect(ok).To(BeTrue())
 
 			expireWindow(pool)
-			backoff.RefreshMetrics()
+			ExpectSingletonReconciled(ctx, backoff)
 			_, ok = FindMetricWithLabelValues(driftBackoffSecondsMetric, map[string]string{metrics.NodePoolLabel: pool})
 			Expect(ok).To(BeFalse())
 		})
