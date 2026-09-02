@@ -51,9 +51,10 @@ type Liveness struct {
 // If we don't see the node within this time, then we should delete the NodeClaim and try again
 
 const (
-	registrationTimeout       = time.Minute * 15
-	registrationTimeoutReason = "registration_timeout"
-	launchTimeoutReason       = "launch_timeout"
+	registrationTimeout = time.Minute * 15
+	// Sourced from pkg/metrics so the documented reason values stay in one place.
+	registrationTimeoutReason = metrics.RegistrationTimeoutReason
+	launchTimeoutReason       = metrics.LaunchTimeoutReason
 )
 
 // LaunchTimeout is a heuristic time that we expect to be able to launch within

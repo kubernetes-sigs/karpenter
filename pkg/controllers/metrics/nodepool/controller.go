@@ -50,9 +50,9 @@ var (
 			Name:      "limit",
 			Help:      "Limits specified on the nodepool that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
 		},
-		[]string{
-			metrics.ResourceTypeLabel,
-			metrics.NodePoolLabel,
+		[]opmetrics.Label{
+			metrics.ResourceType,
+			metrics.NodePool,
 		},
 	)
 	Usage = opmetrics.NewPrometheusGauge(
@@ -63,9 +63,9 @@ var (
 			Name:      "usage",
 			Help:      "The amount of resources that have been provisioned for a nodepool. Labeled by nodepool name and resource type.",
 		},
-		[]string{
-			metrics.ResourceTypeLabel,
-			metrics.NodePoolLabel,
+		[]opmetrics.Label{
+			metrics.ResourceType,
+			metrics.NodePool,
 		},
 	)
 	ClusterCost = opmetrics.NewPrometheusGauge(
@@ -76,7 +76,7 @@ var (
 			Name:      "cost_total",
 			Help:      "Total cost of the nodepool from Karpenter's perspective. Units are determined by the cloud provider. Not an authoritative source for billing. Includes modifications due to NodeOverlays",
 		},
-		[]string{metrics.NodePoolLabel},
+		[]opmetrics.Label{metrics.NodePool},
 	)
 )
 
