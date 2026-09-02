@@ -80,6 +80,10 @@ type Cluster struct {
 	// the state, interested disruption methods can check to see if this has changed to
 	// optimize and not try to disrupt if nothing about the cluster has changed.
 	clusterState time.Time
+	// Nominated nodes are excluded from disruption, but nomination expiry is a passive
+	// clock check that produces no state update. Track the latest expiry so that
+	// ConsolidationState can mark the cluster unconsolidated once it lapses.
+	latestNominationExpiry time.Time
 
 	unsyncedTimeMu      sync.Mutex
 	unsyncedStartTime   time.Time
@@ -293,6 +297,11 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 
 	if n, ok := c.nodes[providerID]; ok {
 		n.Nominate(ctx, c.clock) // extends nomination window if already nominated
+		c.clusterStateMu.Lock()
+		if n.nominatedUntil.After(c.latestNominationExpiry) {
+			c.latestNominationExpiry = n.nominatedUntil.Time
+		}
+		c.clusterStateMu.Unlock()
 	}
 }
 
@@ -612,7 +621,14 @@ func (c *Cluster) MarkUnconsolidated() time.Time {
 func (c *Cluster) ConsolidationState() time.Time {
 	c.clusterStateMu.RLock()
 	state := c.clusterState
+	nominationExpiry := c.latestNominationExpiry
 	c.clusterStateMu.RUnlock()
+
+	// A nomination that expired after the last state change frees a node up for
+	// disruption, so treat the expiry as a state change.
+	if nominationExpiry.After(state) && !c.clock.Now().Before(nominationExpiry) {
+		return c.MarkUnconsolidated()
+	}
 
 	// time.Time uses a monotonic clock for these comparisons
 	if c.clock.Since(state) < time.Minute*5 {
@@ -638,6 +654,7 @@ func (c *Cluster) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clusterState = time.Time{}
+	c.latestNominationExpiry = time.Time{}
 	c.unsyncedStartTime = time.Time{}
 	c.lastUnsyncedLogTime = time.Time{}
 	c.hasSynced.Store(false)
@@ -966,6 +983,10 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		return
 	}
 	if old.MarkedForDeletion() != new.MarkedForDeletion() {
+		c.MarkUnconsolidated()
+		return
+	}
+	if old.Consolidatable() != new.Consolidatable() {
 		c.MarkUnconsolidated()
 		return
 	}
