@@ -85,6 +85,28 @@ var _ = Describe("buildVirtualPods", func() {
 		}
 		Expect(BuildVirtualPods(cb, spec)).To(BeNil())
 	})
+
+	It("should build only the unfilled remainder for a one-shot buffer (shrink-as-fill)", func() {
+		cb := test.ReadyBuffer("web", 4)
+		cb.Spec.RefillStrategy = ptr(autoscalingv1beta1.RefillStrategyNone)
+		cb.Status.ConsumedReplicas = ptr(int32(3))
+		spec := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
+		Expect(BuildVirtualPods(cb, spec)).To(HaveLen(1))
+
+		cb.Status.ConsumedReplicas = ptr(int32(4))
+		Expect(BuildVirtualPods(cb, spec)).To(BeNil())
+	})
+
+	It("should ignore consumedReplicas for a recreate buffer", func() {
+		cb := test.ReadyBuffer("web", 4)
+		cb.Status.ConsumedReplicas = ptr(int32(3))
+		spec := corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
+		Expect(BuildVirtualPods(cb, spec)).To(HaveLen(4))
+	})
 })
 
 var _ = Describe("sanitizeVirtualPodSpec", func() {
