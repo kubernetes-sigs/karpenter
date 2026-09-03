@@ -206,6 +206,50 @@ var _ = Describe("Pod Metrics", func() {
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_bound_duration_seconds", map[string]string{})
 		Expect(found).To(BeTrue())
 	})
+	DescribeTable("should label the pod binding metrics with dynamic_resources",
+		func(pod *corev1.Pod, expected string) {
+			if expected == "true" && env.Version.Minor() < 34 {
+				Skip("DRA is only available in K8s versions >= 1.34.x")
+			}
+			pod.Status.Phase = corev1.PodPending
+
+			env.Clock.Step(1 * time.Hour)
+			cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{}, map[string][]*corev1.Pod{"n1": {pod}}, map[string][]*corev1.Pod{"nc1": {pod}})
+
+			// PodScheduled condition does not exist yet, so the unbound metrics are emitted labeled by dynamic_resources.
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+			_, found := FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
+				"name":              pod.GetName(),
+				"namespace":         pod.GetNamespace(),
+				"dynamic_resources": expected,
+			})
+			Expect(found).To(BeTrue())
+			_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+				"name":              pod.GetName(),
+				"namespace":         pod.GetNamespace(),
+				"dynamic_resources": expected,
+			})
+			Expect(found).To(BeTrue())
+
+			// Pod becomes scheduled and running, firing the bound duration metrics labeled by dynamic_resources.
+			pod.Status.Phase = corev1.PodRunning
+			pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: metav1.Now()}}
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+			_, found = FindMetricWithLabelValues("karpenter_pods_bound_duration_seconds", map[string]string{
+				"dynamic_resources": expected,
+			})
+			Expect(found).To(BeTrue())
+			_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_bound_duration_seconds", map[string]string{
+				"dynamic_resources": expected,
+			})
+			Expect(found).To(BeTrue())
+		},
+		Entry("when the pod does not request dynamic resources", test.Pod(), "false"),
+		Entry("when the pod requests dynamic resources via a pod-level resource claim",
+			test.Pod(test.PodOptions{ResourceClaims: []corev1.PodResourceClaim{test.PodResourceClaimReference("gpu", "gpu-claim")}}), "true"),
+	)
 	It("should update the pod startup and unstarted time metrics", func() {
 		p := test.Pod()
 		p.Status.Phase = corev1.PodPending
@@ -530,6 +574,58 @@ var _ = Describe("Pod Metrics", func() {
 		})
 		Expect(found).To(BeFalse())
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+	})
+	It("should delete provisioning undecided metrics when the pod has a NodeName but PodScheduled condition is not True", func() {
+		node := test.Node()
+		p := test.Pod()
+		p.Status.Phase = corev1.PodPending
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", LastTransitionTime: metav1.Now()}}
+		ExpectApplied(ctx, env.Client, node, p)
+
+		cluster.AckPods(p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found := FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		// The pod gets bound, but the PodScheduled condition never transitions to True
+		ExpectManualBinding(ctx, env.Client, p, node)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+	})
+	It("should delete provisioning undecided metrics when the pod is terminal without PodScheduled condition being True", func() {
+		p := test.Pod()
+		p.Status.Phase = corev1.PodPending
+		ExpectApplied(ctx, env.Client, p)
+
+		cluster.AckPods(p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found := FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		// Pod goes directly to Failed phase without PodScheduled condition being True
+		p.Status.Phase = corev1.PodFailed
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", LastTransitionTime: metav1.Now()}}
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})

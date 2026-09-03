@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -96,7 +98,7 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 		// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
 		its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
 		if err != nil {
-			return "", err
+			return "", serrors.Wrap(fmt.Errorf("checking instance type drift, %w", err), "NodeClaim", klog.KObj(nodeClaim))
 		}
 		if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
 			return reason, nil
@@ -108,7 +110,7 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	// Then check if it's drifted from the cloud provider side.
 	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
-		return "", err
+		return "", serrors.Wrap(fmt.Errorf("checking cloud provider drift, %w", err), "NodeClaim", klog.KObj(nodeClaim))
 	}
 	return driftedReason, nil
 }

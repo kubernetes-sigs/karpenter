@@ -91,7 +91,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 				return nil, client.IgnoreNotFound(err)
 			}
 			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-				metrics.ReasonLabel:              "insufficient_capacity",
+				metrics.ReasonLabel:              metrics.InsufficientCapacityReason,
 				metrics.NodePoolLabel:            nodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel:        nodeClaim.Labels[v1.CapacityTypeLabelKey],
 				metrics.ConsolidationPolicyLabel: "",
@@ -104,7 +104,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 				return nil, client.IgnoreNotFound(err)
 			}
 			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-				metrics.ReasonLabel:              "nodeclass_not_ready",
+				metrics.ReasonLabel:              metrics.NodeClassNotReadyReason,
 				metrics.NodePoolLabel:            nodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel:        nodeClaim.Labels[v1.CapacityTypeLabelKey],
 				metrics.ConsolidationPolicyLabel: "",

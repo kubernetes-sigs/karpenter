@@ -63,7 +63,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	queue = terminator.NewQueue(env.Clock, env.Client, recorder)
 	healthController = health.NewController(env.Client, cloudProvider, env.Clock, recorder)
 })
 
@@ -403,7 +403,7 @@ var _ = Describe("Node Health", func() {
 				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
 			ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
-				health.Condition:      pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
+				health.ConditionLabel: pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
 				metrics.NodePoolLabel: nodePool.Name,
 			})
 		})

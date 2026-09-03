@@ -17,6 +17,9 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -29,12 +32,22 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	cloudprovideroverlay "sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
+
+type erroringCloudProvider struct {
+	cloudprovider.CloudProvider
+	err error
+}
+
+func (e *erroringCloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider.DriftReason, error) {
+	return "", e.err
+}
 
 var _ = Describe("Drift", func() {
 	var nodePool *v1.NodePool
@@ -91,6 +104,38 @@ var _ = Describe("Drift", func() {
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+	})
+	It("should add resource context to instance type errors", func() {
+		providerErr := errors.New("provider unavailable")
+		cp.ErrorsForNodePool[nodePool.Name] = providerErr
+		controller := disruption.NewController(env.Clock, env.Client, cloudprovideroverlay.Decorate(cp, nil, nil))
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		env.Clock.Step(time.Hour * 2)
+
+		_, err := controller.Reconcile(ctx, nodeClaim)
+		Expect(err).To(MatchError(fmt.Sprintf(
+			"getting drift, checking instance type drift, getting cloud provider instance types, %s (NodePool=%s) (NodeClaim=%s)",
+			providerErr,
+			nodePool.Name,
+			nodeClaim.Name,
+		)))
+		Expect(errors.Is(err, providerErr)).To(BeTrue())
+	})
+	It("should add NodeClaim context to drift errors", func() {
+		providerErr := errors.New("provider unavailable")
+		controller := disruption.NewController(env.Clock, env.Client, &erroringCloudProvider{
+			CloudProvider: cp,
+			err:           providerErr,
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		_, err := controller.Reconcile(ctx, nodeClaim)
+		Expect(err).To(MatchError(fmt.Sprintf(
+			"getting drift, checking cloud provider drift, %s (NodeClaim=%s)",
+			providerErr,
+			nodeClaim.Name,
+		)))
+		Expect(errors.Is(err, providerErr)).To(BeTrue())
 	})
 	It("should detect stale instance type drift if the instance type doesn't exist", func() {
 		cp.InstanceTypes = nil
