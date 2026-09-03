@@ -105,11 +105,20 @@ jobs:
       with:
         path: ./cache-bigger
         key: ${{ runner.os }}-perf-benchmark-bigger-${{ inputs.test_name || inputs.suite }}
-    # Regression thresholds are on the batch median only. A variance-gate
-    # (e.g. failing when the batch CV grows beyond the historical CV) is
-    # tracked as future work — see PR#2994 discussion. Adding it here would
-    # require carrying CV across baselines, which the current cache schema
-    # does not persist.
+    - name: Download previous benchmark data (cv, informational)
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ./cache-cv
+        key: ${{ runner.os }}-perf-benchmark-cv-${{ inputs.test_name || inputs.suite }}
+    # The batch median regression alerts run below with fail-on-alert: true.
+    # An additional CV entry is emitted per metric so a reviewer can see when
+    # a batch's within-batch variance grows beyond its historical envelope.
+    # It runs under fail-on-alert: false so a noise spike comments but does
+    # not block the pipeline — this is the informational answer to Ryan's
+    # PR#2994 variance question. benchmark-action persists CV entries in
+    # the same cache format as the median entries; no cache-schema change
+    # is required.
     - name: Compare smaller-is-better metrics
       if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
       uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
@@ -144,6 +153,30 @@ jobs:
         comment-on-alert: true
         alert-comment-cc-users: '@nathangeology'
         summary-always: true
+    - name: Compare batch CV (informational only)
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+      with:
+        name: Karpenter Performance (${{ inputs.test_name || inputs.suite }}) - batch CV
+        tool: customSmallerIsBetter
+        output-file-path: ${{ env.OUTPUT_DIR }}/benchmark-results-cv.json
+        external-data-json-path: ./cache-cv/benchmark-data.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Threshold is a benchmark-action ratio: alert fires when the
+        # current batch CV is >= 2x the previous batch CV for that metric.
+        # Derived empirically from 15 push-triggered kind-perf-e2e runs on
+        # kubernetes-sigs/karpenter@main between 2026-08-19 and 2026-09-02
+        # (n=120 (sub-test, metric) samples): cross-metric P95 CV = 43%,
+        # median CV = 3.8%, per-metric P95/median ratios span 1.7x-7x.
+        # Setting threshold to 200% (2x) is the informational analog to
+        # the 2 sigma heuristic in @ryan-mist's PR#2994 variance comment
+        # (id 3857936029) — it fires when a batch's within-batch variance
+        # doubles vs. its prior baseline without gating the pipeline.
+        alert-threshold: '200%'
+        fail-on-alert: false
+        comment-on-alert: true
+        alert-comment-cc-users: '@nathangeology'
+        summary-always: true
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -154,6 +187,7 @@ jobs:
           ${{ env.OUTPUT_DIR }}/aggregated_summary.json
           ${{ env.OUTPUT_DIR }}/benchmark-results-smaller.json
           ${{ env.OUTPUT_DIR }}/benchmark-results-bigger.json
+          ${{ env.OUTPUT_DIR }}/benchmark-results-cv.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
         retention-days: 30

@@ -88,6 +88,7 @@ func TestRunEndToEnd(t *testing.T) {
 
 	assertMetricGrouping(t, tmp)
 	assertSummaryMedians(t, tmp)
+	assertCVEntries(t, tmp)
 }
 
 // seedSyntheticIterations lays down iter_1..iter_N per-test performance
@@ -178,6 +179,42 @@ func TestRunHandlesMissingIterationDir(t *testing.T) {
 	entries := loadEntries(t, filepath.Join(tmp, "benchmark-results-smaller.json"))
 	if len(entries) != 0 {
 		t.Errorf("expected empty smaller results, got %d", len(entries))
+	}
+	// The CV file must also be present-but-empty so the informational
+	// benchmark-action step doesn't fail on a missing input path.
+	cvEntries := loadEntries(t, filepath.Join(tmp, "benchmark-results-cv.json"))
+	if len(cvEntries) != 0 {
+		t.Errorf("expected empty cv results, got %d", len(cvEntries))
+	}
+}
+
+// assertCVEntries verifies the CV benchmark file is emitted, contains an
+// entry for every metric-test combination in the summary, is tagged with
+// the cv-percent unit, and embeds the batch median + stddev + n in Extra
+// so a benchmark-action alert comment carries enough context to interpret.
+func assertCVEntries(t *testing.T, dir string) {
+	t.Helper()
+	entries := loadEntries(t, filepath.Join(dir, "benchmark-results-cv.json"))
+	if len(entries) == 0 {
+		t.Fatal("expected at least one CV entry")
+	}
+	// Expected count: sum of metrics present across test_a and test_b in the
+	// seed helper. Test A supplies Duration + Final Nodes + CPU Util +
+	// Efficiency + Mem Util + Rounds = 6. Test B supplies Controller CPU
+	// + Final Nodes = 2. Total = 8.
+	if got, want := len(entries), 8; got != want {
+		t.Errorf("cv entries: got %d, want %d", got, want)
+	}
+	for _, e := range entries {
+		if e.Unit != "cv-percent" {
+			t.Errorf("cv unit: got %q, want %q for entry %s", e.Unit, "cv-percent", e.Name)
+		}
+		if !strings.Contains(e.Name, "CV%") {
+			t.Errorf("cv name missing CV%% marker: %s", e.Name)
+		}
+		if !strings.Contains(e.Extra, "median=") || !strings.Contains(e.Extra, "stddev=") {
+			t.Errorf("cv extra missing median/stddev context: %s", e.Extra)
+		}
 	}
 }
 

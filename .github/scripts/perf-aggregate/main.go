@@ -130,9 +130,41 @@ func run(outputDir string, iterations int, out *os.File) error {
 	}
 	sort.Strings(testKeys)
 
-	summary := map[string]map[string]stats{}
-	var smallerResults, biggerResults []benchmarkEntry
+	summary, results := buildResults(testKeys, reportsByTest)
 
+	if err := writeJSON(filepath.Join(outputDir, "benchmark-results-smaller.json"), results.smaller); err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(outputDir, "benchmark-results-bigger.json"), results.bigger); err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(outputDir, "benchmark-results-cv.json"), results.cv); err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(outputDir, "aggregated_summary.json"), summary); err != nil {
+		return err
+	}
+	printTable(out, testKeys, summary)
+	fmt.Fprintf(out, "\nEmitted %d smaller-is-better, %d bigger-is-better, %d CV metrics\n",
+		len(results.smaller), len(results.bigger), len(results.cv))
+	return nil
+}
+
+// benchmarkResults holds the three parallel benchmark-action arrays this
+// aggregator emits: one gating file per direction plus one informational
+// CV file.
+type benchmarkResults struct {
+	smaller []benchmarkEntry
+	bigger  []benchmarkEntry
+	cv      []benchmarkEntry
+}
+
+// buildResults computes stats for every (test, metric) pair and appends
+// the corresponding gating and CV benchmark entries. It also returns the
+// summary map keyed by test then metric display name.
+func buildResults(testKeys []string, reportsByTest map[string][]map[string]any) (map[string]map[string]stats, benchmarkResults) {
+	summary := map[string]map[string]stats{}
+	var results benchmarkResults
 	for _, testKey := range testKeys {
 		datas := reportsByTest[testKey]
 		if len(datas) == 0 {
@@ -147,39 +179,45 @@ func run(outputDir string, iterations int, out *os.File) error {
 			}
 			s := computeStats(values)
 			testSummary[m.display] = s
-			entry := benchmarkEntry{
-				Name:  fmt.Sprintf("%s - %s (median, n=%d)", name, m.display, s.N),
-				Unit:  m.unit,
-				Value: s.Median,
-				Range: fmt.Sprintf("%v", s.Stddev),
-				Extra: fmt.Sprintf(
-					"mean=%v stddev=%v cv=%v%% min=%v max=%v n=%d",
-					s.Mean, s.Stddev, s.CVPct, s.Min, s.Max, s.N,
-				),
-			}
-			switch m.dir {
-			case biggerIsBetter:
-				biggerResults = append(biggerResults, entry)
-			default:
-				smallerResults = append(smallerResults, entry)
-			}
+			results.appendMetric(name, m, s)
 		}
 		summary[testKey] = testSummary
 	}
+	return summary, results
+}
 
-	if err := writeJSON(filepath.Join(outputDir, "benchmark-results-smaller.json"), smallerResults); err != nil {
-		return err
+// appendMetric records both the gating (median-based) entry and the
+// informational CV entry for a single (test, metric) pair. Gating entries
+// route to smaller/bigger by metric direction; CV entries share a single
+// smaller-is-better list because lower batch variance is always better.
+func (r *benchmarkResults) appendMetric(name string, m metricSpec, s stats) {
+	gate := benchmarkEntry{
+		Name:  fmt.Sprintf("%s - %s (median, n=%d)", name, m.display, s.N),
+		Unit:  m.unit,
+		Value: s.Median,
+		Range: fmt.Sprintf("%v", s.Stddev),
+		Extra: fmt.Sprintf(
+			"mean=%v stddev=%v cv=%v%% min=%v max=%v n=%d",
+			s.Mean, s.Stddev, s.CVPct, s.Min, s.Max, s.N,
+		),
 	}
-	if err := writeJSON(filepath.Join(outputDir, "benchmark-results-bigger.json"), biggerResults); err != nil {
-		return err
+	if m.dir == biggerIsBetter {
+		r.bigger = append(r.bigger, gate)
+	} else {
+		r.smaller = append(r.smaller, gate)
 	}
-	if err := writeJSON(filepath.Join(outputDir, "aggregated_summary.json"), summary); err != nil {
-		return err
-	}
-	printTable(out, testKeys, summary)
-	fmt.Fprintf(out, "\nEmitted %d smaller-is-better and %d bigger-is-better metrics\n",
-		len(smallerResults), len(biggerResults))
-	return nil
+	// CV entries feed an informational-only benchmark-action invocation
+	// (fail-on-alert: false). They surface when a batch's within-batch
+	// coefficient of variation grows beyond its historical envelope, so a
+	// reviewer can notice noise-floor regressions without gating the
+	// pipeline — the informational answer to Ryan's PR#2994 variance
+	// question (comment 3857936029).
+	r.cv = append(r.cv, benchmarkEntry{
+		Name:  fmt.Sprintf("%s - %s (CV%%, n=%d)", name, m.display, s.N),
+		Unit:  "cv-percent",
+		Value: s.CVPct,
+		Extra: fmt.Sprintf("median=%v stddev=%v n=%d", s.Median, s.Stddev, s.N),
+	})
 }
 
 // collectReports loads every iter_N/*_performance_report.json under
