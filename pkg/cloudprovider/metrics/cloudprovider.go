@@ -33,8 +33,9 @@ const (
 	metricLabelMethod   = "method"
 	metricLabelProvider = "provider"
 	metricLabelError    = "error"
-	// MetricLabelErrorDefaultVal is the default string value that represents "error type unknown"
-	MetricLabelErrorDefaultVal = ""
+	// MetricLabelErrorDefaultVal is the `error` value for any error outside the
+	// well-known categories.
+	MetricLabelErrorDefaultVal = "unknown"
 )
 
 // Well-known `error` dimension values. These are metric-only values, so they are
@@ -53,6 +54,12 @@ var (
 		Name: "InsufficientCapacityError",
 		Help: "The cloud provider had insufficient capacity to fulfill the request.",
 	}
+	// UnknownError is the value emitted for any error outside the well-known
+	// categories above (GetErrorTypeLabelValue's default).
+	UnknownError = opmetrics.Value{
+		Name: MetricLabelErrorDefaultVal,
+		Help: "An error that does not match a well-known CloudProvider error category.",
+	}
 )
 
 // Package-local metric dimensions for the CloudProvider metrics. The controller
@@ -69,7 +76,7 @@ var (
 	Error = opmetrics.Label{
 		Name:   metricLabelError,
 		Help:   "The category of error returned by the CloudProvider call.",
-		Values: []opmetrics.Value{NodeClaimNotFoundError, NodeClassNotReadyError, InsufficientCapacityError},
+		Values: []opmetrics.Value{NodeClaimNotFoundError, NodeClassNotReadyError, InsufficientCapacityError, UnknownError},
 	}
 )
 
