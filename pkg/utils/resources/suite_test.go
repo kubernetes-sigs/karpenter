@@ -36,6 +36,15 @@ func TestResources(t *testing.T) {
 }
 
 var _ = Describe("Resources", func() {
+	DescribeTable("Utilization Ratio",
+		func(resourceName v1.ResourceName, utilized, allocatable string, expected float64) {
+			Expect(resources.UtilizationRatio(resourceName, resource.MustParse(utilized), resource.MustParse(allocatable))).To(BeNumerically("~", expected))
+		},
+		Entry("CPU", v1.ResourceCPU, "250m", "1", 0.25),
+		Entry("memory", v1.ResourceMemory, "1Gi", "4Gi", 0.25),
+		Entry("zero allocatable", v1.ResourceCPU, "1", "0", 0.0),
+	)
+
 	Context("Resource Calculations", func() {
 		It("should calculate resource requests based off of the sum of containers and sidecarContainers", func() {
 			pod := test.Pod(test.PodOptions{
