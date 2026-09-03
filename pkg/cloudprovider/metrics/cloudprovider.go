@@ -204,7 +204,7 @@ func getLabelsMapForError(ctx context.Context, d *decorator, method, nodePoolNam
 		metricLabelMethod:       method,
 		metricLabelProvider:     d.Name(),
 		metricLabelError:        GetErrorTypeLabelValue(err),
-		metrics.NodePoolLabel:    nodePoolName,
+		metrics.NodePoolLabel:   nodePoolName,
 	}
 }
 
