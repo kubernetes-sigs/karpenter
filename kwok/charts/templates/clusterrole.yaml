@@ -71,7 +71,7 @@ rules:
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["delete", "patch"]
+    verbs: ["delete", "patch", "update"]
   {{- with .Values.additionalClusterRoleRules -}}
   {{ toYaml . | nindent 2 }}
   {{- end -}}
