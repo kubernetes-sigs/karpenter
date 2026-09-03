@@ -114,7 +114,7 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodeNames ...string)
 		}
 		var podList corev1.PodList
 		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
-			return nil, fmt.Errorf("listing pods, %w", err)
+			return nil, serrors.Wrap(fmt.Errorf("listing pods, %w", err), "Node", klog.KRef("", nodeName))
 		}
 		for i := range podList.Items {
 			pods = append(pods, &podList.Items[i])
@@ -173,7 +173,7 @@ func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client
 	nodeNames := lo.Map(nodes, func(n *corev1.Node, _ int) string { return n.Name })
 	pods, err := GetPods(ctx, kubeClient, nodeNames...)
 	if err != nil {
-		return nil, fmt.Errorf("listing pods, %w", err)
+		return nil, err
 	}
 
 	pdbs, err := pdb.NewLimits(ctx, kubeClient)

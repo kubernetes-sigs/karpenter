@@ -18,12 +18,15 @@ package node_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -38,6 +41,15 @@ var (
 	ctx context.Context
 	env *test.Environment
 )
+
+type listErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c *listErrorClient) List(context.Context, client.ObjectList, ...client.ListOption) error {
+	return c.err
+}
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -93,6 +105,19 @@ var _ = Describe("NodeUtils", func() {
 		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
+	})
+	It("should add node context to pod listing errors", func() {
+		node := test.Node()
+		listErr := errors.New("api unavailable")
+		kubeClient := &listErrorClient{Client: env.Client, err: listErr}
+
+		_, err := nodeutils.GetPods(ctx, kubeClient, node.Name)
+		Expect(err).To(MatchError(fmt.Sprintf("listing pods, %s (Node=%s)", listErr, node.Name)))
+		Expect(errors.Is(err, listErr)).To(BeTrue())
+
+		_, err = nodeutils.GetCurrentlyReschedulablePods(ctx, kubeClient, env.Clock, test.NewEventRecorder(), node)
+		Expect(err).To(MatchError(fmt.Sprintf("listing pods, %s (Node=%s)", listErr, node.Name)))
+		Expect(errors.Is(err, listErr)).To(BeTrue())
 	})
 	Context("ReschedulablePods", func() {
 		It("should return no pods for an empty node name", func() {

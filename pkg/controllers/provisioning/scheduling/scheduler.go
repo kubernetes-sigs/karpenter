@@ -500,8 +500,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	controllerName := injection.GetControllerName(ctx)
 	for zone, count := range podCountByZone {
 		PendingPodsByEffectiveZone.Set(float64(count), map[string]string{
-			ControllerLabel: controllerName,
-			"zone":          zone,
+			ControllerLabel:   controllerName,
+			metrics.ZoneLabel: zone,
 		})
 	}
 
@@ -593,28 +593,33 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 		return err
 	}
 
+	// determine the volumes that will be mounted if the pod schedules
+	volumes, err := scheduling.GetVolumes(ctx, s.kubeClient, pod)
+	if err != nil {
+		return err
+	}
 	// first try to schedule against an in-flight real node
-	if err := s.addToExistingNode(ctx, pod); err == nil {
+	if err := s.addToExistingNode(ctx, pod, volumes); err == nil {
 		return nil
 	}
 	// Consider using https://pkg.go.dev/container/heap
 	sort.Slice(s.newNodeClaims, func(a, b int) bool { return len(s.newNodeClaims[a].Pods) < len(s.newNodeClaims[b].Pods) })
 
 	// Pick existing node that we are about to create
-	if err := s.addToInflightNode(ctx, pod); err == nil {
+	if err := s.addToInflightNode(ctx, pod, volumes); err == nil {
 		return nil
 	}
 	if len(s.nodeClaimTemplates) == 0 {
 		return fmt.Errorf("nodepool requirements filtered out all available instance types")
 	}
-	err := s.addToNewNodeClaim(ctx, pod)
+	err = s.addToNewNodeClaim(ctx, pod, volumes)
 	if err == nil {
 		return nil
 	}
 	return err
 }
 
-func (s *Scheduler) addToExistingNode(ctx context.Context, p *corev1.Pod) error {
+func (s *Scheduler) addToExistingNode(ctx context.Context, p *corev1.Pod, volumes scheduling.Volumes) error {
 	idx := math.MaxInt
 	var mu sync.Mutex
 
@@ -622,11 +627,6 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, p *corev1.Pod) error 
 	var requirements scheduling.Requirements
 	var allocationResult *dynamicresources.AllocationResult
 
-	// determine the volumes that will be mounted if the pod schedules
-	volumes, err := scheduling.GetVolumes(ctx, s.kubeClient, p)
-	if err != nil {
-		return err
-	}
 	parallelizeUntil(s.numConcurrentReconciles, len(s.existingNodes), func(i int) bool {
 		if s.existingNodes[i].isUnderConsolidateAfter && (!pod.IsPending(p) && !s.deletingNodeNames.Has(p.Spec.NodeName)) {
 			// We shouldn't try to schedule candidate pods onto nodes that are under consolidate after.
@@ -658,7 +658,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, p *corev1.Pod) error 
 	return fmt.Errorf("failed scheduling pod to existing nodes")
 }
 
-func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) error {
+func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) error {
 	idx := math.MaxInt
 	var mu sync.Mutex
 
@@ -668,7 +668,7 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	var offeringsToReserve []*cloudprovider.Offering
 	var allocationResult *dynamicresources.AllocationResult
 	parallelizeUntil(s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) bool {
-		r, its, ofr, result, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], false, s.allocator)
+		r, its, ofr, result, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, false, s.allocator)
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
@@ -688,14 +688,14 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 		return true
 	})
 	if inflightNodeClaim != nil {
-		inflightNodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve, allocationResult, s.allocator)
+		inflightNodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, volumes, offeringsToReserve, allocationResult, s.allocator)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
 }
 
 //nolint:gocyclo
-func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) error {
+func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volumes scheduling.Volumes) error {
 	idx := math.MaxInt
 	var mu sync.Mutex
 
@@ -729,7 +729,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
-		r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
+		r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
 		if err != nil {
 			errs[i] = err
 
@@ -764,8 +764,8 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		}
 
 		_, minValuesRelaxed := lo.Find(nodeClaim.Requirements.Keys().UnsortedList(), func(k string) bool {
-			updated := r.Get(k).MinValues
-			original := nodeClaim.Requirements.Get(k).MinValues
+			updated := r.Get(k).MinValues()
+			original := nodeClaim.Requirements.Get(k).MinValues()
 			return original != nil && updated != nil && lo.FromPtr(updated) < lo.FromPtr(original)
 		})
 		if minValuesRelaxed {
@@ -784,7 +784,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	})
 	if newNodeClaim != nil {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
-		newNodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve, allocationResult, s.allocator)
+		newNodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, volumes, offeringsToReserve, allocationResult, s.allocator)
 		s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil

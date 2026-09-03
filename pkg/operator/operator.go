@@ -68,6 +68,15 @@ import (
 
 var AppName = "karpenter"
 
+// build_info metric dimensions. These describe the build the running binary was
+// produced from.
+var (
+	buildVersion   = opmetrics.Label{Name: "version", Help: "The Karpenter version the binary was built from."}
+	buildGoVersion = opmetrics.Label{Name: "goversion", Help: "The Go version the binary was compiled with."}
+	buildGoArch    = opmetrics.Label{Name: "goarch", Help: "The target architecture the binary was compiled for."}
+	buildCommit    = opmetrics.Label{Name: "commit", Help: "The git commit the binary was built from."}
+)
+
 var (
 	BuildInfo = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -76,7 +85,7 @@ var (
 			Name:      "build_info",
 			Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
 		},
-		[]string{"version", "goversion", "goarch", "commit"},
+		[]opmetrics.Label{buildVersion, buildGoVersion, buildGoArch, buildCommit},
 	)
 )
 
@@ -168,6 +177,10 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 
 	log.FromContext(ctx).WithValues("version", Version).V(1).Info("discovered karpenter version")
+
+	if cfg := options.FromContext(ctx).SchedulerConfig; cfg != nil && cfg.PodTopologySpread != nil && len(cfg.PodTopologySpread.DefaultConstraints) != 0 {
+		log.FromContext(ctx).WithValues("default-topology-spread-constraints", cfg.PodTopologySpread.DefaultConstraints).Info("scheduler-config is set: applying these default topology spread constraints during scheduling to pods that declare none of their own")
+	}
 
 	// Manager
 	mgrOpts := ctrl.Options{

@@ -48,6 +48,15 @@ const (
 	managed   = "managed"
 )
 
+// Fixed node metric dimensions. The remaining dimensions are the cloud
+// provider's well-known labels, which are self-describing and wrapped without
+// help text (see nodeLabelNames).
+var (
+	nodeNameLabel  = opmetrics.Label{Name: nodeName, Help: "The name of the node."}
+	nodePhaseLabel = opmetrics.Label{Name: nodePhase, Help: "The node's lifecycle phase, e.g. `Pending`, `Running`."}
+	managedLabel   = opmetrics.Label{Name: managed, Help: "Whether the node is managed by Karpenter.", Values: metrics.BoolValues}
+)
+
 var (
 	Allocatable         opmetrics.GaugeMetric
 	TotalPodRequests    opmetrics.GaugeMetric
@@ -140,25 +149,28 @@ func initializeMetrics() {
 			Name:      "utilization_percent",
 			Help:      "Utilization of allocatable resources by pod requests",
 		},
-		[]string{metrics.ResourceTypeLabel},
+		[]opmetrics.Label{metrics.ResourceType},
 	)
 }
 
-func nodeLabelNamesWithResourceType() []string {
+func nodeLabelNamesWithResourceType() []opmetrics.Label {
 	return append(
 		nodeLabelNames(),
-		metrics.ResourceTypeLabel,
+		metrics.ResourceType,
 	)
 }
 
-func nodeLabelNames() []string {
+func nodeLabelNames() []opmetrics.Label {
 	return append(
 		// WellKnownLabels includes the nodepool label, so we don't need to add it as its own item here.
 		// If we do, prometheus will panic since there would be duplicate labels.
-		sets.New(lo.Values(getWellKnownLabels())...).UnsortedList(),
-		nodeName,
-		nodePhase,
-		managed,
+		// The well-known labels are self-describing, so they are wrapped without help text.
+		lo.Map(sets.New(lo.Values(getWellKnownLabels())...).UnsortedList(), func(l string, _ int) opmetrics.Label {
+			return opmetrics.Label{Name: l}
+		}),
+		nodeNameLabel,
+		nodePhaseLabel,
+		managedLabel,
 	)
 }
 
