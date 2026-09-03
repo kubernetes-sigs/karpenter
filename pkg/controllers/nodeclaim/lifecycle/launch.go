@@ -32,14 +32,24 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
+)
+
+const (
+	// maxEventMessageLength is the maximum length of an Event message. Kubernetes rejects Events whose message
+	// exceeds this limit at validation time, so the message has to be truncated before the Event is created.
+	// https://github.com/kubernetes/kubernetes/blob/564b0e55c7007745500d579356897848aaacb9dd/pkg/apis/core/validation/events.go#L38
+	maxEventMessageLength = 1024
 )
 
 type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	cluster       *state.Cluster
 	cache         *cache.Cache // exists due to eventual consistency on the cache
 	recorder      events.Recorder
 	clock         clock.Clock
@@ -85,6 +95,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
 			l.recorder.Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
+			l.publishNominatedPodEvents(ctx, nodeClaim, err)
 			log.FromContext(ctx).Error(err, "failed launching nodeclaim")
 
 			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
@@ -130,6 +141,26 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	return created, nil
 }
 
+// publishNominatedPodEvents emits an InsufficientCapacityError event for each pod that was nominated to schedule
+// against the NodeClaim, so that users can discover that insufficient capacity is preventing their pods from
+// scheduling without requiring access to the Karpenter logs.
+func (l *Launch) publishNominatedPodEvents(ctx context.Context, nodeClaim *v1.NodeClaim, launchErr error) {
+	for _, podKey := range l.cluster.NominatedPodsForNodeClaim(nodeClaim.Name) {
+		pod := &corev1.Pod{}
+		// This also skips CapacityBuffer virtual pods since they never exist in the API server
+		if err := l.kubeClient.Get(ctx, podKey, pod); err != nil {
+			continue
+		}
+		// Only emit events for pods that are still unscheduled and alive. Between the nomination and this
+		// launch failure, the pod may have been bound to a node (still in Pending phase while its containers
+		// start), reached a terminal phase, or been deleted. In any of those cases, the event would be misleading.
+		if podutils.IsScheduled(pod) || podutils.IsTerminal(pod) || podutils.IsTerminating(pod) {
+			continue
+		}
+		l.recorder.Publish(InsufficientCapacityErrorPodEvent(pod, nodeClaim, launchErr))
+	}
+}
+
 func PopulateNodeClaimDetails(nodeClaim, retrieved *v1.NodeClaim) *v1.NodeClaim {
 	// These are ordered in priority order so that user-defined nodeClaim labels and requirements trump retrieved labels
 	// or the static nodeClaim labels
@@ -145,9 +176,11 @@ func PopulateNodeClaimDetails(nodeClaim, retrieved *v1.NodeClaim) *v1.NodeClaim 
 	return nodeClaim
 }
 
+// truncateMessage truncates the message so that it fits within the Event message length limit.
 func truncateMessage(msg string) string {
-	if len(msg) < 300 {
+	if len(msg) <= maxEventMessageLength {
 		return msg
 	}
-	return msg[:300] + "..."
+	const suffix = "..."
+	return msg[:maxEventMessageLength-len(suffix)] + suffix
 }
