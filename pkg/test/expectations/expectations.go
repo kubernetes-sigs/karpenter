@@ -20,7 +20,6 @@ package expectations
 import (
 	"context"
 	"fmt"
-	"log"
 	"reflect"
 	"regexp"
 	"strings"
@@ -364,19 +363,12 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	for _, pod := range pods {
 		ExpectResourceClaimsProcessed(ctx, c, pod)
 	}
-	// TODO: Check the error on the provisioner scheduling round
 	results, err := provisioner.Schedule(ctx)
+	Expect(err).ToNot(HaveOccurred())
 	result := ProvisioningResult{Bindings: map[*corev1.Pod]*Binding{}}
-	if err != nil {
-		log.Printf("error provisioning in test, %s", err)
-		return result
-	}
 	for _, m := range results.NewNodeClaims {
-		// TODO: Check the error on the provisioner launch
 		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
-		if err != nil {
-			return result
-		}
+		Expect(err).ToNot(HaveOccurred())
 		nodeClaim := &v1.NodeClaim{}
 		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
 		nodeClaim, node := ExpectNodeClaimDeployedAndStateUpdated(ctx, c, cluster, cloudProvider, nodeClaim)
