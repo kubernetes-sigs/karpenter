@@ -38,6 +38,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -46,12 +47,27 @@ import (
 	static "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
+
+// unavailableOfferings returns the default fake offering shape with every offering marked unavailable.
+func unavailableOfferings() []cloudprovider.Offering {
+	return lo.Map([]string{"test-zone-1", "test-zone-2"}, func(zone string, _ int) cloudprovider.Offering {
+		return cloudprovider.Offering{
+			Available: false,
+			Requirements: pscheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone: zone,
+			}),
+			Price: 1.0,
+		}
+	})
+}
 
 type failingClient struct {
 	client.Client
@@ -461,7 +477,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 				{Key: "karpenter.k8s.aws/instance-cpu", Operator: corev1.NodeSelectorOpIn, Values: []string{"32"}},
 				{Key: "karpenter.k8s.aws/instance-hypervisor", Operator: corev1.NodeSelectorOpIn, Values: []string{"nitro"}},
 				{Key: "karpenter.k8s.aws/instance-generation", Operator: corev1.NodeSelectorOpGt, Values: []string{"2"}},
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a", "us-west-2b"}},
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}},
 				{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64", "arm64"}},
 				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"on-demand", "reserved", "spot"}},
 			}
@@ -471,7 +487,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 				{Key: "karpenter.k8s.aws/instance-cpu", Operator: corev1.NodeSelectorOpIn, Values: []string{"32"}},
 				{Key: "karpenter.k8s.aws/instance-hypervisor", Operator: corev1.NodeSelectorOpIn, Values: []string{"nitro"}},
 				{Key: "karpenter.k8s.aws/instance-generation", Operator: v1.NodeSelectorOpGte, Values: []string{"3"}}, // GT 2 canonicalized to GTE 3
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-west-2a", "us-west-2b"}},
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}},
 				{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64", "arm64"}},
 				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"on-demand", "reserved", "spot"}},
 			}
@@ -584,6 +600,84 @@ var _ = Describe("Static Provisioning Controller", func() {
 			}, 10*time.Second)
 		})
 
+	})
+	Context("Offering Availability", func() {
+		It("should not create nodeclaims when no instance type has an available offering", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(3))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("unavailable-instance-type", fake.WithOfferings(unavailableOfferings()...)),
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(0))
+			// The node count reservation must not leak when we skip provisioning
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 0, 0, 0)
+		})
+		It("should not create nodeclaims when the only available offerings belong to an incompatible instance type", func() {
+			nodePool := test.ReplaceRequirements(test.StaticNodePool(), v1.NodeSelectorRequirementWithMinValues{
+				Key:      corev1.LabelInstanceTypeStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"unavailable-instance-type"},
+			})
+			nodePool.Spec.Replicas = new(int64(1))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("unavailable-instance-type", fake.WithOfferings(unavailableOfferings()...)),
+				fake.NewInstanceType("available-instance-type"),
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(0))
+		})
+		It("should create nodeclaims when at least one compatible instance type has an available offering", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(2))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType("unavailable-instance-type", fake.WithOfferings(unavailableOfferings()...)),
+				fake.NewInstanceType("available-instance-type"),
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(2))
+		})
+		It("should create nodeclaims when the cloudprovider fails to resolve instance types", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(2))
+			cloudProvider.ErrorsForNodePool[nodePool.Name] = fmt.Errorf("failed resolving instance types")
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(2))
+		})
+		It("should not create nodeclaims when the cloudprovider resolves no instance types", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = new(int64(2))
+			cloudProvider.InstanceTypesForNodePool[nodePool.Name] = []*cloudprovider.InstanceType{}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(0))
+		})
 	})
 	Context("Helper Functions", func() {
 		DescribeTable("should detect replica or status changes",
