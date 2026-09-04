@@ -324,43 +324,21 @@ func recordSelectedCandidates(method Method, cmd Command) {
 }
 
 func recordSelectedPodPlacements(method Method, cmd Command) {
-	candidatePodNodePools := map[string]string{}
-	for _, candidate := range cmd.Candidates {
-		for _, pod := range candidate.reschedulablePods {
-			for key := range podKeys(pod) {
-				candidatePodNodePools[key] = candidate.NodePool.Name
-			}
-		}
-	}
+	candidatePodNodePools := candidatePodNodePools(cmd.Candidates)
 	podErrors := sets.New[string]()
 	for pod := range cmd.Results.PodErrors {
 		podErrors.Insert(podKeys(pod).UnsortedList()...)
 	}
 	seen := sets.New[string]()
 	counts := map[string]map[string]int{}
-	record := func(pod *corev1.Pod, destination string) {
-		key := podKeys(pod).UnsortedList()
-		if len(key) == 0 || seen.Has(key[0]) || podErrors.Has(key[0]) {
-			return
-		}
-		nodePool, ok := candidatePodNodePools[key[0]]
-		if !ok {
-			return
-		}
-		seen.Insert(key[0])
-		if counts[nodePool] == nil {
-			counts[nodePool] = map[string]int{}
-		}
-		counts[nodePool][destination]++
-	}
 	for _, node := range cmd.Results.ExistingNodes {
 		for _, pod := range node.Pods {
-			record(pod, SimulationDestinationExistingNode)
+			recordPodPlacement(pod, SimulationDestinationExistingNode, candidatePodNodePools, podErrors, seen, counts)
 		}
 	}
 	for _, nodeClaim := range cmd.Results.NewNodeClaims {
 		for _, pod := range nodeClaim.Pods {
-			record(pod, SimulationDestinationNewNodeClaim)
+			recordPodPlacement(pod, SimulationDestinationNewNodeClaim, candidatePodNodePools, podErrors, seen, counts)
 		}
 	}
 	for nodePool, byDestination := range counts {
@@ -371,6 +349,34 @@ func recordSelectedPodPlacements(method Method, cmd Command) {
 			SimulationPodPlacementsTotal.Add(float64(count), labels)
 		}
 	}
+}
+
+func candidatePodNodePools(candidates []*Candidate) map[string]string {
+	candidatePodNodePools := map[string]string{}
+	for _, candidate := range candidates {
+		for _, pod := range candidate.reschedulablePods {
+			for key := range podKeys(pod) {
+				candidatePodNodePools[key] = candidate.NodePool.Name
+			}
+		}
+	}
+	return candidatePodNodePools
+}
+
+func recordPodPlacement(pod *corev1.Pod, destination string, candidatePodNodePools map[string]string, podErrors, seen sets.Set[string], counts map[string]map[string]int) {
+	keys := podKeys(pod).UnsortedList()
+	if len(keys) == 0 || seen.Has(keys[0]) || podErrors.Has(keys[0]) {
+		return
+	}
+	nodePool, ok := candidatePodNodePools[keys[0]]
+	if !ok {
+		return
+	}
+	seen.Insert(keys[0])
+	if counts[nodePool] == nil {
+		counts[nodePool] = map[string]int{}
+	}
+	counts[nodePool][destination]++
 }
 
 func methodMetricLabels(method Method) map[string]string {
