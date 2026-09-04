@@ -59,6 +59,7 @@ import (
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
 	nodepoolregistrationhealth "sigs.k8s.io/karpenter/pkg/controllers/nodepool/registrationhealth"
 	nodepoolvalidation "sigs.k8s.io/karpenter/pkg/controllers/nodepool/validation"
+	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -206,6 +207,13 @@ func NewControllers(
 		}
 	}
 
+	if options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
+		deletionCostQueue := deletioncost.NewQueue(kubeClient)
+		controllers = append(controllers,
+			deletionCostQueue,
+			deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, deletionCostQueue),
+		)
+	}
 	if !o.disableVPAPrediction {
 		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
 	}

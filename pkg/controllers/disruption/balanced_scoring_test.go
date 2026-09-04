@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 )
 
 // makeOffering creates an Offering with the given price, zone, and capacity type.
@@ -78,13 +79,18 @@ func makeCandidate(nodeName string, np *v1.NodePool, it *cloudprovider.InstanceT
 	sn := &state.StateNode{
 		Node: node,
 	}
+	// computeRescheduleDisruptionCost -> EvictionCost reads the
+	// PodDeletionCostManagement feature gate from options on the context.
+	// Inject default Options so the gate lookup finds a context; the default
+	// (gate OFF) matches the fallback path these balanced-scoring tests
+	// exercise.
 	return &Candidate{
 		StateNode:                sn,
 		instanceType:             it,
 		NodePool:                 np,
 		reschedulablePods:        pods,
-		Price:                    resolveNodePrice(sn, it),
-		RescheduleDisruptionCost: computeRescheduleDisruptionCost(context.Background(), pods),
+		Price:                    disruptionutils.ResolveOfferingPrice(sn.Labels(), it),
+		RescheduleDisruptionCost: disruptionutils.ComputeRescheduleDisruptionCost(options.ToContext(context.Background(), &options.Options{}), pods),
 	}
 }
 
@@ -176,7 +182,7 @@ func makeShouldDisruptCandidate(np *v1.NodePool, policy v1.ConsolidationPolicy) 
 		},
 		instanceType:             it,
 		NodePool:                 np,
-		RescheduleDisruptionCost: PerNodeBaseDisruptionCost + 1, // non-empty so consolidation ShouldDisrupt accepts it
+		RescheduleDisruptionCost: disruptionutils.PerNodeBaseDisruptionCost + 1, // non-empty so consolidation ShouldDisrupt accepts it
 	}
 }
 
