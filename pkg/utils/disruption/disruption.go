@@ -38,11 +38,6 @@ import (
 // designs/balanced-consolidation.md.
 const PerNodeBaseDisruptionCost = 1.0
 
-// ResolveOfferingPrice returns the price of the offering that matches the
-// node's zone and capacity-type labels. Returns 0 when the instance type is
-// nil, no matching offering exists, or the resolved price is NaN — callers
-// treat 0 as "unpriced" and SavingsRatio degrades to 0 in that case rather
-// than panicking on divide-by-zero.
 func ResolveOfferingPrice(labels map[string]string, instanceType *cloudprovider.InstanceType) float64 {
 	if instanceType == nil {
 		return 0
@@ -115,9 +110,8 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 			log.FromContext(ctx).Error(err, "failed parsing disruption cost",
 				"annotation", v1.DisruptionCostAnnotationKey, "value", costStr, "pod", client.ObjectKeyFromObject(p))
 		} else {
-			// 2^27 = max representable pod-deletion-cost (int32 ceiling).
-			// Dividing here normalizes the user value into [0, 1) so it
-			// cannot overpower the QoS/priority bands above it.
+			// the disruptionCost is in [-2147483647, 2147483647]
+			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
 			cost += parsedCost / math.Pow(2, 27.0)
 		}
 	} else if !podDeletionCostManagementEnabled(ctx) {
