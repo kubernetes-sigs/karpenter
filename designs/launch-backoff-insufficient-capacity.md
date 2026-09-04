@@ -98,15 +98,17 @@ Two pieces of in-memory state, both written only from real launch outcomes:
    `FilterUnavailable` to DeepCopy'd instance types at the two scheduling
    `GetInstanceTypes` call sites. See
    [Applying the backoff filter](#applying-the-backoff-filter).
-2. **Per-NodePool launch budget**, with two parts. An aggregate budget engages only while
-   the NodePool is constrained by a recent ICE: the callers of `CreateNodeClaims` (the
-   dynamic provisioner and `static.provisioning`) `Admit` one NodeClaim per `probeInterval`,
-   ramping up as probes succeed and returning to one on any failure. A *risky* budget is
-   always engaged, even for an unconstrained pool: a NodeClaim whose every compatible
-   offering has a failure history is admitted at most `riskyBurst` per `probeInterval`. The
-   filter cannot supply that bound itself.
-   `CreateNodeClaims` itself is unchanged: it still creates every NodeClaim it is given.
-   Disruption only *peeks* with a read-only `IsConstrained`; it never consumes a probe.
+2. **Per-NodePool launch budget**, with two parts. Keyed by NodePool rather than by offering
+   because which offering a NodeClaim will consume is not known at admission — see
+   [Why the budget is keyed by NodePool](#per-nodepool-launch-budget). An aggregate budget
+   engages only while the NodePool is constrained by a recent ICE: the callers of
+   `CreateNodeClaims` (the dynamic provisioner and `static.provisioning`) `Admit` one
+   NodeClaim per `probeInterval`, ramping up as probes succeed and returning to one on any
+   failure. A *risky* budget is always engaged, even for an unconstrained pool: a NodeClaim
+   whose every compatible offering has a failure history is admitted at most `riskyBurst` per
+   `probeInterval`. The filter cannot supply that bound itself. `CreateNodeClaims` itself is
+   unchanged: it still creates every NodeClaim it is given. Disruption only *peeks* with a
+   read-only `IsConstrained`; it never consumes a probe.
 
 An offering with no recorded failures is not in the tracker, and a NodePool with no recorded
 ICE is unconstrained, so **a cluster that never hits a launch failure behaves as it does
@@ -239,25 +241,61 @@ A NodeClaim carries a set of acceptable instance types and requirements, and the
   least one offering that is not backed off. That offering survives the filter and the
   NodeClaim launches immediately if the NodePool is unconstrained. Backed-off siblings in
   the set are simply absent; they are not charged.
-- **Every compatible offering is backed off.** The filter leaves nothing. `Solve` does not
-  produce a NodeClaim for these pods. They stay pending and are surfaced by
-  `karpenter_scheduler_unschedulable_pods_count`. When the earliest `until` elapses, that
-  offering becomes eligible and `Solve` starts producing NodeClaims for these pods again —
-  potentially many, all targeting the one eligible key. Those NodeClaims are *risky*, and
-  the NodePool budget below is what limits how many are admitted per window.
+- **Every compatible offering is backed off.** The filter leaves nothing, so this pool cannot
+  take the pod. The pod falls through to the next NodePool by weight — see
+  [NodePool weight fallback](#nodepool-weight-fallback). If no NodePool can take it, it stays
+  pending and is surfaced by `karpenter_scheduler_unschedulable_pods_count`. When the earliest
+  `until` elapses, that offering becomes eligible and `Solve` starts producing NodeClaims for
+  these pods again — potentially many, all targeting the one eligible key. Those NodeClaims are
+  *risky*, and the NodePool budget below is what limits how many are admitted per window.
 
-The filter therefore binds for a given pod exactly when every offering it could land on is
-backed off. The NodePool budget is coarser and can briefly delay a satisfiable NodeClaim: a
-pool constrained by an ICE elsewhere rate-limits *all* of its launches until a success
-releases it. Admit ordering keeps that delay to roughly one `probeInterval` by spending each
-window on the NodeClaims most likely to succeed — see
+The filter therefore binds for a given pod exactly when every offering it could land on,
+across every NodePool it is compatible with, is backed off. The NodePool budget is coarser and
+can briefly delay a satisfiable NodeClaim: a pool constrained by an ICE elsewhere rate-limits
+*all* of its launches until a success releases it. Admit ordering keeps that delay to roughly
+one `probeInterval` by spending each window on the NodeClaims most likely to succeed — see
 [Admit ordering](#per-nodepool-launch-budget).
+
+#### NodePool weight fallback
+
+A pod whose offerings are all backed off in its preferred NodePool falls through to the next
+NodePool by weight, on the same scheduling pass. This is not new machinery — it is what the
+scheduler already does with any per-NodePool failure. A high-weight spot NodePool over a
+low-weight on-demand NodePool sheds to on-demand while spot is short, and consolidation
+returns the workload to spot once it recovers.
+
+Pods stay pending only when *every* NodePool they are compatible with is fully backed off.
 
 #### Per-NodePool launch budget
 
 The NodePool budget is a *rate limit*, not a window. A boolean window is a poor fit here:
 when it elapsed it would admit the full `Solve`, reproducing the cache-expiry thundering
 herd at NodePool scope.
+
+**Why the budget is keyed by NodePool.** The two mechanisms answer different questions, and
+only one of those questions is answerable per offering. The backoff window decides *whether*
+a capacity pool may be tried, which is a property of the offering, so it is keyed by
+offering. The budget decides *how many* NodeClaims may be spent finding out, and at
+admission time nobody knows which offering a NodeClaim will consume: a NodeClaim carries a
+set of acceptable instance types and the provider picks one. There is no offering to charge
+yet. Two consequences follow.
+
+- **A per-offering budget has to debit speculatively, and the over-debit grows with breadth.**
+  A NodeClaim that could land on any of fifty backed-off offerings has to charge all fifty at
+  create — the `ReservationManager` pattern — though it will consume exactly one. That is
+  harmless while some candidate still has allowance, so a pool with a few short offerings is
+  unaffected. It bites in precisely the case this RFC targets: once most of a pool's offerings
+  are backed off, a handful of in-flight NodeClaims zero out the pool's entire remaining
+  allowance until they resolve, and the wider the compatible set the fewer it takes. That
+  inverts the scaling intuition — the pool with hundreds of spot offerings is the one this
+  hurts most, and therefore the one that most needs a budget keyed on something it has exactly
+  one of.
+- **Not every ICE is offering-scoped.** Account vCPU quota, an SCP, or a zonal shift ICEs on
+  whichever offering happened to be attempted. State keyed only by offering responds by
+  walking the offering space one create → ICE → delete cycle at a time — the "entries are
+  learned by failing" cost from the motivation, relocated from the provider cache into core.
+  A broad NodePool pays that walk once per offering; the NodePool is the coarsest thing core
+  can key on that bounds it to one cycle per `probeInterval` instead.
 
 ```go
 type poolEntry struct {
@@ -702,6 +740,10 @@ If any of these stops holding, the corresponding part of the design must be revi
   how many nodes may be disrupted.
 - **Capacity buffers** drive provisioning through the dynamic provisioner and are
   throttled by the same `Admit` + requeue rules as other pending pods.
+- **NodePool weight.** A pool whose compatible offerings are all backed off yields to the next
+  pool by weight on the same scheduling pass. Backoff deliberately does not suppress that
+  fallback the way `ReservedOfferingError` does. See
+  [NodePool weight fallback](#nodepool-weight-fallback).
 - **Static capacity** does not use the scheduler; the pool budget is the throttle. See
   [Static capacity](#static-capacity).
 - **Topology spread.** Unchanged in mechanism, but the filter makes an existing interaction
@@ -820,13 +862,54 @@ off exponentially. Simpler, no offering tracker, no provider attribution. Reject
 zones and instance types in a NodePool where only one offering is short. This design keeps
 the useful half as the per-NodePool admit, layered on the per-offering backoff.
 
-### Alternative 4: Keep the ICE'd NodeClaim in a backed-off state
+### Alternative 4: Per-offering launch budgets with pessimistic debit
+
+Give every offering key its own budget after ICE instead of a backoff window, debit each ICE'd
+candidate offering when a NodeClaim is created — as `ReservationManager` does for reservation
+capacity — and double only the budget of the offering the launch actually landed on.
+
+This is precise where the NodePool budget is coarse: a pool with two hundred offerings and
+one short zone would throttle only the short zone instead of dropping every launch in the
+pool to burst 1. It collapses three mechanisms — window, aggregate budget, risky budget
+ — into one number. Its recovery signal is better targeted, crediting the offering that
+ actually came back rather than releasing the whole pool on any success. And it has no
+boolean edge for a pending batch to cross at once, so it avoids the re-admission burst
+inherent to a window.
+
+**It is not v1 because a count cannot repair itself.** Every resolution path is observable:
+NodeClaims carry the `karpenter.sh/termination` finalizer, `CloudProvider.Create` resolves
+synchronously within one reconcile, the landed offering is readable from the created NodeClaim's
+own labels rather than from `Keys`, and a launch that never resolves is reaped by
+`LaunchTimeout`. The credit can always be computed. The problem is what happens when one of
+those paths computes it wrong. A budget has no clock, so a credit that is missed — or applied
+twice, on a race between the deletion watch and the launch resolution — is wrong permanently. An
+offering pinned at zero is one Karpenter will never attempt again, indistinguishable from an
+offering that is legitimately exhausted, and nothing in the system notices. A window is
+self-repairing by construction: a dropped `Succeed` costs a bounded delay, because the entry
+expires at `until + maxDelay` regardless.
+
+That asymmetry is also what makes the `ReservationManager` comparison misleading. Its ledger is
+built inside `NewScheduler` and discarded at the end of the loop, so it can be exact against a
+count the provider published, and an accounting bug is short-lived.
+
+An ICE budget has to persist across reconciles to be a throttle at all, which costs it both
+properties. It requires exact accounting, which is only affordable and easy when the ledger
+is short-lived or closed.
+Bounding each debit with its own TTL would stop the drift, but it reintroduces the clock: the
+result is a counter *plus* a window, not a counter *instead of* one.
+
+A provider that does not populate `Keys` gives nothing to debit or credit, so the scheme needs
+a NodePool-level fallback anyway. And a shortage that is not offering-scoped — account vCPU
+quota, an SCP, a zonal shift — ICEs on whichever offering was attempted, so per-offering
+budgets respond by probing each ICE'd offering independently: two hundred short offerings
+become two hundred probes per window instead of one.
+
+### Alternative 5: Keep the ICE'd NodeClaim in a backed-off state
 
 Instead of deleting on ICE, leave the NodeClaim in a backed-off state so the provisioner
 does not regenerate it. Rejected because doomed NodeClaims are user-visible objects consuming
 NodePool limits and cluster state, and their presence still costs provisioner scheduling
 work on every loop. With a launch budget, the delete-and-recreate cycle is bounded anyway.
-
 
 ### What we already tried: cluster-state sync
 
@@ -973,11 +1056,24 @@ gate.
    group, or NodeClass-specific constraints. Adding NodeClass to the key would isolate those
    but fragments the signal and loses cross-NodePool sharing. Proposed: start with the
    three-tuple, matching the granularity providers' own ICE caches already use.
-2. **Should the risky budget be keyed by `(NodePool, zone)` as well?** The rate is bounded
-   either way; what zone-keying would change is *fairness* between dead AZs, which currently
-   share one budget and are therefore probed round-robin rather than one probe each per
-   window. Proposed: NodePool-only for v1, since the bound is the correctness property and
-   the fairness gap only delays discovering that one dead AZ recovered before another.
+2. **Should the risky budget be keyed more finely than by NodePool?** The rate is bounded
+   either way; what a finer key changes is *fairness* between dead capacity pools, which
+   currently share one budget and are therefore probed round-robin rather than one probe each
+   per window. Keyed by `(NodePool, zone)` this is the difference between discovering one dead
+   AZ recovered before another. Keyed by offering — the natural reading of "give every
+   offering its own budget" — it is a coverage limit worth stating plainly: a pool holding 200
+   backed-off offerings shares one risky probe per `probeInterval`, so probing all of them
+   takes on the order of 100 minutes, where per-offering probes would cover them in a single
+   window at the cost of the 200-probe burst `probeInterval` exists to prevent. Proposed:
+   NodePool-only for v1, since the bound is the correctness property and slow coverage delays
+   recovery discovery rather than breaking it. The concrete beta candidate is layered rather
+   than either/or: keep the NodePool budget as the bound that holds for broad shortages and
+   unattributed ICE, and add per-offering probe budgets on top for coverage where the provider
+   populates `Keys`. See
+   [Alternative 4](#alternative-4-per-offering-launch-budgets-with-pessimistic-debit) for why
+   the per-offering budget is not proposed as the whole mechanism.
+   `karpenter_offerings_unavailable` cardinality is the measurement that says whether the
+   round-robin is too slow in practice.
 3. **Is a per-NodePool risky budget the right scope, or should it also be capped
    cluster-wide?** The aggregate guarantee is `riskyBurst` per `probeInterval` *per
    NodePool*, so a cluster with 100 simultaneously-shorted NodePools still sees ~200 doomed
