@@ -60,6 +60,13 @@ type NodeClaim struct {
 	//   this expansion.
 	reservedOfferings    cloudprovider.Offerings
 	reservedOfferingMode ReservedOfferingMode
+	priceAwareBinPacking bool
+
+	// hasSpotOffering tracks whether the NodeClaim, with the pods currently scheduled to it, still has at least one
+	// instance type option with an available spot offering compatible with its requirements. Since the cloudprovider
+	// launches into the cheapest capacity type the NodeClaim's options allow (spot before on-demand), this is the
+	// NodeClaim's expected launch capacity type and is used to keep bin-packing price-aware (see CanAdd).
+	hasSpotOffering bool
 }
 
 // ReservedOfferingError indicates a NodeClaim couldn't be created or a pod couldn't be added to an exxisting NodeClaim
@@ -90,6 +97,7 @@ func NewNodeClaim(
 	instanceTypes []*cloudprovider.InstanceType,
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
+	priceAwareBinPacking bool,
 ) *NodeClaim {
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	template := *nodeClaimTemplate
@@ -117,6 +125,7 @@ func NewNodeClaim(
 		reservedOfferings:    cloudprovider.Offerings{},
 		reservationManager:   reservationManager,
 		reservedOfferingMode: reservedOfferingMode,
+		priceAwareBinPacking: priceAwareBinPacking,
 	}
 }
 
@@ -246,6 +255,17 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 			return nil, nil, nil, nil, fmt.Errorf("no instance type satisfies both scheduling and dynamic resource requirements")
 		}
 	}
+	// Price-aware bin-packing: adding a pod to an in-flight NodeClaim tightens its requirements and shrinks its
+	// instance type options (larger pods need larger instance types, pod constraints may exclude offerings). If that
+	// leaves no instance type with an available spot offering, the NodeClaim can only launch as on-demand, which is
+	// typically far more expensive than launching this pod on a separate spot NodeClaim and keeping the current one
+	// spot. Reject the add in that case so the scheduler tries another in-flight NodeClaim or creates a new one. This
+	// only applies once the NodeClaim already has pods: a NodeClaim's first pod is always accepted, so a pod that can
+	// only fit an on-demand instance type still schedules, and NodePools that allow a single capacity type are
+	// unaffected. Reserved offerings are handled separately by offeringsToReserve.
+	if n.priceAwareBinPacking && len(n.Pods) != 0 && n.hasSpotOffering && !hasAvailableOffering(remaining, nodeClaimRequirements, v1.CapacityTypeSpot) {
+		return nil, nil, nil, nil, fmt.Errorf("adding pod would remove all instance type options with an available spot offering")
+	}
 	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -264,6 +284,7 @@ func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, 
 	// Daemon overhead is excluded here to avoid double-counting
 	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 	n.Requirements = nodeClaimRequirements
+	n.hasSpotOffering = hasAvailableOffering(instanceTypes, nodeClaimRequirements, v1.CapacityTypeSpot)
 	n.topology.Register(corev1.LabelHostname, n.hostname)
 	n.topology.Record(pod, n.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	hostPorts := scheduling.GetHostPorts(pod)
@@ -648,6 +669,19 @@ func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList
 		}
 	}
 	return false, hasOffering
+}
+
+// hasAvailableOffering returns true if any of the instance types has an available offering of the given capacity type
+// that is compatible with the requirements.
+func hasAvailableOffering(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, capacityType string) bool {
+	for _, it := range instanceTypes {
+		for _, o := range it.Offerings {
+			if o.Available && o.CapacityType() == capacityType && requirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // filterInstanceTypesByVolumeAttachmentLimits returns the instance types which can support the given volumes. Instance types
