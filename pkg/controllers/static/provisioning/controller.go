@@ -47,6 +47,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -73,6 +74,7 @@ func (c *Controller) Name() string {
 	return "static.provisioning"
 }
 
+//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
@@ -92,6 +94,14 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	// Size down of replicas will be handled in deprovisioning controller to drain nodes and delete NodeClaims
 	// If there are drifting NodeClaims we need to count them as Active as disruption controller is in the process of creating replacements
 	if int64(runningNodeClaims)+int64(nodesPendingDisruptionCount) >= desiredReplicas {
+		return reconcile.Result{RequeueAfter: time.Minute}, nil
+	}
+
+	// Static NodeClaims don't go through scheduling, so the CloudProvider only discovers that every compatible offering
+	// is unavailable after the NodeClaim exists, at which point it's deleted and provisioning is immediately retriggered.
+	// Checking availability up-front keeps that failure from becoming an unbounded create/delete loop.
+	if !c.hasAvailableOffering(ctx, np) {
+		log.FromContext(ctx).V(1).Info("skipping provisioning, no compatible offering is currently available")
 		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 
@@ -121,6 +131,24 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	}
 
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
+}
+
+// hasAvailableOffering mirrors the offering filter that CloudProviders apply in Create(). It's intentionally more
+// permissive than that filter so that it can only ever be a superset of what Create() would accept, and it returns
+// true on a CloudProvider error, since an error means availability is unknown rather than exhausted.
+func (c *Controller) hasAvailableOffering(ctx context.Context, np *v1.NodePool) bool {
+	its, err := c.cloudProvider.GetInstanceTypes(ctx, np)
+	if err != nil {
+		log.FromContext(ctx).V(1).Info("skipping offering availability check, unable to resolve instance types", "error", err)
+		return true
+	}
+	// Evaluate against the requirements of the NodeClaim that would actually be created, since ToNodeClaim() drops the
+	// requirements that only exist for scheduling simulation.
+	nc := scheduling.NewNodeClaimTemplate(np).ToNodeClaim()
+	reqs := pscheduling.NewNodeSelectorRequirementsWithMinValues(nc.Spec.Requirements...)
+	return lo.ContainsBy(its, func(it *cloudprovider.InstanceType) bool {
+		return it.Requirements.Intersects(reqs) == nil && it.Offerings.Available().HasCompatible(reqs)
+	})
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
