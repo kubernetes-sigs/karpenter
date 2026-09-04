@@ -16,6 +16,11 @@ on:
         type: string
         required: false
         description: "Human-readable test name for job identification"
+      repeat:
+        type: number
+        required: false
+        default: 1
+        description: "Number of iterations to run the test suite (for statistical aggregation)"
 jobs:
   e2e:
     permissions:
@@ -29,10 +34,6 @@ jobs:
         echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
         echo "Workflow run name: ${{ github.event.workflow_run.name }}"
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - name: Set up Python 3.10
-      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-      with:
-        python-version: "3.10"
     - uses: ./.github/actions/install-deps
       with:
           k8sVersion: ${{ inputs.k8s_version }}
@@ -71,19 +72,122 @@ jobs:
       env:
           SUITE: ${{ inputs.suite }}
           FOCUS: ${{ inputs.focus }}
+          ITERATIONS: ${{ inputs.repeat }}
       shell: bash
       run: |
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
-        TEST_SUITE="$SUITE" make e2etests
+        for i in $(seq 1 "${ITERATIONS:-1}"); do
+          echo "=== Iteration $i / ${ITERATIONS:-1} ==="
+          TEST_SUITE="$SUITE" make e2etests
+          iter_dir="$OUTPUT_DIR/iter_${i}"
+          mkdir -p "$iter_dir"
+          # Move reports from this iteration into a per-iteration subdirectory
+          find "$OUTPUT_DIR" -maxdepth 1 -name "*_performance_report.json" -exec mv {} "$iter_dir/" \;
+        done
+    - name: Aggregate and compare against baseline
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      env:
+        ITERATIONS: ${{ inputs.repeat }}
+      shell: bash
+      run: |
+        go run ./.github/scripts/perf-aggregate
+    - name: Download previous benchmark data (smaller-is-better)
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ./cache-smaller
+        key: ${{ runner.os }}-perf-benchmark-smaller-${{ inputs.test_name || inputs.suite }}
+    - name: Download previous benchmark data (bigger-is-better)
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ./cache-bigger
+        key: ${{ runner.os }}-perf-benchmark-bigger-${{ inputs.test_name || inputs.suite }}
+    - name: Download previous benchmark data (cv, informational)
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ./cache-cv
+        key: ${{ runner.os }}-perf-benchmark-cv-${{ inputs.test_name || inputs.suite }}
+    # The batch median regression alerts run below with fail-on-alert: true.
+    # An additional CV entry is emitted per metric so a reviewer can see when
+    # a batch's within-batch variance grows beyond its historical envelope.
+    # It runs under fail-on-alert: false so a noise spike comments but does
+    # not block the pipeline — this is the informational answer to Ryan's
+    # PR#2994 variance question. benchmark-action persists CV entries in
+    # the same cache format as the median entries; no cache-schema change
+    # is required.
+    - name: Compare smaller-is-better metrics
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+      with:
+        name: Karpenter Performance (${{ inputs.test_name || inputs.suite }}) - smaller-is-better
+        tool: customSmallerIsBetter
+        output-file-path: ${{ env.OUTPUT_DIR }}/benchmark-results-smaller.json
+        external-data-json-path: ./cache-smaller/benchmark-data.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Alert if batch median is 50% worse than previous batch median.
+        # At n=10 with observed CV ~48%, batch median CV is ~15%. A 130%
+        # threshold would yield ~7% false positives per test (~40% across
+        # the 7-test matrix). 150% keeps false alarm rate under 5% total.
+        alert-threshold: '150%'
+        fail-on-alert: true
+        comment-on-alert: true
+        alert-comment-cc-users: '@nathangeology'
+        summary-always: true
+    - name: Compare bigger-is-better metrics
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+      with:
+        name: Karpenter Performance (${{ inputs.test_name || inputs.suite }}) - bigger-is-better
+        # Utilization and efficiency-score metrics fail when they DROP,
+        # so they must not share a group with latency/resource-cost metrics.
+        tool: customBiggerIsBetter
+        output-file-path: ${{ env.OUTPUT_DIR }}/benchmark-results-bigger.json
+        external-data-json-path: ./cache-bigger/benchmark-data.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        alert-threshold: '150%'
+        fail-on-alert: true
+        comment-on-alert: true
+        alert-comment-cc-users: '@nathangeology'
+        summary-always: true
+    - name: Compare batch CV (informational only)
+      if: always() && env.OUTPUT_DIR != '' && inputs.repeat > 1
+      uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+      with:
+        name: Karpenter Performance (${{ inputs.test_name || inputs.suite }}) - batch CV
+        tool: customSmallerIsBetter
+        output-file-path: ${{ env.OUTPUT_DIR }}/benchmark-results-cv.json
+        external-data-json-path: ./cache-cv/benchmark-data.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Threshold is a benchmark-action ratio: alert fires when the
+        # current batch CV is >= 2x the previous batch CV for that metric.
+        # Derived empirically from 15 push-triggered kind-perf-e2e runs on
+        # kubernetes-sigs/karpenter@main between 2026-08-19 and 2026-09-02
+        # (n=120 (sub-test, metric) samples): cross-metric P95 CV = 43%,
+        # median CV = 3.8%, per-metric P95/median ratios span 1.7x-7x.
+        # Setting threshold to 200% (2x) is the informational analog to
+        # the 2 sigma heuristic in @ryan-mist's PR#2994 variance comment
+        # (id 3857936029) — it fires when a batch's within-batch variance
+        # doubles vs. its prior baseline without gating the pipeline.
+        alert-threshold: '200%'
+        fail-on-alert: false
+        comment-on-alert: true
+        alert-comment-cc-users: '@nathangeology'
+        summary-always: true
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
         path: |
-          ${{ env.OUTPUT_DIR }}/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/**/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/aggregated_summary.json
+          ${{ env.OUTPUT_DIR }}/benchmark-results-smaller.json
+          ${{ env.OUTPUT_DIR }}/benchmark-results-bigger.json
+          ${{ env.OUTPUT_DIR }}/benchmark-results-cv.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
         retention-days: 30
