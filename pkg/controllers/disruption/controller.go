@@ -33,7 +33,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -183,20 +185,38 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
+	passOutcome := PassOutcomeError
+	var observation *EvaluationObservation
+	var nodePools []string
+	defer func() {
+		if observation == nil {
+			observation = NewEvaluationObservation(disruption, nil)
+		}
+		observation.Complete(passOutcome)
+		if nodePools != nil {
+			c.recordLastEvaluated(disruption, nodePools)
+		}
+	}()
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
-	candidates, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
+	candidateSet, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
+	nodePools = candidateSet.NodePools
+	observation = NewEvaluationObservation(disruption, candidateSet.Eligible)
+	ctx = WithEvaluationObservation(ctx, observation)
+	c.recordCandidateSnapshots(disruption, candidateSet)
+	candidates := candidateSet.Eligible
 	EligibleNodes.Set(float64(len(candidates)), map[string]string{
 		metrics.ReasonLabel: strings.ToLower(string(disruption.Reason())),
 	})
 
 	// If there are no candidates, move to the next disruption
 	if len(candidates) == 0 {
+		passOutcome = PassOutcomeNoCandidates
 		return false, nil
 	}
 	// Pass precomputed NodePool totals to consolidation methods for balanced scoring
@@ -214,6 +234,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 	cmds = lo.Filter(cmds, func(c Command, _ int) bool { return c.Decision() != NoOpDecision })
 	if len(cmds) == 0 {
+		passOutcome = PassOutcomeNoCommand
 		return false, nil
 	}
 
@@ -229,12 +250,135 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		// Attempt to disrupt
 		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
 			errs[i] = fmt.Errorf("disrupting candidates, %w", err)
+			return
 		}
+		recordSelectedCandidates(disruption, cmd)
+		recordSelectedPodPlacements(disruption, cmd)
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
+	passOutcome = PassOutcomeSelected
 	return true, nil
+}
+
+func (c *Controller) recordCandidateSnapshots(method Method, candidateSet CandidateSet) {
+	baseLabels := methodMetricLabels(method)
+	Candidates.DeletePartialMatch(baseLabels)
+	OldestEligibleAgeSeconds.DeletePartialMatch(baseLabels)
+
+	possibleByNodePool := lo.CountValuesBy(candidateSet.Possible, func(candidate *Candidate) string {
+		return candidate.NodePool.Name
+	})
+	eligibleByNodePool := lo.CountValuesBy(candidateSet.Eligible, func(candidate *Candidate) string {
+		return candidate.NodePool.Name
+	})
+	for _, nodePool := range candidateSet.NodePools {
+		labels := withLabel(baseLabels, metrics.NodePoolLabel, nodePool)
+		Candidates.Set(float64(possibleByNodePool[nodePool]), withLabel(labels, stageLabel, CandidateStagePossible))
+		Candidates.Set(float64(eligibleByNodePool[nodePool]), withLabel(labels, stageLabel, CandidateStageEligible))
+	}
+
+	oldestByNodePool := map[string]time.Time{}
+	for _, candidate := range candidateSet.Eligible {
+		conditionType := v1.ConditionTypeConsolidatable
+		if method.Reason() == v1.DisruptionReasonDrifted {
+			conditionType = string(v1.DisruptionReasonDrifted)
+		}
+		condition := candidate.NodeClaim.StatusConditions().Get(conditionType)
+		if condition == nil || condition.LastTransitionTime.IsZero() {
+			continue
+		}
+		nodePool := candidate.NodePool.Name
+		if oldest, ok := oldestByNodePool[nodePool]; !ok || condition.LastTransitionTime.Time.Before(oldest) {
+			oldestByNodePool[nodePool] = condition.LastTransitionTime.Time
+		}
+	}
+	for nodePool, oldest := range oldestByNodePool {
+		age := c.clock.Since(oldest).Seconds()
+		if age < 0 {
+			age = 0
+		}
+		OldestEligibleAgeSeconds.Set(age, withLabel(baseLabels, metrics.NodePoolLabel, nodePool))
+	}
+}
+
+func (c *Controller) recordLastEvaluated(method Method, nodePools []string) {
+	baseLabels := methodMetricLabels(method)
+	LastEvaluatedTimestampSeconds.DeletePartialMatch(baseLabels)
+	for _, nodePool := range nodePools {
+		LastEvaluatedTimestampSeconds.Set(float64(c.clock.Now().Unix()), withLabel(baseLabels, metrics.NodePoolLabel, nodePool))
+	}
+}
+
+func recordSelectedCandidates(method Method, cmd Command) {
+	counts := lo.CountValuesBy(cmd.Candidates, func(candidate *Candidate) string {
+		return candidate.NodePool.Name
+	})
+	for nodePool, count := range counts {
+		labels := methodMetricLabels(method)
+		labels[metrics.NodePoolLabel] = nodePool
+		labels[decisionLabel] = string(cmd.Decision())
+		SelectedCandidatesTotal.Add(float64(count), labels)
+	}
+}
+
+func recordSelectedPodPlacements(method Method, cmd Command) {
+	candidatePodNodePools := map[string]string{}
+	for _, candidate := range cmd.Candidates {
+		for _, pod := range candidate.reschedulablePods {
+			for key := range podKeys(pod) {
+				candidatePodNodePools[key] = candidate.NodePool.Name
+			}
+		}
+	}
+	podErrors := sets.New[string]()
+	for pod := range cmd.Results.PodErrors {
+		podErrors.Insert(podKeys(pod).UnsortedList()...)
+	}
+	seen := sets.New[string]()
+	counts := map[string]map[string]int{}
+	record := func(pod *corev1.Pod, destination string) {
+		key := podKeys(pod).UnsortedList()
+		if len(key) == 0 || seen.Has(key[0]) || podErrors.Has(key[0]) {
+			return
+		}
+		nodePool, ok := candidatePodNodePools[key[0]]
+		if !ok {
+			return
+		}
+		seen.Insert(key[0])
+		if counts[nodePool] == nil {
+			counts[nodePool] = map[string]int{}
+		}
+		counts[nodePool][destination]++
+	}
+	for _, node := range cmd.Results.ExistingNodes {
+		for _, pod := range node.Pods {
+			record(pod, SimulationDestinationExistingNode)
+		}
+	}
+	for _, nodeClaim := range cmd.Results.NewNodeClaims {
+		for _, pod := range nodeClaim.Pods {
+			record(pod, SimulationDestinationNewNodeClaim)
+		}
+	}
+	for nodePool, byDestination := range counts {
+		for destination, count := range byDestination {
+			labels := methodMetricLabels(method)
+			labels[metrics.NodePoolLabel] = nodePool
+			labels[destinationLabel] = destination
+			SimulationPodPlacementsTotal.Add(float64(count), labels)
+		}
+	}
+}
+
+func methodMetricLabels(method Method) map[string]string {
+	return map[string]string{
+		methodLabel:            methodName(method),
+		metrics.ReasonLabel:    strings.ToLower(string(method.Reason())),
+		ConsolidationTypeLabel: method.ConsolidationType(),
+	}
 }
 
 func (c *Controller) recordRun(s string) {

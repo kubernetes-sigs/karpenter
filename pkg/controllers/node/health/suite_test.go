@@ -92,6 +92,8 @@ var _ = Describe("Node Health", func() {
 
 		// Reset the metrics collectors
 		metrics.NodeClaimsDisruptedTotal.Reset()
+		health.NodeRepairBlockedTotal.Reset()
+		health.NodeRepairUnhealthyDurationSeconds.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -309,6 +311,10 @@ var _ = Describe("Node Health", func() {
 			nodeClaimOne := nodeClaims[0]
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			ExpectMetricCounterValue(health.NodeRepairBlockedTotal, 1, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
+				health.Gate:           health.GateNodePool,
+			})
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
 			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
 
@@ -339,6 +345,10 @@ var _ = Describe("Node Health", func() {
 			nodeClaimOne := nodeClaims[0]
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			ExpectMetricCounterValue(health.NodeRepairBlockedTotal, 1, map[string]string{
+				metrics.NodePoolLabel: "",
+				health.Gate:           health.GateCluster,
+			})
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
 			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
 
@@ -405,6 +415,10 @@ var _ = Describe("Node Health", func() {
 			ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
 				health.Condition:      pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
 				metrics.NodePoolLabel: nodePool.Name,
+			})
+			ExpectMetricHistogramSampleCountValue("karpenter_nodes_repair_unhealthy_duration_seconds", 1, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
+				health.Condition:      pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
 			})
 		})
 	})

@@ -82,6 +82,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	ExpirationLatenessSeconds.Observe(c.clock.Since(expirationTime).Seconds(), map[string]string{
+		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
+	})
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
 	labels := map[string]string{

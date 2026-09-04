@@ -85,6 +85,7 @@ var _ = Describe("Expiration", func() {
 		})
 		metrics.NodeClaimsDisruptedTotal.Reset()
 		metrics.PodsDisruptionInitiatedTotal.Reset()
+		expiration.ExpirationLatenessSeconds.Reset()
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
@@ -101,6 +102,9 @@ var _ = Describe("Expiration", func() {
 				metrics.NodePoolLabel:            nodePool.Name,
 				metrics.ConsolidationPolicyLabel: "",
 				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
+			})
+			ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_expiration_lateness_seconds", 1, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
 			})
 		})
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {

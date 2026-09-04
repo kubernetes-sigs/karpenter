@@ -177,6 +177,19 @@ var _ = AfterEach(func() {
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
 	disruption.NodepoolDecisionsPerformed.Reset()
+	disruption.PassesTotal.Reset()
+	disruption.LastEvaluatedTimestampSeconds.Reset()
+	disruption.Candidates.Reset()
+	disruption.OldestEligibleAgeSeconds.Reset()
+	disruption.CandidateEvaluationDurationSeconds.Reset()
+	disruption.SimulationsTotal.Reset()
+	disruption.CandidateBatchSize.Reset()
+	disruption.SimulationPodCount.Reset()
+	disruption.SimulationPodPlacementsTotal.Reset()
+	disruption.ValidationDurationSeconds.Reset()
+	disruption.CandidatesEvaluatedPerPass.Reset()
+	disruption.TimeoutCandidateCount.Reset()
+	disruption.SelectedCandidatesTotal.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -252,9 +265,41 @@ var _ = Describe("Simulate Scheduling", func() {
 		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(Succeed())
 
-		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, nil, candidate)
+		method := disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock)
+		observation := disruption.NewEvaluationObservation(method, []*disruption.Candidate{candidate})
+		simulationCtx := disruption.WithSimulationStage(disruption.WithEvaluationObservation(ctx, observation), disruption.SimulationStageEvaluate)
+		results, err := disruption.SimulateScheduling(simulationCtx, env.Client, cluster, prov, env.Clock, recorder, nil, candidate)
 		Expect(err).To(Succeed())
 		Expect(results.PodErrors[pod]).To(BeNil())
+		observation.Complete(disruption.PassOutcomeSelected)
+
+		labels := map[string]string{
+			"method":                          method.MethodName(),
+			metrics.NodePoolLabel:             nodePool.Name,
+			metrics.ReasonLabel:               "drifted",
+			disruption.ConsolidationTypeLabel: "",
+			"stage":                           disruption.SimulationStageEvaluate,
+		}
+		ExpectMetricCounterValue(disruption.SimulationsTotal, 1, lo.Assign(map[string]string{}, labels, map[string]string{"outcome": disruption.SimulationOutcomeSchedulable}))
+		ExpectMetricHistogramSampleCountValue("karpenter_voluntary_disruption_candidate_batch_size", 1, labels)
+		ExpectMetricHistogramSampleCountValue("karpenter_voluntary_disruption_candidate_evaluation_duration_seconds", 1, labels)
+		for source, expected := range map[string]float64{
+			disruption.SimulationPodSourceCandidate: 1,
+			disruption.SimulationPodSourcePending:   0,
+			disruption.SimulationPodSourceDeleting:  0,
+			disruption.SimulationPodSourceTotal:     1,
+		} {
+			podCountLabels := lo.Assign(map[string]string{}, labels, map[string]string{"source": source})
+			metric, found := FindMetricWithLabelValues("karpenter_voluntary_disruption_simulation_pod_count", podCountLabels)
+			Expect(found).To(BeTrue())
+			Expect(metric.GetHistogram().GetSampleSum()).To(Equal(expected))
+		}
+		ExpectMetricHistogramSampleCountValue("karpenter_voluntary_disruption_candidates_evaluated_per_pass", 1, map[string]string{
+			"method":                          method.MethodName(),
+			metrics.ReasonLabel:               "drifted",
+			disruption.ConsolidationTypeLabel: "",
+			"outcome":                         disruption.PassOutcomeSelected,
+		})
 	})
 	It("should allow multiple replace operations to happen successively", func() {
 		numNodes := 10

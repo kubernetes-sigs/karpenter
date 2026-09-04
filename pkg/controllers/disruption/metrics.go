@@ -30,7 +30,48 @@ const (
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
 	policyLabel                  = "policy"
+	methodLabel                  = "method"
+	stageLabel                   = "stage"
+	outcomeLabel                 = "outcome"
+	stateLabel                   = "state"
+	sourceLabel                  = "source"
+	destinationLabel             = "destination"
+
+	CandidateStagePossible = "possible"
+	CandidateStageEligible = "eligible"
+
+	SimulationStageEvaluate           = "evaluate"
+	SimulationStageValidate           = "validate"
+	SimulationPodSourceCandidate      = "candidate"
+	SimulationPodSourcePending        = "pending"
+	SimulationPodSourceDeleting       = "deleting"
+	SimulationPodSourceTotal          = "total"
+	SimulationDestinationExistingNode = "existing_node"
+	SimulationDestinationNewNodeClaim = "new_nodeclaim"
+
+	ValidationStageDelay            = "delay"
+	ValidationStageCandidateRefresh = "candidate_refresh"
+	ValidationStageSimulation       = "simulation"
+	ValidationStageTotal            = "total"
+
+	PassOutcomeNoCandidates = "no_candidates"
+	PassOutcomeNoCommand    = "no_command"
+	PassOutcomeSelected     = "selected"
+	PassOutcomeError        = "error"
+
+	SimulationOutcomeSchedulable       = "schedulable"
+	SimulationOutcomeUnschedulable     = "unschedulable"
+	SimulationOutcomeCandidateDeleting = "candidate_deleting"
+	SimulationOutcomeTimeout           = "timeout"
+	SimulationOutcomeError             = "error"
+
+	TimeoutStateEligible    = "eligible"
+	TimeoutStateEvaluated   = "evaluated"
+	TimeoutStateUnevaluated = "unevaluated"
 )
+
+var candidateCountBuckets = []float64{0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000}
+var podCountBuckets = []float64{0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000}
 
 func init() {
 	ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: MultiNodeConsolidationType})
@@ -38,6 +79,142 @@ func init() {
 }
 
 var (
+	PassesTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "passes_total",
+			Help:      "Number of completed voluntary disruption method passes. Labeled by method, reason, consolidation type, and terminal outcome.",
+		},
+		[]string{methodLabel, metrics.ReasonLabel, ConsolidationTypeLabel, outcomeLabel},
+	)
+	LastEvaluatedTimestampSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "last_evaluated_timestamp_seconds",
+			Help:      "Unix timestamp of the latest completed voluntary disruption method pass. Labeled by method, nodepool, reason, and consolidation type.",
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+	)
+	Candidates = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "candidates",
+			Help:      "Latest candidate count for a voluntary disruption method. Possible candidates passed common candidate construction; eligible candidates also passed the method-specific filter.",
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel, stageLabel},
+	)
+	OldestEligibleAgeSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "oldest_eligible_age_seconds",
+			Help:      "Age in seconds of the oldest candidate's durable disruption eligibility condition.",
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+	)
+	CandidateEvaluationDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "candidate_evaluation_duration_seconds",
+			Help:      "Duration of a complete disruption scheduling simulation in seconds. Labeled by method, nodepool scope, reason, consolidation type, and stage.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel, stageLabel},
+	)
+	SimulationsTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "simulations_total",
+			Help:      "Number of disruption scheduling simulations. Labeled by method, nodepool scope, reason, consolidation type, stage, and result.",
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel, stageLabel, outcomeLabel},
+	)
+	CandidateBatchSize = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "candidate_batch_size",
+			Help:      "Number of candidates supplied to each disruption scheduling simulation.",
+			Buckets:   candidateCountBuckets,
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel, stageLabel},
+	)
+	SimulationPodCount = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "simulation_pod_count",
+			Help:      "Number of distinct pods supplied to a disruption scheduling simulation, labeled by pod source.",
+			Buckets:   podCountBuckets,
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel, stageLabel, sourceLabel},
+	)
+	SimulationPodPlacementsTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "simulation_pod_placements_total",
+			Help:      "Number of candidate pods placed by selected disruption simulations, labeled by existing-node or new-nodeclaim destination.",
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel, destinationLabel},
+	)
+	ValidationDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "validation_duration_seconds",
+			Help:      "Duration of voluntary disruption validation stages in seconds.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{methodLabel, metrics.ReasonLabel, ConsolidationTypeLabel, stageLabel},
+	)
+	CandidatesEvaluatedPerPass = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "candidates_evaluated_per_pass",
+			Help:      "Number of distinct candidates included in evaluation-stage scheduling simulations during a completed method pass.",
+			Buckets:   candidateCountBuckets,
+		},
+		[]string{methodLabel, metrics.ReasonLabel, ConsolidationTypeLabel, outcomeLabel},
+	)
+	TimeoutCandidateCount = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "timeout_candidate_count",
+			Help:      "Candidate counts observed when a consolidation method times out. Labeled by eligible, distinctly evaluated, or unevaluated state.",
+			Buckets:   candidateCountBuckets,
+		},
+		[]string{methodLabel, metrics.ReasonLabel, ConsolidationTypeLabel, stateLabel},
+	)
+	SelectedCandidatesTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "selected_candidates_total",
+			Help:      "Number of candidates in validated commands accepted by the disruption queue.",
+		},
+		[]string{methodLabel, metrics.NodePoolLabel, metrics.ReasonLabel, ConsolidationTypeLabel, decisionLabel},
+	)
 	EvaluationDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{

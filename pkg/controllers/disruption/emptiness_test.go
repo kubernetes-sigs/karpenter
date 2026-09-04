@@ -95,6 +95,20 @@ var _ = Describe("Emptiness", func() {
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
+			candidateLabels := map[string]string{
+				"method":                          "empty",
+				metrics.NodePoolLabel:             nodePool.Name,
+				metrics.ReasonLabel:               "empty",
+				disruption.ConsolidationTypeLabel: "empty",
+			}
+			ExpectMetricGaugeValue(disruption.Candidates, 1, lo.Assign(map[string]string{}, candidateLabels, map[string]string{"stage": disruption.CandidateStagePossible}))
+			ExpectMetricGaugeValue(disruption.Candidates, 0, lo.Assign(map[string]string{}, candidateLabels, map[string]string{"stage": disruption.CandidateStageEligible}))
+			ExpectMetricCounterValue(disruption.PassesTotal, 1, map[string]string{
+				"method":                          "empty",
+				metrics.ReasonLabel:               "empty",
+				disruption.ConsolidationTypeLabel: "empty",
+				"outcome":                         disruption.PassOutcomeNoCandidates,
+			})
 
 			ExpectDeleted(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -103,6 +117,24 @@ var _ = Describe("Emptiness", func() {
 			// Pod deleted, node is now empty. Emptiness claims it.
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "empty",
+			})
+			ExpectMetricGaugeValue(disruption.Candidates, 1, lo.Assign(map[string]string{}, candidateLabels, map[string]string{"stage": disruption.CandidateStagePossible}))
+			ExpectMetricGaugeValue(disruption.Candidates, 1, lo.Assign(map[string]string{}, candidateLabels, map[string]string{"stage": disruption.CandidateStageEligible}))
+			ExpectMetricGaugeValue(disruption.LastEvaluatedTimestampSeconds, float64(env.Clock.Now().Unix()), candidateLabels)
+			_, found := FindMetricWithLabelValues("karpenter_voluntary_disruption_oldest_eligible_age_seconds", candidateLabels)
+			Expect(found).To(BeTrue())
+			ExpectMetricCounterValue(disruption.PassesTotal, 1, map[string]string{
+				"method":                          "empty",
+				metrics.ReasonLabel:               "empty",
+				disruption.ConsolidationTypeLabel: "empty",
+				"outcome":                         disruption.PassOutcomeSelected,
+			})
+			ExpectMetricCounterValue(disruption.SelectedCandidatesTotal, 1, map[string]string{
+				"method":                          "empty",
+				metrics.NodePoolLabel:             nodePool.Name,
+				metrics.ReasonLabel:               "empty",
+				disruption.ConsolidationTypeLabel: "empty",
+				"decision":                        "delete",
 			})
 		})
 	})
@@ -743,6 +775,18 @@ var _ = Describe("Emptiness", func() {
 				Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			},
 		)
+		for _, stage := range []string{
+			disruption.ValidationStageDelay,
+			disruption.ValidationStageCandidateRefresh,
+			disruption.ValidationStageTotal,
+		} {
+			ExpectMetricHistogramSampleCountValue("karpenter_voluntary_disruption_validation_duration_seconds", 1, map[string]string{
+				"method":                          "empty",
+				metrics.ReasonLabel:               "empty",
+				disruption.ConsolidationTypeLabel: "empty",
+				"stage":                           stage,
+			})
+		}
 		// Process the item so that the nodes can be deleted
 		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 

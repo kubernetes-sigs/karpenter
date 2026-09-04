@@ -30,6 +30,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -486,6 +487,13 @@ var _ = Describe("Balanced Consolidation", func() {
 			cmd := deleteCmd[0]
 			// Savings for delete = full source node price
 			Expect(cmd.EstimatedSavings()).To(BeNumerically("~", sourceOffering.Price, 0.01))
+			ExpectMetricCounterValue(disruption.SimulationPodPlacementsTotal, 1, map[string]string{
+				"method":                          "single",
+				metrics.NodePoolLabel:             nodePool.Name,
+				metrics.ReasonLabel:               "underutilized",
+				disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType,
+				"destination":                     disruption.SimulationDestinationExistingNode,
+			})
 		})
 
 		It("should choose replace when pods need a new cheaper node", func() {
@@ -548,6 +556,13 @@ var _ = Describe("Balanced Consolidation", func() {
 			// The destination should be cheaper than the source.
 			Expect(cmd.EstimatedSavings()).To(BeNumerically(">", 0))
 			Expect(cmd.EstimatedSavings()).To(BeNumerically("<", mostExpensiveOffering.Price))
+			ExpectMetricCounterValue(disruption.SimulationPodPlacementsTotal, 1, map[string]string{
+				"method":                          "single",
+				metrics.NodePoolLabel:             nodePool.Name,
+				metrics.ReasonLabel:               "underutilized",
+				disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType,
+				"destination":                     disruption.SimulationDestinationNewNodeClaim,
+			})
 		})
 	})
 

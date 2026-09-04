@@ -30,6 +30,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
@@ -203,13 +204,26 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				nodePool3.Name: 30,
 			}
 
-			_, _ = consolidation.ComputeCommands(ctx, budgetMapping, candidates...)
+			observation := disruption.NewEvaluationObservation(consolidation, candidates)
+			_, _ = consolidation.ComputeCommands(disruption.WithEvaluationObservation(ctx, observation), budgetMapping, candidates...)
 
 			// Verify all nodepools are marked as timed out
 			// since we timed out before processing any candidates
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool1.Name)).To(BeTrue())
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeTrue())
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool3.Name)).To(BeTrue())
+			for _, state := range []string{
+				disruption.TimeoutStateEligible,
+				disruption.TimeoutStateEvaluated,
+				disruption.TimeoutStateUnevaluated,
+			} {
+				ExpectMetricHistogramSampleCountValue("karpenter_voluntary_disruption_timeout_candidate_count", 1, map[string]string{
+					"method":                          consolidation.MethodName(),
+					metrics.ReasonLabel:               "underutilized",
+					disruption.ConsolidationTypeLabel: consolidation.ConsolidationType(),
+					"state":                           state,
+				})
+			}
 		})
 	})
 })

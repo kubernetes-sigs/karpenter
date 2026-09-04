@@ -109,6 +109,10 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 	return []Command{validCmd}, nil
 }
 
+func (e *Emptiness) MethodName() string {
+	return "empty"
+}
+
 func (e *Emptiness) Reason() v1.DisruptionReason {
 	return v1.DisruptionReasonEmpty
 }

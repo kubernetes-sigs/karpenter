@@ -105,6 +105,10 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 	return cmds, nil
 }
 
+func (d *StaticDrift) MethodName() string {
+	return "static_drift"
+}
+
 func (d *StaticDrift) Reason() v1.DisruptionReason {
 	return v1.DisruptionReasonDrifted
 }

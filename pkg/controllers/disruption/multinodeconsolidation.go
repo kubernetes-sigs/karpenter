@@ -142,6 +142,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
+				evaluationObservationFromContext(ctx).ObserveTimeout()
 				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
 				if lastSavedCommand.Candidates == nil {
 					log.FromContext(ctx).V(1).Info("failed to find a multi-node consolidation after timeout", "last_batch_size", (min+max)/2)
@@ -188,6 +189,10 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		m.evaluator.EmitMultiNodeEvents(ctx, lastRejectedCmd, lastRejectedPerPool, false)
 	}
 	return lastSavedCommand, lastSavedPerPool, nil
+}
+
+func (m *MultiNodeConsolidation) MethodName() string {
+	return "multi"
 }
 
 // filterOutSameInstanceType filters out instance types that are more expensive than the cheapest instance type that is being

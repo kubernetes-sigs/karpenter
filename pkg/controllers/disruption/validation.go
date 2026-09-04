@@ -132,14 +132,20 @@ func NewEmptinessValidator(c consolidation) *EmptinessValidator {
 }
 
 func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, validationPeriod time.Duration) (Command, error) {
+	defer measureValidationStage(ctx, e.clock, ValidationStageTotal)()
 	if validationPeriod > 0 {
+		stop := measureValidationStage(ctx, e.clock, ValidationStageDelay)
 		select {
 		case <-ctx.Done():
+			stop()
 			return Command{}, errors.New("interrupted")
 		case <-e.clock.After(validationPeriod):
+			stop()
 		}
 	}
+	stop := measureValidationStage(ctx, e.clock, ValidationStageCandidateRefresh)
 	validatedCandidates, err := e.validateCandidates(ctx, cmd.Candidates...)
+	stop()
 	if err != nil {
 		return Command{}, err
 	}
@@ -190,6 +196,7 @@ func NewMultiConsolidationValidator(c consolidation) *ConsolidationValidator {
 }
 
 func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, validationPeriod time.Duration) (Command, error) {
+	defer measureValidationStage(ctx, c.clock, ValidationStageTotal)()
 	if err := c.isValid(ctx, cmd, validationPeriod); err != nil {
 		return Command{}, err
 	}
@@ -198,24 +205,35 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
 	if validationPeriod > 0 {
+		stop := measureValidationStage(ctx, c.clock, ValidationStageDelay)
 		select {
 		case <-ctx.Done():
+			stop()
 			return errors.New("context canceled")
 		case <-c.clock.After(validationPeriod):
+			stop()
 		}
 	}
+	stop := measureValidationStage(ctx, c.clock, ValidationStageCandidateRefresh)
 	validatedCandidates, err := c.validateCandidates(ctx, cmd.Candidates...)
+	stop()
 	if err != nil {
 		return fmt.Errorf("validating candidates, %w", err)
 	}
+	stop = measureValidationStage(ctx, c.clock, ValidationStageSimulation)
 	if err := c.validateCommand(ctx, cmd, validatedCandidates); err != nil {
+		stop()
 		return fmt.Errorf("validating command, %w", err)
 	}
+	stop()
 	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
 	// the following GitHub issue: https://github.com/kubernetes-sigs/karpenter/issues/1167.
+	stop = measureValidationStage(ctx, c.clock, ValidationStageCandidateRefresh)
 	if _, err = c.validateCandidates(ctx, validatedCandidates...); err != nil {
+		stop()
 		return fmt.Errorf("revalidating candidates, %w", err)
 	}
+	stop()
 	return nil
 }
 
@@ -299,7 +317,7 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 	if len(candidates) == 0 {
 		return NewValidationError(fmt.Errorf("no candidates"))
 	}
-	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, v.clock, v.recorder, []scheduling.Options{scheduling.IsConsolidationSimulation}, candidates...)
+	results, err := SimulateScheduling(WithSimulationStage(ctx, SimulationStageValidate), v.kubeClient, v.cluster, v.provisioner, v.clock, v.recorder, []scheduling.Options{scheduling.IsConsolidationSimulation}, candidates...)
 	if err != nil {
 		return fmt.Errorf("simluating scheduling, %w", err)
 	}

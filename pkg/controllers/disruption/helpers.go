@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -52,7 +53,34 @@ var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
 	schedulerOpts []scheduling.Options, candidates ...*Candidate,
-) (scheduling.Results, error) {
+) (results scheduling.Results, err error) {
+	observation := evaluationObservationFromContext(ctx)
+	stage := simulationStageFromContext(ctx)
+	if observation != nil {
+		if stage == SimulationStageEvaluate {
+			observation.RecordEvaluation(candidates...)
+		}
+		labels := observation.methodLabels()
+		labels[metrics.NodePoolLabel] = candidateNodePoolScope(candidates...)
+		labels[stageLabel] = stage
+		start := clk.Now()
+		CandidateBatchSize.Observe(float64(len(candidates)), labels)
+		defer func() {
+			outcome := SimulationOutcomeError
+			switch {
+			case err == nil && results.AllNonPendingPodsScheduled():
+				outcome = SimulationOutcomeSchedulable
+			case err == nil:
+				outcome = SimulationOutcomeUnschedulable
+			case errors.Is(err, errCandidateDeleting):
+				outcome = SimulationOutcomeCandidateDeleting
+			case errors.Is(err, context.DeadlineExceeded):
+				outcome = SimulationOutcomeTimeout
+			}
+			CandidateEvaluationDurationSeconds.Observe(clk.Since(start).Seconds(), labels)
+			SimulationsTotal.Inc(withLabel(labels, outcomeLabel, outcome))
+		}()
+	}
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.DeepCopyNodes()
 	deletingNodes := nodes.Deleting()
@@ -74,6 +102,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
+	pendingPods := pods
 
 	// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
 	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
@@ -100,6 +129,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return scheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
 	pods = append(pods, deletingNodePods...)
+	observeSimulationPodCounts(observation, stage, candidates, pendingPods, candidatePods, deletingNodePods)
 
 	var opts []scheduling.Options
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
@@ -125,7 +155,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return client.ObjectKeyFromObject(p), nil
 	})
 
-	results, err := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods)
+	results, err = scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("scheduling pods, %w", err)
 	}
@@ -185,24 +215,31 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue,
 ) ([]*Candidate, error) {
-	candidates, _, err := GetCandidatesWithTotals(ctx, cluster, kubeClient, recorder, clk, cloudProvider, shouldDisrupt, disruptionClass, queue, nil)
-	return candidates, err
+	candidateSet, _, err := GetCandidatesWithTotals(ctx, cluster, kubeClient, recorder, clk, cloudProvider, shouldDisrupt, disruptionClass, queue, nil)
+	return candidateSet.Eligible, err
 }
 
-// GetCandidatesWithTotals returns candidates and NodePoolTotals computed from all
-// candidates before filtering, so balanced scoring normalizes against the full pool.
+type CandidateSet struct {
+	Possible  []*Candidate
+	Eligible  []*Candidate
+	NodePools []string
+}
+
+// GetCandidatesWithTotals returns possible and eligible candidates and NodePoolTotals
+// computed from all possible candidates before method filtering, so balanced scoring
+// normalizes against the full pool.
 // When clusterCost is non-nil, TotalCost is read from precomputed cluster state
 // rather than re-summed from candidates.
 func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue, clusterCost *cost.ClusterCost,
-) ([]*Candidate, map[string]NodePoolTotals, error) {
+) (CandidateSet, map[string]NodePoolTotals, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
-		return nil, nil, err
+		return CandidateSet{}, nil, err
 	}
 	pdbs, err := pdb.NewLimits(ctx, kubeClient)
 	if err != nil {
-		return nil, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+		return CandidateSet{}, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	allNodes := cluster.DeepCopyNodes()
 	allCandidates := lo.FilterMap(allNodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
@@ -213,7 +250,11 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	// "Non-candidate nodes still contribute to the denominators").
 	nodePoolTotals := computeNodePoolTotals(ctx, allCandidates, stateNodesToSlice(allNodes), clusterCost)
 	filtered := lo.Filter(allCandidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) })
-	return filtered, nodePoolTotals, nil
+	return CandidateSet{
+		Possible:  allCandidates,
+		Eligible:  filtered,
+		NodePools: lo.Keys(nodePoolMap),
+	}, nodePoolTotals, nil
 }
 
 // stateNodesToSlice converts StateNodes to []*StateNode for computeNodePoolTotals.

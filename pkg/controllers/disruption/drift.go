@@ -81,7 +81,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			continue
 		}
 		// Check if we need to create any NodeClaims.
-		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, nil, candidate)
+		results, err := SimulateScheduling(WithSimulationStage(ctx, SimulationStageEvaluate), d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, nil, candidate)
 		if err != nil {
 			// if a candidate is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {
@@ -105,6 +105,10 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 
 	}
 	return []Command{}, nil
+}
+
+func (d *Drift) MethodName() string {
+	return "drift"
 }
 
 func (d *Drift) Reason() v1.DisruptionReason {

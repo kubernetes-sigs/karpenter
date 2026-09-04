@@ -140,6 +140,10 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 		if !nodePoolHealthy {
+			NodeRepairBlockedTotal.Inc(map[string]string{
+				metrics.NodePoolLabel: nodePoolName,
+				Gate:                  GateNodePool,
+			})
 			if err := c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName); err != nil {
 				return reconcile.Result{}, err
 			}
@@ -151,6 +155,10 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, err
 		}
 		if !clusterHealthy {
+			NodeRepairBlockedTotal.Inc(map[string]string{
+				metrics.NodePoolLabel: "",
+				Gate:                  GateCluster,
+			})
 			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
 			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 		}
@@ -192,6 +200,10 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
 		ImageID:                   nodeClaim.Status.ImageID,
+	})
+	NodeRepairUnhealthyDurationSeconds.Observe(max(0, c.clock.Since(unhealthyNodeCondition.LastTransitionTime.Time).Seconds()), map[string]string{
+		metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
+		Condition:             pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 	})
 	return reconcile.Result{}, nil
 }

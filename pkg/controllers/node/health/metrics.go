@@ -27,20 +27,47 @@ import (
 const (
 	ImageID   = "image_id"
 	Condition = "condition"
+	Gate      = "gate"
+
+	GateNodePool = "nodepool"
+	GateCluster  = "cluster"
 )
 
-var NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
-	crmetrics.Registry,
-	prometheus.CounterOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: metrics.NodeClaimSubsystem,
-		Name:      "unhealthy_disrupted_total",
-		Help:      "Number of unhealthy nodeclaims disrupted in total by Karpenter. Labeled by condition on the node was disrupted, the owning nodepool, and the image ID.",
-	},
-	[]string{
-		Condition,
-		metrics.NodePoolLabel,
-		metrics.CapacityTypeLabel,
-		ImageID,
-	},
+var (
+	NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeClaimSubsystem,
+			Name:      "unhealthy_disrupted_total",
+			Help:      "Number of unhealthy nodeclaims disrupted in total by Karpenter. Labeled by condition on the node was disrupted, the owning nodepool, and the image ID.",
+		},
+		[]string{
+			Condition,
+			metrics.NodePoolLabel,
+			metrics.CapacityTypeLabel,
+			ImageID,
+		},
+	)
+	NodeRepairBlockedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_blocked_total",
+			Help:      "Number of node repair evaluations deferred by a NodePool or cluster health gate. Repeated reconciles are counted as repeated deferrals.",
+		},
+		[]string{metrics.NodePoolLabel, Gate},
+	)
+	NodeRepairUnhealthyDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "repair_unhealthy_duration_seconds",
+			Help:      "Time in seconds from the triggering unhealthy condition transition until Karpenter successfully submitted the NodeClaim deletion.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{metrics.NodePoolLabel, Condition},
+	)
 )
