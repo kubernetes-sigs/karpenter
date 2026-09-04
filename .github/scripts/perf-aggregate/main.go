@@ -39,8 +39,6 @@ import (
 	"strings"
 )
 
-// direction distinguishes benchmark metrics whose regression alarm fires on
-// an increase (Smaller) from those whose alarm fires on a decrease (Bigger).
 type direction int
 
 const (
@@ -57,12 +55,6 @@ type metricSpec struct {
 	dir       direction
 }
 
-// metrics is the ordered list of report fields we aggregate. Order controls
-// the print-table row order and the emitted benchmark-action array order.
-//
-// Memory and CPU use the p95 percentile from types.go rather than max because
-// p95 tracks the controller's steady-state resource envelope; max is dominated
-// by transient spikes that make regression signals noisy.
 var metrics = []metricSpec{
 	{"total_time", "Duration", "seconds", smallerIsBetter},
 	{"karpenter_p95_memory_mb", "Controller Peak Memory", "MB", smallerIsBetter},
@@ -234,7 +226,6 @@ func collectReports(outputDir string, iterations int) (map[string][]map[string]a
 		for _, path := range matches {
 			data, err := readReport(path)
 			if err != nil {
-				// Skip unreadable / malformed reports; match prior Python behavior.
 				fmt.Fprintf(os.Stderr, "warn: skipping %s: %v\n", path, err)
 				continue
 			}
@@ -246,8 +237,6 @@ func collectReports(outputDir string, iterations int) (map[string][]map[string]a
 }
 
 func readReport(path string) (map[string]any, error) {
-	// path is the output of filepath.Glob under OUTPUT_DIR, which the CI
-	// workflow creates via mktemp -d. Not attacker-controlled.
 	b, err := os.ReadFile(path) //nolint:gosec // G304: path is scoped to CI-created OUTPUT_DIR
 	if err != nil {
 		return nil, err
@@ -259,10 +248,6 @@ func readReport(path string) (map[string]any, error) {
 	return m, nil
 }
 
-// extractValues pulls the numeric value at jsonField from each report,
-// applying the unit conversions we inherited from the prior Python script:
-// nanosecond durations become seconds. The controller CPU field is already
-// in cores in types.go, so no CPU conversion is needed here.
 func extractValues(datas []map[string]any, jsonField string) []float64 {
 	values := make([]float64, 0, len(datas))
 	for _, d := range datas {
@@ -338,8 +323,6 @@ func computeStats(values []float64) stats {
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
 func round1(f float64) float64 { return math.Round(f*10) / 10 }
 
-// prettifyTestName reverses the report-file naming convention so table rows
-// and benchmark entries read as human titles rather than snake_case slugs.
 func prettifyTestName(fileBasename string) string {
 	base := strings.TrimSuffix(fileBasename, "_performance_report.json")
 	words := strings.Split(base, "_")
