@@ -65,8 +65,12 @@ jobs:
       - name: Check artifacts
         id: check
         run: |
-          if [ ! -f before/results.txt ] || [ ! -f after/results.txt ]; then
-            echo "::warning::Benchmark artifacts not found. Skipping comparison."
+          if [ ! -f after/results.txt ]; then
+            echo "::error::Missing after/results.txt: this PR's benchmark job did not produce results."
+            exit 1
+          fi
+          if [ ! -f before/results.txt ]; then
+            echo "::warning::Missing before/results.txt: skipping comparison (base benchmark job did not produce results, or fork PR without upload permissions)."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
