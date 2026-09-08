@@ -160,38 +160,17 @@ type cachedBench struct {
 	candidates   []*Candidate
 }
 
-// benchCache memoizes setupConsolidationBench output keyed on benchConfig so
-// that -count=N re-invocations of the same sub-benchmark share the fixture
-// built by the first invocation.
+// benchCache memoizes setupConsolidationBench output keyed on benchConfig
+// so that -count=N re-invocations of the same sub-benchmark share the
+// fixture built by the first invocation.
 //
-// Safety: SimulateScheduling is read-only over its inputs on the timed path
-// (verified in pkg/controllers/disruption/helpers.go:53-154 as of PR 2998's
-// tip):
-//
-//   - cluster.DeepCopyNodes() (helpers.go:57) makes a fresh copy of node
-//     state before use; clusterState itself is not mutated.
-//   - provisioner.GetPendingPods reads pending pods (spec.nodeName="") from
-//     kubeClient — but the bench pods are all pre-scheduled onto nodes, so
-//     the pending-pod list is empty and the p.Validate/MarkPodScheduling
-//     Decisions branch never fires. See provisioner.go:196.
-//   - pdb.NewLimits and deletingNodes.CurrentlyReschedulablePods only read.
-//   - provisioner.NewScheduler is constructed fresh per call, and Solve
-//     mutates only its own local scheduling state; the input pods,
-//     stateNodes, and cluster/kubeClient pointers are not written back to.
-//
-// Because the current b.N inner loop already reuses these fixtures across
-// 100+ SimulateScheduling calls per BenchmarkFn invocation without affecting
-// correctness or ns/op stability, extending that reuse across -count=N
-// invocations is semantically equivalent to what b.N already does — the
-// harness just gets more samples per computed fixture.
-//
-// If a mutating consolidation-related function is added to the timed path
-// in the future (e.g. Scheduler.Solve becomes stateful over clusterState, a
-// new SimulateScheduling variant writes back to kubeClient, or p.Validate
-// starts firing in the bench pod shape), this cache MUST be revisited or
-// removed. The load-bearing invariant is: the timed path is read-only over
-// kubeClient / clusterState / candidates / prov.
-var benchCache sync.Map // benchConfig → *cachedBench
+// Safety invariant: the timed path (SimulateScheduling) must remain
+// read-only over kubeClient, clusterState, candidates, and prov. The
+// current implementation satisfies this: cluster.DeepCopyNodes runs
+// before use, GetPendingPods never fires on pre-scheduled pods, and
+// NewScheduler is constructed fresh per call. If a mutating function is
+// added to the timed path, this cache MUST be revisited or removed.
+var benchCache sync.Map // benchConfig -> *cachedBench
 
 // setupOrLoadBench returns a fresh ctx (always) and either the cached
 // fixture for cfg or a freshly built one that is then stored in the cache.
