@@ -69,17 +69,10 @@ var benchRand = rand.New(rand.NewSource(42))
 //	go test -tags=test_performance -run=XXX -bench=. -count=10 ./pkg/controllers/disruption/ | tee /tmp/new
 //	benchstat /tmp/old /tmp/new
 //
-// These benchmarks exercise the SimulateScheduling path, which is the hot path
-// for consolidation. This is where PR#2671's regression occurred: adding per-pod
-// NodePool compatibility checks inside the topology domain evaluation loop.
-//
-// Sub-benchmarks are named vector=<name>/<param>=<n>/... where "vector" is the
-// primary axis being swept and remaining path segments pin the other axes as
-// filters. This shape is compatible with slope-based benchstat gates (see PR
-// #3299's perf_fixtures_test.go) which parse the vector to group points and
-// gate on per-vector growth slope instead of a single-point cost. The current
-// 20% p<0.05 gate is level-based per sub-benchmark; the vector naming is
-// forward-compatible with an eventual slope gate.
+// Sub-benchmarks are named vector=<name>/<param>=<n>/... where "vector" is
+// the primary axis being swept. This shape is compatible with slope-based
+// benchstat gates that group points by vector and gate on per-vector
+// growth slope rather than a single-point cost.
 
 type benchConfig struct {
 	nodeCount              int
@@ -88,21 +81,10 @@ type benchConfig struct {
 	topologySpreadFraction float64
 }
 
-// BenchmarkConsolidation is the top-level benchmark for consolidation
-// SimulateScheduling. Sub-benchmarks are organized by vector:
-//
-//   - vector=nodes: sweep node count at fixed (np=1, topo=none). Detects
-//     per-node cost scaling and node-index build regressions.
-//   - vector=nodepools: sweep NodePool count at fixed (topo=hostname). This
-//     is the R1 replay axis — the np=9/n=100 case is the #2671 replay
-//     target that trips the 20% wall-time gate at p=0.002.
-//   - vector=topology: sweep topology spread fraction. Currently a single
-//     data point at frac=50 (n=500, np=1) for measurement-only coverage.
-//
-// 500-node sub-benchmarks are gated by testing.Short() to avoid CI timeouts
-// on shared runners; they run in local profiling.
+// BenchmarkConsolidation sweeps three vectors (nodes, nodepools, topology)
+// over the SimulateScheduling hot path. 500-node sub-benchmarks are gated
+// by testing.Short() to avoid CI timeouts; they run under local profiling.
 func BenchmarkConsolidation(b *testing.B) {
-	// vector=nodes: sweep node count at (topo=none, np=1).
 	for _, n := range []int{10, 50, 100, 500} {
 		cfg := benchConfig{nodeCount: n, podsPerNode: 10, nodePoolCount: 1, topologySpreadFraction: 0.0}
 		b.Run(fmt.Sprintf("vector=nodes/n=%d/topo=none/np=1", n), func(b *testing.B) {
@@ -113,8 +95,6 @@ func BenchmarkConsolidation(b *testing.B) {
 		})
 	}
 
-	// vector=nodepools at n=100 (topo=hostname). The np=9 case is the #2671
-	// (R1) regression pattern: O(pods * domains * NodePools).
 	for _, np := range []int{1, 3, 9} {
 		cfg := benchConfig{nodeCount: 100, podsPerNode: 10, nodePoolCount: np, topologySpreadFraction: 1.0}
 		b.Run(fmt.Sprintf("vector=nodepools/np=%d/topo=hostname/n=100", np), func(b *testing.B) {
@@ -122,8 +102,6 @@ func BenchmarkConsolidation(b *testing.B) {
 		})
 	}
 
-	// vector=nodepools at n=500 (topo=hostname), short-gated. Extends the
-	// nodepools sweep to larger cluster scale for local profiling.
 	for _, np := range []int{3, 9} {
 		cfg := benchConfig{nodeCount: 500, podsPerNode: 10, nodePoolCount: np, topologySpreadFraction: 1.0}
 		b.Run(fmt.Sprintf("vector=nodepools/np=%d/topo=hostname/n=500", np), func(b *testing.B) {
@@ -134,7 +112,6 @@ func BenchmarkConsolidation(b *testing.B) {
 		})
 	}
 
-	// vector=topology at (n=500, np=1). Half-fraction topology spread.
 	b.Run("vector=topology/frac=50/n=500/np=1", func(b *testing.B) {
 		if testing.Short() {
 			b.Skip("skipping 500-node benchmark in short mode")
@@ -143,15 +120,11 @@ func BenchmarkConsolidation(b *testing.B) {
 	})
 }
 
-// --- Implementation ---
-
-// cachedBench holds the heavy setup fixture built by setupConsolidationBench
-// so that -count=N re-invocations of the same benchConfig can reuse it.
+// cachedBench holds the heavy setup fixture built by setupConsolidationBench.
 // The ctx is deliberately NOT cached: TestContextWithLogger binds a zaptest
-// logger to a specific *testing.B via t.Cleanup(), so using a stale ctx from
-// a finished testing.B in a later invocation would emit logs on a completed
-// test frame. We re-derive ctx per invocation (cheap) and share only the
-// expensive-to-build objects.
+// logger to a specific *testing.B via t.Cleanup(), so a stale ctx would log
+// on a completed test frame. Re-derive ctx per invocation and share only
+// the expensive-to-build objects.
 type cachedBench struct {
 	kubeClient   client.Client
 	clk          *clock.FakeClock
@@ -172,12 +145,9 @@ type cachedBench struct {
 // added to the timed path, this cache MUST be revisited or removed.
 var benchCache sync.Map // benchConfig -> *cachedBench
 
-// setupOrLoadBench returns a fresh ctx (always) and either the cached
-// fixture for cfg or a freshly built one that is then stored in the cache.
-// sync.Map.LoadOrStore handles the race case where two goroutines
-// concurrently miss (defensive — bench iterations are sequential by
-// default). See benchCache doc for the safety invariant that makes sharing
-// setup across -count=N safe.
+// setupOrLoadBench returns a fresh ctx and either the cached fixture for
+// cfg or a freshly built one stored in the cache. See benchCache doc for
+// the safety invariant.
 func setupOrLoadBench(b *testing.B, cfg benchConfig) (context.Context, *cachedBench) {
 	// Always derive ctx fresh: it holds a zaptest logger bound to THIS b via
 	// t.Cleanup(), so it must not outlive the current invocation.
@@ -187,9 +157,8 @@ func setupOrLoadBench(b *testing.B, cfg benchConfig) (context.Context, *cachedBe
 	if v, ok := benchCache.Load(cfg); ok {
 		return ctx, v.(*cachedBench)
 	}
-	// Cache miss: do the heavy setup. We discard setupConsolidationBench's
-	// internal ctx (bound to the FIRST b that populated the cache) since
-	// subsequent cache hits use our fresh ctx anyway.
+	// Cache miss: run the heavy setup, discard its internal ctx (bound to
+	// the populating *testing.B; our fresh ctx replaces it).
 	_, kubeClient, clk, clusterState, prov, candidates := setupConsolidationBench(b, cfg)
 	fresh := &cachedBench{
 		kubeClient:   kubeClient,
@@ -203,13 +172,8 @@ func setupOrLoadBench(b *testing.B, cfg benchConfig) (context.Context, *cachedBe
 }
 
 func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
-	// Setup is cached per benchConfig across -count=N invocations; b.ResetTimer
-	// below excludes both the fresh-ctx derivation and any cache-miss setup
-	// from the timed section. See benchCache for the safety invariant.
 	ctx, setup := setupOrLoadBench(b, cfg)
 	rec := events.NewRecorder(&record.FakeRecorder{})
-
-	// Benchmark SimulateScheduling for a single candidate node removal.
 	candidate := setup.candidates[0]
 
 	b.ReportAllocs()
@@ -223,12 +187,8 @@ func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
 	b.ReportMetric(cfg.topologySpreadFraction*100, "topo%")
 }
 
-// --- Setup ---
-
-// Parameters (node counts, TSC fraction, pod requests) are intentionally
-// deterministic and seeded so benchstat can compare runs across commits with
-// low variance. Randomizing configuration inside a microbenchmark defeats that
-// signal; broader coverage belongs in the kind-cluster benchmarks (PR #2994).
+// Parameters are intentionally deterministic and seeded so benchstat can
+// compare runs across commits with low variance.
 func setupConsolidationBench(b *testing.B, cfg benchConfig) (
 	context.Context, client.Client, *clock.FakeClock, *state.Cluster,
 	*provisioning.Provisioner, []*Candidate,
@@ -341,7 +301,7 @@ func addCandidateNode(b *testing.B, ctx context.Context, kubeClient client.Clien
 	}
 
 	// Grab the StateNode that cluster.DeepCopyNodes will return so the
-	// candidate name filter in SimulateScheduling matches (see helpers.go).
+	// candidate name filter in SimulateScheduling matches.
 	var sn *state.StateNode
 	for n := range clusterState.Nodes() {
 		if n.Node != nil && n.Node.Name == node.Name {
