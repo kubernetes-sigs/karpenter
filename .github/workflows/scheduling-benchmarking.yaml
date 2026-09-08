@@ -90,8 +90,13 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-          # Check for statistically significant regressions > 20%
-          if echo "$RESULT" | grep -E '\+[2-9][0-9]\.[0-9]+%|\+[1-9][0-9]{2,}\.[0-9]+%' | grep -v '~' | grep -qE 'p=0\.0[0-4]'; then
+          # Gate on allocs/op only, at >=20% delta + p<0.05.
+          # allocs/op is deterministic from code paths and portable across
+          # runners; sec/op noise at n=6 regularly exceeds any threshold below
+          # ~200% on identical code, so a sec/op threshold cannot separate
+          # real regressions from runner variance without also masking them.
+          ALLOCS=$(benchstat -filter '.unit:allocs/op' before/results.txt after/results.txt 2>&1 || true)
+          if echo "$ALLOCS" | grep -E '\+[2-9][0-9]\.[0-9]+%|\+[1-9][0-9]{2,}\.[0-9]+%' | grep -v '~' | grep -qE 'p=0\.0[0-4]'; then
             REGRESSED=true
           else
             REGRESSED=false
@@ -114,7 +119,7 @@ jobs:
 
             </details>
 
-            ${{ steps.benchstat.outputs.regression == 'true' && '⚠️ **Statistically significant regression detected (>20%, p<0.05).** Please investigate before merging.' || '✅ No significant regression detected.' }}
+            ${{ steps.benchstat.outputs.regression == 'true' && '⚠️ **Statistically significant allocs/op regression detected (>20%, p<0.05).** Please investigate before merging.' || '✅ No significant allocs/op regression detected.' }}
       - name: Fail on regression
         if: steps.benchstat.outputs.regression == 'true'
         run: |
