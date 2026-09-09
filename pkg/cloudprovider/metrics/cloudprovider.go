@@ -98,7 +98,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: "cloudprovider",
 			Name:      "errors_total",
-			Help:      "Total number of errors returned from CloudProvider calls. Labeled by the controller, method name, provider, error type, and owning NodePool when available.",
+			Help:      "Total number of errors returned from CloudProvider calls.",
 		},
 		[]opmetrics.Label{
 			metrics.Controller,
