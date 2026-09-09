@@ -10,6 +10,7 @@ This RFC proposes that **repair become a voluntary disruption** — the same cla
 2. **Ordering** — because a budget forces a choice of *which* eligible node to repair first, repair gets a deterministic, prioritizable, starvation-free ordering.
 3. **Policy** — the existing `RepairPolicy` gains a per-condition drain bound (forceful vs. graceful) and an ordering priority.
 4. **Veto** — repair needs a dedicated veto (the escape hatch the breaker never gave), distinct from `do-not-disrupt`. This RFC establishes that it must exist; the exact shape is a separate RFC.
+5. **NodePool backoff** — pace repairs whose pre-spun replacements keep failing to come up healthy by backing off the destination NodePool, a shared launch-failure primitive with drift.
 
 These changes are additive and default to behavior *more* conservative than today's. They realize two "future considerations" the original RFC explicitly deferred for lack of data — disruption budgets and a graceful/forceful split — which the community has since asked for repeatedly ([#2811](https://github.com/kubernetes-sigs/karpenter/issues/2811), [#2134](https://github.com/kubernetes-sigs/karpenter/issues/2134), [#2321](https://github.com/kubernetes-sigs/karpenter/issues/2321), [#2042](https://github.com/kubernetes-sigs/karpenter/issues/2042)).
 
@@ -113,7 +114,7 @@ Both changes align with the original RFC ([#1768](https://github.com/kubernetes-
 
 ## Proposal
 
-Making repair a well-behaved voluntary disruption is four additive changes. Together they turn the inert controls above into live branches — the same decision flow, but now every control the operator set steers it:
+Making repair a well-behaved voluntary disruption is five additive changes. Together they turn the inert controls above into live branches — the same decision flow, but now every control the operator set steers it:
 
 ```mermaid
 flowchart TD
@@ -169,16 +170,14 @@ Two benefits fall out of riding the shared machinery:
 
 ### 2. Ordering — deterministic, prioritizable, starvation-free
 
-Once a budget caps the rate, something must choose which eligible node goes first. Today that choice is **arbitrary** — whichever reconcile fires under the breaker wins. The initial ordering just needs to be **deterministic** (same set → same order), **prioritizable** (a fatal ECC fault beats a flaky fabric error), **starvation-free** (a low-priority real fault can't wait forever), and **monotone in waiting** (waiting only raises a node's standing). Linear aging with a per-NodePool backoff satisfies all four:
+Once a budget caps the rate, something must choose which eligible node goes first. Today that choice is **arbitrary** — whichever reconcile fires under the breaker wins. The initial ordering just needs to be **deterministic** (same set → same order), **prioritizable** (a fatal ECC fault beats a flaky fabric error), **starvation-free** (a low-priority real fault can't wait forever), and **monotone in waiting** (waiting only raises a node's standing). Linear aging satisfies all four:
 
 ```
-E = rank + age/τ − backoff(nodePool)     sort descending; tie-break on disruptionCost, then nodeName
+E = rank + age/τ     sort descending; tie-break on disruptionCost, then nodeName
 ```
 
 - **`rank`** — a dense ordering of fault types from per-policy `Priority` (below). Using rank, not raw priority values, keeps arbitrary magnitudes from changing what `τ` means.
-- **`age/τ`** — time *past toleration*, the wait that buys one rank tier (`τ` sets the starvation bound). Age starts at *eligibility*, not fault onset, so a flakier signal's longer toleration can't bank extra age and rank higher.
-- **`backoff(nodePool)`** — a down payment on smarter restraint: applied to every node in a pool whose replacements keep failing, pacing the bad-component loop across fresh nodes. Keyed to the **NodePool, not the node**, because a failed launch is almost never node-specific. (This is the same head-of-line / launch-failure problem drift hits in [#3072](https://github.com/kubernetes-sigs/karpenter/issues/3072) / [#3080](https://github.com/kubernetes-sigs/karpenter/issues/3080).)
-
+- **`age/τ`** — time *past toleration*, the wait that raises a node's standing. `τ` is the **aging constant with units of time-per-rank-tier**: a node gains one full `rank` tier of standing for every `τ` it waits, so a node `Δrank` tiers below a steadily-refreshed rival overtakes it after `Δrank·τ` — which is exactly the starvation bound. Picking `τ` is picking that bound: small `τ` ages nodes up quickly (fairer, less strictly prioritized); large `τ` holds priority order longer (more strictly prioritized, slower to rescue a low-priority fault). Age starts at *eligibility*, not fault onset, so a flakier signal's longer toleration can't bank extra age and rank higher.
 This ordering is the concrete answer to the freeze: a genuine fault out-*ranks* a false-positive flood, so it's served first, not starved behind it — and aging guarantees even a low-priority real fault wins within `Δrank·τ`. This direction generalizes to [#3141](https://github.com/kubernetes-sigs/karpenter/issues/3141) (unify disruption methods into a single priority-scored candidate list), where repair is simply one more scored candidate.
 
 ### 3. Policy — expand the existing `RepairPolicy`
@@ -219,6 +218,10 @@ The budget paces repair; it doesn't give an operator a "stop, you're wrong" leve
 It has to be dedicated because the two carry different intents. `do-not-disrupt` means "don't do *discretionary* things to this node" — consolidation, drift. A user who set it to protect a long-running job did not necessarily mean "and never fix this node if it breaks"; conversely, a user might want repair suppressed on a node they're happy to consolidate. Repair-suppression and disruption-suppression are separable intents, so repair gets its own annotation rather than overloading `do-not-disrupt`.
 
 **What this RFC does *not* settle:** whether `do-not-disrupt` should *also* imply "don't repair" **by default**. Repair ignores `do-not-disrupt` today, so any coupling would be a behavior change with real trade-offs in both directions, and the right shape (default coupling? node vs. NodePool scope? interaction with the dedicated veto?) deserves its own discussion. This RFC commits only to the principle that **a repair-specific veto must exist**; the precise annotation shape and its relationship to `do-not-disrupt` are worked out in a dedicated follow-up, tracked in [#2424](https://github.com/kubernetes-sigs/karpenter/issues/2424). The node-level pause direction in [#2497](https://github.com/kubernetes-sigs/karpenter/issues/2497) / [#2901](https://github.com/kubernetes-sigs/karpenter/pull/2901) is related prior art for that conversation.
+
+### 5. NodePool backoff — decline repairs that won't help
+
+Repair needs a way to *decline* a valid, in-budget target when repairing it won't actually help — otherwise it churns launching replacements into a NodePool where they can't come up healthy (bad AMI/config, impaired zone). The initial version is a **backoff on the destination NodePool**: when a pre-spun replacement keeps failing, repairs whose scheduling sim resolves to that pool are skipped until it clears (a genuine fault keeps its rank and retries — delayed, not starved). This is the **same launch-failure backoff drift already needs** ([#3072](https://github.com/kubernetes-sigs/karpenter/issues/3072) / [#3080](https://github.com/kubernetes-sigs/karpenter/issues/3080)), so it should be shared, not repair-specific. It leaves the door open to smarter, proactive restraint later ([#3193](https://github.com/kubernetes-sigs/karpenter/issues/3193)).
 
 ---
 
