@@ -80,14 +80,24 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 			continue
 		}
-		// Check if we need to create any NodeClaims.
-		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, nil, candidate)
+		// Simulate rescheduling the candidate's pods. When they can't be replaced-first and the candidate holds a full
+		// reservation, this reports terminate-first (RFC #3203): delete the candidate and let reactive provisioning
+		// refill the freed slot. See SimulateSchedulingWithReservedFallback.
+		results, terminateFirst, err := SimulateSchedulingWithReservedFallback(ctx, d.kubeClient, d.cluster, d.provisioner, d.clock, d.recorder, candidate)
 		if err != nil {
 			// if a candidate is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
 			return []Command{}, err
+		}
+		if terminateFirst {
+			// Delete-only: don't carry the simulation Results — the freed pods pend and reactive provisioning re-places
+			// them onto the freed reservation slot. The drain still honors PDBs and is bounded by TGP.
+			return []Command{{
+				Candidates:          []*Candidate{candidate},
+				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
+			}}, nil
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {

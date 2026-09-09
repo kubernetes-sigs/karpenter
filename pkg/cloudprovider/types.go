@@ -351,12 +351,12 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 		jPrice := math.MaxFloat64
 
 		for _, of := range its[i].Offerings {
-			if of.Available && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
+			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
 				iPrice = of.Price
 			}
 		}
 		for _, of := range its[j].Offerings {
-			if of.Available && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
+			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
 				jPrice = of.Price
 			}
 		}
@@ -563,6 +563,24 @@ type Offerings []*Offering
 func (ofs Offerings) Available() Offerings {
 	return lo.Filter(ofs, func(o *Offering, _ int) bool {
 		return o.Available
+	})
+}
+
+// Launchable reports whether a new node can actually be launched into this offering right now. It requires the offering
+// to be healthy (Available) and, for a reserved offering, to have remaining reservation capacity. Availability alone is
+// insufficient because capacity and health are independent axes: a full-but-healthy reservation is Available with a
+// ReservationCapacity of 0, and launching into it would fail. Non-reserved offerings are never reservation-constrained,
+// so for them Launchable is equivalent to Available.
+func (o *Offering) Launchable() bool {
+	return o.Available && (o.CapacityType() != v1.CapacityTypeReserved || o.ReservationCapacity > 0)
+}
+
+// Launchable returns the offerings that can currently be launched into (see Offering.Launchable). Use this rather than
+// Available anywhere availability is a proxy for "can launch/price this now" (pricing, ordering, capacity-type
+// selection); use Available only where the pure health signal is intended.
+func (ofs Offerings) Launchable() Offerings {
+	return lo.Filter(ofs, func(o *Offering, _ int) bool {
+		return o.Launchable()
 	})
 }
 

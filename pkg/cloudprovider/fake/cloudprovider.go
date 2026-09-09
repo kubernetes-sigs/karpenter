@@ -158,11 +158,13 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 	offerings := instanceType.Offerings.Available().Compatible(reqs)
 	lo.Must0(len(offerings) != 0, "created nodeclaim with no available offerings")
 	for _, o := range offerings {
-		if o.CapacityType() == v1.CapacityTypeReserved {
+		// Only launch into a reserved offering that still has capacity. A full reservation stays Available (health) but
+		// is not launchable — matching the real provider, where reservation capacity and offering availability are
+		// independent axes (a full-but-healthy reservation is Available=true with ReservationCapacity=0). We do NOT
+		// flip Available on exhaustion; downstream scheduling/pricing already treats a zero-capacity reserved offering
+		// as non-launchable (see Offering.Launchable / offeringsToReserve).
+		if o.CapacityType() == v1.CapacityTypeReserved && o.ReservationCapacity > 0 {
 			o.ReservationCapacity -= 1
-			if o.ReservationCapacity == 0 {
-				o.Available = false
-			}
 			offering = o
 			break
 		}
