@@ -100,7 +100,13 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 
 func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
 	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
-	return []Method{
+	methods := []Method{}
+	// Repair runs first: fixing a fault outranks any discretionary rebalance. Only registered when a cloud provider
+	// defines repair policies and the NodeRepair feature gate is on, matching the old node.health controller's gating.
+	if len(cp.RepairPolicies()) != 0 {
+		methods = append(methods, NewRepair(c))
+	}
+	return append(methods, []Method{
 		// Delete empty nodes across all consolidation policies (WhenEmpty, WhenEmptyOrUnderutilized, Balanced).
 		NewEmptiness(c),
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
@@ -111,7 +117,7 @@ func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Clien
 		NewMultiNodeConsolidation(c),
 		// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
 		NewSingleNodeConsolidation(c),
-	}
+	}...)
 }
 
 func (c *Controller) Name() string {

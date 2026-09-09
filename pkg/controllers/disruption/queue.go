@@ -233,6 +233,20 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// then the termination controller will handle the eventual deletion of the nodes.
 	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
+		// A candidate may carry an explicit drain bound (repair sets one). Stamp the absolute termination deadline HERE,
+		// at actual deletion time, so replace-then-terminate latency doesn't erode the grace window. The lifecycle
+		// controller no-ops if the annotation already exists, so this candidate-level bound wins over the NodeClaim's TGP.
+		if tgp := cmd.Candidates[i].TerminationGracePeriod; tgp != nil {
+			nc := cmd.Candidates[i].NodeClaim
+			stored := nc.DeepCopy()
+			nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
+				v1.NodeClaimTerminationTimestampAnnotationKey: q.clock.Now().Add(*tgp).Format(time.RFC3339),
+			})
+			if err := q.kubeClient.Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
+				errs[i] = err
+				return
+			}
+		}
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
 			return q.kubeClient.Delete(ctx, cmd.Candidates[i].NodeClaim)
 		}); err != nil {
