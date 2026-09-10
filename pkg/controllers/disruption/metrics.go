@@ -284,6 +284,7 @@ var (
 			Help:      "The number of times a NodePool entered or escalated drift replacement back-off after an unrecoverable failure. Labeled by NodePool.",
 		},
 		[]opmetrics.Label{metrics.NodePool},
+		opmetrics.Alpha,
 	)
 	DriftBackoffSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -294,6 +295,7 @@ var (
 			Help:      "Seconds remaining in the current drift replacement back-off window for a NodePool. The series is present only while the NodePool is backed off and is removed once it becomes eligible again (absent == not backing off). Labeled by NodePool.",
 		},
 		[]opmetrics.Label{metrics.NodePool},
+		opmetrics.Alpha,
 	)
 )
 
