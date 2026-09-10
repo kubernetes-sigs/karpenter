@@ -70,6 +70,7 @@ type FeatureGates struct {
 	TerminateFirstDrift       bool
 	TerminateFirstRepair      bool
 	PodDeletionCostManagement bool
+	NodePoolDriftBackoff      bool
 }
 
 // FeatureGate is the source-of-truth description of a feature gate. Declaring gates as FeatureGates keeps each gate's
@@ -148,6 +149,13 @@ var (
 		Help: "Karpenter sets controller.kubernetes.io/pod-deletion-cost on pods so ReplicaSet scale-down prefers " +
 			"nodes it plans to consolidate, and stops reading that annotation as a disruption cost.",
 	}
+	NodePoolDriftBackoffFeatureGate = FeatureGate{
+		Name:    "NodePoolDriftBackoff",
+		Default: true,
+		Stage:   docs.Alpha,
+		Help: "Karpenter backs off drift disruption for a NodePool after its drift replacements fail, so a NodePool " +
+			"that can't launch replacements doesn't keep cycling drifted nodes.",
+	}
 )
 
 // KarpenterFeatureGates are the feature gates Karpenter supports, in the order --feature-gates lists them.
@@ -161,6 +169,7 @@ var KarpenterFeatureGates = []FeatureGate{
 	TerminateFirstDriftFeatureGate,
 	TerminateFirstRepairFeatureGate,
 	PodDeletionCostManagementFeatureGate,
+	NodePoolDriftBackoffFeatureGate,
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -285,6 +294,7 @@ func DefaultFeatureGates() FeatureGates {
 		TerminateFirstDrift:       TerminateFirstDriftFeatureGate.Default,
 		TerminateFirstRepair:      TerminateFirstRepairFeatureGate.Default,
 		PodDeletionCostManagement: PodDeletionCostManagementFeatureGate.Default,
+		NodePoolDriftBackoff:      NodePoolDriftBackoffFeatureGate.Default,
 	}
 }
 
@@ -323,6 +333,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap[PodDeletionCostManagementFeatureGate.Name]; ok {
 		gates.PodDeletionCostManagement = val
+	}
+	if val, ok := gateMap[NodePoolDriftBackoffFeatureGate.Name]; ok {
+		gates.NodePoolDriftBackoff = val
 	}
 
 	return gates, nil

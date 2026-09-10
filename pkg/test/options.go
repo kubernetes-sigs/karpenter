@@ -63,6 +63,7 @@ type FeatureGates struct {
 	TerminateFirstDrift       *bool
 	TerminateFirstRepair      *bool
 	PodDeletionCostManagement *bool
+	NodePoolDriftBackoff      *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -104,6 +105,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			TerminateFirstDrift:       lo.FromPtrOr(opts.FeatureGates.TerminateFirstDrift, options.TerminateFirstDriftFeatureGate.Default),
 			TerminateFirstRepair:      lo.FromPtrOr(opts.FeatureGates.TerminateFirstRepair, options.TerminateFirstRepairFeatureGate.Default),
 			PodDeletionCostManagement: lo.FromPtrOr(opts.FeatureGates.PodDeletionCostManagement, options.PodDeletionCostManagementFeatureGate.Default),
+			NodePoolDriftBackoff:      lo.FromPtrOr(opts.FeatureGates.NodePoolDriftBackoff, options.NodePoolDriftBackoffFeatureGate.Default),
 		},
 	}
 }
