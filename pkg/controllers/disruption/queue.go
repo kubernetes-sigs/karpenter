@@ -55,6 +55,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -197,6 +198,9 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 // back-off state. Per the single-NodePool-per-command invariant, the key is the command's
 // candidate NodePool.
 func (q *Queue) observeDriftOutcome(ctx context.Context, cmd *Command, succeeded bool) {
+	if !options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff {
+		return
+	}
 	if q.backoff == nil {
 		return
 	}
