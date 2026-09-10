@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -125,6 +126,25 @@ var _ = Describe("Drift back-off", func() {
 			Expect(cmds[0].Candidates[0].NodePool.Name).To(Equal(healthy.Name))
 			// A back-off skip event should have been surfaced for the backed-off pool.
 			Expect(recorder.Calls(events.DisruptionBackoff)).To(BeNumerically(">=", 1))
+		})
+		It("does not skip a backed-off NodePool when NodePoolDriftBackoff is disabled", func() {
+			backedOff := backoffNodePool()
+			healthy := backoffNodePool()
+			bNC, bNode, _ := driftedNodeClaimAndNode(backedOff.Name, -time.Hour, nil)
+			hNC, hNode, _ := driftedNodeClaimAndNode(healthy.Name, -time.Minute, nil)
+
+			ExpectApplied(ctx, env.Client, backedOff, healthy, bNC, bNode, hNC, hNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{bNode, hNode}, []*v1.NodeClaim{bNC, hNC})
+
+			queue.NodePoolBackoff().Fail(backedOff.Name)
+			Expect(queue.NodePoolBackoff().IsBackedOff(backedOff.Name)).To(BeTrue())
+
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)}}))
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodePool.Name).To(Equal(backedOff.Name))
 		})
 		It("registers a zero-valued back-off counter for a healthy NodePool with drift candidates", func() {
 			nodePool := backoffNodePool()
