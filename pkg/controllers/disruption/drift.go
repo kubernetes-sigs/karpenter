@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
@@ -67,8 +68,10 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 	// Register a zero-valued back-off counter for every NodePool with a drift candidate so the
 	// metric is visible (at 0) for healthy pools rather than being absent until the first back-off.
 	// Add(0) is idempotent: it only ensures the series exists and never clobbers an incremented value.
-	for _, nodePoolName := range lo.Uniq(lo.Map(candidates, func(c *Candidate, _ int) string { return c.NodePool.Name })) {
-		DriftBackoffsTotal.Add(0, map[string]string{metrics.NodePoolLabel: nodePoolName})
+	if options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff {
+		for _, nodePoolName := range lo.Uniq(lo.Map(candidates, func(c *Candidate, _ int) string { return c.NodePool.Name })) {
+			DriftBackoffsTotal.Add(0, map[string]string{metrics.NodePoolLabel: nodePoolName})
+		}
 	}
 
 	sort.Slice(candidates, func(i int, j int) bool {
@@ -96,7 +99,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		// drift replacement failures. Healthy pools and pools whose back-off window has elapsed
 		// fall through to normal selection. This is a read-only check; the queue is the only
 		// place that mutates back-off state (Fail/Reset).
-		if d.isBackedOff(candidate.NodePool, backedOffNodePools) {
+		if d.isBackedOff(ctx, candidate.NodePool, backedOffNodePools) {
 			continue
 		}
 		// Check if we need to create any NodeClaims.
@@ -126,7 +129,10 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 	return []Command{}, nil
 }
 
-func (d *Drift) isBackedOff(nodePool *v1.NodePool, backedOffNodePools map[string]struct{}) bool {
+func (d *Drift) isBackedOff(ctx context.Context, nodePool *v1.NodePool, backedOffNodePools map[string]struct{}) bool {
+	if !options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff {
+		return false
+	}
 	if _, ok := backedOffNodePools[nodePool.Name]; ok {
 		return true
 	}
