@@ -165,8 +165,8 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 		})
 		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
 			decisionLabel:          string(cmd.Decision()),
-			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.Reason())),
-			ConsolidationTypeLabel: string(cmd.Decision()),
+			metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
+			ConsolidationTypeLabel: cmd.ConsolidationType(),
 		})
 		stateNodes := lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, stateNodes...))
@@ -246,7 +246,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			consolidationPolicy = pretty.ToSnakeCase(string(cmd.Candidates[i].NodePool.Spec.Disruption.ConsolidationPolicy))
 		}
 		labels := map[string]string{
-			metrics.ReasonLabel:              pretty.ToSnakeCase(string(cmd.Reason())),
+			metrics.ReasonLabel:              strings.ToLower(string(cmd.Reason())),
 			metrics.NodePoolLabel:            cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
 			metrics.ConsolidationPolicyLabel: consolidationPolicy,

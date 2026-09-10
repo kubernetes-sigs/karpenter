@@ -35,6 +35,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -184,7 +185,7 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectApplied(ctx, env.Client, pod, node)
 			queue.Add(nil, pod)
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
+			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{metrics.ReasonLabel: ""})
 			ExpectMetricCounterValue(terminator.PodsEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
@@ -210,7 +211,7 @@ var _ = Describe("Eviction/Queue", func() {
 			queue.Add(nil, pod)
 			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 
-			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: "SpotInterruption"})
+			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{metrics.ReasonLabel: "SpotInterruption"})
 			ExpectMetricCounterValue(terminator.PodsEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
@@ -230,7 +231,7 @@ var _ = Describe("Eviction/Queue", func() {
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
-			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
+			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{metrics.ReasonLabel: ""})
 			// The queue entry is cleared once the force-delete succeeds.
 			Expect(queue.Has(pod)).To(BeFalse())
 		})
@@ -249,7 +250,7 @@ var _ = Describe("Eviction/Queue", func() {
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
-			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
+			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{metrics.ReasonLabel: ""})
 		})
 		It("should keep the earlier deadline when Add is called again with a looser one", func() {
 			// Once a pod has a force-delete deadline, a later Add must not push it out — otherwise

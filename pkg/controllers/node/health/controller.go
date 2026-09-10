@@ -188,10 +188,10 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	}
 	metrics.PodsDisruptionInitiatedTotal.Add(float64(len(reschedulablePods)), labels)
 	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
-		Condition:                 pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
+		ConditionLabel:            pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
-		ImageID:                   nodeClaim.Status.ImageID,
+		ImageIDLabel:              nodeClaim.Status.ImageID,
 	})
 	return reconcile.Result{}, nil
 }

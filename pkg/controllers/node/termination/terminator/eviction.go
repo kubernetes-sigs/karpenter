@@ -47,6 +47,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -284,7 +285,7 @@ func (q *Queue) evict(ctx context.Context, pod *corev1.Pod) (reconcile.Result, e
 	PodsEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
 	reason := evictionReason(ctx, pod, q.kubeClient)
 	q.recorder.Publish(terminatorevents.EvictPod(pod, reason))
-	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: reason})
+	PodsDrainedTotal.Inc(map[string]string{metrics.ReasonLabel: reason})
 	q.complete(pod)
 	return reconcile.Result{}, nil
 }
@@ -318,7 +319,7 @@ func (q *Queue) forceDelete(ctx context.Context, pod *corev1.Pod, nodeTerminatio
 		"delete.gracePeriodSeconds", lo.FromPtr(gracePeriodSeconds),
 		"nodeclaim.terminationTime", lo.FromPtr(nodeTerminationTime),
 	).V(1).Info("deleting pod")
-	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: evictionReason(ctx, pod, q.kubeClient)})
+	PodsDrainedTotal.Inc(map[string]string{metrics.ReasonLabel: evictionReason(ctx, pod, q.kubeClient)})
 	q.complete(pod)
 	return reconcile.Result{}, nil
 }
@@ -344,5 +345,5 @@ func evictionReason(ctx context.Context, pod *corev1.Pod, kubeClient client.Clie
 	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason); cond.IsTrue() {
 		return cond.Reason
 	}
-	return "Forceful Termination"
+	return ForcefulTerminationReason
 }

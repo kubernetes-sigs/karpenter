@@ -30,16 +30,47 @@ import (
 )
 
 const (
-	metricLabelController = "controller"
-	metricLabelMethod     = "method"
-	metricLabelProvider   = "provider"
-	metricLabelError      = "error"
+	metricLabelMethod   = "method"
+	metricLabelProvider = "provider"
+	metricLabelError    = "error"
 	// MetricLabelErrorDefaultVal is the default string value that represents "error type unknown"
 	MetricLabelErrorDefaultVal = ""
-	// Well-known metricLabelError values
-	NodeClaimNotFoundError    = "NodeClaimNotFoundError"
-	NodeClassNotReadyError    = "NodeClassNotReadyError"
-	InsufficientCapacityError = "InsufficientCapacityError"
+)
+
+// Well-known `error` dimension values. These are metric-only values, so they are
+// first-class opmetrics.Value vars: the value string and its documentation live in
+// one place and callers refer to it by .Name.
+var (
+	NodeClaimNotFoundError = opmetrics.Value{
+		Name: "NodeClaimNotFoundError",
+		Help: "The NodeClaim's backing instance was not found.",
+	}
+	NodeClassNotReadyError = opmetrics.Value{
+		Name: "NodeClassNotReadyError",
+		Help: "The referenced NodeClass is not yet ready.",
+	}
+	InsufficientCapacityError = opmetrics.Value{
+		Name: "InsufficientCapacityError",
+		Help: "The cloud provider had insufficient capacity to fulfill the request.",
+	}
+)
+
+// Package-local metric dimensions for the CloudProvider metrics. The controller
+// dimension reuses the shared metrics.Controller description.
+var (
+	Method = opmetrics.Label{
+		Name: metricLabelMethod,
+		Help: "The CloudProvider interface method that was called, e.g. `Create`, `Delete`, `Get`, `List`, `GetInstanceTypes`, `IsDrifted`.",
+	}
+	Provider = opmetrics.Label{
+		Name: metricLabelProvider,
+		Help: "The name of the cloud provider implementation.",
+	}
+	Error = opmetrics.Label{
+		Name:   metricLabelError,
+		Help:   "The category of error returned by the CloudProvider call.",
+		Values: []opmetrics.Value{NodeClaimNotFoundError, NodeClassNotReadyError, InsufficientCapacityError},
+	}
 )
 
 // decorator implements CloudProvider
@@ -53,10 +84,10 @@ var MethodDuration = opmetrics.NewPrometheusHistogram(
 		Name:      "duration_seconds",
 		Help:      "Duration of cloud provider method calls. Labeled by the controller, method name and provider.",
 	},
-	[]string{
-		metricLabelController,
-		metricLabelMethod,
-		metricLabelProvider,
+	[]opmetrics.Label{
+		metrics.Controller,
+		Method,
+		Provider,
 	},
 )
 
@@ -69,11 +100,11 @@ var (
 			Name:      "errors_total",
 			Help:      "Total number of errors returned from CloudProvider calls.",
 		},
-		[]string{
-			metricLabelController,
-			metricLabelMethod,
-			metricLabelProvider,
-			metricLabelError,
+		[]opmetrics.Label{
+			metrics.Controller,
+			Method,
+			Provider,
+			Error,
 		},
 	)
 )
@@ -157,9 +188,9 @@ func (d *decorator) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (clo
 // for a prometheus Label map used to compose a duration metric spec
 func getLabelsMapForDuration(ctx context.Context, d *decorator, method string) map[string]string {
 	return map[string]string{
-		metricLabelController: injection.GetControllerName(ctx),
-		metricLabelMethod:     method,
-		metricLabelProvider:   d.Name(),
+		metrics.ControllerLabel: injection.GetControllerName(ctx),
+		metricLabelMethod:       method,
+		metricLabelProvider:     d.Name(),
 	}
 }
 
@@ -167,10 +198,10 @@ func getLabelsMapForDuration(ctx context.Context, d *decorator, method string) m
 // for a prometheus Label map used to compose a counter metric spec
 func getLabelsMapForError(ctx context.Context, d *decorator, method string, err error) map[string]string {
 	return map[string]string{
-		metricLabelController: injection.GetControllerName(ctx),
-		metricLabelMethod:     method,
-		metricLabelProvider:   d.Name(),
-		metricLabelError:      GetErrorTypeLabelValue(err),
+		metrics.ControllerLabel: injection.GetControllerName(ctx),
+		metricLabelMethod:       method,
+		metricLabelProvider:     d.Name(),
+		metricLabelError:        GetErrorTypeLabelValue(err),
 	}
 }
 
@@ -179,11 +210,11 @@ func getLabelsMapForError(ctx context.Context, d *decorator, method string, err 
 func GetErrorTypeLabelValue(err error) string {
 	switch {
 	case cloudprovider.IsInsufficientCapacityError(err):
-		return InsufficientCapacityError
+		return InsufficientCapacityError.Name
 	case cloudprovider.IsNodeClaimNotFoundError(err):
-		return NodeClaimNotFoundError
+		return NodeClaimNotFoundError.Name
 	case cloudprovider.IsNodeClassNotReadyError(err):
-		return NodeClassNotReadyError
+		return NodeClassNotReadyError.Name
 	default:
 		return MetricLabelErrorDefaultVal
 	}

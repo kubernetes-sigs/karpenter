@@ -32,8 +32,6 @@ import (
 
 var SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 
-const SingleNodeConsolidationType = "single"
-
 // SingleNodeConsolidation evaluates one node at a time for consolidation.
 type SingleNodeConsolidation struct {
 	consolidation
@@ -134,7 +132,7 @@ func (s *SingleNodeConsolidation) Class() string {
 }
 
 func (s *SingleNodeConsolidation) ConsolidationType() string {
-	return SingleNodeConsolidationType
+	return SingleNodeConsolidationType.Name
 }
 
 // SortCandidates applies the consolidation sort, then interweaves by NodePool.

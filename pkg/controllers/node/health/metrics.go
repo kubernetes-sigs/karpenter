@@ -25,8 +25,20 @@ import (
 )
 
 const (
-	ImageID   = "image_id"
-	Condition = "condition"
+	ImageIDLabel   = "image_id"
+	ConditionLabel = "condition"
+)
+
+// Metric dimensions specific to node health / repair.
+var (
+	Condition = opmetrics.Label{
+		Name: ConditionLabel,
+		Help: "The node status condition type that failed the repair health check and triggered disruption.",
+	}
+	ImageID = opmetrics.Label{
+		Name: ImageIDLabel,
+		Help: "The image ID of the node that was disrupted.",
+	}
 )
 
 var NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
@@ -35,12 +47,12 @@ var NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
 		Namespace: metrics.Namespace,
 		Subsystem: metrics.NodeClaimSubsystem,
 		Name:      "unhealthy_disrupted_total",
-		Help:      "Number of unhealthy nodeclaims disrupted in total by Karpenter. Labeled by condition on the node was disrupted, the owning nodepool, and the image ID.",
+		Help:      "Number of unhealthy nodeclaims disrupted in total by Karpenter. Labeled by the condition the node was disrupted on, the owning nodepool, the capacity type, and the image ID.",
 	},
-	[]string{
+	[]opmetrics.Label{
 		Condition,
-		metrics.NodePoolLabel,
-		metrics.CapacityTypeLabel,
+		metrics.NodePool,
+		metrics.CapacityType,
 		ImageID,
 	},
 )

@@ -33,7 +33,6 @@ import (
 )
 
 const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
-const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
@@ -240,7 +239,7 @@ func filterOutSameInstanceType(replacement *Replacement, consolidate []*Candidat
 	var err error
 	replacement.NodeClaim, err = replacement.RemoveInstanceTypeOptionsByPriceAndMinValues(replacement.Requirements, maxPrice)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("filtering instance types by price, %w", err)
 	}
 	return replacement, nil
 }
@@ -254,5 +253,5 @@ func (m *MultiNodeConsolidation) Class() string {
 }
 
 func (m *MultiNodeConsolidation) ConsolidationType() string {
-	return MultiNodeConsolidationType
+	return MultiNodeConsolidationType.Name
 }

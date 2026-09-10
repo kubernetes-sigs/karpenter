@@ -27,9 +27,29 @@ import (
 const (
 	// CodeLabel for eviction request
 	CodeLabel = "code"
-	// ReasonLabel for pod draining
-	ReasonLabel = "reason"
+	// ForcefulTerminationReason is the drain `reason` value emitted when a pod is
+	// force-deleted (the node's terminationGracePeriod elapsed) rather than
+	// drained under a disruption reason.
+	ForcefulTerminationReason = "Forceful Termination"
 )
+
+// Code describes the code dimension emitted by the pod eviction metric.
+var Code = opmetrics.Label{
+	Name: CodeLabel,
+	Help: "The HTTP response code returned by the Kubernetes eviction API (https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/) for the eviction request.",
+}
+
+// DrainReason describes the reason dimension emitted by the pod drain metric.
+// The emitted value is the owning NodeClaim's ConditionTypeDisruptionReason
+// condition reason when set (a voluntary-disruption reason), or
+// ForcefulTerminationReason otherwise. That condition reason is currently
+// emitted verbatim (PascalCase) rather than in the lowercase form the other
+// reason dimensions use, so the value set is left unenumerated until the reason
+// casing is standardized (see the reason-standardization follow-up).
+var DrainReason = opmetrics.Label{
+	Name: metrics.ReasonLabel,
+	Help: "Why the pod was drained: the owning NodeClaim's disruption reason, or forceful termination.",
+}
 
 var PodsEvictionRequestsTotal = opmetrics.NewPrometheusCounter(
 	crmetrics.Registry,
@@ -39,7 +59,7 @@ var PodsEvictionRequestsTotal = opmetrics.NewPrometheusCounter(
 		Name:      "eviction_requests_total",
 		Help:      "The total number of pod eviction requests made by Karpenter, labeled by response code",
 	},
-	[]string{CodeLabel},
+	[]opmetrics.Label{Code},
 )
 
 var PodsDrainedTotal = opmetrics.NewPrometheusCounter(
@@ -50,5 +70,5 @@ var PodsDrainedTotal = opmetrics.NewPrometheusCounter(
 		Name:      "drained_total",
 		Help:      "The total number of pods drained during node termination by Karpenter, labeled by reason",
 	},
-	[]string{ReasonLabel},
+	[]opmetrics.Label{DrainReason},
 )

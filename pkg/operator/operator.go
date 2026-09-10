@@ -68,6 +68,15 @@ import (
 
 var AppName = "karpenter"
 
+// build_info metric dimensions. These describe the build the running binary was
+// produced from.
+var (
+	buildVersion   = opmetrics.Label{Name: "version", Help: "The Karpenter version the binary was built from."}
+	buildGoVersion = opmetrics.Label{Name: "goversion", Help: "The Go version the binary was compiled with."}
+	buildGoArch    = opmetrics.Label{Name: "goarch", Help: "The target architecture the binary was compiled for."}
+	buildCommit    = opmetrics.Label{Name: "commit", Help: "The git commit the binary was built from."}
+)
+
 var (
 	BuildInfo = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -76,7 +85,7 @@ var (
 			Name:      "build_info",
 			Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
 		},
-		[]string{"version", "goversion", "goarch", "commit"},
+		[]opmetrics.Label{buildVersion, buildGoVersion, buildGoArch, buildCommit},
 	)
 )
 

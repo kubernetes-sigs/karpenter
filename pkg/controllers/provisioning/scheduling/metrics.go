@@ -25,10 +25,19 @@ import (
 )
 
 const (
-	ControllerLabel    = "controller"
+	// ControllerLabel is an alias for the shared controller dimension. Its
+	// canonical description (help text) lives on metrics.Controller.
+	ControllerLabel    = metrics.ControllerLabel
 	schedulingIDLabel  = "scheduling_id"
 	schedulerSubsystem = "scheduler"
 )
+
+// SchedulingID describes the scheduling_id dimension. It is co-located here
+// because its value is a package-local runtime UUID.
+var SchedulingID = opmetrics.Label{
+	Name: schedulingIDLabel,
+	Help: "A unique identifier for a scheduling simulation run.",
+}
 
 var (
 	DurationSeconds = opmetrics.NewPrometheusHistogram(
@@ -40,8 +49,8 @@ var (
 			Help:      "Duration of scheduling simulations used for deprovisioning and provisioning in seconds.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{
-			ControllerLabel,
+		[]opmetrics.Label{
+			metrics.Controller,
 		},
 	)
 	QueueDepth = opmetrics.NewPrometheusGauge(
@@ -52,9 +61,9 @@ var (
 			Name:      "queue_depth",
 			Help:      "The number of pods currently waiting to be scheduled.",
 		},
-		[]string{
-			ControllerLabel,
-			schedulingIDLabel,
+		[]opmetrics.Label{
+			metrics.Controller,
+			SchedulingID,
 		},
 	)
 	UnfinishedWorkSeconds = opmetrics.NewPrometheusGauge(
@@ -65,9 +74,9 @@ var (
 			Name:      "unfinished_work_seconds",
 			Help:      "How many seconds of work has been done that is in progress and hasn't been observed by scheduling_duration_seconds.",
 		},
-		[]string{
-			ControllerLabel,
-			schedulingIDLabel,
+		[]opmetrics.Label{
+			metrics.Controller,
+			SchedulingID,
 		},
 	)
 	IgnoredPodCount = opmetrics.NewPrometheusGauge(
@@ -78,7 +87,7 @@ var (
 			Name:      "ignored_pods_count",
 			Help:      "Number of pods ignored during scheduling by Karpenter",
 		},
-		[]string{},
+		[]opmetrics.Label{},
 	)
 	UnschedulablePodsCount = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -88,8 +97,8 @@ var (
 			Name:      "unschedulable_pods_count",
 			Help:      "The number of unschedulable Pods.",
 		},
-		[]string{
-			ControllerLabel,
+		[]opmetrics.Label{
+			metrics.Controller,
 		},
 	)
 	PendingPodsByEffectiveZone = opmetrics.NewPrometheusGauge(
@@ -100,9 +109,9 @@ var (
 			Name:      "pending_pods_by_effective_zone_count",
 			Help:      "Pending pods dimensioned by effective zone constraint, or the intersection of pod-level zone signals, volume topology (PVC zones), and topology constraints. Values: specific zone name (e.g., 'us-west-2a'), 'flexible' (multiple zones), or 'none' (no valid intersection).",
 		},
-		[]string{
-			ControllerLabel,
-			"zone",
+		[]opmetrics.Label{
+			metrics.Controller,
+			metrics.Zone,
 		},
 	)
 )
