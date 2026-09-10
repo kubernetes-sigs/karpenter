@@ -166,4 +166,7 @@ settings:
     # on pods it schedules, influencing which pod(s) the replica set controller prefers
     # to stop during a replica scale down.
     podDeletionCostManagement: false
+    # -- nodePoolDriftBackoff is enabled by default.
+    # Setting this to false disables per-NodePool exponential back-off on unrecoverable drift replacement failures.
+    nodePoolDriftBackoff: true
 
