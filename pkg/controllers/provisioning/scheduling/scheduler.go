@@ -90,15 +90,29 @@ const (
 	PreferencePolicyIgnore
 )
 
+type PlacementStrategy int
+
+const (
+	PlacementStrategyMostAllocated PlacementStrategy = iota
+	PlacementStrategyLeastAllocated
+)
+
 type options struct {
 	reservedOfferingMode    ReservedOfferingMode
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
 	enforceConsolidateAfter bool
+	placementStrategy       PlacementStrategy
 }
 
 type Options = option.Function[options]
+
+var WithPlacementStrategy = func(strategy PlacementStrategy) Options {
+	return func(opts *options) {
+		opts.placementStrategy = strategy
+	}
+}
 
 var DisableReservedCapacityFallback = func(opts *options) {
 	opts.reservedOfferingMode = ReservedOfferingModeStrict
@@ -189,6 +203,7 @@ func NewScheduler(
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
 		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
+		placementStrategy:       option.Resolve(opts...).placementStrategy,
 		allocator:               allocator,
 		instanceTypes:           instanceTypes,
 		cachedResourceClaims:    map[types.NamespacedName]*resourcev1.ResourceClaim{},
@@ -249,6 +264,7 @@ type Scheduler struct {
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
 	deletingNodeNames       sets.Set[string]
+	placementStrategy       PlacementStrategy
 
 	// allocator simulates DRA device allocation for pods with ResourceClaims. It is nil when DRA support is disabled.
 	allocator *dynamicresources.Allocator
@@ -841,7 +857,26 @@ func (s *Scheduler) updateRemainingResources(node *state.StateNode) {
 	}
 }
 
-// sortExistingNodes sorts existing nodes with initialized nodes first
+func nodeUtilizationRatio(node *ExistingNode) float64 {
+	allocatable := node.Allocatable()
+	utilized := node.PodRequests()
+	var sum float64
+	var count int
+	for _, resourceName := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+		allocatableResource, ok := allocatable[resourceName]
+		if !ok || allocatableResource.Sign() <= 0 {
+			continue
+		}
+		sum += resources.UtilizationRatio(resourceName, utilized[resourceName], allocatableResource)
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
+}
+
+// sortExistingNodes sorts existing nodes with initialized nodes first, ordered by PlacementStrategy
 func (s *Scheduler) sortExistingNodes() {
 	// Order the existing nodes for scheduling with initialized nodes first
 	// This is done specifically for consolidation where we want to make sure we schedule to initialized nodes
@@ -852,6 +887,20 @@ func (s *Scheduler) sortExistingNodes() {
 		}
 		if !s.existingNodes[i].Initialized() && s.existingNodes[j].Initialized() {
 			return false
+		}
+		switch s.placementStrategy {
+		case PlacementStrategyLeastAllocated:
+			utilI := nodeUtilizationRatio(s.existingNodes[i])
+			utilJ := nodeUtilizationRatio(s.existingNodes[j])
+			if utilI != utilJ {
+				return utilI < utilJ
+			}
+		case PlacementStrategyMostAllocated:
+			utilI := nodeUtilizationRatio(s.existingNodes[i])
+			utilJ := nodeUtilizationRatio(s.existingNodes[j])
+			if utilI != utilJ {
+				return utilI > utilJ
+			}
 		}
 		return s.existingNodes[i].Name() < s.existingNodes[j].Name()
 	})
