@@ -16,12 +16,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package disruption
+package disruption_test
 
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -30,9 +29,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/uuid"
-	"k8s.io/client-go/tools/record"
-	clock "k8s.io/utils/clock/testing"
+	"k8s.io/client-go/kubernetes/scheme"
+	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -40,316 +38,313 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
+	pstate "sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 	"sigs.k8s.io/karpenter/pkg/test"
+	_ "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
-func init() {
+// Benchmarks target the N-candidate iteration inside
+// SingleNodeConsolidation.ComputeCommands and the binary search inside
+// MultiNodeConsolidation.ComputeCommands. These are the pathological loops
+// identified in kubernetes-sigs/karpenter#2972.
+//
+// This file uses controller-runtime's in-memory fake client with an index
+// on spec.nodeName so that cluster.populateResourceRequests scans only pods
+// for the target node instead of the full pod list. That keeps setup at 1000
+// nodes in the sub-minute range instead of the tens of minutes an envtest
+// apiserver + etcd round-trip per object costs.
+//
+// The maximum cluster size across all benches is populated once and all sub-
+// sizes are prefix-slices of the same candidate list, amortizing setup cost.
+//
+// To run locally:
+//   go test -tags=test_performance -run='^$' \
+//       -bench='BenchmarkSingleNodeConsolidation|BenchmarkMultiNodeConsolidation' \
+//       -benchtime=1x -count=1 ./pkg/controllers/disruption/...
+
+const benchMaxNodes = 1000
+
+// Package-scoped bench context distinct from the ginkgo suite variables in
+// suite_test.go so a `go test -tags=test_performance -bench=. -run=1` invocation
+// runs only the benches, does not fire Ginkgo's BeforeSuite, and does not depend
+// on envtest.
+var (
+	benchOnce       sync.Once
+	benchCtx        context.Context
+	benchClient     client.Client
+	benchClock      *clocktesting.FakeClock
+	benchCP         *fake.CloudProvider
+	benchClusterCst *cost.ClusterCost
+	benchCluster    *pstate.Cluster
+	benchProv       *provisioning.Provisioner
+	benchRecorder   *test.EventRecorder
+	benchQueue      *disruption.Queue
+	benchNodePools  []*v1.NodePool
+	benchNodeClaims []*v1.NodeClaim
+	benchNodes      []*corev1.Node
+	benchInstType   *cloudprovider.InstanceType
+)
+
+func setupBench(b *testing.B) {
+	b.Helper()
+	benchOnce.Do(func() { setupBenchOnce(b) })
+}
+
+func setupBenchOnce(b *testing.B) {
+	b.Helper()
 	log.SetLogger(logging.NopLogger)
+	benchClock = clocktesting.NewFakeClock(time.Now())
+	// Bench context lives for the whole test binary; no cancel needed.
+	benchCtx = TestContextWithLogger(b)
+	benchCtx = injection.WithControllerName(benchCtx, "disruption-bench")
+	benchCtx = options.ToContext(benchCtx, test.Options())
+
+	// karpenter/v1 and test/v1alpha1 register themselves with scheme.Scheme
+	// in their init() functions (blank-imported above).
+	benchClient = fakecr.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&v1.NodeClaim{}, &v1.NodePool{}).
+		WithIndex(&corev1.Pod{}, "spec.nodeName", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Pod).Spec.NodeName}
+		}).
+		Build()
+
+	benchCP = fake.NewCloudProvider()
+	benchCP.InstanceTypes = fake.InstanceTypesAssorted()
+	benchClusterCst = cost.NewClusterCost(benchCtx, benchCP, benchClient)
+	benchCluster = pstate.NewCluster(benchClock, benchClient, benchCP)
+	benchRecorder = test.NewEventRecorder()
+	draCtl := deviceallocation.NewController(benchClient)
+	benchProv = provisioning.NewProvisioner(benchClient, benchRecorder, benchCP, benchCluster, benchClock, draCtl, virtualpods.NewVirtualPodCache(benchClient))
+	benchQueue = disruption.NewQueue(benchClient, benchRecorder, benchCluster, benchClock, benchProv)
+
+	benchInstType = pickExpensiveOnDemand(benchCP.InstanceTypes)
+	off := benchInstType.Offerings.Available()[0]
+
+	benchNodePools = createBenchNodePools(b, 3)
+
+	rs := test.ReplicaSet()
+	if err := benchClient.Create(benchCtx, rs); err != nil {
+		b.Fatalf("create replicaset: %v", err)
+	}
+	benchNodeClaims, benchNodes = createBenchClusterState(b, benchMaxNodes, benchNodePools, benchInstType, off, rs)
 }
 
-//nolint:gosec
-var benchRand = rand.New(rand.NewSource(42))
-
-// To run the consolidation benchmarks:
-//
-//	go test -tags=test_performance -run=XXX -bench=. ./pkg/controllers/disruption/
-//
-// To compare before/after with benchstat:
-//
-//	go test -tags=test_performance -run=XXX -bench=. -count=10 ./pkg/controllers/disruption/ | tee /tmp/old
-//	# make changes
-//	go test -tags=test_performance -run=XXX -bench=. -count=10 ./pkg/controllers/disruption/ | tee /tmp/new
-//	benchstat /tmp/old /tmp/new
-//
-// Sub-benchmarks are named vector=<name>/<param>=<n>/... where "vector" is
-// the primary axis being swept. This shape is compatible with slope-based
-// benchstat gates that group points by vector and gate on per-vector
-// growth slope rather than a single-point cost.
-
-type benchConfig struct {
-	nodeCount              int
-	podsPerNode            int
-	nodePoolCount          int
-	topologySpreadFraction float64
-}
-
-// BenchmarkConsolidation sweeps three vectors (nodes, nodepools, topology)
-// over the SimulateScheduling hot path. 500-node sub-benchmarks are gated
-// by testing.Short() to avoid CI timeouts; they run under local profiling.
-func BenchmarkConsolidation(b *testing.B) {
-	for _, n := range []int{10, 50, 100, 500} {
-		cfg := benchConfig{nodeCount: n, podsPerNode: 10, nodePoolCount: 1, topologySpreadFraction: 0.0}
-		b.Run(fmt.Sprintf("vector=nodes/n=%d/topo=none/np=1", n), func(b *testing.B) {
-			if n >= 500 && testing.Short() {
-				b.Skip("skipping 500-node benchmark in short mode")
-			}
-			benchmarkConsolidationSim(b, cfg)
+// pickExpensiveOnDemand keeps consolidation's filterByPrice from ever returning
+// empty by handing it the highest-priced on-demand type as the starting point.
+func pickExpensiveOnDemand(its []*cloudprovider.InstanceType) *cloudprovider.InstanceType {
+	ods := lo.Filter(its, func(it *cloudprovider.InstanceType, _ int) bool {
+		return lo.ContainsBy(it.Offerings.Available(), func(o *cloudprovider.Offering) bool {
+			return o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == v1.CapacityTypeOnDemand
 		})
-	}
-
-	for _, np := range []int{1, 3, 9} {
-		cfg := benchConfig{nodeCount: 100, podsPerNode: 10, nodePoolCount: np, topologySpreadFraction: 1.0}
-		b.Run(fmt.Sprintf("vector=nodepools/np=%d/topo=hostname/n=100", np), func(b *testing.B) {
-			benchmarkConsolidationSim(b, cfg)
-		})
-	}
-
-	for _, np := range []int{3, 9} {
-		cfg := benchConfig{nodeCount: 500, podsPerNode: 10, nodePoolCount: np, topologySpreadFraction: 1.0}
-		b.Run(fmt.Sprintf("vector=nodepools/np=%d/topo=hostname/n=500", np), func(b *testing.B) {
-			if testing.Short() {
-				b.Skip("skipping 500-node benchmark in short mode")
-			}
-			benchmarkConsolidationSim(b, cfg)
-		})
-	}
-
-	b.Run("vector=topology/frac=50/n=500/np=1", func(b *testing.B) {
-		if testing.Short() {
-			b.Skip("skipping 500-node benchmark in short mode")
-		}
-		benchmarkConsolidationSim(b, benchConfig{nodeCount: 500, podsPerNode: 10, nodePoolCount: 1, topologySpreadFraction: 0.5})
+	})
+	return lo.MaxBy(ods, func(a, b *cloudprovider.InstanceType) bool {
+		return a.Offerings.Cheapest().Price > b.Offerings.Cheapest().Price
 	})
 }
 
-// cachedBench holds the heavy setup fixture built by setupConsolidationBench.
-// The ctx is deliberately NOT cached: TestContextWithLogger binds a zaptest
-// logger to a specific *testing.B via t.Cleanup(), so a stale ctx would log
-// on a completed test frame. Re-derive ctx per invocation and share only
-// the expensive-to-build objects.
-type cachedBench struct {
-	kubeClient   client.Client
-	clk          *clock.FakeClock
-	clusterState *state.Cluster
-	prov         *provisioning.Provisioner
-	candidates   []*Candidate
+func createBenchNodePools(b *testing.B, count int) []*v1.NodePool {
+	b.Helper()
+	nps := test.NodePools(count, v1.NodePool{
+		Spec: v1.NodePoolSpec{
+			Disruption: v1.Disruption{
+				ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+				ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
+				Budgets:             []v1.Budget{{Nodes: "100%"}},
+			},
+		},
+	})
+	for _, np := range nps {
+		if err := benchClient.Create(benchCtx, np); err != nil {
+			b.Fatalf("create nodepool: %v", err)
+		}
+	}
+	return nps
 }
 
-// benchCache memoizes setupConsolidationBench output keyed on benchConfig
-// so that -count=N re-invocations of the same sub-benchmark share the
-// fixture built by the first invocation.
-//
-// Safety invariant: the timed path (SimulateScheduling) must remain
-// read-only over kubeClient, clusterState, candidates, and prov. The
-// current implementation satisfies this: cluster.DeepCopyNodes runs
-// before use, GetPendingPods never fires on pre-scheduled pods, and
-// NewScheduler is constructed fresh per call. If a mutating function is
-// added to the timed path, this cache MUST be revisited or removed.
-var benchCache sync.Map // benchConfig -> *cachedBench
-
-// setupOrLoadBench returns a fresh ctx and either the cached fixture for
-// cfg or a freshly built one stored in the cache. See benchCache doc for
-// the safety invariant.
-func setupOrLoadBench(b *testing.B, cfg benchConfig) (context.Context, *cachedBench) {
-	// Always derive ctx fresh: it holds a zaptest logger bound to THIS b via
-	// t.Cleanup(), so it must not outlive the current invocation.
-	ctx := TestContextWithLogger(b)
-	ctx = options.ToContext(ctx, test.Options())
-
-	if v, ok := benchCache.Load(cfg); ok {
-		return ctx, v.(*cachedBench)
+func createBenchClusterState(b *testing.B, n int, nps []*v1.NodePool, inst *cloudprovider.InstanceType, off *cloudprovider.Offering, rs client.Object) ([]*v1.NodeClaim, []*corev1.Node) {
+	b.Helper()
+	zone := off.Requirements.Get(corev1.LabelTopologyZone).Any()
+	capType := off.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+	ncs := make([]*v1.NodeClaim, 0, n)
+	nds := make([]*corev1.Node, 0, n)
+	antiSel := metav1.LabelSelector{MatchLabels: map[string]string{"bench": "stress"}}
+	for i := 0; i < n; i++ {
+		np := nps[i%len(nps)]
+		nc, nd := buildBenchNodeClaimAndNode(np.Name, inst.Name, capType, zone)
+		if err := benchClient.Create(benchCtx, nc); err != nil {
+			b.Fatalf("create nodeclaim: %v", err)
+		}
+		if err := benchClient.Status().Update(benchCtx, nc); err != nil {
+			b.Fatalf("status update nodeclaim: %v", err)
+		}
+		if err := benchClient.Create(benchCtx, nd); err != nil {
+			b.Fatalf("create node: %v", err)
+		}
+		if err := benchClient.Status().Update(benchCtx, nd); err != nil {
+			b.Fatalf("status update node: %v", err)
+		}
+		pod := buildBenchPod(i, nd.Name, rs, antiSel)
+		if err := benchClient.Create(benchCtx, pod); err != nil {
+			b.Fatalf("create pod: %v", err)
+		}
+		benchCluster.UpdateNodeClaim(nc)
+		if err := benchCluster.UpdateNode(benchCtx, nd); err != nil {
+			b.Fatalf("cluster.UpdateNode: %v", err)
+		}
+		ncs = append(ncs, nc)
+		nds = append(nds, nd)
 	}
-	// Cache miss: run the heavy setup, discard its internal ctx (bound to
-	// the populating *testing.B; our fresh ctx replaces it).
-	_, kubeClient, clk, clusterState, prov, candidates := setupConsolidationBench(b, cfg)
-	fresh := &cachedBench{
-		kubeClient:   kubeClient,
-		clk:          clk,
-		clusterState: clusterState,
-		prov:         prov,
-		candidates:   candidates,
-	}
-	actual, _ := benchCache.LoadOrStore(cfg, fresh)
-	return ctx, actual.(*cachedBench)
+	return ncs, nds
 }
 
-func benchmarkConsolidationSim(b *testing.B, cfg benchConfig) {
-	ctx, setup := setupOrLoadBench(b, cfg)
-	rec := events.NewRecorder(&record.FakeRecorder{})
-	candidate := setup.candidates[0]
+func buildBenchNodeClaimAndNode(nodePool, instanceType, capType, zone string) (*v1.NodeClaim, *corev1.Node) {
+	nc, nd := test.NodeClaimAndNode(v1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				v1.NodePoolLabelKey:            nodePool,
+				corev1.LabelInstanceTypeStable: instanceType,
+				v1.CapacityTypeLabelKey:        capType,
+				corev1.LabelTopologyZone:       zone,
+			},
+		},
+		Status: v1.NodeClaimStatus{
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse("32"),
+				corev1.ResourceMemory: resource.MustParse("128Gi"),
+				corev1.ResourcePods:   resource.MustParse("100"),
+			},
+		},
+	})
+	nc.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+	nc.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+	nc.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
+	nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+	nd.Spec.Taints = nil
+	if nd.Labels == nil {
+		nd.Labels = map[string]string{}
+	}
+	nd.Labels[v1.NodeRegisteredLabelKey] = "true"
+	nd.Labels[v1.NodeInitializedLabelKey] = "true"
+	nd.Status.Phase = corev1.NodeRunning
+	nd.Status.Conditions = []corev1.NodeCondition{{
+		Type:               corev1.NodeReady,
+		Status:             corev1.ConditionTrue,
+		LastHeartbeatTime:  metav1.NewTime(benchClock.Now()),
+		LastTransitionTime: metav1.NewTime(benchClock.Now()),
+		Reason:             "KubeletReady",
+	}}
+	return nc, nd
+}
+
+func buildBenchPod(idx int, nodeName string, rs client.Object, antiSel metav1.LabelSelector) *corev1.Pod {
+	pod := test.Pod(test.PodOptions{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				"bench": "stress",
+				"app":   fmt.Sprintf("bench-%d", idx),
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "ReplicaSet",
+				Name:               rs.GetName(),
+				UID:                rs.GetUID(),
+				Controller:         lo.ToPtr(true),
+				BlockOwnerDeletion: lo.ToPtr(true),
+			}},
+		},
+		PodAntiRequirements: []corev1.PodAffinityTerm{{
+			LabelSelector: &antiSel,
+			TopologyKey:   corev1.LabelHostname,
+		}},
+		ResourceRequirements: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")},
+		},
+	})
+	pod.Spec.NodeName = nodeName
+	return pod
+}
+
+// candidatesForBench resets cluster.consolidated so GetCandidates re-emits
+// the shared cluster's nodes every iteration; caller times only ComputeCommands.
+func candidatesForBench(b *testing.B, m disruption.Method, numNodes int) (map[string]int, []*disruption.Candidate) {
+	b.Helper()
+	benchCluster.MarkUnconsolidated()
+	budgets, err := disruption.BuildDisruptionBudgetMapping(benchCtx, benchCluster, benchClock, benchClient, benchCP, benchRecorder, m.Reason())
+	if err != nil {
+		b.Fatalf("build disruption budgets: %v", err)
+	}
+	cands, err := disruption.GetCandidates(benchCtx, benchCluster, benchClient, benchRecorder, benchClock, benchCP, m.ShouldDisrupt, m.Class(), benchQueue)
+	if err != nil {
+		b.Fatalf("get candidates: %v", err)
+	}
+	if len(cands) < numNodes {
+		b.Fatalf("expected at least %d candidates, got %d", numNodes, len(cands))
+	}
+	return budgets, cands[:numNodes]
+}
+
+func BenchmarkSingleNodeConsolidation_ComputeCommands_100(b *testing.B) {
+	benchmarkSingleNodeConsolidation(b, 100)
+}
+func BenchmarkSingleNodeConsolidation_ComputeCommands_400(b *testing.B) {
+	benchmarkSingleNodeConsolidation(b, 400)
+}
+func BenchmarkSingleNodeConsolidation_ComputeCommands_1000(b *testing.B) {
+	benchmarkSingleNodeConsolidation(b, 1000)
+}
+
+func benchmarkSingleNodeConsolidation(b *testing.B, numNodes int) {
+	setupBench(b)
+	c := disruption.MakeConsolidation(benchClock, benchCluster, benchClient, benchProv, benchCP, benchRecorder, benchQueue)
+	singleNode := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = SimulateScheduling(ctx, setup.kubeClient, setup.clusterState, setup.prov, setup.clk, rec, nil, candidate)
+		b.StopTimer()
+		budgets, cands := candidatesForBench(b, singleNode, numNodes)
+		b.StartTimer()
+		if _, err := singleNode.ComputeCommands(benchCtx, budgets, cands...); err != nil {
+			b.Fatalf("compute commands: %v", err)
+		}
 	}
-	b.ReportMetric(float64(len(candidate.reschedulablePods)), "pods")
-	b.ReportMetric(float64(cfg.nodeCount), "nodes")
-	b.ReportMetric(float64(cfg.nodePoolCount), "nodepools")
-	b.ReportMetric(cfg.topologySpreadFraction*100, "topo%")
 }
 
-// Parameters are intentionally deterministic and seeded so benchstat can
-// compare runs across commits with low variance.
-func setupConsolidationBench(b *testing.B, cfg benchConfig) (
-	context.Context, client.Client, *clock.FakeClock, *state.Cluster,
-	*provisioning.Provisioner, []*Candidate,
-) {
-	b.Helper()
-	ctx := TestContextWithLogger(b)
-	ctx = options.ToContext(ctx, test.Options())
-
-	cp := fake.NewCloudProvider()
-	clk := clock.NewFakeClock(time.Now())
-	instanceTypes := fake.InstanceTypes(100)
-	cp.InstanceTypes = instanceTypes
-
-	// The fake client needs the spec.nodeName field index registered so that
-	// GetProvisionablePods and StateNode.Pods (both use a field selector) work
-	// against the in-memory store; NewFakeClient() alone doesn't provide it.
-	kubeClient := fakecr.NewClientBuilder().
-		WithIndex(&corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
-			return []string{o.(*corev1.Pod).Spec.NodeName}
-		}).
-		Build()
-	clusterState := state.NewCluster(clk, kubeClient, cp)
-	rec := events.NewRecorder(&record.FakeRecorder{})
-	prov := provisioning.NewProvisioner(kubeClient, rec, cp, clusterState, clk, deviceallocation.NewController(kubeClient), virtualpods.NewVirtualPodCache(kubeClient))
-
-	nodePools := make([]*v1.NodePool, cfg.nodePoolCount)
-	for i := 0; i < cfg.nodePoolCount; i++ {
-		np := test.NodePool(v1.NodePool{
-			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pool-%d", i)},
-			Spec: v1.NodePoolSpec{
-				Limits: v1.Limits{
-					corev1.ResourceCPU:    resource.MustParse("100000"),
-					corev1.ResourceMemory: resource.MustParse("100000Gi"),
-				},
-			},
+// BenchmarkMultiNodeConsolidation_ComputeCommands is table-driven to surface
+// the log2(N) shape of firstNConsolidationOption's binary search across a
+// range of candidate counts. The MultiNode ComputeCommands path caps its
+// batch at 100 (maxParallel), so counts above 100 exercise the same window.
+func BenchmarkMultiNodeConsolidation_ComputeCommands(b *testing.B) {
+	for _, numNodes := range []int{10, 50, 100} {
+		b.Run(fmt.Sprintf("%d", numNodes), func(sub *testing.B) {
+			benchmarkMultiNodeConsolidation(sub, numNodes)
 		})
-		nodePools[i] = np
-		if err := kubeClient.Create(ctx, np); err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	candidates := make([]*Candidate, 0, cfg.nodeCount)
-	for i := 0; i < cfg.nodeCount; i++ {
-		candidates = append(candidates, addCandidateNode(b, ctx, kubeClient, clusterState, cfg, i,
-			nodePools[i%cfg.nodePoolCount], instanceTypes[i%len(instanceTypes)]))
-	}
-
-	return ctx, kubeClient, clk, clusterState, prov, candidates
-}
-
-// addCandidateNode creates one NodeClaim/Node/pods in the fake client, updates
-// cluster state, and returns a Candidate pointing at the resulting StateNode.
-func addCandidateNode(b *testing.B, ctx context.Context, kubeClient client.Client, clusterState *state.Cluster,
-	cfg benchConfig, i int, np *v1.NodePool, it *cloudprovider.InstanceType,
-) *Candidate {
-	zone := fmt.Sprintf("zone-%d", i%3)
-	alloc := corev1.ResourceList{
-		corev1.ResourceCPU:    resource.MustParse("16"),
-		corev1.ResourceMemory: resource.MustParse("64Gi"),
-		corev1.ResourcePods:   resource.MustParse("110"),
-	}
-	nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				v1.NodePoolLabelKey:            np.Name,
-				corev1.LabelInstanceTypeStable: it.Name,
-				corev1.LabelTopologyZone:       zone,
-				v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
-			},
-		},
-		Status: v1.NodeClaimStatus{
-			ProviderID:  fmt.Sprintf("fake://node-%d", i),
-			Capacity:    alloc,
-			Allocatable: alloc,
-		},
-	})
-	// Mirror ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated: mark the
-	// NodeClaim and Node as launched/registered/initialized so cluster state
-	// treats them as active capacity available for rescheduling. Without this,
-	// SimulateScheduling sees an empty cluster and returns fast.
-	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
-	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
-	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
-	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
-		return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
-	})
-	node.Labels[v1.NodeRegisteredLabelKey] = "true"
-	node.Labels[v1.NodeInitializedLabelKey] = "true"
-
-	if err := kubeClient.Create(ctx, nodeClaim); err != nil {
-		b.Fatal(err)
-	}
-	if err := kubeClient.Create(ctx, node); err != nil {
-		b.Fatal(err)
-	}
-	clusterState.UpdateNodeClaim(nodeClaim)
-	if err := clusterState.UpdateNode(ctx, node); err != nil {
-		b.Fatal(err)
-	}
-
-	pods := makeBenchPods(cfg.podsPerNode, cfg.topologySpreadFraction, node.Name)
-	for _, p := range pods {
-		if err := kubeClient.Create(ctx, p); err != nil {
-			b.Fatal(err)
-		}
-		if err := clusterState.UpdatePod(ctx, p); err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	// Grab the StateNode that cluster.DeepCopyNodes will return so the
-	// candidate name filter in SimulateScheduling matches.
-	var sn *state.StateNode
-	for n := range clusterState.Nodes() {
-		if n.Node != nil && n.Node.Name == node.Name {
-			sn = n
-			break
-		}
-	}
-	if sn == nil {
-		b.Fatalf("state node for %s not found after UpdateNode", node.Name)
-	}
-
-	return &Candidate{
-		StateNode:         sn,
-		instanceType:      it,
-		NodePool:          np,
-		zone:              zone,
-		capacityType:      v1.CapacityTypeOnDemand,
-		reschedulablePods: pods,
 	}
 }
 
-func makeBenchPods(count int, topologyFraction float64, nodeName string) []*corev1.Pod {
-	pods := make([]*corev1.Pod, count)
-	topologyCount := int(float64(count) * topologyFraction)
+func benchmarkMultiNodeConsolidation(b *testing.B, numNodes int) {
+	setupBench(b)
+	c := disruption.MakeConsolidation(benchClock, benchCluster, benchClient, benchProv, benchCP, benchRecorder, benchQueue)
+	multi := disruption.NewMultiNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 
-	for i := 0; i < count; i++ {
-		opts := test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{"app": fmt.Sprintf("bench-%d", i%5)},
-				UID:    uuid.NewUUID(),
-			},
-			NodeName: nodeName,
-			ResourceRequirements: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%dm", 100+benchRand.Intn(400))),
-					corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dMi", 128+benchRand.Intn(512))),
-				},
-			},
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		budgets, cands := candidatesForBench(b, multi, numNodes)
+		b.StartTimer()
+		if _, err := multi.ComputeCommands(benchCtx, budgets, cands...); err != nil {
+			b.Fatalf("compute commands: %v", err)
 		}
-		if i < topologyCount {
-			opts.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{{
-				MaxSkew:           1,
-				TopologyKey:       corev1.LabelHostname,
-				WhenUnsatisfiable: corev1.DoNotSchedule,
-				LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": fmt.Sprintf("bench-%d", i%5)}},
-			}}
-		}
-		pods[i] = test.Pod(opts)
 	}
-	return pods
 }
