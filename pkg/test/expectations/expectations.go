@@ -49,6 +49,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -152,20 +153,30 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 		current := object.DeepCopyObject().(client.Object)
 		statuscopy := object.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
 
-		// Create or Update
-		if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
-			if errors.IsNotFound(err) {
-				Expect(c.Create(ctx, object)).To(Succeed())
-			} else {
-				Expect(err).ToNot(HaveOccurred())
+		// Create or Update, retrying on conflict. Under parallel test workloads
+		// (e.g. workqueue.ParallelizeUntil), the controller informer can reconcile
+		// the same object between our Get and Update, so the Update returns 409.
+		// Each retry re-fetches the fresh resource version.
+		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
+				if errors.IsNotFound(err) {
+					return c.Create(ctx, object)
+				}
+				return err
 			}
-		} else {
 			object.SetResourceVersion(current.GetResourceVersion())
-			Expect(c.Update(ctx, object)).To(Succeed())
-		}
-		// Update status
-		statuscopy.SetResourceVersion(object.GetResourceVersion())
-		Expect(c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
+			return c.Update(ctx, object)
+		})).To(Succeed())
+
+		// Update status, also retrying on conflict.
+		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			fresh := statuscopy.DeepCopyObject().(client.Object)
+			if err := c.Get(ctx, client.ObjectKeyFromObject(statuscopy), fresh); err != nil {
+				return err
+			}
+			statuscopy.SetResourceVersion(fresh.GetResourceVersion())
+			return c.Status().Update(ctx, statuscopy)
+		})).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
 
 		// Re-get the object to grab the updated spec and status
 		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
