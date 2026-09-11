@@ -204,9 +204,20 @@ func addDeltaToRemaining(remaining map[PoolKey]map[string]map[string]resourcev1.
 	}
 }
 
+// hasPersistedCounterOccupancy reports whether a device already holds a fixed shared-counter footprint
+// that must be reserved before any new allocation in the pool. This covers a dedicated preallocation
+// (PreallocatedDevices), an allow-multiple preallocation (PreallocatedConsumedCapacity), and a blocked
+// device whose consumed-capacity accounting is invalid: the device cannot be allocated, but it still
+// occupies the pool counters its ConsumesCounters reserve, so those must not be handed to another device.
+func (at *AllocationTracker) hasPersistedCounterOccupancy(id DeviceID) bool {
+	return at.PreallocatedDevices.Has(id) ||
+		at.BlockedDevices.Has(id) ||
+		lo.HasKey(at.PreallocatedConsumedCapacity, id)
+}
+
 // InitRemainingCounters initializes the remaining counter budget for a pool. Called lazily on first
 // access for each pool during allocation. The initial value is the pool's total counter budget
-// minus consumption from preallocated devices.
+// minus consumption from devices that already occupy a shared-counter footprint.
 func (at *AllocationTracker) InitRemainingCounters(pool *Pool) {
 	if _, ok := at.RemainingCounters[pool.Key]; ok {
 		return
@@ -221,17 +232,17 @@ func (at *AllocationTracker) InitRemainingCounters(pool *Pool) {
 			remainingCounterSets[counterSetName][counterName] = resourcev1.Counter{Value: counter.Value.DeepCopy()}
 		}
 	}
-	// Deduct consumption from preallocated devices.
+	// Deduct consumption from devices that already occupy a shared-counter footprint (preallocated,
+	// allow-multiple, or blocked). A blocked device cannot be allocated, but its counters stay reserved
+	// so they are not handed to another device in the same pool.
 	for i := range pool.Devices {
-		if !at.PreallocatedDevices.Has(pool.Devices[i].ID) &&
-			!lo.HasKey(at.PreallocatedConsumedCapacity, pool.Devices[i].ID) {
+		if !at.hasPersistedCounterOccupancy(pool.Devices[i].ID) {
 			continue
 		}
 		deductFromCounters(remainingCounterSets, pool.Devices[i].Device)
 	}
 	for i := range pool.NonTargetingDevices {
-		if !at.PreallocatedDevices.Has(pool.NonTargetingDevices[i].ID) &&
-			!lo.HasKey(at.PreallocatedConsumedCapacity, pool.NonTargetingDevices[i].ID) {
+		if !at.hasPersistedCounterOccupancy(pool.NonTargetingDevices[i].ID) {
 			continue
 		}
 		deductFromCounters(remainingCounterSets, pool.NonTargetingDevices[i].Device)

@@ -147,6 +147,10 @@ type AllocatedDeviceState struct {
 	ExclusiveDevices sets.Set[cloudprovider.DeviceID]
 	// ConsumedCapacity maps multi-allocatable devices to their aggregated consumed capacity.
 	ConsumedCapacity map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity
+	// BlockedDevices contains devices whose consumed-capacity accounting is invalid (e.g. a negative
+	// ConsumedCapacity in a ResourceClaim status). They must not be allocated on either the exclusive or the
+	// allow-multiple path until the invalid state clears.
+	BlockedDevices sets.Set[cloudprovider.DeviceID]
 }
 
 // NewAllocator constructs an Allocator for a single scheduling loop.
@@ -851,6 +855,12 @@ func (a *allocator) tryDevice(
 	dw DeviceWithID,
 ) bool {
 	deviceID := dw.ID
+
+	// 0. A device with invalid consumed-capacity accounting fails closed on every path. The allow-multiple
+	//    branch below does not consult IsAllocated, so this cannot rely on the exclusive-device set. See #3209.
+	if a.allocationTracker.BlockedDevices.Has(deviceID) {
+		return false
+	}
 
 	// 1. Availability check — multi-alloc devices use capacity as the gatekeeper;
 	//    exclusive devices use binary allocation tracking.
