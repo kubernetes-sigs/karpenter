@@ -241,6 +241,10 @@ type Command struct {
 	Candidates          []*Candidate
 	Replacements        []*Replacement
 	PoolDisruptionCosts map[string]float64
+	// TerminateFirst marks a delete-only command that was chosen because the candidate couldn't stage a replacement
+	// first (Terminate-First Disruption, RFC #3203) — as opposed to an ordinary replacement-less delete (e.g. an empty
+	// node). It surfaces via Decision() as TerminateFirstDecision so the decision metrics can distinguish the two.
+	TerminateFirst bool
 }
 
 // Reason returns the disruption reason for this command.
@@ -257,6 +261,9 @@ var (
 	NoOpDecision    Decision = "no-op"
 	ReplaceDecision Decision = "replace"
 	DeleteDecision  Decision = "delete"
+	// TerminateFirstDecision is a delete-only decision taken because the candidate couldn't stage a replacement first
+	// (RFC #3203); it is distinguished from DeleteDecision so metrics can count terminate-first disruptions.
+	TerminateFirstDecision Decision = "terminate-first"
 	// ApprovedDecision and RejectedDecision are the decision label values emitted
 	// by the Balanced consolidation move metrics (consolidation_moves_total and
 	// consolidation_score).
@@ -269,6 +276,9 @@ func (c Command) Decision() Decision {
 	case len(c.Candidates) > 0 && len(c.Replacements) > 0:
 		return ReplaceDecision
 	case len(c.Candidates) > 0 && len(c.Replacements) == 0:
+		if c.TerminateFirst {
+			return TerminateFirstDecision
+		}
 		return DeleteDecision
 	default:
 		return NoOpDecision

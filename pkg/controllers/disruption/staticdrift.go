@@ -97,6 +97,7 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 				cmds = append(cmds, Command{
 					Candidates:          []*Candidate{c},
 					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{c}),
+					TerminateFirst:      true,
 				})
 			}
 			continue

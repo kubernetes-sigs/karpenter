@@ -97,6 +97,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			return []Command{{
 				Candidates:          []*Candidate{candidate},
 				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
+				TerminateFirst:      true,
 			}}, nil
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
