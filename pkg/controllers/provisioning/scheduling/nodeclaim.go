@@ -60,10 +60,9 @@ type NodeClaim struct {
 	//   this expansion.
 	reservedOfferings    cloudprovider.Offerings
 	reservedOfferingMode ReservedOfferingMode
-	// creditReservationCapacity: see options.creditReservationCapacity. A reservation with a positive credit here is
-	// classified as reservable even if its offering's static ReservationCapacity is 0 — modeling a slot a disruption
-	// candidate will free on termination.
-	creditReservationCapacity map[string]int
+	// creditReservationCapacity models slots a disruption candidate will free on termination: a reservation with a
+	// positive credit here is classified as reservable even if its offering's static ReservationCapacity is 0.
+	creditReservationCapacity map[string]int // reservationID -> credit count
 }
 
 // ReservedOfferingError indicates a NodeClaim couldn't be created or a pod couldn't be added to an exxisting NodeClaim
@@ -333,9 +332,9 @@ func (n *NodeClaim) offeringsToReserve(
 	// I couldn't grab a slot this pessimistic pass" (ReservationCapacity>0, CanReserve==false) require opposite handling in
 	// strict mode: the former should fall back to on-demand/spot (or, with no fallback, defer), while the latter must defer
 	// so pessimistic reservation only schedules one NodeClaim per loop.
-	hasReservableOffering := false           // compatible reserved offering with real capacity (cap>0) — a pessimism candidate
-	hasFullReservedOffering := false         // compatible reserved offering that is full right now (Available, cap==0)
-	hasCompatibleUnreservedFallback := false // compatible on-demand/spot offering to fall back to
+	reservedWithCapacity := false  // compatible reserved offering with real capacity (cap>0) — a pessimism candidate
+	reservedFull := false          // compatible reserved offering that is full right now (Available, cap==0)
+	hasUnreservedFallback := false // compatible on-demand/spot offering to fall back to
 	var reservedOfferings cloudprovider.Offerings
 	for _, it := range instanceTypes {
 		for _, o := range it.Offerings {
@@ -348,7 +347,7 @@ func (n *NodeClaim) offeringsToReserve(
 				continue
 			}
 			if o.CapacityType() != v1.CapacityTypeReserved {
-				hasCompatibleUnreservedFallback = true
+				hasUnreservedFallback = true
 				continue
 			}
 			// A full-but-healthy reservation (Available=true, ReservationCapacity=0) can't be reserved right now, but it is
@@ -358,10 +357,10 @@ func (n *NodeClaim) offeringsToReserve(
 			// as reservable even though its static capacity is 0 — this is the terminate-first "would the pods fit once
 			// the slot is freed?" pass. The ReservationManager was credited to match, so CanReserve reflects the slot.
 			if o.ReservationCapacity == 0 && n.creditReservationCapacity[o.ReservationID()] == 0 {
-				hasFullReservedOffering = true
+				reservedFull = true
 				continue
 			}
-			hasReservableOffering = true
+			reservedWithCapacity = true
 			// Note that reservation is an idempotent operation - if we have previously successfully reserved an offering for
 			// this host, this operation is guaranteed to succeed. We may also succeed to make reservations for offerings which
 			// failed in previous iterations if other NodeClaims have released them since the last attempt.
@@ -371,39 +370,35 @@ func (n *NodeClaim) offeringsToReserve(
 		}
 	}
 
-	// Fallback mode: if the pod's only compatible option is a reservation that is full right now (no reservable
-	// reserved offering with real or credited capacity, and no on-demand/spot fallback), fail with a PLAIN error — NOT
-	// a ReservedOfferingError — so the scheduler falls through to a lower-weight NodePool (e.g. on-demand). This
-	// restores the pre-decouple behavior: a full reservation used to be Available=false and simply wasn't offered here,
-	// so the pod fell through; now that a full-but-healthy reservation is Available=true, cap=0, we reproduce that
-	// fallthrough explicitly. A ReservedOfferingError would instead poison cross-NodePool fallthrough and defer the pod,
-	// so we must not use one here. A reservation with a slot credited back for this loop is classified reservable (not
-	// full) above, so this does not fire for the terminate-first credit-back pass (which runs strict, below). Strict
-	// mode raises a ReservedOfferingError for this case instead (defer), handled below.
-	if n.reservedOfferingMode != ReservedOfferingModeStrict &&
-		hasFullReservedOffering && !hasReservableOffering && !hasCompatibleUnreservedFallback {
+	strict := n.reservedOfferingMode == ReservedOfferingModeStrict
+	// onlyFullReservations: the pod's only compatible option is a reservation that is full right now — no reserved
+	// offering with real (or credited) capacity, and no on-demand/spot fallback. A reservation with a slot credited
+	// back for this loop is classified reservable above, so this is false for the terminate-first credit-back pass.
+	onlyFullReservations := reservedFull && !reservedWithCapacity && !hasUnreservedFallback
+
+	// Pessimism: a compatible reserved offering has real capacity but we couldn't reserve any this pass (another
+	// NodeClaim in this loop pessimistically holds it). Defer and retry next loop rather than falling back — this is
+	// what limits provisioning to one NodeClaim per loop when a pod is compatible with multiple reserved offerings.
+	if strict && reservedWithCapacity && len(reservedOfferings) == 0 {
+		return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
+	}
+
+	// The only compatible option is a full reservation. In strict mode defer until a slot frees, instead of creating a
+	// NodeClaim that getCapacityType would default to on-demand — which would mislaunch a reserved-only pool. In
+	// fallback mode fail with a PLAIN error — NOT a ReservedOfferingError, which would poison cross-NodePool
+	// fallthrough — so the scheduler falls through to a lower-weight NodePool, reproducing the pre-decouple behavior (a
+	// full reservation used to be Available=false and simply wasn't offered here).
+	if onlyFullReservations {
+		if strict {
+			return nil, NewReservedOfferingError(fmt.Errorf("all compatible reserved offerings are full and no on-demand or spot fallback is available"))
+		}
 		return nil, fmt.Errorf("the only compatible reserved offering is full; falling through to other NodePools")
 	}
 
-	if n.reservedOfferingMode == ReservedOfferingModeStrict {
-		// Pessimism: a compatible reserved offering has real capacity but we couldn't reserve any this pass (another
-		// NodeClaim in this loop pessimistically holds it). Defer and retry next loop rather than falling back — this is
-		// what limits provisioning to one NodeClaim per loop when a pod is compatible with multiple reserved offerings.
-		if hasReservableOffering && len(reservedOfferings) == 0 {
-			return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
-		}
-		// Reserved-only exhaustion: the ONLY compatible offerings are full reservations (cap==0) with no on-demand/spot
-		// fallback. Defer until a slot frees instead of creating a NodeClaim that getCapacityType would default to
-		// on-demand — which would mislaunch a reserved-only pool on-demand. A mixed pool (fallback present) skips this and
-		// falls back to on-demand/spot, matching long-standing behavior for an exhausted reservation.
-		if hasFullReservedOffering && !hasReservableOffering && !hasCompatibleUnreservedFallback {
-			return nil, NewReservedOfferingError(fmt.Errorf("all compatible reserved offerings are full and no on-demand or spot fallback is available"))
-		}
-		// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,
-		// we should fail to add the pod to this nodeclaim.
-		if len(n.reservedOfferings) != 0 && len(reservedOfferings) == 0 {
-			return nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
-		}
+	// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,
+	// we should fail to add the pod to this nodeclaim.
+	if strict && len(n.reservedOfferings) != 0 && len(reservedOfferings) == 0 {
+		return nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
 	}
 	return reservedOfferings, nil
 }

@@ -92,11 +92,12 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			return []Command{}, err
 		}
 		if terminateFirst {
-			// Delete-only: don't carry the simulation Results — the freed pods pend and reactive provisioning re-places
-			// them onto the freed reservation slot. The drain still honors PDBs and is bounded by TGP.
+			// Delete-only: don't carry the simulation Results — the freed pods pend and reactive provisioning
+			// handles them. The drain still honors PDBs and is bounded by TGP.
 			return []Command{{
 				Candidates:          []*Candidate{candidate},
 				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
+				TerminateFirst:      true,
 			}}, nil
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.

@@ -94,7 +94,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
 			Expect(cmds[0].Replacements).To(HaveLen(0))
 		})
 
@@ -193,7 +193,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
 			Expect(cmds[0].Replacements).To(HaveLen(0))
 		})
 
