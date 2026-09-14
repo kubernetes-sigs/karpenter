@@ -177,6 +177,7 @@ var _ = Describe("Consolidation", func() {
 	Context("Metrics", func() {
 		BeforeEach(func() {
 			disruption.FailedValidationsTotal.Reset()
+			disruption.NodePoolFailedValidationsTotal.Reset()
 		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
@@ -226,6 +227,12 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType()})
+			// The same failure is attributed to the NodePool that owns the candidate.
+			ExpectMetricCounterValue(disruption.NodePoolFailedValidationsTotal, 1, map[string]string{
+				metrics.NodePoolLabel:             nodePool.Name,
+				disruption.PolicyLabel:            string(nodePool.Spec.Disruption.ConsolidationPolicy),
+				disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType(),
+			})
 		},
 			Entry("when a candidate is blocked by budgets", WithEmptinessBlockingBudget()),
 			Entry("when candidates are filtered out due to pod churn", WithEmptinessChurn()),
@@ -284,6 +291,13 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(multiNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType()})
+			// Both candidates belong to the same NodePool, so the per-NodePool
+			// counter carries the whole failure and reconciles with the aggregate.
+			ExpectMetricCounterValue(disruption.NodePoolFailedValidationsTotal, 2, map[string]string{
+				metrics.NodePoolLabel:             nodePool.Name,
+				disruption.PolicyLabel:            string(nodePool.Spec.Disruption.ConsolidationPolicy),
+				disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType(),
+			})
 		},
 			Entry("when candidates are blocked by budgets", WithUnderutilizedBlockingBudget()),
 			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
@@ -327,6 +341,11 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(singleNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType()})
+			ExpectMetricCounterValue(disruption.NodePoolFailedValidationsTotal, 1, map[string]string{
+				metrics.NodePoolLabel:             nodePool.Name,
+				disruption.PolicyLabel:            string(nodePool.Spec.Disruption.ConsolidationPolicy),
+				disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType(),
+			})
 		},
 			Entry("when a candidate is blocked by budgets", WithUnderutilizedBlockingBudget()),
 			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),

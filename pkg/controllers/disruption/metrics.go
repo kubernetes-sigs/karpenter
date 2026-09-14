@@ -29,7 +29,7 @@ const (
 	decisionLabel                = "decision"
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
-	policyLabel                  = "policy"
+	PolicyLabel                  = "policy"
 )
 
 var (
@@ -80,7 +80,7 @@ var (
 		},
 	}
 	Policy = opmetrics.Label{
-		Name: policyLabel,
+		Name: PolicyLabel,
 		Help: "The NodePool consolidation policy in effect for the move.",
 	}
 )
@@ -155,6 +155,16 @@ var (
 			Help:      "Number of candidates that were selected for disruption but failed validation. Labeled by consolidation type.",
 		},
 		[]opmetrics.Label{ConsolidationType},
+	)
+	NodePoolFailedValidationsTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "failed_validations_by_nodepool_total",
+			Help:      "Number of candidates that were selected for disruption but failed validation, by nodepool. Labeled by nodepool name, consolidation policy, and consolidation type. Summing without the nodepool and policy labels gives failed_validations_total.",
+		},
+		[]opmetrics.Label{metrics.NodePool, Policy, ConsolidationType},
 	)
 	NodePoolAllowedDisruptions = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
