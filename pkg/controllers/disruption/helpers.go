@@ -255,15 +255,46 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 	return nodePoolMap, nodePoolToInstanceTypesMap, nil
 }
 
-// BuildDisruptionBudgets prepares our disruption budget mapping. The disruption budget maps each disruption reason to the number of allowed disruptions.
-// We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are NotReady and already being deleted by that disruption reason.
-//
-//nolint:gocyclo
-func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, reason v1.DisruptionReason) (map[string]int, error) {
-	disruptionBudgetMapping := map[string]int{}
-	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
-	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
-	for _, node := range cluster.DeepCopyNodes() {
+// NodePoolStats returns per-NodePool counts of managed, initialized, non-terminating
+// nodes plus the subset that are currently disrupting (NotReady or marked for
+// deletion). Shared between BuildDisruptionBudgetMapping and the deletion-cost
+// controller so the two stay in lockstep on which nodes count toward each budget.
+func NodePoolStats(cluster *state.Cluster) (numNodes, disrupting map[string]int) {
+	return NodePoolStatsFromNodes(cluster.DeepCopyNodes())
+}
+
+// NodePoolBudgetMap returns per-NodePool remaining disruption budget for the
+// given reason. Result equals MustGetAllowedDisruptions minus already-disrupting,
+// clamped at 0. Pure: no metric emissions or events; callers emit at their own
+// site. Shared between BuildDisruptionBudgetMapping and the deletion-cost
+// controller so both compute budgets identically.
+func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[string]*v1.NodePool, numNodes, disrupting map[string]int, reason v1.DisruptionReason) map[string]int {
+	out := map[string]int{}
+	for name, np := range nodePools {
+		allowed := np.MustGetAllowedDisruptions(clk, numNodes[name], reason)
+		remaining := allowed - disrupting[name]
+		if remaining < 0 {
+			log.FromContext(ctx).V(1).WithValues(
+				"nodePool", name,
+				"reason", string(reason),
+				"allowed", allowed,
+				"disrupting", disrupting[name],
+			).Info("disruption budget already exhausted; clamping to 0")
+			remaining = 0
+		}
+		out[name] = remaining
+	}
+	return out
+}
+
+// NodePoolStatsFromNodes computes the same per-NodePool counts as NodePoolStats
+// against a caller-supplied snapshot. Callers that already hold a DeepCopy
+// (e.g. the deletion-cost controller) reuse it here instead of paying for a
+// second cluster-wide deep copy.
+func NodePoolStatsFromNodes(nodes []*state.StateNode) (numNodes, disrupting map[string]int) {
+	numNodes = map[string]int{}
+	disrupting = map[string]int{}
+	for _, node := range nodes {
 		// We only consider nodes that we own and are initialized towards the total.
 		// If a node is launched/registered, but not initialized, pods aren't scheduled
 		// to the node, and these are treated as unhealthy until they're cleaned up.
@@ -292,6 +323,14 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 			disrupting[nodePool]++
 		}
 	}
+	return numNodes, disrupting
+}
+
+// BuildDisruptionBudgets prepares our disruption budget mapping. The disruption budget maps each disruption reason to the number of allowed disruptions.
+// We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are NotReady and already being deleted by that disruption reason.
+func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, reason v1.DisruptionReason) (map[string]int, error) {
+	disruptionBudgetMapping := map[string]int{}
+	numNodes, disrupting := NodePoolStats(cluster)
 	nodePools, err := nodepoolutils.ListManaged(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return disruptionBudgetMapping, fmt.Errorf("listing node pools, %w", err)

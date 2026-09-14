@@ -111,39 +111,12 @@ func (r ScoreResult) Score() float64 {
 func (r ScoreResult) Threshold() float64 { return 1.0 / float64(r.K) }
 func (r ScoreResult) Approved() bool     { return r.Score() >= r.Threshold() }
 
-// resolveNodePrice returns the actual price of a running node by looking up the
-// offering that matches the node's zone and capacity-type labels.
-// Returns 0 when the instance type is nil or no matching offering exists.
-func resolveNodePrice(node *state.StateNode, instanceType *cloudprovider.InstanceType) float64 {
-	if instanceType == nil {
-		return 0
-	}
-	labels := node.Labels()
-	price, ok := instanceType.OfferingPrice(labels[corev1.LabelTopologyZone], labels[v1.CapacityTypeLabelKey])
-	if !ok {
-		return 0
-	}
-	if math.IsNaN(price) {
-		return 0
-	}
-	return price
-}
-
-// PerNodeBaseDisruptionCost is the inherent cost of draining a node (cordon,
-// drain, API calls, replacement latency). Could become per-NodePool if GPU
-// nodes need higher weight. See designs/balanced-consolidation.md.
-const PerNodeBaseDisruptionCost = 1.0
-
-func computeRescheduleDisruptionCost(ctx context.Context, reschedulablePods []*corev1.Pod) float64 {
-	cost := PerNodeBaseDisruptionCost
-	for _, p := range reschedulablePods {
-		cost += math.Max(0, disruptionutils.EvictionCost(ctx, p))
-	}
-	return cost
-}
-
 // SavingsRatio returns cost per unit disruption (higher = prefer to disrupt).
-func (c *Candidate) SavingsRatio() float64 { return c.Price / c.RescheduleDisruptionCost }
+// Delegates to disruptionutils.SavingsRatio so the balanced-consolidation
+// candidate sort and pod-deletion-cost ranking read the same formula.
+func (c *Candidate) SavingsRatio() float64 {
+	return disruptionutils.SavingsRatio(c.Price, c.RescheduleDisruptionCost)
+}
 
 func (c *Candidate) OwnedByStaticNodePool() bool {
 	return c.NodePool.Spec.Replicas != nil
@@ -154,7 +127,7 @@ func (c *Candidate) OwnedByStaticNodePool() bool {
 // this definition; the Empty disruption reason and Empty budgets govern its
 // deletion through the Emptiness method.
 func (c *Candidate) IsEmpty() bool {
-	return c.RescheduleDisruptionCost <= PerNodeBaseDisruptionCost
+	return c.RescheduleDisruptionCost <= disruptionutils.PerNodeBaseDisruptionCost
 }
 
 //nolint:gocyclo
@@ -210,8 +183,8 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		reschedulablePods: reschedulable,
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
 		DisruptionCost:           disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
-		Price:                    resolveNodePrice(node, instanceType),
-		RescheduleDisruptionCost: computeRescheduleDisruptionCost(ctx, reschedulable),
+		Price:                    disruptionutils.ResolveOfferingPrice(node.Labels(), instanceType),
+		RescheduleDisruptionCost: disruptionutils.ComputeRescheduleDisruptionCost(ctx, reschedulable),
 	}, nil
 }
 
@@ -367,7 +340,7 @@ func (c Command) SourceCost() float64 {
 
 // EstimatedSavings returns the estimated cost savings from this consolidation.
 // Unknown prices degrade silently: an unpriceable source node carries Price 0
-// (see resolveNodePrice) and deflates savings, while a replacement with no
+// (see disruptionutils.ResolveOfferingPrice) and deflates savings, while a replacement with no
 // available compatible offering contributes 0 to destination cost and inflates
 // them.
 func (c Command) EstimatedSavings() float64 {

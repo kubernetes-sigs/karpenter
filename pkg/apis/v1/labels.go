@@ -57,6 +57,18 @@ const (
 	// scheduled to this NodeClaim. The initialization controller can gate on these drivers having published their
 	// ResourceSlices before marking the node initialized.
 	DRADriversAnnotationKey = apis.Group + "/requested-dra-drivers"
+	// DisruptionCostAnnotationKey is the user-facing Karpenter annotation for
+	// expressing the cost of evicting a pod during consolidation. Customers
+	// set this on workloads to influence which pods Karpenter prefers to
+	// evict during consolidation.
+	//
+	// This annotation is read by pkg/utils/disruption.EvictionCost. When the
+	// PodDeletionCostManagement feature gate is enabled, Karpenter writes
+	// controller.kubernetes.io/pod-deletion-cost as a coordination signal to
+	// the ReplicaSet controller and EvictionCost reads only this annotation.
+	// When the gate is off, EvictionCost falls back to
+	// controller.kubernetes.io/pod-deletion-cost if this key is absent.
+	DisruptionCostAnnotationKey = apis.Group + "/disruption-cost"
 )
 
 // Karpenter specific finalizers
