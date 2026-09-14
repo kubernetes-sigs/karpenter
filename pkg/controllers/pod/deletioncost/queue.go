@@ -38,7 +38,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 )
@@ -141,7 +140,6 @@ func (q *Queue) complete(qk terminator.QueueKey) {
 // throttled apiserver naturally slows fan-out across all in-flight pods.
 func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, q.Name())
-	defer metrics.Measure(annotationDurationSeconds, noLabels)()
 
 	qk := terminator.NewQueueKey(pod)
 	q.Lock()

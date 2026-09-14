@@ -348,13 +348,13 @@ var _ = Describe("Annotation", func() {
 			live.Labels["racing-writer"] = "true"
 			Expect(env.Client.Update(ctx, live)).To(Succeed())
 
-			before := counterDelta("karpenter_pod_deletion_cost_pods_updated_total", map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
+			before := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
 			queue.Add(snapshot, -1, false)
 			result, err := queue.Reconcile(ctx, snapshot)
 			Expect(err).ToNot(HaveOccurred(), "409 must not surface as an error; the queue treats it as terminal")
 			Expect(result).To(BeZero())
 			Expect(queue.Has(snapshot)).To(BeFalse(), "queue must drop the item after Conflict")
-			after := counterDelta("karpenter_pod_deletion_cost_pods_updated_total", map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
+			after := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
 			Expect(after-before).To(Equal(1.0), "Conflict should increment pods_updated_total{result=skipped_conflict}")
 
 			// Live state preserved: the racing writer's label update stuck,
@@ -380,12 +380,12 @@ var _ = Describe("Annotation", func() {
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), live)).To(Succeed())
 
 			q := deletioncost.NewQueue(&notFoundClient{Client: env.Client})
-			before := counterDelta("karpenter_pod_deletion_cost_pods_updated_total", map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
+			before := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
 			q.Add(live, -1, false)
 			_, err := q.Reconcile(ctx, live)
 			Expect(err).ToNot(HaveOccurred(), "NotFound must not surface as an error; the queue treats it as terminal")
 			Expect(q.Has(live)).To(BeFalse(), "queue must drop the item after NotFound")
-			after := counterDelta("karpenter_pod_deletion_cost_pods_updated_total", map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
+			after := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
 			Expect(after-before).To(Equal(1.0), "NotFound should increment pods_updated_total{result=skipped_notfound}")
 		})
 

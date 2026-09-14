@@ -32,9 +32,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
@@ -123,14 +125,21 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("ranking nodes, %w", err)
 	}
-	annotated := c.enqueueAnnotationWrites(ctx, groupA, groupBC, groupD)
-	nodesRanked.Set(float64(annotated), noLabels)
+	perNodePool := c.enqueueAnnotationWrites(ctx, groupA, groupBC, groupD)
+
+	// Reset before Set so pools whose count fell to zero don't linger.
+	nodesRanked.Reset()
+	total := 0
+	for np, count := range perNodePool {
+		nodesRanked.Set(float64(count), map[string]string{metrics.NodePoolLabel: np})
+		total += count
+	}
 
 	// Advance the skip cursor only after enqueueing succeeded.
 	c.lastConsolidationState = currentState
 
-	if annotated > 0 {
-		log.FromContext(ctx).V(1).WithValues("nodeCount", annotated).Info("enqueued pod deletion cost annotation writes")
+	if total > 0 {
+		log.FromContext(ctx).V(1).WithValues("nodeCount", total).Info("enqueued pod deletion cost annotation writes")
 	}
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }
@@ -141,20 +150,20 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 // cycle cap of maxNodesPerCycle. Nodes whose pods already carry the planned
 // annotation state are skipped so they don't consume the cap. Pods are
 // read from the informer cache on demand rather than cached in a struct.
-// Returns the count of nodes actually enqueued (drives the nodes_ranked
+// Returns per-nodepool counts of nodes annotated (drives the nodes_ranked
 // gauge).
-func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupBC, groupD []*state.StateNode) int {
-	total := c.enqueueGroupA(ctx, groupA)
-	written := c.enqueueRankedBC(ctx, groupBC, maxNodesPerCycle)
-	written += c.enqueueCleanup(ctx, groupD, maxNodesPerCycle-written)
-	return total + written
+func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupBC, groupD []*state.StateNode) map[string]int {
+	perNodePool := map[string]int{}
+	c.enqueueGroupA(ctx, groupA, perNodePool)
+	written := c.enqueueRankedBC(ctx, groupBC, maxNodesPerCycle, perNodePool)
+	c.enqueueCleanup(ctx, groupD, maxNodesPerCycle-written, perNodePool)
+	return perNodePool
 }
 
 // enqueueGroupA writes the math.MinInt32 sentinel to every non-no-op Group
 // A node. Group A is uncapped; disrupted-tainted or marked-for-deletion
 // nodes always annotate promptly.
-func (c *Controller) enqueueGroupA(ctx context.Context, nodes []*state.StateNode) int {
-	count := 0
+func (c *Controller) enqueueGroupA(ctx context.Context, nodes []*state.StateNode, perNodePool map[string]int) {
 	for _, node := range nodes {
 		pods, _ := node.Pods(ctx, c.kubeClient)
 		if !nodeMutatesAnyPod(pods, math.MinInt32, false) {
@@ -163,15 +172,14 @@ func (c *Controller) enqueueGroupA(ctx context.Context, nodes []*state.StateNode
 		for _, pod := range pods {
 			c.queue.Add(pod, math.MinInt32, false)
 		}
-		count++
+		perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
 	}
-	return count
 }
 
 // enqueueRankedBC writes sequential ranks to Groups B and C, stopping when
 // budget non-no-op nodes have been enqueued. Rank per position is
 // RankForBC(i, len(nodes)).
-func (c *Controller) enqueueRankedBC(ctx context.Context, nodes []*state.StateNode, budget int) int {
+func (c *Controller) enqueueRankedBC(ctx context.Context, nodes []*state.StateNode, budget int, perNodePool map[string]int) int {
 	if budget <= 0 {
 		return 0
 	}
@@ -189,6 +197,7 @@ func (c *Controller) enqueueRankedBC(ctx context.Context, nodes []*state.StateNo
 		for _, pod := range pods {
 			c.queue.Add(pod, rank, false)
 		}
+		perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
 		count++
 	}
 	return count
@@ -196,7 +205,7 @@ func (c *Controller) enqueueRankedBC(ctx context.Context, nodes []*state.StateNo
 
 // enqueueCleanup clears the pod-deletion-cost annotation on Group D nodes,
 // stopping when budget non-no-op nodes have been enqueued.
-func (c *Controller) enqueueCleanup(ctx context.Context, nodes []*state.StateNode, budget int) int {
+func (c *Controller) enqueueCleanup(ctx context.Context, nodes []*state.StateNode, budget int, perNodePool map[string]int) int {
 	if budget <= 0 {
 		return 0
 	}
@@ -212,6 +221,7 @@ func (c *Controller) enqueueCleanup(ctx context.Context, nodes []*state.StateNod
 		for _, pod := range pods {
 			c.queue.Add(pod, 0, true)
 		}
+		perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
 		count++
 	}
 	return count
@@ -245,7 +255,6 @@ func nodeMutatesAnyPod(pods []*corev1.Pod, rank int, cleanup bool) bool {
 func (c *Controller) consolidationStateUnchanged(ctx context.Context, currentState time.Time) bool {
 	if currentState.Equal(c.lastConsolidationState) {
 		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
-		reconcileSkippedTotal.Add(1, noLabels)
 		return true
 	}
 	return false

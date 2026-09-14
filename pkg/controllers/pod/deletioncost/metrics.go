@@ -34,8 +34,9 @@ const (
 var noLabels = map[string]string{}
 
 var (
-	// RFC §"Observability" calls for a gauge (current footprint), not a
-	// monotonic total.
+	// nodes_ranked is a gauge of nodes annotated in the most recent reconcile
+	// cycle, partitioned by nodepool. Reset each cycle so pools whose count
+	// drops to zero don't linger at their prior value.
 	nodesRanked = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
@@ -44,7 +45,7 @@ var (
 			Name:      "nodes_ranked",
 			Help:      "Number of nodes ranked in the most recent reconcile cycle by the pod deletion cost controller.",
 		},
-		[]opmetrics.Label{},
+		[]opmetrics.Label{metrics.NodePool},
 	)
 	podsUpdatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -64,30 +65,6 @@ var (
 			Name:      "ranking_duration_seconds",
 			Help:      "Duration of node ranking computation in seconds.",
 			Buckets:   metrics.DurationBuckets(),
-		},
-		[]opmetrics.Label{},
-	)
-	// Per-pod queue-reconcile duration. Previously per-cycle when
-	// UpdatePodDeletionCosts ran synchronously; after the queue swap this
-	// measures each Queue.Reconcile call (single-pod write, retry, or skip).
-	annotationDurationSeconds = opmetrics.NewPrometheusHistogram(
-		crmetrics.Registry,
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: podDeletionCostSubsystem,
-			Name:      "annotation_duration_seconds",
-			Help:      "Duration of a single pod annotation update operation in seconds.",
-			Buckets:   metrics.DurationBuckets(),
-		},
-		[]opmetrics.Label{},
-	)
-	reconcileSkippedTotal = opmetrics.NewPrometheusCounter(
-		crmetrics.Registry,
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: podDeletionCostSubsystem,
-			Name:      "reconcile_skipped_total",
-			Help:      "Number of reconcile loops skipped due to no changes detected in cluster state.",
 		},
 		[]opmetrics.Label{},
 	)

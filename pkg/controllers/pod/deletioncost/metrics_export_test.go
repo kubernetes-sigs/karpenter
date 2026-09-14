@@ -21,9 +21,8 @@ package deletioncost
 // Files ending in _test.go are compiled only into the test binary, so
 // these names do not leak into production callers.
 var (
-	NodesRankedMetric           = nodesRanked
-	PodsUpdatedTotalMetric      = podsUpdatedTotal
-	ReconcileSkippedTotalMetric = reconcileSkippedTotal
+	NodesRankedMetric      = nodesRanked
+	PodsUpdatedTotalMetric = podsUpdatedTotal
 )
 
 // Label values used by the pods_updated_total counter, exported for tests.

@@ -62,9 +62,11 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 		return nil, nil, nil, fmt.Errorf("listing pod disruption budgets, %w", err)
 	}
 
-	// lo.GroupBy iterates the input in order and appends to each group's
-	// slice, so groups[k] preserves the source ordering of matching nodes.
-	// Group B/C sort applies on top.
+	// Sort once at entry by SavingsRatio DESC. lo.GroupBy preserves the
+	// iteration order per partition (proven by ranking_internal_test.go), so
+	// downstream slices inherit this order without a per-partition sort.
+	sortBySavingsRatio(ctx, kubeClient, nodes, nodePoolToInstanceTypesMap)
+
 	groups := lo.GroupBy(nodes, func(n *state.StateNode) nodePartition {
 		return classifyNode(ctx, kubeClient, clk, n, nodePoolMap, nodePoolToInstanceTypesMap, pdbs)
 	})
@@ -72,10 +74,6 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	drifted := groups[partitionDrifted]
 	normal := groups[partitionNormal]
 	cleanupOnly := groups[partitionCleanupOnly]
-
-	// Sort B/C by SavingsRatio DESC. Group A and D order is not observable.
-	sortBySavingsRatio(ctx, kubeClient, drifted, nodePoolToInstanceTypesMap)
-	sortBySavingsRatio(ctx, kubeClient, normal, nodePoolToInstanceTypesMap)
 
 	// Per-NodePool budget: B/C overflow lands in D.
 	numNodes, disrupting := disruption.NodePoolStatsFromNodes(nodes)
@@ -281,11 +279,11 @@ func sortBySavingsRatio(ctx context.Context, kubeClient client.Client, nodes []*
 		if m := nodePoolToInstanceTypesMap[labels[v1.NodePoolLabelKey]]; m != nil {
 			it = m[labels[corev1.LabelInstanceTypeStable]]
 		}
-		price := disruptionutils.ResolveOfferingPrice(labels, it)
+		offeringPrice := disruptionutils.ResolveOfferingPrice(labels, it)
 		pods, _ := n.Pods(ctx, kubeClient)
 		reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutils.IsReschedulable(p) })
-		cost := disruptionutils.ComputeRescheduleDisruptionCost(ctx, reschedulable)
-		ratio[n.Name()] = disruptionutils.SavingsRatio(price, cost)
+		disruptionCost := disruptionutils.ComputeRescheduleDisruptionCost(ctx, reschedulable)
+		ratio[n.Name()] = disruptionutils.SavingsRatio(offeringPrice, disruptionCost)
 	}
 	sort.Slice(nodes, func(i, j int) bool {
 		ri, rj := ratio[nodes[i].Name()], ratio[nodes[j].Name()]

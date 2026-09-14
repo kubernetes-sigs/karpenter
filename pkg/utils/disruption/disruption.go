@@ -43,10 +43,7 @@ func ResolveOfferingPrice(labels map[string]string, instanceType *cloudprovider.
 		return 0
 	}
 	price, ok := instanceType.OfferingPrice(labels[corev1.LabelTopologyZone], labels[v1.CapacityTypeLabelKey])
-	if !ok {
-		return 0
-	}
-	if math.IsNaN(price) {
+	if !ok || math.IsNaN(price) {
 		return 0
 	}
 	return price
@@ -65,11 +62,12 @@ func ComputeRescheduleDisruptionCost(ctx context.Context, reschedulablePods []*c
 }
 
 // SavingsRatio returns Price / RescheduleDisruptionCost (higher = prefer to
-// disrupt). Callers must guarantee a positive rescheduleDisruptionCost — use
-// ComputeRescheduleDisruptionCost which is floored at PerNodeBaseDisruptionCost.
-// Both the balanced-consolidation candidate sort and the pod-deletion-cost
-// ranking read this ratio so their orderings agree.
+// disrupt). Panics on zero: ComputeRescheduleDisruptionCost floors at
+// PerNodeBaseDisruptionCost, so a zero here is a caller bug.
 func SavingsRatio(price, rescheduleDisruptionCost float64) float64 {
+	if rescheduleDisruptionCost == 0 {
+		panic("SavingsRatio: rescheduleDisruptionCost is 0; use ComputeRescheduleDisruptionCost")
+	}
 	return price / rescheduleDisruptionCost
 }
 
@@ -117,7 +115,7 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
 			cost += float64(parsedCost) / math.Pow(2, 27.0)
 		}
-	} else if !podDeletionCostManagementEnabled(ctx) {
+	} else if !options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
 		if podDeletionCostStr, ok := p.Annotations[corev1.PodDeletionCost]; ok {
 			// controller.kubernetes.io/pod-deletion-cost is int32 per the
 			// K8s API spec. Mirror the RS controller's parsing so a bad
@@ -147,15 +145,6 @@ func ReschedulingCost(ctx context.Context, pods []*corev1.Pod) float64 {
 		cost += EvictionCost(ctx, p)
 	}
 	return cost
-}
-
-// podDeletionCostManagementEnabled reports whether the PodDeletionCostManagement
-// feature gate is enabled on the ctx's options. Prod call sites inject options
-// via operator.Runtime; tests that reach EvictionCost must do the same so that
-// a missing-options bug surfaces as a panic instead of a silently-wrong gate
-// reading.
-func podDeletionCostManagementEnabled(ctx context.Context) bool {
-	return options.FromContext(ctx).FeatureGates.PodDeletionCostManagement
 }
 
 func IsUnderConsolidateAfter(nodePool *v1.NodePool, nodeClaim *v1.NodeClaim, c clock.Clock) bool {
