@@ -282,6 +282,7 @@ func (t *Topology) GetTopologyZoneConstraints(p *corev1.Pod, podRequirements sch
 
 // Register is used to register a domain as available across topologies for the given topology key.
 func (t *Topology) Register(topologyKey string, domain string) {
+	topologyKey = normalizeTopologyKey(topologyKey)
 	for _, tg := range t.topologyGroups {
 		if tg.Key == topologyKey {
 			tg.Register(domain)
@@ -296,6 +297,7 @@ func (t *Topology) Register(topologyKey string, domain string) {
 
 // Unregister is used to unregister a domain as available across topologies for the given topology key.
 func (t *Topology) Unregister(topologyKey string, domain string) {
+	topologyKey = normalizeTopologyKey(topologyKey)
 	for _, topology := range t.topologyGroups {
 		if topology.Key == topologyKey {
 			topology.Unregister(domain)
@@ -338,7 +340,8 @@ func (t *Topology) updateInverseAntiAffinity(ctx context.Context, pod *corev1.Po
 			return err
 		}
 
-		tg := NewTopologyGroup(TopologyTypePodAntiAffinity, term.TopologyKey, pod, namespaces, term.LabelSelector, math.MaxInt32, nil, nil, nil, t.domainGroups[term.TopologyKey])
+		key := normalizeTopologyKey(term.TopologyKey)
+		tg := NewTopologyGroup(TopologyTypePodAntiAffinity, key, pod, namespaces, term.LabelSelector, math.MaxInt32, nil, nil, nil, t.domainGroups[key])
 
 		hash := tg.Hash()
 		if existing, ok := t.inverseTopologyGroups[hash]; !ok {
@@ -346,7 +349,7 @@ func (t *Topology) updateInverseAntiAffinity(ctx context.Context, pod *corev1.Po
 		} else {
 			tg = existing
 		}
-		if domain, ok := domains[tg.Key]; ok {
+		if domain, ok := domainForNode(domains, tg.Key); ok {
 			tg.Record(domain)
 		}
 		tg.AddOwner(pod.UID)
@@ -384,7 +387,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		if !tg.nodeFilter.Matches(n.Node.Spec.Taints, scheduling.NewLabelRequirements(n.Node.Labels)) {
 			continue
 		}
-		domain, exists := n.Labels()[tg.Key]
+		domain, exists := domainForNode(n.Labels(), tg.Key)
 		if !exists {
 			continue
 		}
@@ -435,7 +438,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 			previousNodeRequirements = nodeRequirements
 		}
 
-		domain, ok := node.Labels[tg.Key]
+		domain, ok := domainForNode(node.Labels, tg.Key)
 		// Kubelet sets the hostname label, but the node may not be ready yet so there is no label.  We fall back and just
 		// treat the node name as the label.  It probably is in most cases, but even if not we at least count the existence
 		// of the pods in some domain, even if not in the correct one.  This is needed to handle the case of pods with
@@ -473,9 +476,10 @@ func (t *Topology) newForTopologies(p *corev1.Pod) []*TopologyGroup {
 				})
 			}
 		}
+		key := normalizeTopologyKey(tsc.TopologyKey)
 		topologyGroups = append(topologyGroups, NewTopologyGroup(
 			TopologyTypeSpread,
-			tsc.TopologyKey,
+			key,
 			p,
 			sets.New(p.Namespace),
 			tsc.LabelSelector,
@@ -483,7 +487,7 @@ func (t *Topology) newForTopologies(p *corev1.Pod) []*TopologyGroup {
 			tsc.MinDomains,
 			tsc.NodeTaintsPolicy,
 			tsc.NodeAffinityPolicy,
-			t.domainGroups[tsc.TopologyKey],
+			t.domainGroups[key],
 		))
 	}
 	return topologyGroups
@@ -525,7 +529,8 @@ func (t *Topology) newForAffinities(ctx context.Context, p *corev1.Pod) ([]*Topo
 			if err != nil {
 				return nil, err
 			}
-			topologyGroups = append(topologyGroups, NewTopologyGroup(topologyType, term.TopologyKey, p, namespaces, term.LabelSelector, math.MaxInt32, nil, nil, nil, t.domainGroups[term.TopologyKey]))
+			key := normalizeTopologyKey(term.TopologyKey)
+			topologyGroups = append(topologyGroups, NewTopologyGroup(topologyType, key, p, namespaces, term.LabelSelector, math.MaxInt32, nil, nil, nil, t.domainGroups[key]))
 		}
 	}
 	return topologyGroups, nil
@@ -613,4 +618,32 @@ func mapOperator(operator metav1.LabelSelectorOperator) selection.Operator {
 
 func IgnoredForTopology(p *corev1.Pod) bool {
 	return !pod.IsScheduled(p) || pod.IsTerminal(p) || pod.IsTerminating(p)
+}
+
+// normalizeTopologyKey resolves an aliased label key the same way scheduling.NewRequirement does.
+// Requirements, and therefore the domainGroups built from them, are always keyed on the normalized
+// key, so topology groups must be too or they can never match a domain or a node requirement.
+func normalizeTopologyKey(key string) string {
+	if normalized, ok := v1.NormalizedLabels[key]; ok {
+		return normalized
+	}
+	return key
+}
+
+// domainForNode reads a node's domain for a topology group key. The key is normalized, while node
+// labels keep whatever spelling the cluster set, so a node carrying only the legacy spelling still
+// has to resolve, or its pods drop out of the group's counts.
+func domainForNode(labels map[string]string, key string) (string, bool) {
+	if domain, ok := labels[key]; ok {
+		return domain, true
+	}
+	for alias, normalized := range v1.NormalizedLabels {
+		if normalized != key {
+			continue
+		}
+		if domain, ok := labels[alias]; ok {
+			return domain, true
+		}
+	}
+	return "", false
 }
