@@ -96,12 +96,22 @@ type options struct {
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
 	enforceConsolidateAfter bool
+	priceAwareBinPacking    bool
 }
 
 type Options = option.Function[options]
 
 var DisableReservedCapacityFallback = func(opts *options) {
 	opts.reservedOfferingMode = ReservedOfferingModeStrict
+}
+
+// PriceAwareBinPacking indicates that the scheduler should not add a pod to an in-flight NodeClaim if doing so would
+// remove every instance type option with an available spot offering, forcing the NodeClaim to launch as on-demand.
+// The pod is scheduled to another in-flight NodeClaim or a new NodeClaim instead, so that both remain eligible for
+// spot. This is enabled for provisioning but not for disruption simulations, which require a single replacement
+// NodeClaim and compare launch prices explicitly.
+var PriceAwareBinPacking = func(opts *options) {
+	opts.priceAwareBinPacking = true
 }
 
 var IgnorePreferences = func(opts *options) {
@@ -186,6 +196,7 @@ func NewScheduler(
 		clock:                   clock,
 		reservationManager:      NewReservationManager(instanceTypes),
 		reservedOfferingMode:    option.Resolve(opts...).reservedOfferingMode,
+		priceAwareBinPacking:    option.Resolve(opts...).priceAwareBinPacking,
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
 		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
@@ -245,6 +256,7 @@ type Scheduler struct {
 	clock                   clock.Clock
 	reservationManager      *ReservationManager
 	reservedOfferingMode    ReservedOfferingMode
+	priceAwareBinPacking    bool
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
@@ -725,7 +737,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 					"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
 			}
 		}
-		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
+		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode, s.priceAwareBinPacking)
 		r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
 		if err != nil {
 			errs[i] = err

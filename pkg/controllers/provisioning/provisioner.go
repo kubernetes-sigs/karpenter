@@ -399,6 +399,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 
 	opts := []scheduler.Options{
 		scheduler.DisableReservedCapacityFallback,
+		scheduler.PriceAwareBinPacking,
 		scheduler.NumConcurrentReconciles(int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))),
 		scheduler.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy),
 	}
