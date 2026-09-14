@@ -145,84 +145,60 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 }
 
 // enqueueAnnotationWrites walks the ranked groups and pushes per-pod
-// annotation writes onto the Queue. Ranks are derived from position within
-// groupBC via RankForBC. Group A is uncapped; Groups B/C/D share a per-
-// cycle cap of maxNodesPerCycle. Nodes whose pods already carry the planned
+// annotation writes onto the Queue. Group A is uncapped and writes the
+// math.MinInt32 sentinel so disrupted-tainted or marked-for-deletion nodes
+// always annotate promptly. Groups B/C share a per-cycle cap and write
+// sequential ranks derived from RankForBC. Group D clears annotations
+// under the remaining cap. Nodes whose pods already carry the planned
 // annotation state are skipped so they don't consume the cap. Pods are
-// read from the informer cache on demand rather than cached in a struct.
-// Returns per-nodepool counts of nodes annotated (drives the nodes_ranked
-// gauge).
+// read from the informer cache on demand. Returns per-nodepool counts of
+// nodes annotated (drives the nodes_ranked gauge).
 func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupBC, groupD []*state.StateNode) map[string]int {
 	perNodePool := map[string]int{}
-	c.enqueueGroupA(ctx, groupA, perNodePool)
-	written := c.enqueueRankedBC(ctx, groupBC, maxNodesPerCycle, perNodePool)
-	c.enqueueCleanup(ctx, groupD, maxNodesPerCycle-written, perNodePool)
+	for _, node := range groupA {
+		c.tryEnqueueNode(ctx, node, math.MinInt32, false, perNodePool)
+	}
+	n := len(groupBC)
+	written := c.enqueueCapped(ctx, groupBC, maxNodesPerCycle, perNodePool, func(i int) (int, bool) {
+		return RankForBC(i, n), false
+	})
+	c.enqueueCapped(ctx, groupD, maxNodesPerCycle-written, perNodePool, func(_ int) (int, bool) {
+		return 0, true
+	})
 	return perNodePool
 }
 
-// enqueueGroupA writes the math.MinInt32 sentinel to every non-no-op Group
-// A node. Group A is uncapped; disrupted-tainted or marked-for-deletion
-// nodes always annotate promptly.
-func (c *Controller) enqueueGroupA(ctx context.Context, nodes []*state.StateNode, perNodePool map[string]int) {
-	for _, node := range nodes {
-		pods, _ := node.Pods(ctx, c.kubeClient)
-		if !nodeMutatesAnyPod(pods, math.MinInt32, false) {
-			continue
-		}
-		for _, pod := range pods {
-			c.queue.Add(pod, math.MinInt32, false)
-		}
-		perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
+// tryEnqueueNode reads a node's pods, guards against a no-op annotation
+// write, and enqueues per-pod writes with the given rank and cleanup.
+// Returns true when the node was enqueued.
+func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, rank int, cleanup bool, perNodePool map[string]int) bool {
+	pods, _ := node.Pods(ctx, c.kubeClient)
+	if !nodeMutatesAnyPod(pods, rank, cleanup) {
+		return false
 	}
+	for _, pod := range pods {
+		c.queue.Add(pod, rank, cleanup)
+	}
+	perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
+	return true
 }
 
-// enqueueRankedBC writes sequential ranks to Groups B and C, stopping when
-// budget non-no-op nodes have been enqueued. Rank per position is
-// RankForBC(i, len(nodes)).
-func (c *Controller) enqueueRankedBC(ctx context.Context, nodes []*state.StateNode, budget int, perNodePool map[string]int) int {
+// enqueueCapped walks nodes and enqueues per-node writes until budget
+// non-no-op nodes have been reached. rankAt derives per-position rank and
+// cleanup flag. Returns the count of nodes actually enqueued.
+func (c *Controller) enqueueCapped(ctx context.Context, nodes []*state.StateNode, budget int, perNodePool map[string]int, rankAt func(i int) (int, bool)) int {
 	if budget <= 0 {
 		return 0
 	}
-	n := len(nodes)
 	count := 0
 	for i, node := range nodes {
 		if count >= budget {
 			break
 		}
-		rank := RankForBC(i, n)
-		pods, _ := node.Pods(ctx, c.kubeClient)
-		if !nodeMutatesAnyPod(pods, rank, false) {
-			continue
+		rank, cleanup := rankAt(i)
+		if c.tryEnqueueNode(ctx, node, rank, cleanup, perNodePool) {
+			count++
 		}
-		for _, pod := range pods {
-			c.queue.Add(pod, rank, false)
-		}
-		perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
-		count++
-	}
-	return count
-}
-
-// enqueueCleanup clears the pod-deletion-cost annotation on Group D nodes,
-// stopping when budget non-no-op nodes have been enqueued.
-func (c *Controller) enqueueCleanup(ctx context.Context, nodes []*state.StateNode, budget int, perNodePool map[string]int) int {
-	if budget <= 0 {
-		return 0
-	}
-	count := 0
-	for _, node := range nodes {
-		if count >= budget {
-			break
-		}
-		pods, _ := node.Pods(ctx, c.kubeClient)
-		if !nodeMutatesAnyPod(pods, 0, true) {
-			continue
-		}
-		for _, pod := range pods {
-			c.queue.Add(pod, 0, true)
-		}
-		perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
-		count++
 	}
 	return count
 }
