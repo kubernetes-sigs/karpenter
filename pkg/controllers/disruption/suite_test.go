@@ -61,6 +61,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -651,7 +652,7 @@ var _ = Describe("Disruption Taints", func() {
 		})
 		Expect(nodeClaims).To(HaveLen(1))
 		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason)).ToNot(BeNil())
-		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue()).To(BeTrue())
+		Expect(nodeclaimutils.IsPendingDisruption(nodeClaims[0])).To(BeTrue())
 
 		createdNodeClaim := lo.Reject(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
 			return nc.Name == nodeClaim.Name

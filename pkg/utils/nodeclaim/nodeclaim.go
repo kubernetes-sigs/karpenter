@@ -44,6 +44,17 @@ func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
 	})
 }
 
+// IsPendingDisruption reports whether the disruption controller has claimed this NodeClaim for an
+// in-flight disruption command, as recorded by the DisruptionReason status condition. This is the
+// only source of truth for "am I currently being disrupted" that callers outside the disruption
+// controller should rely on: the condition and the disruption controller's own MarkNodeClaimPendingDisruption
+// bookkeeping are written together when a command starts, and the condition is cleared by
+// state.ClearNodeClaimsCondition if the command is abandoned or fails, so checking it self-heals rather
+// than requiring separate cleanup.
+func IsPendingDisruption(nodeClaim *v1.NodeClaim) bool {
+	return nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue()
+}
+
 // DisruptionTerminationMode returns the termination_mode metric label value for a
 // disrupted NodeClaim, derived from its terminationGracePeriod.
 func DisruptionTerminationMode(nodeClaim *v1.NodeClaim) string {
