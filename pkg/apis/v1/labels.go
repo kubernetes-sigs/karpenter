@@ -47,11 +47,17 @@ const (
 
 // Karpenter specific annotations
 const (
+	// DoNotDisruptAnnotationKey prevents Karpenter from voluntarily disrupting the annotated resource.
 	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
+	// ProviderCompatibilityAnnotationKey identifies the cloud provider compatible with the annotated resource.
 	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
+	// NodePoolHashAnnotationKey stores the hash of a NodePool's configuration on the NodePool and its NodeClaims.
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
+	// NodePoolHashVersionAnnotationKey stores the version used to calculate NodePoolHashAnnotationKey.
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
+	// NodeClaimTerminationTimestampAnnotationKey records when Karpenter initiated termination of a NodeClaim.
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
+	// NodeClaimMinValuesRelaxedAnnotationKey records whether Karpenter relaxed minimum requirement values for a NodeClaim.
 	NodeClaimMinValuesRelaxedAnnotationKey     = apis.Group + "/nodeclaim-min-values-relaxed"
 	// DRADriversAnnotationKey records the comma-separated set of DRA driver names whose devices were allocated to pods
 	// scheduled to this NodeClaim. The initialization controller can gate on these drivers having published their
