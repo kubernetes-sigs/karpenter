@@ -71,7 +71,7 @@ var (
 			},
 			{
 				Name: string(TerminateFirstDecision),
-				Help: "The candidate(s) were deleted without staging a replacement first (terminate-first, RFC #3203); reactive provisioning refills afterward.",
+				Help: "The candidate(s) were deleted without staging a replacement first; reactive provisioning refills afterward.",
 			},
 			{
 				Name: string(ApprovedDecision),
