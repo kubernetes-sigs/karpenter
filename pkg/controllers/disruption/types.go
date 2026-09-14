@@ -241,9 +241,7 @@ type Command struct {
 	Candidates          []*Candidate
 	Replacements        []*Replacement
 	PoolDisruptionCosts map[string]float64
-	// TerminateFirst marks a delete-only command that was chosen because the candidate couldn't stage a replacement
-	// first (Terminate-First Disruption, RFC #3203) — as opposed to an ordinary replacement-less delete (e.g. an empty
-	// node). It surfaces via Decision() as TerminateFirstDecision so the decision metrics can distinguish the two.
+	// TerminateFirst marks a delete-only terminate-first command (RFC #3203); Decision() surfaces it as TerminateFirstDecision.
 	TerminateFirst bool
 }
 
@@ -261,8 +259,7 @@ var (
 	NoOpDecision    Decision = "no-op"
 	ReplaceDecision Decision = "replace"
 	DeleteDecision  Decision = "delete"
-	// TerminateFirstDecision is a delete-only decision taken because the candidate couldn't stage a replacement first
-	// (RFC #3203); it is distinguished from DeleteDecision so metrics can count terminate-first disruptions.
+	// TerminateFirstDecision is a delete-only decision distinguished from DeleteDecision for terminate-first (RFC #3203).
 	TerminateFirstDecision Decision = "terminate-first"
 	// ApprovedDecision and RejectedDecision are the decision label values emitted
 	// by the Balanced consolidation move metrics (consolidation_moves_total and
