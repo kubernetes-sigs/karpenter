@@ -1,0 +1,47 @@
+# Kind cluster configuration for the e2e suites.
+#
+# This is a default kind cluster except that kube-scheduler is pointed at
+# test/suites/regression/testdata/kube-scheduler-config.yaml, which adds a profile carrying
+# podTopologySpread.defaultConstraints. The "DefaultTopologySpreadConstraints" specs need a kube-scheduler
+# that defaults pods the way Karpenter's --scheduler-config says it does, and skip themselves on a cluster
+# without it.
+#
+# Create the cluster from the repository root: the extraMounts hostPath is resolved relative to the working
+# directory.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: test/suites/regression/testdata
+        containerPath: /etc/kubernetes/karpenter-scheduler-config
+        readOnly: true
+    kubeadmConfigPatches:
+      # kubeadm's ClusterConfiguration changed extraArgs from a map (v1beta3) to a list (v1beta4), and which
+      # one kind generates depends on the Kubernetes and kind versions. Both shapes are given here; kind
+      # matches a patch by apiVersion and ignores the one that doesn't apply.
+      - |
+        apiVersion: kubeadm.k8s.io/v1beta3
+        kind: ClusterConfiguration
+        scheduler:
+          extraArgs:
+            config: /etc/kubernetes/karpenter-scheduler-config/kube-scheduler-config.yaml
+          extraVolumes:
+            - name: karpenter-scheduler-config
+              hostPath: /etc/kubernetes/karpenter-scheduler-config
+              mountPath: /etc/kubernetes/karpenter-scheduler-config
+              readOnly: true
+              pathType: Directory
+      - |
+        apiVersion: kubeadm.k8s.io/v1beta4
+        kind: ClusterConfiguration
+        scheduler:
+          extraArgs:
+            - name: config
+              value: /etc/kubernetes/karpenter-scheduler-config/kube-scheduler-config.yaml
+          extraVolumes:
+            - name: karpenter-scheduler-config
+              hostPath: /etc/kubernetes/karpenter-scheduler-config
+              mountPath: /etc/kubernetes/karpenter-scheduler-config
+              readOnly: true
+              pathType: Directory

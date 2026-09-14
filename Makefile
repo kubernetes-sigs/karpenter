@@ -59,6 +59,11 @@ get-kind-image: ## Extract the actual KWOK image repository from Kind cluster
 	$(eval IMG_TAG=latest)
 	@echo "Using Repository: $(IMG_REPOSITORY), Tag: $(IMG_TAG)"
 
+setup-kind: ## Setup a Kind cluster for the e2e suites, with the kube-scheduler configuration they expect
+	-kind delete cluster --name $(KIND_CLUSTER_NAME)
+	kind create cluster --name $(KIND_CLUSTER_NAME) --config hack/kind/cluster.yaml
+	kubectl taint nodes $(KIND_CLUSTER_NAME)-control-plane CriticalAddonsOnly:NoSchedule
+
 setup-kind-dra: ## Setup Kind cluster for DRA testing
 	-kind delete cluster --name $(KIND_CLUSTER_NAME)
 	kind create cluster --image kindest/node:v1.34.0 --name $(KIND_CLUSTER_NAME)
@@ -187,4 +192,4 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake vulncheck licenses verify download gen_instance_types setup-kind-dra delete-kind-dra apply-with-kind-dra
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake vulncheck licenses verify download gen_instance_types setup-kind setup-kind-dra delete-kind-dra apply-with-kind-dra
