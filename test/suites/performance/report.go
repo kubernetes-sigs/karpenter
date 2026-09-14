@@ -25,6 +25,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -118,6 +119,11 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 	totalTime := time.Since(startTime)
 	memProfile, cpuProfile := profiler.Stop()
 	stats := metricsPoller.Stop()
+	// A run with zero metrics samples means the poller never scraped the Karpenter pod (e.g. /metrics
+	// unreachable). Guard against that here so the KarpenterP95MemoryMB / CPU assertions in each suite can't
+	// pass vacuously against empty (zero-valued) stats.
+	Expect(stats.SampleCount).To(BeNumerically(">", 0),
+		"expected Karpenter metrics samples to be collected; 0 indicates a scrape failure that would let resource assertions pass silently")
 
 	// Collect metrics
 	nodeCount := env.Monitor.CreatedNodeCount()
@@ -185,6 +191,8 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 	totalTime := time.Since(startTime)
 	memProfile, cpuProfile := profiler.Stop()
 	stats := metricsPoller.Stop()
+	Expect(stats.SampleCount).To(BeNumerically(">", 0),
+		"expected Karpenter metrics samples to be collected; 0 indicates a scrape failure that would let resource assertions pass silently")
 
 	// Collect final metrics
 	finalNodes := env.Monitor.CreatedNodeCount()
@@ -291,6 +299,8 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 	totalTime := time.Since(startTime)
 	memProfile, cpuProfile := profiler.Stop()
 	stats := metricsPoller.Stop()
+	Expect(stats.SampleCount).To(BeNumerically(">", 0),
+		"expected Karpenter metrics samples to be collected; 0 indicates a scrape failure that would let resource assertions pass silently")
 	finalNodeCount := env.Monitor.CreatedNodeCount()
 
 	// Collect metrics
