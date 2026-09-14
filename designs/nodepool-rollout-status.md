@@ -69,7 +69,7 @@ type NodeClaimStatus struct {
 
 The existing `nodeclaim.disruption` controller already evaluates drift and already watches NodePool and NodeClass. It becomes the writer:
 
-- On NodeClaim create, provisioning stamps both fields to the current generations of the owning NodePool and resolved NodeClass, so a replacement is up to date from the moment it exists.
+- On NodeClaim create, provisioning stamps both fields to the generation of the NodePool and NodeClass resolved to launch the NodeClaim.
 - On reconcile, the two fields are advanced **independently**. Today's `isDrifted()` short-circuits (static/requirements drift skips `cloudProvider.IsDrifted`); the stamp writer must not. It Gets the referenced NodeClass and runs both checks every pass:
   - If `areStaticFieldsDrifted` and `areRequirementsDrifted` are both empty, set `compatibleWithNodePoolGeneration = nodePool.generation`.
   - If `cloudProvider.IsDrifted` returns `""`, set `compatibleWithNodeClassGeneration = nodeClass.generation`.
@@ -77,6 +77,46 @@ The existing `nodeclaim.disruption` controller already evaluates drift and alrea
 - `InstanceTypeNotFound` is neither axis: it does not block either stamp.
 
 `IsDrifted` is used only as the *advance* signal, not as the *count* predicate. That is what lets a GitOps gate cover NodeClass spec changes (including AMI) without stalling on out-of-band AMI alias updates — see [Which drift vectors count](#which-drift-vectors-count).
+
+### Shared rollout status
+
+NodePool and every supported NodeClass anonymously embed the same rollout accounting struct. Anonymous embedding promotes the fields in Go and serializes them directly under `status`, so both resources expose the same flat JSON paths:
+
+```go
+type NodeRolloutStatus struct {
+    // ObservedGeneration is the generation of the parent spec that the node counts
+    // below were computed against. Consumers gating on rollout progress must ignore
+    // those counts when this does not equal the parent's metadata.generation.
+    // +optional
+    ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+    // Nodes is the count of NodeClaims associated with this parent, including NodeClaims
+    // that have not yet launched or registered a Node and NodeClaims that are terminating.
+    // +kubebuilder:default:=0
+    // +optional
+    Nodes *int64 `json:"nodes"`
+
+    // UpToDateNodes is the count of associated NodeClaims whose corresponding
+    // compatibleWith*Generation equals this parent's metadata.generation.
+    // +kubebuilder:default:=0
+    // +optional
+    UpToDateNodes *int64 `json:"upToDateNodes"`
+
+    // ReadyNodes is the count of associated NodeClaims whose Ready condition is True,
+    // meaning they have launched, registered a Node, and initialized. This reports
+    // whether a node successfully came up, not whether it is currently healthy: the
+    // underlying conditions do not revert if the Node later goes NotReady.
+    // +kubebuilder:default:=0
+    // +optional
+    ReadyNodes *int64 `json:"readyNodes"`
+
+    // UpToDateAndReadyNodes is the count of associated NodeClaims counted by both
+    // UpToDateNodes and ReadyNodes. A rollout is complete when this equals Nodes.
+    // +kubebuilder:default:=0
+    // +optional
+    UpToDateAndReadyNodes *int64 `json:"upToDateAndReadyNodes"`
+}
+```
 
 ### NodePool status
 
@@ -107,43 +147,7 @@ status:
 ```go
 type NodePoolStatus struct {
     // ... existing fields ...
-
-    // ObservedGeneration is the generation of the NodePool spec that the node counts
-    // below were computed against. Consumers gating on rollout progress must ignore those
-    // counts when this does not equal metadata.generation.
-    // +optional
-    ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-    // Nodes is the count of NodeClaims owned by this NodePool, including NodeClaims that
-    // have not yet launched or registered a Node and NodeClaims that are terminating.
-    // +kubebuilder:default:=0
-    // +optional
-    Nodes *int64 `json:"nodes"`
-
-    // UpToDateNodes is the count of nodes owned by this NodePool whose
-    // compatibleWithNodePoolGeneration equals this NodePool's metadata.generation.
-    // The difference between Nodes and UpToDateNodes is the number of nodes
-    // Karpenter will replace to finish rolling out the current NodePool spec.
-    // NodeClass spec changes (AMI, userData, …) are reported on the NodeClass,
-    // not folded into this count.
-    // +kubebuilder:default:=0
-    // +optional
-    UpToDateNodes *int64 `json:"upToDateNodes"`
-
-    // ReadyNodes is the count of nodes owned by this NodePool whose NodeClaim Ready
-    // condition is True, meaning they have launched, registered a Node, and initialized.
-    // This reports whether a node successfully came up, not whether it is currently
-    // healthy: the underlying conditions do not revert if the Node later goes NotReady.
-    // +kubebuilder:default:=0
-    // +optional
-    ReadyNodes *int64 `json:"readyNodes"`
-
-    // UpToDateAndReadyNodes is the count of nodes owned by this NodePool that are counted
-    // by both UpToDateNodes and ReadyNodes. A rollout of the current NodePool spec is
-    // complete when this equals Nodes.
-    // +kubebuilder:default:=0
-    // +optional
-    UpToDateAndReadyNodes *int64 `json:"upToDateAndReadyNodes"`
+    NodeRolloutStatus `json:",inline"`
 }
 ```
 
@@ -154,6 +158,8 @@ We do **not** bump `NodePool.status.observedGeneration` when the NodeClass chang
 ### NodeClass status (provider contract)
 
 This is the load-bearing surface for the Argo CD AMI use case. An AMI pin, `userData` change, or any other EC2NodeClass spec edit is applied to the NodeClass. Argo's Lua sandbox sees only that object, so the counts have to live here — folding them into NodePool would leave an Application that only applies `EC2NodeClass` with nothing to read.
+
+Providers anonymously embed the shared `NodeRolloutStatus` in their NodeClass status type:
 
 ```yaml
 apiVersion: karpenter.k8s.aws/v1
@@ -178,25 +184,6 @@ status:
 A NodeClaim referencing the NodeClass is up to date when `compatibleWithNodeClassGeneration == nodeClass.metadata.generation`. NodePool compatibility is *not* required: an AMI rollout should be able to report complete even if a NodePool taint change is in flight on a different axis. Each parent reports its own spec's propagation.
 
 The denominator is every NodeClaim that references this NodeClass, across NodePools. That is the right unit for "did this AMI finish rolling out": one NodeClass, every node that uses it.
-
-Core exposes a shared struct and an interface so providers do not fork the semantics:
-
-```go
-// NodeRolloutStatus is the rollout accounting every NodeClass status should embed.
-type NodeRolloutStatus struct {
-    ObservedGeneration    int64  `json:"observedGeneration,omitempty"`
-    Nodes                 *int64 `json:"nodes"`
-    UpToDateNodes          *int64 `json:"upToDateNodes"`
-    ReadyNodes            *int64 `json:"readyNodes"`
-    UpToDateAndReadyNodes *int64 `json:"upToDateAndReadyNodes"`
-}
-
-type NodeClassWithRolloutStatus interface {
-    status.Object
-    GetRolloutStatus() *NodeRolloutStatus
-    SetRolloutStatus(NodeRolloutStatus)
-}
-```
 
 A `nodeclass.counter` controller in core lists each supported NodeClass, lists its NodeClaims via the existing `spec.nodeClassRef` index, and patches status for types that implement the interface. NodeClasses that do not yet implement it are skipped, so this can land in core (KWOK + the shared type) before every provider has merged the CRD fields.
 
@@ -351,7 +338,9 @@ The new NodeClaim fields, NodePool fields, and condition are additive and read-o
 
 NodeClass status fields are similarly additive on each provider CRD. Providers that have not yet added them simply do not implement `NodeClassWithRolloutStatus`; core skips them. KWOK ships the fields in the same change as the NodePool API so the in-tree provider is a complete example.
 
-`status.nodes` is the one field whose meaning changes. It is read-only, so nothing breaks structurally, but its value shifts: it now includes NodeClaims that have not launched and NodeClaims that are terminating, so it reads higher than before during provisioning and disruption and is unchanged for a steady-state pool.
+`status.nodes` is the one field whose meaning changes. It is read-only, so nothing breaks on the wire, but its value shifts: it now includes NodeClaims that have not launched and NodeClaims that are terminating, so it reads higher than before during provisioning and disruption and is unchanged for a steady-state pool.
+
+Inlining `NodeRolloutStatus` also preserves the existing JSON path and ordinary Go selectors such as `nodePool.Status.Nodes`. It is a source-level change for Go callers that use keyed composite literals: `NodePoolStatus{Nodes: value}` must become `NodePoolStatus{NodeRolloutStatus: NodeRolloutStatus{Nodes: value}}`. Karpenter does not use such literals internally, but external Go consumers may need this mechanical update.
 
 ## Graduation Criteria
 
