@@ -572,7 +572,18 @@ func (ofs Offerings) Available() Offerings {
 // ReservationCapacity of 0, and launching into it would fail. Non-reserved offerings are never reservation-constrained,
 // so for them Launchable is equivalent to Available.
 func (o *Offering) Launchable() bool {
-	return o.Available && (o.CapacityType() != v1.CapacityTypeReserved || o.ReservationCapacity > 0)
+	if !o.Available {
+		return false
+	}
+	if o.ReservationCapacity > 0 {
+		return true
+	}
+	// Out of reservation capacity: launchable only if this isn't a reserved offering. Index the requirement map
+	// directly and use the allocation-free Requirement.Has, avoiding Offering.CapacityType() (which calls
+	// Requirement.Any() -> UnsortedList() and allocates on every call). An offering with no capacity-type requirement
+	// is not reservation-constrained, so it stays launchable.
+	req, ok := o.Requirements[v1.CapacityTypeLabelKey]
+	return !ok || !req.Has(v1.CapacityTypeReserved)
 }
 
 // Launchable returns the offerings that can currently be launched into (see Offering.Launchable). Use this rather than
