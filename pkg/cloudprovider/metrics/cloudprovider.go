@@ -89,6 +89,7 @@ var MethodDuration = opmetrics.NewPrometheusHistogram(
 		Method,
 		Provider,
 	},
+	opmetrics.Beta,
 )
 
 var (
@@ -106,6 +107,7 @@ var (
 			Provider,
 			Error,
 		},
+		opmetrics.Beta,
 	)
 )
 

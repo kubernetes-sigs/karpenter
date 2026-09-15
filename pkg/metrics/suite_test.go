@@ -39,8 +39,8 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	testGauge1 = opmetrics.NewPrometheusGauge(crmetrics.Registry, prometheus.GaugeOpts{Name: "test_gauge_1"}, []opmetrics.Label{{Name: "label_1"}, {Name: "label_2"}})
-	testGauge2 = opmetrics.NewPrometheusGauge(crmetrics.Registry, prometheus.GaugeOpts{Name: "test_gauge_2"}, []opmetrics.Label{{Name: "label_1"}, {Name: "label_2"}})
+	testGauge1 = opmetrics.NewPrometheusGauge(crmetrics.Registry, prometheus.GaugeOpts{Name: "test_gauge_1"}, []opmetrics.Label{{Name: "label_1"}, {Name: "label_2"}}, opmetrics.Alpha)
+	testGauge2 = opmetrics.NewPrometheusGauge(crmetrics.Registry, prometheus.GaugeOpts{Name: "test_gauge_2"}, []opmetrics.Label{{Name: "label_1"}, {Name: "label_2"}}, opmetrics.Alpha)
 })
 
 var _ = Describe("Store", func() {
