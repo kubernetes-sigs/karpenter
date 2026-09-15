@@ -28,6 +28,23 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
+// NodeRepairBlocked warns that node repair is being withheld from a node (e.g. the circuit breaker tripped because too
+// much of the NodePool is unhealthy). Unlike the discretionary DisruptionBlocked event, this is a Warning: an operator
+// should notice that a broken node is deliberately not being repaired.
+func NodeRepairBlocked(node *corev1.Node, nodeClaim *v1.NodeClaim, nodePool *v1.NodePool, msg string) (evs []events.Event) {
+	for _, uid := range []string{string(node.UID), string(nodeClaim.UID), string(nodePool.UID)} {
+		evs = append(evs, events.Event{
+			InvolvedObject: node,
+			Type:           corev1.EventTypeWarning,
+			Reason:         events.NodeRepairBlocked,
+			Message:        msg,
+			DedupeValues:   []string{uid},
+			DedupeTimeout:  15 * time.Minute,
+		})
+	}
+	return evs
+}
+
 func Launching(nodeClaim *v1.NodeClaim, reason string) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,

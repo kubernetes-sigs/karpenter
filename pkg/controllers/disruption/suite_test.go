@@ -850,6 +850,48 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
 	})
+	It("should not consider not ready nodes for the Unhealthy repair budget", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, nodes[0], nodes[1])
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		// NotReady is repair's own trigger, so the Unhealthy budget must not count these nodes against itself —
+		// otherwise a wave of unhealthy nodes would starve the budget that repairs them.
+		budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonUnhealthy)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(10))
+		// A discretionary reason still counts NotReady nodes (kubernetes-sigs/karpenter#981 semantics preserved).
+		budgets, err = disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonDrifted)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
+	})
+	It("should still consider marked-for-deletion nodes for the Unhealthy repair budget", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// An in-flight repair marks its candidate for deletion; those must still count so repair paces itself.
+		Expect(env.Client.Delete(ctx, nodeClaims[0])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodes[0])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodeClaims[1])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodes[1])).To(Succeed())
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonUnhealthy)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
+	})
 })
 
 var _ = Describe("Pod Eviction Cost", func() {
