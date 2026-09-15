@@ -51,6 +51,8 @@ import (
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
+
 	"sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -137,6 +139,8 @@ func NewScheduler(
 	clock clock.Clock,
 	volumeReqsByPod map[types.UID][]scheduling.Requirements,
 	allocator *dynamicresources.Allocator,
+	predictForPodUIDs sets.Set[types.UID],
+	predictionStore *prediction.Store,
 	opts ...Options,
 ) *Scheduler {
 	minValuesPolicy := option.Resolve(opts...).minValuesPolicy
@@ -175,7 +179,7 @@ func NewScheduler(
 		nodeClaimTemplates:   templates,
 		topology:             topology,
 		cluster:              cluster,
-		daemonOverheadGroups: buildDaemonOverheadGroups(ctx, templates, daemonSetPods),
+		daemonOverheadGroups: buildDaemonOverheadGroups(ctx, kubeClient, predictionStore, templates, daemonSetPods),
 		cachedPodData:        map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
 		volumeReqsByPod:      volumeReqsByPod,          // Volume requirements per pod
 		recorder:             recorder,
@@ -192,6 +196,9 @@ func NewScheduler(
 		allocator:               allocator,
 		instanceTypes:           instanceTypes,
 		cachedResourceClaims:    map[types.NamespacedName]*resourcev1.ResourceClaim{},
+		cachedOwnerResolutions:  map[types.UID]ownerResolution{},
+		predictForPodUIDs:       predictForPodUIDs,
+		predictionStore:         predictionStore,
 	}
 
 	npByName := lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, *v1.NodePool) {
@@ -255,7 +262,10 @@ type Scheduler struct {
 	// instanceTypes is the per-NodePool instance type set, used to resolve template devices for existing nodes.
 	instanceTypes map[string][]*cloudprovider.InstanceType
 	// cachedResourceClaims memoizes ResourceClaim lookups for the duration of a single scheduling loop.
-	cachedResourceClaims map[types.NamespacedName]*resourcev1.ResourceClaim
+	cachedResourceClaims   map[types.NamespacedName]*resourcev1.ResourceClaim
+	cachedOwnerResolutions map[types.UID]ownerResolution
+	predictForPodUIDs      sets.Set[types.UID] // if non-nil, only apply predictions for these pods
+	predictionStore        *prediction.Store
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -564,8 +574,12 @@ func (s *Scheduler) updateCachedPodData(ctx context.Context, p *corev1.Pod) {
 		// preferred node affinity.  Only required node affinities can actually reduce pod domains.
 		strictRequirements = scheduling.NewStrictPodRequirements(p)
 	}
+	store := s.predictionStore
+	if s.predictForPodUIDs != nil && !s.predictForPodUIDs.Has(p.UID) {
+		store = nil
+	}
 	data := &PodData{
-		Requests:                 resources.RequestsForPods(p),
+		Requests:                 PredictedRequests(ctx, s.kubeClient, store, p, s.cachedOwnerResolutions),
 		Requirements:             requirements,
 		StrictRequirements:       strictRequirements,
 		HasResourceClaimRequests: pod.HasDRARequirements(p),
@@ -966,10 +980,25 @@ type DaemonOverheadGroup struct {
 	HostPortUsage  *scheduling.HostPortUsage
 }
 
+// predictedRequestsForDaemons computes total resource requests for daemon pods using VPA predictions when available.
+// When the store is nil (VPA prediction disabled), it falls back to current requests.
+func predictedRequestsForDaemons(ctx context.Context, c client.Client, store *prediction.Store, pods []*corev1.Pod) corev1.ResourceList {
+	if store == nil || len(pods) == 0 {
+		return resources.RequestsForPods(pods...)
+	}
+	cache := map[types.UID]ownerResolution{}
+
+	var allRequests []corev1.ResourceList
+	for _, p := range pods {
+		allRequests = append(allRequests, PredictedRequests(ctx, c, store, p, cache))
+	}
+	return resources.Merge(allRequests...)
+}
+
 // buildDaemonOverheadGroups groups instance types by their compatible daemon pods and computes the following for NodeClaimTemplate and group
 // - Overhead required for daemons to schedule for any node provisioned by the NodeClaimTemplate
 // - Requested host ports for DaemonSet pods
-func buildDaemonOverheadGroups(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate][]DaemonOverheadGroup {
+func buildDaemonOverheadGroups(ctx context.Context, c client.Client, store *prediction.Store, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate][]DaemonOverheadGroup {
 	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, []DaemonOverheadGroup) {
 		groups := map[string]*DaemonOverheadGroup{}
 		for _, it := range nct.InstanceTypeOptions {
@@ -985,7 +1014,7 @@ func buildDaemonOverheadGroups(ctx context.Context, nodeClaimTemplates []*NodeCl
 			} else {
 				var overhead corev1.ResourceList
 				if len(compatible) > 0 {
-					overhead = resources.RequestsForPods(compatible...)
+					overhead = predictedRequestsForDaemons(ctx, c, store, compatible)
 				}
 				hostPortUsage := scheduling.NewHostPortUsage()
 				for _, p := range compatible {
