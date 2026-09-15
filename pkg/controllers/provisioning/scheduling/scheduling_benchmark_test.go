@@ -108,6 +108,129 @@ func BenchmarkIgnorePreferences(b *testing.B) {
 	benchmarkScheduler(b, makePreferencePods(4000), scheduling.IgnorePreferences)
 }
 
+// nodePoolIndexLabel is the label key each NodePool declares (via In requirement)
+// with a unique per-index value. Pods pin to a specific NodePool by setting the
+// same key on their NodeSelector. This makes exactly one template match per pod
+// so parallelizeUntil workers must traverse the entire nodeClaimTemplates slice
+// before returning, causing per-pod cost inside Scheduler.Solve to scale with
+// NodePool count.
+const nodePoolIndexLabel = "test.karpenter.sh/nodepool-index"
+
+// BenchmarkSchedulingMultiNodePool extends the existing BenchmarkScheduling*
+// family with a (NodePoolCount, PodCount) grid so per-NodePool cost inside
+// Scheduler.Solve surfaces in the numbers. The single-NodePool benches average
+// that cost into a single number. Solve fans out over s.nodeClaimTemplates per
+// pod inside parallelizeUntil, so a regression there lands on the row of the
+// grid that exercises it.
+//
+// NodePools are heterogeneous: each declares a unique nodePoolIndexLabel value
+// in its Requirements, and each pod's NodeSelector pins it round-robin to one
+// specific NodePool. This defeats the parallelizeUntil short-circuit that would
+// otherwise let identical NodePools succeed on the first workers and skip the
+// remaining templates. It also forces every fan-out to evaluate every template,
+// so the cost of addToNewNodeClaim grows with NodePoolCount.
+func BenchmarkSchedulingMultiNodePool(b *testing.B) {
+	for _, nodePoolCount := range []int{5, 10, 20} {
+		for _, podCount := range []int{100, 500, 1000} {
+			b.Run(fmt.Sprintf("%dNP_%dPods", nodePoolCount, podCount), func(b *testing.B) {
+				benchmarkSchedulerMultiNodePool(b, makeDiversePodsPinnedRoundRobin(podCount, nodePoolCount), nodePoolCount)
+			})
+		}
+	}
+}
+
+// makeDiversePodsPinnedRoundRobin returns diverse pods with each pod's
+// NodeSelector set to nodePoolIndexLabel = (podIndex mod nodePoolCount). This
+// keeps the workload diversity of makeDiversePods while ensuring every pod
+// matches exactly one NodePool template.
+func makeDiversePodsPinnedRoundRobin(count, nodePoolCount int) []*corev1.Pod {
+	pods := makeDiversePods(count)
+	for i, p := range pods {
+		if p.Spec.NodeSelector == nil {
+			p.Spec.NodeSelector = map[string]string{}
+		}
+		p.Spec.NodeSelector[nodePoolIndexLabel] = fmt.Sprintf("%d", i%nodePoolCount)
+	}
+	return pods
+}
+
+func benchmarkSchedulerMultiNodePool(b *testing.B, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) {
+	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
+	scheduler, err := setupMultiNodePoolScheduler(ctx, pods, nodePoolCount, append(opts, scheduling.NumConcurrentReconciles(5))...)
+	if err != nil {
+		b.Fatalf("creating scheduler, %s", err)
+	}
+	// ReportAllocs is required for B/op and allocs/op to appear;
+	// .github/workflows/run-bench-test.yaml does not pass -benchmem.
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		results, err := scheduler.Solve(ctx, pods)
+		if err != nil {
+			b.Fatalf("expected scheduler to schedule all pods without error, got %s", err)
+		}
+		if len(results.PodErrors) > 0 {
+			b.Fatalf("expected all pods to schedule, got %d pods that didn't", len(results.PodErrors))
+		}
+	}
+}
+
+func setupMultiNodePoolScheduler(ctx context.Context, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
+	cloudProvider = fake.NewCloudProvider()
+	// Reduced to 100 (vs 400 for the single-NodePool benches) so the 20-NodePool x 1000-pod cell stays within CI wall-clock budget.
+	instanceTypes := fake.InstanceTypes(100)
+	cloudProvider.InstanceTypes = instanceTypes
+
+	nodePools := make([]*v1.NodePool, nodePoolCount)
+	instanceTypesByNodePool := make(map[string][]*cloudprovider.InstanceType, nodePoolCount)
+	for i := range nodePools {
+		np := test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Limits: v1.Limits{
+					corev1.ResourceCPU:    resource.MustParse("10000000"),
+					corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+				},
+				Template: v1.NodeClaimTemplate{
+					Spec: v1.NodeClaimTemplateSpec{
+						Requirements: []v1.NodeSelectorRequirementWithMinValues{
+							{
+								Key:      nodePoolIndexLabel,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{fmt.Sprintf("%d", i)},
+							},
+						},
+					},
+				},
+			},
+		})
+		nodePools[i] = np
+		instanceTypesByNodePool[np.Name] = instanceTypes
+	}
+
+	client := fakecr.NewFakeClient()
+	clock := &clock.RealClock{}
+	cluster = state.NewCluster(clock, client, cloudProvider)
+	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, nodePools, instanceTypesByNodePool, pods, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating topology, %w", err)
+	}
+	return scheduling.NewScheduler(
+		ctx,
+		client,
+		nodePools,
+		cluster,
+		nil,
+		topology,
+		instanceTypesByNodePool,
+		nil,
+		events.NewRecorder(&record.FakeRecorder{}),
+		clock,
+		nil, // volumeReqsByPod
+		nil, // allocator
+		opts...,
+	), nil
+}
+
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions
 // go test -tags=test_performance -run=SchedulingProfile
