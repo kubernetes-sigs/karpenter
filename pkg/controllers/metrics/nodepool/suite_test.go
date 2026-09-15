@@ -20,6 +20,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -44,6 +46,7 @@ var ctx context.Context
 var env *test.Environment
 var cp *fake.CloudProvider
 var cc *cost.ClusterCost
+var backoff *nodepoolbackoff.State
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -55,7 +58,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cp = fake.NewCloudProvider()
 	cc = cost.NewClusterCost(ctx, cp, env.Client)
-	nodePoolController = nodepool.NewController(env.Client, cp, cc)
+	backoff = nodepoolbackoff.NewState(env.Clock)
+	nodePoolController = nodepool.NewController(env.Client, cp, cc, backoff)
 })
 
 var _ = AfterSuite(func() {
@@ -163,5 +167,54 @@ var _ = Describe("Metrics", func() {
 			})
 			Expect(found).To(BeFalse())
 		}
+	})
+	Context("drift backoff metric", func() {
+		const metricName = "karpenter_nodepools_drift_backoff_seconds"
+
+		It("should publish the remaining backoff and update it over time", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			Expect(backoff.Fail(nodePool)).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+			ExpectMetricGaugeValue(nodepool.DriftBackoffSeconds, backoff.Remaining(nodePool).Seconds(), map[string]string{metrics.NodePoolLabel: nodePool.Name})
+
+			env.Clock.Step(15 * time.Second)
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			ExpectMetricGaugeValue(nodepool.DriftBackoffSeconds, backoff.Remaining(nodePool).Seconds(), map[string]string{metrics.NodePoolLabel: nodePool.Name})
+		})
+
+		It("should delete the metric when backoff is reset", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			Expect(backoff.Fail(nodePool)).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+			backoff.Reset(nodePool)
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			_, found := FindMetricWithLabelValues(metricName, map[string]string{metrics.NodePoolLabel: nodePool.Name})
+			Expect(found).To(BeFalse())
+		})
+
+		It("should delete the metric when the backoff window expires", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			Expect(backoff.Fail(nodePool)).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+			_, until := backoff.Snapshot(nodePool)
+			env.Clock.SetTime(until.Add(time.Second))
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			_, found := FindMetricWithLabelValues(metricName, map[string]string{metrics.NodePoolLabel: nodePool.Name})
+			Expect(found).To(BeFalse())
+		})
+
+		It("should delete the metric when the NodePool is deleted", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			Expect(backoff.Fail(nodePool)).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+			ExpectDeleted(ctx, env.Client, nodePool)
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			_, found := FindMetricWithLabelValues(metricName, map[string]string{metrics.NodePoolLabel: nodePool.Name})
+			Expect(found).To(BeFalse())
+		})
 	})
 })

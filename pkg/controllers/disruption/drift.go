@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -35,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
@@ -44,10 +46,10 @@ type Drift struct {
 	provisioner *provisioning.Provisioner
 	recorder    events.Recorder
 	clock       clock.Clock
-	backoff     *NodePoolBackoff
+	backoff     *nodepoolbackoff.State
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock, backoff *NodePoolBackoff) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock, backoff *nodepoolbackoff.State) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
@@ -83,7 +85,9 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		return len(c.reschedulablePods) == 0
 	})
 
-	backedOffNodePools := make(map[string]struct{})
+	// Track backed off NodePools by UID to avoid duplicate back-off events.
+	// If a backoff expires during the loop, the NodePool will remain backed off until the next loop iteration.
+	backedOffNodePools := make(map[types.UID]struct{})
 
 	// Prioritize empty candidates since we want them to get priority over non-empty candidates if the budget is constrained.
 	// Disrupting empty candidates first also helps reduce the overall churn because if a non-empty candidate is disrupted first,
@@ -129,16 +133,16 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 	return []Command{}, nil
 }
 
-func (d *Drift) isBackedOff(ctx context.Context, nodePool *v1.NodePool, backedOffNodePools map[string]struct{}) bool {
+func (d *Drift) isBackedOff(ctx context.Context, nodePool *v1.NodePool, backedOffNodePools map[types.UID]struct{}) bool {
 	if !options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff {
 		return false
 	}
-	if _, ok := backedOffNodePools[nodePool.Name]; ok {
+	if _, ok := backedOffNodePools[nodePool.UID]; ok {
 		return true
 	}
-	if d.backoff != nil && d.backoff.IsBackedOff(nodePool.Name) {
-		backedOffNodePools[nodePool.Name] = struct{}{}
-		level, until := d.backoff.Snapshot(nodePool.Name)
+	if d.backoff != nil && d.backoff.IsBackedOff(nodePool) {
+		backedOffNodePools[nodePool.UID] = struct{}{}
+		level, until := d.backoff.Snapshot(nodePool)
 		d.recorder.Publish(disruptionevents.NodePoolDriftBackoff(nodePool, until, level))
 		return true
 	}
