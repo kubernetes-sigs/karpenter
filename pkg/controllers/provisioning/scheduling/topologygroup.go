@@ -290,8 +290,7 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, no
 			}
 		}
 	}
-	if minDomain == "" {
-		// avoids an error message about 'zone in [""]', preferring 'zone in []'
+	if validDomains.Len() == 0 {
 		return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist), validDomains
 	}
 	return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpIn, minDomain), validDomains
