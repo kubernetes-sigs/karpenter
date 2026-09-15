@@ -164,6 +164,40 @@ var _ = Describe("classifyBufferPods", func() {
 		Expect(summary["ns-b/buffer"].requiresNewClaim).To(Equal(1))
 		Expect(summary["ns-b/buffer"].desiredReplicas).To(Equal(3))
 	})
+
+	It("should classify InstanceTypeFilterError as infeasible", func() {
+		cb := test.ReadyBuffer("infeasible", 1)
+		buffers := map[string]*autoscalingv1beta1.CapacityBuffer{"default/infeasible": cb}
+		spec := corev1.PodTemplateSpec{}
+		pods := virtualpods.BuildVirtualPods(cb, spec)
+
+		results := scheduler.Results{
+			PodErrors: map[*corev1.Pod]error{
+				pods[0]: scheduler.InstanceTypeFilterError{},
+			},
+		}
+
+		summary := classifyBufferPods(results, buffers)
+		Expect(summary["default/infeasible"].infeasible).To(Equal(1))
+		Expect(summary["default/infeasible"].transientFailure).To(Equal(0))
+	})
+
+	It("should classify non-InstanceTypeFilterError as transient failure", func() {
+		cb := test.ReadyBuffer("transient", 1)
+		buffers := map[string]*autoscalingv1beta1.CapacityBuffer{"default/transient": cb}
+		spec := corev1.PodTemplateSpec{}
+		pods := virtualpods.BuildVirtualPods(cb, spec)
+
+		results := scheduler.Results{
+			PodErrors: map[*corev1.Pod]error{
+				pods[0]: fmt.Errorf("node limits have been exhausted for nodepool"),
+			},
+		}
+
+		summary := classifyBufferPods(results, buffers)
+		Expect(summary["default/transient"].infeasible).To(Equal(0))
+		Expect(summary["default/transient"].transientFailure).To(Equal(1))
+	})
 })
 
 var _ = Describe("computeProvisioningCondition", func() {
@@ -181,6 +215,7 @@ var _ = Describe("computeProvisioningCondition", func() {
 		Expect(cond).ToNot(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal("RequiresNewCapacity"))
+		Expect(cond.Message).ToNot(ContainSubstring("failures"))
 	})
 
 	It("should return False/NotReadyForProvisioning when buffer is not ready", func() {
@@ -204,6 +239,33 @@ var _ = Describe("computeProvisioningCondition", func() {
 		cb := test.ReadyBuffer("web", 3)
 		cond := computeProvisioningCondition(cb, nil)
 		Expect(cond).To(BeNil())
+	})
+
+	It("should return False/Infeasible when infeasible > 0", func() {
+		cb := test.ReadyBuffer("web", 3)
+		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{infeasible: 3, desiredReplicas: 3})
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("Infeasible"))
+		Expect(cond.Message).To(ContainSubstring("infeasible"))
+	})
+
+	It("should return False/RequiresNewCapacity with failure count when transientFailure > 0", func() {
+		cb := test.ReadyBuffer("web", 3)
+		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{transientFailure: 3, desiredReplicas: 3})
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("RequiresNewCapacity"))
+		Expect(cond.Message).To(ContainSubstring("failures"))
+	})
+
+	It("should return False/RequiresNewCapacity with both counts when mixed", func() {
+		cb := test.ReadyBuffer("web", 3)
+		cond := computeProvisioningCondition(cb, &bufferProvisioningStatus{requiresNewClaim: 2, transientFailure: 1, desiredReplicas: 3})
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("RequiresNewCapacity"))
+		Expect(cond.Message).To(ContainSubstring("failures"))
 	})
 })
 

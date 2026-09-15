@@ -133,6 +133,20 @@ var _ = Describe("CapacityBuffer", func() {
 			// Generation should update
 			EventuallyExpectCapacityBufferGenerationUpdated(env, env.Client, buffer, originalGen)
 		})
+
+		It("should set Provisioning=False/Infeasible when buffer requests exceed all instance types", func() {
+			bufferTemplate.Template.Spec.Containers[0].Resources.Requests[corev1.ResourceMemory] = resource.MustParse("100000Ti")
+			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(int32(1)),
+				},
+			})
+
+			env.ExpectCreated(bufferTemplate, buffer)
+			EventuallyExpectCapacityBufferReady(env, env.Client, buffer)
+			EventuallyExpectCapacityBufferNotProvisioned(env, env.Client, buffer, "Infeasible")
+		})
 	})
 
 	Context("ScalableRef Provisioning", func() {
