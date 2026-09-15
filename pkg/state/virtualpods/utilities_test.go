@@ -88,12 +88,14 @@ var _ = Describe("buildVirtualPods", func() {
 })
 
 var _ = Describe("sanitizeVirtualPodSpec", func() {
-	It("should drop PVC volumes and their mounts", func() {
+	It("should clear NodeName and preserve PVC and ephemeral volumes and mounts", func() {
 		spec := corev1.PodSpec{
+			NodeName: "some-node",
 			Containers: []corev1.Container{{
 				Name: "app",
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "data", MountPath: "/data"},
+					{Name: "scratch", MountPath: "/scratch"},
 					{Name: "config", MountPath: "/config"},
 				},
 			}},
@@ -105,29 +107,6 @@ var _ = Describe("sanitizeVirtualPodSpec", func() {
 			}},
 			Volumes: []corev1.Volume{
 				{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "my-pvc"}}},
-				{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "cfg"}}}},
-			},
-		}
-
-		result := sanitizeVirtualPodSpec(spec)
-
-		Expect(result.Volumes).To(HaveLen(1))
-		Expect(result.Volumes[0].Name).To(Equal("config"))
-		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
-		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("config"))
-		Expect(result.InitContainers[0].VolumeMounts).To(BeEmpty())
-	})
-
-	It("should drop ephemeral volumes and their mounts", func() {
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name: "app",
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "scratch", MountPath: "/scratch"},
-					{Name: "config", MountPath: "/config"},
-				},
-			}},
-			Volumes: []corev1.Volume{
 				{Name: "scratch", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
 					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
 						Spec: corev1.PersistentVolumeClaimSpec{},
@@ -139,37 +118,10 @@ var _ = Describe("sanitizeVirtualPodSpec", func() {
 
 		result := sanitizeVirtualPodSpec(spec)
 
-		Expect(result.Volumes).To(HaveLen(1))
-		Expect(result.Volumes[0].Name).To(Equal("config"))
-		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
-		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("config"))
-	})
-
-	It("should drop both PVC and ephemeral volumes together", func() {
-		spec := corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name: "app",
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "pvc-vol", MountPath: "/data"},
-					{Name: "eph-vol", MountPath: "/scratch"},
-					{Name: "secret-vol", MountPath: "/secret"},
-				},
-			}},
-			Volumes: []corev1.Volume{
-				{Name: "pvc-vol", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "my-pvc"}}},
-				{Name: "eph-vol", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
-					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{},
-				}}},
-				{Name: "secret-vol", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "s"}}},
-			},
-		}
-
-		result := sanitizeVirtualPodSpec(spec)
-
-		Expect(result.Volumes).To(HaveLen(1))
-		Expect(result.Volumes[0].Name).To(Equal("secret-vol"))
-		Expect(result.Containers[0].VolumeMounts).To(HaveLen(1))
-		Expect(result.Containers[0].VolumeMounts[0].Name).To(Equal("secret-vol"))
+		Expect(result.NodeName).To(BeEmpty())
+		Expect(result.Volumes).To(HaveLen(3))
+		Expect(result.Containers[0].VolumeMounts).To(HaveLen(3))
+		Expect(result.InitContainers[0].VolumeMounts).To(HaveLen(1))
 	})
 
 	It("should preserve tolerations, nodeSelector, and affinity", func() {
