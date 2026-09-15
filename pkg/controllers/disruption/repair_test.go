@@ -251,6 +251,41 @@ var _ = Describe("Repair", func() {
 		Expect(cmds[0].Candidates[0].Node.Name).To(Equal(highNode.Name))
 	})
 
+	// INV-S4: a node's score is the argmax of rank+age/τ over ALL its matching conditions, not the score of its
+	// highest-priority condition. Node A has a fresh high-priority condition (just past toleration) and a long-starving
+	// low-priority one; node B has a moderately-aged high-priority condition. Scoring A off only its high-priority
+	// (fresh) condition would rank it below B and repair B first; the argmax lifts A above B on its starving condition.
+	It("should order a node by its most urgent condition, not just its highest-priority one", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10},
+			{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 90},
+		}
+		newRepairController()
+		// 8 healthy nodes keep the 2 unhealthy below the 20% breaker.
+		healthyClaims, healthyNodes := test.NodeClaimsAndNodes(8, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		for i := range healthyNodes {
+			initNode(healthyClaims[i], healthyNodes[i])
+		}
+		aClaim, aNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		bClaim, bNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		initNode(aClaim, aNode)
+		initNode(bClaim, bNode)
+
+		markUnhealthy(aNode, "LowPriority")  // A's low-priority condition starts starving now
+		env.Clock.Step(60 * time.Minute)     //
+		markUnhealthy(bNode, "HighPriority") // B's high-priority condition is moderately aged
+		env.Clock.Step(87 * time.Minute)     //
+		markUnhealthy(aNode, "HighPriority") // A's high-priority condition is fresh (just past toleration)
+		env.Clock.Step(33 * time.Minute)     // now: A.low age=5τ (score 5), A.high age≈0.1τ (score 1.1), B.high age=3τ (score 4)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		// argmax(A)=5 (its starving low-priority condition) > score(B)=4; scoring A off its fresh high-priority
+		// condition (1.1) would have picked B.
+		Expect(cmds[0].Candidates[0].Node.Name).To(Equal(aNode.Name))
+	})
+
 	// INV-S10: the drain deadline is stamped at actual deletion time (not command-computation time), so pre-spin latency
 	// can't erode the window — mirroring how the lifecycle controller stamps DeletionTimestamp+TGP for other reasons.
 	// A forceful (0) policy stamps an immediate deadline, so repair is never the unbounded hang.
