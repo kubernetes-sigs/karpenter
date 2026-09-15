@@ -70,6 +70,10 @@ var (
 				Help: "The candidate(s) were deleted without replacement.",
 			},
 			{
+				Name: string(TerminateFirstDecision),
+				Help: "The candidate(s) were deleted without staging a replacement first; reactive provisioning refills afterward.",
+			},
+			{
 				Name: string(ApprovedDecision),
 				Help: "The disruption decision was approved for execution.",
 			},

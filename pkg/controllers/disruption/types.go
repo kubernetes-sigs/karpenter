@@ -241,6 +241,8 @@ type Command struct {
 	Candidates          []*Candidate
 	Replacements        []*Replacement
 	PoolDisruptionCosts map[string]float64
+	// TerminateFirst marks a delete-only terminate-first command (RFC #3203); Decision() surfaces it as TerminateFirstDecision.
+	TerminateFirst bool
 }
 
 // Reason returns the disruption reason for this command.
@@ -257,6 +259,8 @@ var (
 	NoOpDecision    Decision = "no-op"
 	ReplaceDecision Decision = "replace"
 	DeleteDecision  Decision = "delete"
+	// TerminateFirstDecision is a delete-only decision distinguished from DeleteDecision for terminate-first (RFC #3203).
+	TerminateFirstDecision Decision = "terminate-first"
 	// ApprovedDecision and RejectedDecision are the decision label values emitted
 	// by the Balanced consolidation move metrics (consolidation_moves_total and
 	// consolidation_score).
@@ -269,6 +273,9 @@ func (c Command) Decision() Decision {
 	case len(c.Candidates) > 0 && len(c.Replacements) > 0:
 		return ReplaceDecision
 	case len(c.Candidates) > 0 && len(c.Replacements) == 0:
+		if c.TerminateFirst {
+			return TerminateFirstDecision
+		}
 		return DeleteDecision
 	default:
 		return NoOpDecision
@@ -382,11 +389,11 @@ func (c Command) EstimatedSavings() float64 {
 	destPrice := 0.0
 	for _, nodeClaim := range c.Results.NewNodeClaims {
 		if len(nodeClaim.InstanceTypeOptions) > 0 {
-			available := nodeClaim.InstanceTypeOptions[0].Offerings.
-				Available().                       // Filter to available offerings so ICE'd zones don't produce an optimistic estimate.
+			launchable := nodeClaim.InstanceTypeOptions[0].Offerings.
+				Launchable().                      // Launchable (not just Available): a full reservation is Available at ~0 price but launches at OD/spot, which would overstate savings.
 				Compatible(nodeClaim.Requirements) // Filter to only consider allowed offerings
-			if len(available) > 0 {
-				destPrice += available.Cheapest().Price
+			if len(launchable) > 0 {
+				destPrice += launchable.Cheapest().Price
 			}
 		}
 	}
