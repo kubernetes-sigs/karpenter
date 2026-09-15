@@ -42,6 +42,7 @@ import (
 	karpenterevents "sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -928,7 +929,7 @@ var _ = Describe("Repair", func() {
 		})
 		injectedErr := errors.New("injected termination timestamp patch failure")
 		failingClient := &terminationTimestampPatchErrorClient{Client: env.Client, err: injectedErr, failNext: true}
-		failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, prov)
+		failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, prov, nodepoolbackoff.NewState(env.Clock))
 		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, failingClient, prov, cloudProvider, recorder, failingQueue))
 		failingController := disruption.NewController(ctx, env.Clock, failingClient, prov, cloudProvider, recorder, cluster, failingQueue, clusterCost,
 			disruption.WithMethods(failingRepair))
