@@ -19,6 +19,7 @@ package disruption_test
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -32,6 +33,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -70,6 +72,36 @@ var _ = Describe("StaticDrift", func() {
 					corev1.ResourcePods: resource.MustParse("12"),
 				},
 			},
+		})
+	})
+
+	Context("Backoff", func() {
+		BeforeEach(func() {
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			Expect(queue.NodePoolBackoff().Fail(nodePool)).To(BeTrue())
+		})
+
+		It("should skip a backed-off static NodePool until its window expires", func() {
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+
+			env.Clock.Step(2 * time.Minute)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
+			Expect(queue.GetCommands()[0].Candidates[0].NodePool.Name).To(Equal(nodePool.Name))
+		})
+
+		It("should ignore backoff when the feature gate is disabled", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)},
+			}))
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
+			Expect(queue.GetCommands()[0].Candidates[0].NodePool.Name).To(Equal(nodePool.Name))
 		})
 	})
 

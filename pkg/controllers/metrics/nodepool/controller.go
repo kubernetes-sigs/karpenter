@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
@@ -78,22 +79,34 @@ var (
 		},
 		[]opmetrics.Label{metrics.NodePool},
 	)
+	DriftBackoffSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodePoolSubsystem,
+			Name:      "drift_backoff_seconds",
+			Help:      "Seconds remaining in the current drift replacement back-off window for a NodePool. The series is present only while the NodePool is backed off and is removed once it becomes eligible again (absent == not backing off). Labeled by NodePool.",
+		},
+		[]opmetrics.Label{metrics.NodePool},
+	)
 )
 
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	clusterCost   *cost.ClusterCost
+	backoff       *nodepoolbackoff.State
 	metricStore   *metrics.Store
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost, backoff *nodepoolbackoff.State) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		metricStore:   metrics.NewStore(),
 		clusterCost:   clusterCost,
+		backoff:       backoff,
 	}
 }
 
@@ -122,6 +135,13 @@ func (c *Controller) buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMe
 		Labels:      map[string]string{metrics.NodePoolLabel: nodePool.Name},
 		Value:       c.clusterCost.GetNodepoolCost(nodePool),
 	})
+	if remaining := c.backoff.Remaining(nodePool); remaining > 0 {
+		res = append(res, &metrics.StoreMetric{
+			GaugeMetric: DriftBackoffSeconds,
+			Labels:      map[string]string{metrics.NodePoolLabel: nodePool.Name},
+			Value:       remaining.Seconds(),
+		})
+	}
 
 	for gaugeVec, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		Usage: nodePool.Status.Resources,

@@ -161,4 +161,7 @@ settings:
     # -- nodeRepair is ALPHA and is disabled by default.
     # Setting this to true will enable node repair.
     nodeRepair: false
+    # -- nodePoolDriftBackoff is enabled by default.
+    # Setting this to false disables per-NodePool exponential back-off on unrecoverable drift replacement failures.
+    nodePoolDriftBackoff: true
 

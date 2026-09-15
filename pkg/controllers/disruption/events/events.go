@@ -125,6 +125,21 @@ func NodePoolBlockedForDisruptionReason(nodePool *v1.NodePool, reason v1.Disrupt
 	}
 }
 
+// NodePoolDriftBackoff informs the user that a NodePool's drift candidates are being skipped
+// because the NodePool is in drift replacement back-off after repeated unrecoverable failures.
+func NodePoolDriftBackoff(nodePool *v1.NodePool, until time.Time, level int) events.Event {
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.DisruptionBackoff,
+		Message:        fmt.Sprintf("Drift disruption backing off until %s (level %d) after repeated replacement failures", until.Format(time.RFC3339), level),
+		DedupeValues:   []string{string(nodePool.UID)},
+		// A pool's back-off window is at least 30s; rate-limit the event so rapid selection passes
+		// don't spam identical events.
+		DedupeTimeout: 1 * time.Minute,
+	}
+}
+
 func NodePoolBlocked(nodePool *v1.NodePool) events.Event {
 	return events.Event{
 		InvolvedObject: nodePool,
