@@ -93,7 +93,7 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		}
 		if terminateFirst {
 			// Delete-only (no Replacements): carry the Results so existing nodes that can absorb the freed pods get
-			// nominated. Reactive provisioning refills the freed reservation slot afterward.
+			// nominated. Reactive provisioning handles the rest.
 			return []Command{{
 				Candidates:          []*Candidate{candidate},
 				Results:             results,
