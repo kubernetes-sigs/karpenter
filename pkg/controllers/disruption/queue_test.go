@@ -40,6 +40,7 @@ import (
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -494,8 +495,14 @@ var _ = Describe("Queue", func() {
 				ExpectMetricCounterValue(disruption.DriftBackoffsTotal, 1, map[string]string{metrics.NodePoolLabel: nodePool.Name})
 			}
 			completeViaSuccess := func(cmd *disruption.Command) {
-				// A delete-only command (no replacements) completes successfully on reconcile.
 				Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+				if len(cmd.Replacements) > 0 {
+					replacementNodeClaim := &v1.NodeClaim{}
+					Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim)).To(Succeed())
+					replacementNodeClaim, replacementNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim)
+					ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+						[]*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
+				}
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
 			}
@@ -508,10 +515,10 @@ var _ = Describe("Queue", func() {
 
 					if preArm {
 						// Pre-arm back-off so we can observe whether the command's outcome resets it.
-						queue.NodePoolBackoff().Fail(nodePool.Name)
-						Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeTrue())
+						queue.NodePoolBackoff().Fail(nodePool)
+						Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeTrue())
 					} else {
-						Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeFalse())
+						Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeFalse())
 					}
 
 					var repl []*disruption.Replacement
@@ -528,14 +535,16 @@ var _ = Describe("Queue", func() {
 					}
 					complete(cmd)
 
-					Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(Equal(wantBackedOff))
+					Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(Equal(wantBackedOff))
 				},
 				Entry("arms back-off when a drift replacement fails unrecoverably (timeout)",
 					driftMethod, withReplacement, false, completeViaTimeout, true),
 				Entry("arms back-off when a drift replacement fails to launch",
 					driftMethod, withReplacement, false, completeViaLaunchFailure, true),
-				Entry("resets back-off when a drift command succeeds",
-					driftMethod, nil, true, completeViaSuccess, false),
+				Entry("leaves back-off untouched when a drift command succeeds without a replacement",
+					driftMethod, nil, true, completeViaSuccess, true),
+				Entry("resets back-off when a drift replacement succeeds",
+					driftMethod, withReplacement, true, completeViaSuccess, false),
 				Entry("leaves back-off untouched for a successful non-drift (consolidation) command",
 					emptinessMethod, nil, true, completeViaSuccess, true),
 			)
@@ -555,13 +564,13 @@ var _ = Describe("Queue", func() {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)}}))
 				completeViaTimeout(cmd)
 
-				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool.Name)).To(BeFalse())
+				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeFalse())
 			})
 		})
 		Context("CalculateRetryDuration", func() {
 			DescribeTable("should calculate correct timeout based on queue length",
 				func(numCommands int, expectedDuration time.Duration) {
-					q := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+					q := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, nodepoolbackoff.NewState(env.Clock))
 					q.Lock()
 					for i := range numCommands {
 						q.ProviderIDToCommand[strconv.Itoa(i)] = &disruption.Command{}
