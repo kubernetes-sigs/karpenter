@@ -26,12 +26,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: Install envtest binaries
-        run: |
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-          ENVTEST_PATH=$(setup-envtest use -p path 1.31.x)
-          sudo mkdir -p /usr/local/kubebuilder/bin
-          sudo cp -r "$ENVTEST_PATH"/* /usr/local/kubebuilder/bin/
       - name: Run Test
         id: test-run
         shell: bash
@@ -46,7 +40,7 @@ jobs:
           grep -rl "test_performance" . --include="*.go" || echo "No files with test_performance tag"
           mkdir -p output
           echo "Running benchmarks..."
-          if ! go test -tags=test_performance -run='^$' -bench=. -benchmem -short -count=6 -timeout=30m -cpuprofile output/cpu.out -memprofile output/mem.out -v 2>&1 | tee output/results.txt; then
+          if ! go test -tags=test_performance -run='^$' -bench=. -benchmem -benchtime=1x -count=6 -timeout=30m -cpuprofile output/cpu.out -memprofile output/mem.out -v 2>&1 | tee output/results.txt; then
             echo "::error::go test failed. Output:"
             cat output/results.txt
             exit 1

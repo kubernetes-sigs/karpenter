@@ -130,6 +130,17 @@ func setupBenchOnce(b *testing.B) {
 	benchInstType = pickExpensiveOnDemand(benchCP.InstanceTypes)
 	off := benchInstType.Offerings.Available()[0]
 
+	// Force computeConsolidation to return NoOp for every candidate by
+	// restricting the CloudProvider to the single instance type that every
+	// bench node already runs on. With no cheaper (or same-priced, different)
+	// type in the catalog, filterByPrice yields an empty set and consolidation
+	// short-circuits to NoOp. SingleNodeConsolidation then hits its NoOp
+	// continue branch in ComputeCommands and iterates through all N
+	// candidates, which is the pathological loop this bench measures.
+	// MultiNodeConsolidation still exercises firstNConsolidationOption's
+	// log2(N) binary search: each NoOp result contracts the window.
+	benchCP.InstanceTypes = []*cloudprovider.InstanceType{benchInstType}
+
 	benchNodePools = createBenchNodePools(b, 3)
 
 	rs := test.ReplicaSet()
@@ -266,8 +277,15 @@ func buildBenchPod(idx int, nodeName string, rs client.Object, antiSel metav1.La
 			LabelSelector: &antiSel,
 			TopologyKey:   corev1.LabelHostname,
 		}},
+		// Request just under the full node allocatable so exactly one pod fits
+		// per node. This starves the consolidation scheduler of room on any
+		// existing node, forcing SimulateScheduling to propose a new NodeClaim
+		// for every single-node consolidation candidate. Combined with the
+		// single-instance-type CP above, filterByPrice then removes the sole
+		// (same-priced) replacement option and computeConsolidation returns
+		// NoOp per candidate, which is the loop shape this bench measures.
 		ResourceRequirements: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")},
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("30")},
 		},
 	})
 	pod.Spec.NodeName = nodeName
