@@ -26,10 +26,12 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -47,13 +49,13 @@ var repairUnhealthyThreshold = intstr.FromString("20%")
 
 // Repair is a voluntary disruption method that remediates unhealthy nodes. It replaces the standalone node.health
 // controller: repair rides the shared disruption budget (reason "Unhealthy"), pre-spins a replacement before
-// terminating (replace-then-terminate), orders candidates by rank + age/τ − backoff, and is vetoed by do-not-repair.
+// terminating (replace-then-terminate), orders candidates by rank + age/τ, and is vetoed by do-not-repair.
 type Repair struct {
 	consolidation
 	// repairPolicies and ranks are cached at construction. Provider-authored defaults are static, so re-reading them on
-	// every pass (per candidate, in score/matchingPolicy/denseRanks) is wasted work; providers must not mutate them.
+	// every pass (per candidate, in score/denseRanks) is wasted work; providers must not mutate them.
 	repairPolicies []cloudprovider.RepairPolicy
-	ranks          map[int]int
+	ranks          map[int]int // configured priority -> dense rank
 }
 
 func NewRepair(c consolidation) *Repair {
@@ -65,15 +67,19 @@ func NewRepair(c consolidation) *Repair {
 // RepairPolicy, have waited past that policy's toleration, and are not vetoed by the do-not-repair annotation.
 func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	// Repair is behind the NodeRepair feature gate, matching the old node.health controller's gating.
-	if !options.FromContext(ctx).FeatureGates.NodeRepair || c.Node == nil {
+	if !options.FromContext(ctx).FeatureGates.NodeRepair {
 		return false
+	}
+	// A disruption candidate always has a registered Node; a nil here is an invariant violation, so fail loud.
+	if c.Node == nil {
+		panic(fmt.Sprintf("repair candidate has no Node: %#v", c))
 	}
 	// do-not-repair is the operator's escape hatch: it blocks all repair on this node, whatever the drain bound.
 	// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424).
 	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
 		return false
 	}
-	policy, cond := r.matchingPolicy(c.Node)
+	policy, cond := r.matchRepairPolicy(c.Node)
 	if policy == nil {
 		return false
 	}
@@ -97,12 +103,15 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 		return candidates[i].Name() < candidates[j].Name()
 	})
 
-	trippedPools := r.breakerTrippedPools()
+	trippedPools, err := r.breakerTrippedPools(ctx)
+	if err != nil {
+		return []Command{}, err
+	}
 	for _, candidate := range candidates {
 		// Circuit breaker: if too much of the NodePool is unhealthy, stop repairing it — the fault is likely
 		// correlated (bad AMI, AZ outage) and replacing more nodes would amplify the outage, not fix it.
 		if trippedPools[candidate.NodePool.Name] {
-			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim,
+			r.recorder.Publish(disruptionevents.NodeRepairBlocked(candidate.Node, candidate.NodeClaim, candidate.NodePool,
 				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", repairUnhealthyThreshold.String(), candidate.NodePool.Name))...)
 			continue
 		}
@@ -125,6 +134,15 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 		// replacement is healthy), so repair is never an unbounded hang and a forceful (0) policy skips the drain for
 		// conditions the kubelet can't evict through — without pre-spin latency eroding the window.
 		candidate.TerminationGracePeriod = r.effectiveDrainBound(candidate)
+		// Preserve the per-condition/per-image disruption metric the retired node.health controller emitted.
+		if _, cond := r.matchRepairPolicy(candidate.Node); cond != nil {
+			NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
+				conditionLabel:            pretty.ToSnakeCase(string(cond.Type)),
+				metrics.NodePoolLabel:     candidate.NodePool.Name,
+				metrics.CapacityTypeLabel: candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
+				imageIDLabel:              candidate.NodeClaim.Status.ImageID,
+			})
+		}
 		return []Command{{
 			Candidates:          []*Candidate{candidate},
 			Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
@@ -137,20 +155,23 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 
 // breakerTrippedPools returns the set of NodePool names whose unhealthy-node fraction exceeds repairUnhealthyThreshold.
 // A node counts as unhealthy when it matches any RepairPolicy (the same signal repair acts on), regardless of
-// toleration; the denominator is every managed node in the pool. Mirrors the retired node.health breaker (rounding up).
-func (r *Repair) breakerTrippedPools() map[string]bool {
+// toleration; the denominator is every node carrying a NodePool label. Mirrors the retired node.health breaker
+// (rounding up). Reads straight from the informer cache (UnsafeDisableDeepCopy) — we only read the nodes, never mutate.
+func (r *Repair) breakerTrippedPools(ctx context.Context) (map[string]bool, error) {
+	nodeList := &corev1.NodeList{}
+	if err := r.kubeClient.List(ctx, nodeList, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
 	total := map[string]int{}
 	unhealthy := map[string]int{}
-	for _, n := range r.cluster.DeepCopyNodes() {
-		if !n.Managed() || n.Node == nil {
-			continue
-		}
-		nodePool := n.Labels()[v1.NodePoolLabelKey]
+	for i := range nodeList.Items {
+		node := &nodeList.Items[i]
+		nodePool := node.Labels[v1.NodePoolLabelKey]
 		if nodePool == "" {
 			continue
 		}
 		total[nodePool]++
-		if policy, _ := matchRepairPolicy(n.Node, r.repairPolicies); policy != nil {
+		if policy, _ := r.matchRepairPolicy(node); policy != nil {
 			unhealthy[nodePool]++
 		}
 	}
@@ -161,25 +182,29 @@ func (r *Repair) breakerTrippedPools() map[string]bool {
 			tripped[nodePool] = true
 		}
 	}
-	return tripped
+	return tripped, nil
 }
 
-// score computes E = rank + age/τ − backoff. Age is time past toleration (post-eligibility), so a flakier signal's
-// longer toleration never leaks into its standing. Backoff pulls back a whole NodePool whose launches keep failing.
-// TODO: the backoff term is a placeholder — rip it out for the correlated-failure restraint model
-// (kubernetes-sigs/karpenter#3031, Dynamic Node Repair Circuit Breaking).
+// score computes E = rank + age/τ for a node: the argmax of that expression over ALL of the node's matching
+// conditions, not just the highest-priority one. Age is time past toleration (post-eligibility), so a flakier signal's
+// longer toleration never leaks into its standing. Taking the argmax (rather than reusing matchRepairPolicy's
+// priority-first pick) keeps inter-node ordering consistent: a node's importance is its most urgent condition, so a
+// low-priority-but-long-starving condition still lifts the node even when a fresh high-priority condition also trips.
 func (r *Repair) score(c *Candidate, ranks map[int]int) float64 {
-	policy, cond := r.matchingPolicy(c.Node)
-	if policy == nil {
-		return 0
+	best := 0.0
+	for i := range r.repairPolicies {
+		policy := r.repairPolicies[i]
+		cond := nodeutils.GetCondition(c.Node, policy.ConditionType)
+		if cond.Status != policy.ConditionStatus {
+			continue
+		}
+		age := r.clock.Now().Sub(cond.LastTransitionTime.Add(policy.TolerationDuration))
+		if age < 0 {
+			age = 0
+		}
+		best = max(best, float64(ranks[policy.Priority])+age.Minutes()/agingConstant.Minutes())
 	}
-	rank := float64(ranks[policy.Priority])
-	eligibleAt := cond.LastTransitionTime.Add(policy.TolerationDuration)
-	age := r.clock.Now().Sub(eligibleAt)
-	if age < 0 {
-		age = 0
-	}
-	return rank + age.Minutes()/agingConstant.Minutes() - r.backoff(c.NodePool)
+	return best
 }
 
 // denseRanks compresses the set of configured policy priorities into contiguous tiers (adjacent tiers one apart),
@@ -195,35 +220,19 @@ func denseRanks(policies []cloudprovider.RepairPolicy) map[int]int {
 	return ranks
 }
 
-// backoff pulls a NodePool behind healthier pools when its replacements keep failing. A failed launch is almost never
-// node-specific (the AMI/capacity/config is bad for the whole pool), so it is keyed to the NodePool. The existing
-// NodeRegistrationHealthy signal is that per-pool "launches are failing" bit; when it is False, apply a one-tier pull.
-// TODO: rip out for the correlated-failure restraint model (kubernetes-sigs/karpenter#3031, Dynamic Node Repair
-// Circuit Breaking) — this single-bit per-pool pull is a placeholder for AZ/domain-aware restraint.
-func (r *Repair) backoff(np *v1.NodePool) float64 {
-	if np != nil && np.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
-		return 1
-	}
-	return 0
-}
-
-// matchingPolicy returns the highest-priority RepairPolicy whose (type,status) matches an unhealthy condition on the
-// node, plus the matched condition. When a node trips multiple policies, the highest priority wins (ties broken by the
-// earlier toleration deadline) so a node with several unhealthy reasons is ordered by its most urgent one.
+// matchRepairPolicy returns the highest-priority RepairPolicy whose (type,status) matches an unhealthy condition on
+// the node, plus the matched condition — the single policy that governs the repair ACTION (its drain bound). When a
+// node trips multiple policies the highest priority wins, ties broken by the earlier toleration deadline. Note this is
+// deliberately NOT how score orders nodes (score argmaxes rank+age across all conditions); this pick is for the action,
+// score is for inter-node ordering.
 // TODO: rip out for the reason-aware matching model (kubernetes-sigs/karpenter#3263, reason-aware repair policy
 // matching + escalation) — picking a single highest-priority policy is a placeholder for multi-reason semantics.
-func (r *Repair) matchingPolicy(node *corev1.Node) (*cloudprovider.RepairPolicy, *corev1.NodeCondition) {
-	return matchRepairPolicy(node, r.repairPolicies)
-}
-
-// matchRepairPolicy is the package-level matcher shared by the Repair method and the candidate drain-bound gate in
-// NewCandidate, so both agree on which policy governs a node. See matchingPolicy for the selection rule.
-func matchRepairPolicy(node *corev1.Node, policies []cloudprovider.RepairPolicy) (*cloudprovider.RepairPolicy, *corev1.NodeCondition) {
+func (r *Repair) matchRepairPolicy(node *corev1.Node) (*cloudprovider.RepairPolicy, *corev1.NodeCondition) {
 	var best *cloudprovider.RepairPolicy
 	var bestCond *corev1.NodeCondition
 	deadline := time.Time{}
-	for i := range policies {
-		policy := policies[i]
+	for i := range r.repairPolicies {
+		policy := r.repairPolicies[i]
 		cond := nodeutils.GetCondition(node, policy.ConditionType)
 		if cond.Status != policy.ConditionStatus {
 			continue
@@ -245,7 +254,7 @@ func matchRepairPolicy(node *corev1.Node, policies []cloudprovider.RepairPolicy)
 // TODO: the termination-timestamp deadline is a stopgap — replace once the termination flow has a formal contract
 // (kubernetes-sigs/karpenter#3029, Formalize Node Termination Contract).
 func (r *Repair) effectiveDrainBound(c *Candidate) *time.Duration {
-	policy, _ := r.matchingPolicy(c.Node)
+	policy, _ := r.matchRepairPolicy(c.Node)
 	if policy == nil || policy.TerminationGracePeriod == nil {
 		return nil // inherit the NodeClaim's own TerminationGracePeriod
 	}
