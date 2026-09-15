@@ -112,8 +112,8 @@ FEATURE_GATES=NodePoolDriftBackoff=false
 
 When the gate is off:
 
-- `Drift.ComputeCommands` does not skip candidates for back-off (and does not seed the
-  back-off counter).
+- `Drift.ComputeCommands` and `StaticDrift.ComputeCommands` do not skip candidates for
+  back-off (and do not seed the back-off counter).
 - `Queue.observeDriftOutcome` does not `Fail`/`Reset` tracker state.
 
 The in-memory tracker is still constructed; the gate only controls whether it is
@@ -221,11 +221,16 @@ if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 // NEW back-off gate: skip candidates whose NodePool is currently backed off. Healthy
 // pools and pools whose window has elapsed fall through to the unchanged logic below.
 // No-op when NodePoolDriftBackoff is disabled.
-if options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff && d.backoff.IsBackedOff(candidate.NodePool.Name) {
+if options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff && d.backoff.IsBackedOff(candidate.NodePool) {
 	continue
 }
 // ... existing SimulateScheduling + schedulability checks, unchanged ...
 ```
+
+`StaticDrift.ComputeCommands` applies the same check once per NodePool group, after the
+disruption-budget check and before reserving node counts or generating replacement
+commands. A backed-off static NodePool produces no commands during the window, while
+other static NodePools remain eligible.
 
 `IsBackedOff(nodePool)` returns `true` iff `level > 0` and `now < until`; otherwise
 `false` (healthy, or the window has elapsed). It is purely a read — selection never
@@ -336,6 +341,9 @@ from "every pass" to "at most one disruption-budget's worth per back-off window.
   are skipped and a younger NodePool's candidate is selected instead; assert the pool
   becomes selectable again once its window elapses. With `NodePoolDriftBackoff=false`,
   assert a backed-off NodePool is still selected (oldest-first, no skip).
+- **Unit (`StaticDrift.ComputeCommands`):** assert a backed-off static NodePool is
+  skipped until its window elapses, and that disabling `NodePoolDriftBackoff` restores
+  normal static drift selection.
 - **Queue integration:** simulate an unrecoverable failure (replacement NodeClaim
   deleted, as in the ICE path) and assert `Fail` is invoked for the drift command's
   NodePool and *not* for consolidation commands.
