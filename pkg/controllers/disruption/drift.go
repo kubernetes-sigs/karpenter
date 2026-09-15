@@ -92,10 +92,11 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			return []Command{}, err
 		}
 		if terminateFirst {
-			// Delete-only: don't carry the simulation Results — the freed pods pend and reactive provisioning
-			// handles them. The drain still honors PDBs and is bounded by TGP.
+			// Delete-only (no Replacements): carry the Results so existing nodes that can absorb the freed pods get
+			// nominated. Reactive provisioning handles the rest.
 			return []Command{{
 				Candidates:          []*Candidate{candidate},
+				Results:             results,
 				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
 				TerminateFirst:      true,
 			}}, nil

@@ -155,9 +155,10 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 
 // SimulateSchedulingWithReservedFallback runs the candidate-gone scheduling simulation for a single voluntary-disruption
 // candidate and reports whether the candidate must be terminated before a replacement can be provisioned
-// (Terminate-First Disruption, RFC kubernetes-sigs/karpenter#3203). It always returns the replace-first Results (pass 1);
-// when terminateFirst is true the caller should issue a delete-only command and let reactive provisioning refill the
-// freed reservation slot instead of staging a replacement.
+// (Terminate-First Disruption, RFC kubernetes-sigs/karpenter#3203). When terminateFirst is true the caller should issue
+// a delete-only command and let reactive provisioning refill the freed reservation slot instead of staging a
+// replacement; the returned Results are the credit-back (pass 2) simulation so it can nominate the existing nodes that
+// absorb the freed pods. When terminateFirst is false the Results are the pass-1 (replace-first / Blocked) simulation.
 //
 // It simulates up to twice:
 //
@@ -203,7 +204,13 @@ func SimulateSchedulingWithReservedFallback(
 	if err != nil {
 		return results, false, err
 	}
-	return results, tfResults.AllNonPendingPodsScheduled(), nil
+	if tfResults.AllNonPendingPodsScheduled() {
+		// Return the credit-back Results, not pass 1's: this is the accurate post-termination picture (reactive
+		// provisioning runs strict with the freed slot available), so the caller nominates the existing nodes that
+		// absorb the freed pods without spuriously reporting the reserved-bound pods as unschedulable.
+		return tfResults, true, nil
+	}
+	return results, false, nil
 }
 
 // UninitializedNodeError tracks a special pod error for disruption where pods schedule to a node
