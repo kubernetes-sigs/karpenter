@@ -17,7 +17,6 @@ limitations under the License.
 package common
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,8 +26,6 @@ import (
 	"github.com/montanaflynn/stats"
 	. "github.com/onsi/ginkgo/v2"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/prometheus/common/expfmt"
-	"github.com/prometheus/common/model"
 )
 
 type ResourceSample struct {
@@ -211,20 +208,12 @@ func (mp *KarpenterMetricsPoller) recordSample(state *pollerState, now time.Time
 
 // scrapeMetrics uses the API server pod proxy to fetch /metrics from the Karpenter pod.
 func (mp *KarpenterMetricsPoller) scrapeMetrics(ctx context.Context, podName string) (memBytes float64, cpuSeconds float64, err error) {
-	data, err := mp.env.KubeClient.CoreV1().Pods("kube-system").ProxyGet("http", podName, "8080", "/metrics", nil).DoRaw(ctx)
+	families, err := scrapeKarpenterMetricFamilies(ctx, mp.env, podName)
 	if err != nil {
-		return 0, 0, fmt.Errorf("proxy GET /metrics: %w", err)
+		return 0, 0, err
 	}
-
-	parser := expfmt.NewTextParser(model.UTF8Validation)
-	families, err := parser.TextToMetricFamilies(bytes.NewReader(data))
-	if err != nil {
-		return 0, 0, fmt.Errorf("parsing metrics: %w", err)
-	}
-
 	memBytes = getGaugeValue(families, "process_resident_memory_bytes")
 	cpuSeconds = getCounterValue(families, "process_cpu_seconds_total")
-
 	if memBytes == 0 && cpuSeconds == 0 {
 		return 0, 0, &metricsNotFoundError{foundMem: false, foundCPU: false}
 	}
