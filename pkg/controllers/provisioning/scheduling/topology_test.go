@@ -107,6 +107,48 @@ var _ = Describe("Topology", func() {
 		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
 	})
 
+	It("should schedule pods when the only topology domain is an empty string", func() {
+		topologyKey := "topology.example.com/role"
+		nodePool.Spec.Template.Labels = map[string]string{topologyKey: ""}
+		topology := []corev1.TopologySpreadConstraint{{
+			TopologyKey:       topologyKey,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+			MaxSkew:           1,
+		}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+			test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 2)...,
+		)
+		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
+	})
+	It("should spread pods across empty-string and non-empty topology domains", func() {
+		topologyKey := "topology.example.com/role"
+		nodePool.Spec.Template.Labels = map[string]string{topologyKey: ""}
+		nodePool2 := test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Template: v1.NodeClaimTemplate{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{
+							topologyKey: "worker",
+						},
+					},
+				},
+			},
+		})
+		topology := []corev1.TopologySpreadConstraint{{
+			TopologyKey:       topologyKey,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+			MaxSkew:           1,
+		}}
+		ExpectApplied(ctx, env.Client, nodePool, nodePool2)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+			test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+		)
+		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
+	})
+
 	Context("Zonal", func() {
 		It("should balance pods across zones (match labels)", func() {
 			topology := []corev1.TopologySpreadConstraint{{
