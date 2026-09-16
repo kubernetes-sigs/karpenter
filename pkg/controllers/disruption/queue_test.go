@@ -515,7 +515,7 @@ var _ = Describe("Queue", func() {
 
 					if preArm {
 						// Pre-arm back-off so we can observe whether the command's outcome resets it.
-						queue.NodePoolBackoff().Fail(nodePool)
+						queue.NodePoolBackoff().Fail(nodePool, env.Clock.Now())
 						Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeTrue())
 					} else {
 						Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeFalse())

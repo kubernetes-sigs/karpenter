@@ -218,7 +218,7 @@ func (q *Queue) observeDriftOutcome(ctx context.Context, cmd *Command, succeeded
 		}
 		return
 	}
-	if !q.backoff.Fail(nodePool) {
+	if !q.backoff.Fail(nodePool, cmd.CreationTimestamp) {
 		return
 	}
 	DriftBackoffsTotal.Inc(map[string]string{metrics.NodePoolLabel: nodePool.Name})

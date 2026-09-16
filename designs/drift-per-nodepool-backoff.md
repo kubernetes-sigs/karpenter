@@ -16,9 +16,9 @@ replacement failures, gated by the `NodePoolDriftBackoff` feature gate (enabled 
 default). While a NodePool is backed off, its candidates are skipped
 during drift candidate selection. Once the back-off window elapses the pool becomes
 eligible again: a successful replacement resets the back-off, and a failure grows it
-exponentially (capped, with jitter). Repeated failures *within* a single window do not
-compound — `Fail` is a no-op while the pool is already backed off — so the escalation
-tracks failed *windows*, not individual launch attempts. The change is entirely
+exponentially (capped, with jitter). Repeated failures from attempts started before the
+last effective failure do not compound, even if they complete after its back-off window
+expires, so escalation tracks retry cycles rather than individual launch attempts. The change is entirely
 in-memory, requires no API/CRD changes, and preserves the existing selection contract:
 `Drift.ComputeCommands` still returns at most one command per pass and still stops at
 the first schedulable candidate. Operators can disable the behavior with
@@ -66,11 +66,14 @@ design below must be revisited.
   NodePool, so a command maps unambiguously to one NodePool
   (`cmd.Candidates[0].NodePool`). Back-off keys and `Fail`/`Reset` calls depend on
   this.
-- **A drift command's outcome is observed exactly once**, in `Queue.Reconcile` via
-  `CompleteCommand`, and is unambiguously either success (`cmd.Succeeded == true`) or
-  unrecoverable failure. All `level`/`until` transitions happen only there (via
-  `Fail`/`Reset`). The synchronous selection path in `Drift.ComputeCommands` only
-  *reads* back-off state (`IsBackedOff`); it never mutates it.
+- **A drift command's terminal outcome is observed exactly once**, either in
+  `Queue.Reconcile` for an enqueued command or in `StartCommand` when replacement launch
+  fails before enqueue, and is unambiguously success or unrecoverable failure. All
+  `level`/`until` transitions happen in the queue via `Fail`/`Reset`. The synchronous
+  selection path only *reads* back-off state (`IsBackedOff`); it never mutates it.
+- **A command's `CreationTimestamp` is assigned before `StartCommand`.** The queue passes
+  this timestamp to `Fail` so failures from attempts that predate the last effective
+  failure can be ignored even when their asynchronous completion occurs later.
 - **`Drift.ComputeCommands` emits ≤ 1 command per pass and stops at the first
   schedulable candidate.** Back-off is layered as an additional per-candidate skip; it
   never walks past the first schedulable candidate nor batches commands. (This is the
@@ -133,8 +136,9 @@ type State struct {
 }
 
 type backoffEntry struct {
-	level int       // number of failed back-off windows (0 == healthy)
-	until time.Time // pool is skipped during selection before this time
+	level       int       // number of failed back-off windows (0 == healthy)
+	until       time.Time // pool is skipped during selection before this time
+	lastFailure time.Time // completion time of the last failure that escalated back-off
 }
 ```
 
@@ -148,9 +152,9 @@ type backoffEntry struct {
 - Once `until` elapses the pool is eligible again with no special handling: normal
   oldest-first selection resumes, bounded by the pool's existing disruption budget. If
   those attempts fail again, the *first* failure of the new cycle arms the next window
-  and any concurrent failures from the same cycle are no-ops (see
+  and failures from older attempts are no-ops regardless of when they complete (see
   [Where failures/successes are observed](#where-failuressuccesses-are-observed)). This
-  is what keeps `level` counting failed *windows* rather than individual attempts, and
+  is what keeps `level` counting failed retry cycles rather than individual attempts, and
   it means the tracker never needs to inspect queue state.
 
 ### Back-off formula
@@ -190,15 +194,17 @@ reason so only drift is affected:
 - **Delete-only success** (`cmd.Succeeded == true` and `len(cmd.Replacements) == 0`):
   leave back-off unchanged. The command may have placed pods on existing nodes, so it
   provides no evidence that replacement capacity recovered.
-- **Unrecoverable failure**: `backoff.Fail(nodePool)` — **no-op if the pool is already
-  backed off** (`level > 0` and `now < until`); otherwise increment `level` and arm the
-  next window. The no-op is what prevents a burst of failures from one cycle (e.g. every
-  attempt a just-recovered pool made before the first failure landed) from over-inflating
-  `level`.
+- **Unrecoverable failure**: `backoff.Fail(nodePool, cmd.CreationTimestamp)` — **no-op
+  if the pool is already backed off** (`level > 0` and `now < until`) or if the command
+  started at or before the last effective failure. Otherwise increment `level`, record
+  the current completion time as `lastFailure`, and arm the next window. Comparing the
+  command's start time prevents a slow failure from an older burst from escalating
+  back-off after the window expires.
 - **Failed to launch** (`StartCommand` errors, so the command never enters the queue
-  and no success/failure will be observed): also `backoff.Fail(nodePool)` for a drift
+  and no success/failure will be observed): also
+  `backoff.Fail(nodePool, cmd.CreationTimestamp)` for a drift
   command, so a launch failure arms back-off the same as a post-launch failure. Because
-  `Fail` is idempotent within a window, no bookkeeping is needed to avoid double-counting.
+  `Fail` deduplicates by attempt start time, no queue bookkeeping is needed.
 
 Per the single-NodePool-per-command [invariant](#invariants), the NodePool is
 `cmd.Candidates[0].NodePool`, and the tracker keys its state by that object's UID. We guard with
@@ -244,12 +250,14 @@ window is naturally bounded by the pool's disruption budget.
 The tracker exposes two mutating operations plus a read, over the `backoffEntry`
 defined in [Back-off state](#back-off-state).
 
-- **`Fail(nodePool) → bool`** — on an unrecoverable drift failure. **No-op if the pool is
-  already backed off** (`level > 0` and `now < until`). Otherwise increment `level` and
-  recompute `until` per the [back-off formula](#back-off-formula) (exponential, clamped
-  to `maxDelay`, then equal-jittered). Returns whether the state changed so the queue can
-  increment the back-off counter only for effective failures. `level` stops growing once
-  the window saturates at `maxDelay`, so the exponent cannot overflow.
+- **`Fail(nodePool, attemptStartedAt) → bool`** — on an unrecoverable drift failure.
+  **No-op if the pool is already backed off** (`level > 0` and `now < until`) or
+  `attemptStartedAt <= lastFailure`. Otherwise increment `level`, set
+  `lastFailure = now`, and recompute `until` per the [back-off formula](#back-off-formula)
+  (exponential, clamped to `maxDelay`, then equal-jittered). Returns whether the state
+  changed so the queue can increment the back-off counter only for effective failures.
+  `level` stops growing once the window saturates at `maxDelay`, so the exponent cannot
+  overflow.
 - **`Reset(nodePool)`** — on a successful drift command that created replacement
   capacity: delete the entry, returning the pool to healthy (`level == 0`, no window).
 - **`IsBackedOff(nodePool) → bool`** — read-only, called during selection: `true` iff
@@ -268,8 +276,8 @@ Sequence for a persistently failing pool (`spark`) alongside a healthy younger p
    and serviced normally.
 4. At `until`: `spark` is eligible again. Over the next few passes it may launch up to
    its disruption budget worth of replacements before the first one fails. The **first**
-   failure of this cycle → `Fail` → `level=2`, `until=now+~2m`; any concurrent failures
-   from the same burst hit the no-op and do not further inflate `level`. If any
+   failure of this cycle → `Fail` → `level=2`, `until=now+~2m`; any command started
+   before that failure is ignored if it later fails, even after the new window expires. If any
    replacement succeeds → `Reset("spark")`, pool healthy again. A successful delete-only
    drift command leaves the existing back-off state unchanged.
 5. The window grows `1m, 2m, 4m, 8m, 10m, 10m…` (clamped at `maxDelay`)
@@ -297,7 +305,7 @@ from "every pass" to "at most one disruption-budget's worth per back-off window.
 
 - **Metric (counter):** `karpenter_voluntary_disruption_drift_backoffs_total`,
   labeled by NodePool — incremented each time a pool *enters or escalates* back-off (an
-  effective `Fail`, i.e. not the within-window no-ops). Lets operators see which pools
+  effective `Fail`, excluding within-window and stale-attempt no-ops). Lets operators see which pools
   are backing off and how often.
 - **Metric (gauge):** `karpenter_nodepools_drift_backoff_seconds` — seconds remaining
   in the current back-off window per NodePool. The existing NodePool metrics controller
@@ -332,7 +340,8 @@ from "every pass" to "at most one disruption-budget's worth per back-off window.
 - **Unit (tracker):** `Fail` growth/cap, `Reset`, and `IsBackedOff` transitions
   (healthy → backing off → eligible → recovered), driven by a fake `clock.Clock`.
   Assert that repeated `Fail` calls *within* one window increment `level` only once (the
-  no-op), and that a `Fail` after `until` elapses increments again. Inject a seeded
+  no-op), that a delayed failure from the same attempt burst remains a no-op after
+  `until`, and that a newly started attempt can increment after `until`. Inject a seeded
   `*rand.Rand` so jitter is deterministic; assert each window lands in `[½w, w)` and that
   two pools failed at the same instant with the same `level` get *different* `until`
   values (de-synchronization). Assert that a NodePool recreated with the same name and a
@@ -394,8 +403,8 @@ from "every pass" to "at most one disruption-budget's worth per back-off window.
   it requires reserving a single in-flight probe slot (a `probing` flag plus a
   claim/release handle threaded through every non-dispatch path in `ComputeCommands` and
   the launch-failure path in the `Queue`), which is substantial complexity for a bounded,
-  per-window efficiency gain. The window + no-op-`Fail` already provide the correctness
-  guarantees (no indefinite starvation; escalation counts failed windows). Worth
+  per-window efficiency gain. The window + attempt-start deduplication already provide
+  the correctness guarantees (no indefinite starvation; escalation counts retry cycles). Worth
   reconsidering if back-off metrics show the per-window bursts are problematic in
   practice.
 

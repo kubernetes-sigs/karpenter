@@ -54,8 +54,9 @@ type State struct {
 }
 
 type backoffEntry struct {
-	level int
-	until time.Time
+	level       int
+	until       time.Time
+	lastFailure time.Time
 }
 
 // Option configures State.
@@ -93,9 +94,9 @@ func NewState(clk clock.Clock, opts ...Option) *State {
 }
 
 // Fail records an unrecoverable drift replacement failure for a NodePool and arms or escalates
-// its back-off window. It returns true when the state changed and false when the pool was already
-// backed off.
-func (s *State) Fail(nodePool *v1.NodePool) bool {
+// its back-off window. Failures from attempts started before the last effective failure are
+// ignored, even if they complete after the resulting window expires.
+func (s *State) Fail(nodePool *v1.NodePool, attemptStartedAt time.Time) bool {
 	s.Lock()
 	defer s.Unlock()
 
@@ -105,11 +106,15 @@ func (s *State) Fail(nodePool *v1.NodePool) bool {
 		e = &backoffEntry{}
 		s.state[nodePool.UID] = e
 	}
+	if !e.lastFailure.IsZero() && !attemptStartedAt.After(e.lastFailure) {
+		return false
+	}
 	if e.level > 0 && now.Before(e.until) {
 		return false
 	}
 	e.level = min(e.level+1, s.maxLevel)
 	e.until = now.Add(s.jitteredWindow(e.level))
+	e.lastFailure = now
 	return true
 }
 
