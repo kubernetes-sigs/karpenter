@@ -54,7 +54,7 @@ var (
 			metrics.ResourceType,
 			metrics.NodePool,
 		},
-		opmetrics.Alpha,
+		opmetrics.GA,
 	)
 	Usage = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -68,7 +68,7 @@ var (
 			metrics.ResourceType,
 			metrics.NodePool,
 		},
-		opmetrics.Alpha,
+		opmetrics.GA,
 	)
 	ClusterCost = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,

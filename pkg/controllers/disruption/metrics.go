@@ -171,7 +171,7 @@ var (
 			Help:      "The number of nodes for a given NodePool that can be concurrently disrupting at a point in time. Labeled by NodePool. Note that allowed disruptions can change very rapidly, as new nodes may be created and others may be deleted at any point.",
 		},
 		[]opmetrics.Label{metrics.NodePool, metrics.DisruptionReason},
-		opmetrics.Alpha,
+		opmetrics.GA,
 	)
 	NodePoolNodesConsumingBudgets = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
