@@ -81,7 +81,7 @@ var _ = Describe("StaticDrift", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
 				[]*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			Expect(queue.NodePoolBackoff().Fail(nodePool)).To(BeTrue())
+			Expect(queue.NodePoolBackoff().Fail(nodePool, env.Clock.Now())).To(BeTrue())
 		})
 
 		It("should skip a backed-off static NodePool until its window expires", func() {
