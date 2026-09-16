@@ -115,7 +115,7 @@ var _ = Describe("Drift back-off", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{bNode, hNode}, []*v1.NodeClaim{bNC, hNC})
 
 			// Back off the older pool.
-			queue.NodePoolBackoff().Fail(backedOff)
+			queue.NodePoolBackoff().Fail(backedOff, env.Clock.Now())
 			Expect(queue.NodePoolBackoff().IsBackedOff(backedOff)).To(BeTrue())
 
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -136,7 +136,7 @@ var _ = Describe("Drift back-off", func() {
 			ExpectApplied(ctx, env.Client, backedOff, healthy, bNC, bNode, hNC, hNode)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{bNode, hNode}, []*v1.NodeClaim{bNC, hNC})
 
-			queue.NodePoolBackoff().Fail(backedOff)
+			queue.NodePoolBackoff().Fail(backedOff, env.Clock.Now())
 			Expect(queue.NodePoolBackoff().IsBackedOff(backedOff)).To(BeTrue())
 
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)}}))
@@ -162,7 +162,7 @@ var _ = Describe("Drift back-off", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nc, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nc})
 
-			queue.NodePoolBackoff().Fail(nodePool)
+			queue.NodePoolBackoff().Fail(nodePool, env.Clock.Now())
 			Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeTrue())
 
 			// While backed off, drift produces no command for the pool.

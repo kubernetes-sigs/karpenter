@@ -173,7 +173,7 @@ var _ = Describe("Metrics", func() {
 
 		It("should publish the remaining backoff and update it over time", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
-			Expect(backoff.Fail(nodePool)).To(BeTrue())
+			Expect(backoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
 			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 			ExpectMetricGaugeValue(nodepool.DriftBackoffSeconds, backoff.Remaining(nodePool).Seconds(), map[string]string{metrics.NodePoolLabel: nodePool.Name})
@@ -185,7 +185,7 @@ var _ = Describe("Metrics", func() {
 
 		It("should delete the metric when backoff is reset", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
-			Expect(backoff.Fail(nodePool)).To(BeTrue())
+			Expect(backoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
 			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 			backoff.Reset(nodePool)
@@ -196,7 +196,7 @@ var _ = Describe("Metrics", func() {
 
 		It("should delete the metric when the backoff window expires", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
-			Expect(backoff.Fail(nodePool)).To(BeTrue())
+			Expect(backoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
 			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 			_, until := backoff.Snapshot(nodePool)
@@ -208,7 +208,7 @@ var _ = Describe("Metrics", func() {
 
 		It("should delete the metric when the NodePool is deleted", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
-			Expect(backoff.Fail(nodePool)).To(BeTrue())
+			Expect(backoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
 			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 			ExpectDeleted(ctx, env.Client, nodePool)

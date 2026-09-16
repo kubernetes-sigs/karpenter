@@ -67,7 +67,7 @@ var _ = Describe("State", func() {
 	It("arms an exponentially-growing, jittered window on consecutive failures", func() {
 		for _, expected := range []time.Duration{base, 2 * base, 4 * base, 8 * base} {
 			expireWindow(spark)
-			Expect(backoff.Fail(spark)).To(BeTrue())
+			Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 			_, until := backoff.Snapshot(spark)
 			window := until.Sub(fakeClock.Now())
 			Expect(window).To(BeNumerically(">=", expected/2))
@@ -81,7 +81,7 @@ var _ = Describe("State", func() {
 		var lastLevel int
 		for range 12 {
 			expireWindow(spark)
-			Expect(backoff.Fail(spark)).To(BeTrue())
+			Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 			lastLevel, _ = backoff.Snapshot(spark)
 		}
 		Expect(lastLevel).To(Equal(5))
@@ -92,19 +92,39 @@ var _ = Describe("State", func() {
 	})
 
 	It("is a no-op while the pool is already backed off", func() {
-		Expect(backoff.Fail(spark)).To(BeTrue())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 		level1, until1 := backoff.Snapshot(spark)
 		Expect(level1).To(Equal(1))
 
-		Expect(backoff.Fail(spark)).To(BeFalse())
-		Expect(backoff.Fail(spark)).To(BeFalse())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeFalse())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeFalse())
 		level2, until2 := backoff.Snapshot(spark)
 		Expect(level2).To(Equal(1))
 		Expect(until2).To(Equal(until1))
 	})
 
+	It("does not escalate for a delayed failure from the same attempt burst", func() {
+		firstAttemptStartedAt := fakeClock.Now()
+		delayedAttemptStartedAt := fakeClock.Now()
+
+		fakeClock.Step(time.Second)
+		Expect(backoff.Fail(spark, firstAttemptStartedAt)).To(BeTrue())
+		_, until1 := backoff.Snapshot(spark)
+
+		fakeClock.SetTime(until1.Add(time.Second))
+		Expect(backoff.Fail(spark, delayedAttemptStartedAt)).To(BeFalse())
+		level, until2 := backoff.Snapshot(spark)
+		Expect(level).To(Equal(1))
+		Expect(until2).To(Equal(until1))
+
+		// An attempt started after the prior effective failure belongs to the next retry cycle.
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
+		level, _ = backoff.Snapshot(spark)
+		Expect(level).To(Equal(2))
+	})
+
 	It("escalates again once the window has elapsed", func() {
-		Expect(backoff.Fail(spark)).To(BeTrue())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 		level1, _ := backoff.Snapshot(spark)
 		Expect(level1).To(Equal(1))
 
@@ -112,13 +132,13 @@ var _ = Describe("State", func() {
 		Expect(backoff.IsBackedOff(spark)).To(BeFalse())
 		Expect(backoff.Remaining(spark)).To(BeZero())
 
-		Expect(backoff.Fail(spark)).To(BeTrue())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 		level2, _ := backoff.Snapshot(spark)
 		Expect(level2).To(Equal(2))
 	})
 
 	It("returns to healthy on Reset", func() {
-		Expect(backoff.Fail(spark)).To(BeTrue())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 		Expect(backoff.IsBackedOff(spark)).To(BeTrue())
 
 		backoff.Reset(spark)
@@ -129,21 +149,21 @@ var _ = Describe("State", func() {
 	})
 
 	It("de-synchronizes pools that fail at the same instant", func() {
-		Expect(backoff.Fail(spark)).To(BeTrue())
-		Expect(backoff.Fail(ingress)).To(BeTrue())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
+		Expect(backoff.Fail(ingress, fakeClock.Now())).To(BeTrue())
 		_, sparkUntil := backoff.Snapshot(spark)
 		_, ingressUntil := backoff.Snapshot(ingress)
 		Expect(sparkUntil).ToNot(Equal(ingressUntil))
 	})
 
 	It("tracks NodePools independently", func() {
-		Expect(backoff.Fail(spark)).To(BeTrue())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 		Expect(backoff.IsBackedOff(spark)).To(BeTrue())
 		Expect(backoff.IsBackedOff(ingress)).To(BeFalse())
 	})
 
 	It("does not apply stale back-off to a recreated NodePool with the same name", func() {
-		Expect(backoff.Fail(spark)).To(BeTrue())
+		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 		recreated := &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: spark.Name, UID: types.UID("recreated-spark-uid")}}
 
 		Expect(backoff.IsBackedOff(spark)).To(BeTrue())
