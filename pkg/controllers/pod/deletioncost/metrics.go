@@ -43,6 +43,7 @@ var (
 			Help:      "Number of nodes with at least one pending pod-deletion-cost annotation change enqueued this cycle.",
 		},
 		[]opmetrics.Label{metrics.NodePool},
+		opmetrics.Alpha,
 	)
 	podLabelsUpdatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -53,5 +54,6 @@ var (
 			Help:      "Number of pod-deletion-cost annotation write attempts by outcome (updated, skipped_unchanged, skipped_notfound, skipped_conflict, error).",
 		},
 		[]opmetrics.Label{{Name: resultLabel, Help: "Outcome of the annotation write."}},
+		opmetrics.Alpha,
 	)
 )
