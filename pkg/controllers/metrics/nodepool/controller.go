@@ -54,6 +54,7 @@ var (
 			metrics.ResourceType,
 			metrics.NodePool,
 		},
+		opmetrics.GA,
 	)
 	Usage = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -67,6 +68,7 @@ var (
 			metrics.ResourceType,
 			metrics.NodePool,
 		},
+		opmetrics.GA,
 	)
 	ClusterCost = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -77,6 +79,7 @@ var (
 			Help:      "Total cost of the nodepool from Karpenter's perspective. Units are determined by the cloud provider. Not an authoritative source for billing. Includes modifications due to NodeOverlays",
 		},
 		[]opmetrics.Label{metrics.NodePool},
+		opmetrics.Alpha,
 	)
 )
 
