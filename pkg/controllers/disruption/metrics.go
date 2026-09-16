@@ -53,6 +53,8 @@ var (
 		Help:   "The consolidation algorithm that produced the decision.",
 		Values: []opmetrics.Value{MultiNodeConsolidationType, SingleNodeConsolidationType, EmptyConsolidationType},
 	}
+	// DecisionDim is the `decision` dimension for the voluntary-disruption decision
+	// counters, whose value is the command's action.
 	DecisionDim = opmetrics.Label{
 		Name: decisionLabel,
 		Help: "The disruption decision taken for the candidate(s).",
@@ -69,13 +71,22 @@ var (
 				Name: string(DeleteDecision),
 				Help: "The candidate(s) were deleted without replacement.",
 			},
+		},
+	}
+	// ApprovalDim is the `decision` dimension for the balanced-consolidation move
+	// metrics, which score each candidate move and record whether it was approved or
+	// rejected — a disjoint value set from DecisionDim, so it is a separate Label.
+	ApprovalDim = opmetrics.Label{
+		Name: decisionLabel,
+		Help: "Whether a scored balanced-consolidation move was approved or rejected.",
+		Values: []opmetrics.Value{
 			{
 				Name: string(ApprovedDecision),
-				Help: "The disruption decision was approved for execution.",
+				Help: "The move's cost savings justified the pod disruption; it was approved.",
 			},
 			{
 				Name: string(RejectedDecision),
-				Help: "The disruption decision was rejected before execution.",
+				Help: "The move's cost savings did not justify the pod disruption; it was rejected.",
 			},
 		},
 	}
@@ -194,7 +205,7 @@ var (
 			Help:      "Score of balanced consolidation moves. Labeled by decision, NodePool, and policy.",
 			Buckets:   []float64{0.1, 0.25, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0},
 		},
-		[]opmetrics.Label{DecisionDim, metrics.NodePool, Policy},
+		[]opmetrics.Label{ApprovalDim, metrics.NodePool, Policy},
 	)
 	ConsolidationMovesTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -203,6 +214,6 @@ var (
 			Name:      "consolidation_moves_total",
 			Help:      "Number of balanced consolidation moves. Labeled by decision, NodePool, and policy.",
 		},
-		[]opmetrics.Label{DecisionDim, metrics.NodePool, Policy},
+		[]opmetrics.Label{ApprovalDim, metrics.NodePool, Policy},
 	)
 )
