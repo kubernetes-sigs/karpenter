@@ -52,6 +52,7 @@ var (
 		[]opmetrics.Label{
 			metrics.Controller,
 		},
+		opmetrics.GA,
 	)
 	QueueDepth = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -65,6 +66,7 @@ var (
 			metrics.Controller,
 			SchedulingID,
 		},
+		opmetrics.Beta,
 	)
 	UnfinishedWorkSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -78,6 +80,7 @@ var (
 			metrics.Controller,
 			SchedulingID,
 		},
+		opmetrics.Alpha,
 	)
 	IgnoredPodCount = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -88,6 +91,7 @@ var (
 			Help:      "Number of pods ignored during scheduling by Karpenter",
 		},
 		[]opmetrics.Label{},
+		opmetrics.Alpha,
 	)
 	UnschedulablePodsCount = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -100,6 +104,7 @@ var (
 		[]opmetrics.Label{
 			metrics.Controller,
 		},
+		opmetrics.Alpha,
 	)
 	PendingPodsByEffectiveZone = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -113,5 +118,6 @@ var (
 			metrics.Controller,
 			metrics.Zone,
 		},
+		opmetrics.Alpha,
 	)
 )
