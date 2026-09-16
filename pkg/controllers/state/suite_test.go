@@ -1750,6 +1750,29 @@ var _ = Describe("Consolidated State", func() {
 	})
 })
 
+var _ = Describe("Node Snapshots", func() {
+	It("should deep-copy a single node by provider ID", func() {
+		nodeClaim, node := test.NodeClaimAndNode()
+		cluster.UpdateNodeClaim(nodeClaim)
+		Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
+
+		snapshot, ok := cluster.DeepCopyNode(node.Spec.ProviderID)
+		Expect(ok).To(BeTrue())
+		Expect(snapshot.Node).To(Equal(node))
+		Expect(snapshot.NodeClaim).To(Equal(nodeClaim))
+
+		snapshot.Node.Labels["snapshot"] = "mutated"
+		snapshot.NodeClaim.Labels["snapshot"] = "mutated"
+		current, ok := cluster.DeepCopyNode(node.Spec.ProviderID)
+		Expect(ok).To(BeTrue())
+		Expect(current.Node.Labels).ToNot(HaveKey("snapshot"))
+		Expect(current.NodeClaim.Labels).ToNot(HaveKey("snapshot"))
+
+		_, ok = cluster.DeepCopyNode("missing")
+		Expect(ok).To(BeFalse())
+	})
+})
+
 var _ = Describe("Data Races", func() {
 	var wg sync.WaitGroup
 	var cancelCtx context.Context

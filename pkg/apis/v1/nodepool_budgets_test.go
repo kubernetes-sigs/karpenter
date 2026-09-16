@@ -77,6 +77,7 @@ var _ = Describe("Budgets", func() {
 					DisruptionReasonUnderutilized,
 					DisruptionReasonDrifted,
 					DisruptionReasonEmpty,
+					DisruptionReasonUnhealthy,
 				},
 				Nodes:    "0",
 				Schedule: new("@weekly"),
@@ -95,6 +96,7 @@ var _ = Describe("Budgets", func() {
 			DisruptionReasonEmpty,
 			DisruptionReasonUnderutilized,
 			DisruptionReasonDrifted,
+			DisruptionReasonUnhealthy,
 		}
 	})
 

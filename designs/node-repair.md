@@ -1,5 +1,9 @@
 # Node Auto Repair 
 
+> **Historical design.** This document describes the original alpha implementation. The later voluntary-repair,
+> reason-aware matching, and candidate-resolution/admission RFCs supersede its budget, termination, matching, and
+> action-selection semantics.
+
 ## Problem Statement
 
 Nodes can experience failure modes that cause degradation to the underlying hardware, file systems, or container environments. Some of these failure modes are surfaced through the Node object such as network unavailability, disk pressure, or memory pressure, while others are not surfaced at all such as accelerator health. A Diagnostic Agent such as the [Node Problem Detector (NPD)](https://github.com/kubernetes/node-problem-detector) offers a way to surface these failures as additional status conditions on the node object.
@@ -126,4 +130,3 @@ There are additional features we will consider including after the initial itera
 * Node Reboot (instead of replacement)
 * Configuration surface for graceful vs forceful termination 
 * Additional consideration for the availability zone resiliency 
-

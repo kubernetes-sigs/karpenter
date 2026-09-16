@@ -26,11 +26,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	clocktesting "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 )
 
 var _ = Describe("Repair Policies", func() {
@@ -48,6 +45,7 @@ var _ = Describe("Repair Policies", func() {
 		TolerationDuration: 10 * time.Minute,
 		Action:             cloudprovider.RebootNode,
 	}
+	negativeDuration := -time.Second
 
 	DescribeTable("validating complete policy sets",
 		func(policies []cloudprovider.RepairPolicy, actions sets.Set[cloudprovider.RepairAction], errorSubstring string) {
@@ -127,6 +125,36 @@ var _ = Describe("Repair Policies", func() {
 			}},
 			supportedActions,
 			"negative toleration duration",
+		),
+		Entry("rejects a negative termination grace period",
+			[]cloudprovider.RepairPolicy{{
+				ConditionType:          "AcceleratorReady",
+				ConditionStatus:        corev1.ConditionFalse,
+				TerminationGracePeriod: &negativeDuration,
+				Action:                 cloudprovider.ReplaceNode,
+			}},
+			supportedActions,
+			"negative termination grace period",
+		),
+		Entry("rejects a negative priority",
+			[]cloudprovider.RepairPolicy{{
+				ConditionType:   "AcceleratorReady",
+				ConditionStatus: corev1.ConditionFalse,
+				Priority:        -1,
+				Action:          cloudprovider.ReplaceNode,
+			}},
+			supportedActions,
+			"priority -1 outside the supported range [0, 100]",
+		),
+		Entry("rejects a priority above the supported range",
+			[]cloudprovider.RepairPolicy{{
+				ConditionType:   "AcceleratorReady",
+				ConditionStatus: corev1.ConditionFalse,
+				Priority:        101,
+				Action:          cloudprovider.ReplaceNode,
+			}},
+			supportedActions,
+			"priority 101 outside the supported range [0, 100]",
 		),
 		Entry("rejects a missing fallback",
 			[]cloudprovider.RepairPolicy{validSpecific},
@@ -253,6 +281,15 @@ var _ = Describe("Repair Policies", func() {
 			Expect(decision.eligibleAt).To(Equal(now.Add(30 * time.Minute)))
 		})
 
+		It("returns only reason-matching policies whose toleration has elapsed", func() {
+			eligible := matcher.EligiblePolicies(condition, now.Add(15*time.Minute))
+			Expect(eligible).To(HaveLen(1))
+			Expect(eligible[0].ReasonRegex).To(Equal(`XID(48|63)`))
+
+			eligible = matcher.EligiblePolicies(condition, now.Add(35*time.Minute))
+			Expect(eligible).To(HaveLen(2))
+		})
+
 		It("exposes only eligible per-condition results", func() {
 			Expect(matcher.Evaluate(condition, now.Add(5*time.Minute))).To(BeNil())
 			Expect(matcher.Evaluate(condition, now.Add(15*time.Minute))).To(Equal(&RepairPolicyResult{
@@ -293,6 +330,41 @@ var _ = Describe("Repair Policies", func() {
 			Expect(decision).NotTo(BeNil())
 			Expect(decision.eligiblePolicies).To(Equal(2))
 			Expect(decision.eligibleAt).To(Equal(now.Add(10 * time.Minute)))
+		})
+
+		It("selects the shortest termination grace period from eligible policies", func() {
+			longGracePeriod := 15 * time.Minute
+			shortGracePeriod := 5 * time.Minute
+			gracePeriodMatcher, err := NewRepairPolicyMatcher([]cloudprovider.RepairPolicy{
+				{
+					ConditionType:          condition.Type,
+					ConditionStatus:        condition.Status,
+					ReasonRegex:            "XID48",
+					TerminationGracePeriod: &longGracePeriod,
+					Action:                 cloudprovider.ReplaceNode,
+				},
+				{
+					ConditionType:          condition.Type,
+					ConditionStatus:        condition.Status,
+					ReasonRegex:            "48Error",
+					TerminationGracePeriod: &shortGracePeriod,
+					Action:                 cloudprovider.ReplaceNode,
+				},
+				{
+					ConditionType:   condition.Type,
+					ConditionStatus: condition.Status,
+					Action:          cloudprovider.ReplaceNode,
+				},
+			}, supportedActions)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := gracePeriodMatcher.Evaluate(condition, now)
+			Expect(result).NotTo(BeNil())
+			Expect(result.TerminationGracePeriod).NotTo(BeNil())
+			Expect(*result.TerminationGracePeriod).To(Equal(shortGracePeriod))
+			Expect(gracePeriodMatcher.DecisionLogValues(condition, now)).To(
+				ContainElements("termination-grace-period", shortGracePeriod),
+			)
 		})
 
 		It("uses the fallback for an unknown reason", func() {
@@ -395,92 +467,4 @@ var _ = Describe("Repair Policies", func() {
 		})
 	})
 
-	It("rejects reboot policies until the reboot lifecycle is available", func() {
-		now := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
-		cloudProvider := fake.NewCloudProvider()
-		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
-			validSpecific,
-			validFallback,
-		}
-
-		_, err := NewController(nil, cloudProvider, clocktesting.NewFakeClock(now), nil)
-		Expect(err).To(MatchError(ContainSubstring(`unsupported action "RebootNode"`)))
-	})
-})
-
-var _ = Describe("Node Health Predicate", func() {
-	var controller *Controller
-	var oldNode *corev1.Node
-
-	BeforeEach(func() {
-		matcher, err := NewRepairPolicyMatcher([]cloudprovider.RepairPolicy{
-			{
-				ConditionType:   "AcceleratorReady",
-				ConditionStatus: corev1.ConditionFalse,
-				ReasonRegex:     "^NvidiaXID",
-				Action:          cloudprovider.ReplaceNode,
-			},
-			{
-				ConditionType:   "AcceleratorReady",
-				ConditionStatus: corev1.ConditionFalse,
-				Action:          cloudprovider.ReplaceNode,
-			},
-			{
-				ConditionType:   corev1.NodeReady,
-				ConditionStatus: corev1.ConditionFalse,
-				Action:          cloudprovider.ReplaceNode,
-			},
-		}, sets.New(cloudprovider.ReplaceNode))
-		Expect(err).NotTo(HaveOccurred())
-		controller = &Controller{repairPolicyMatcher: matcher}
-		oldNode = &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
-			Type:               "AcceleratorReady",
-			Status:             corev1.ConditionFalse,
-			Reason:             "NvidiaXID48Error",
-			LastTransitionTime: metav1.NewTime(time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)),
-		}}}}
-	})
-
-	It("reconciles reason-only changes for conditions with reason policies", func() {
-		newNode := oldNode.DeepCopy()
-		newNode.Status.Conditions[0].Reason = "NvidiaXID63Error"
-
-		Expect(controller.nodeHealthChanged(event.UpdateEvent{ObjectOld: oldNode, ObjectNew: newNode})).To(BeTrue())
-	})
-
-	It("reconciles status and transition-time changes", func() {
-		newNode := oldNode.DeepCopy()
-		newNode.Status.Conditions[0].Status = corev1.ConditionTrue
-		Expect(controller.nodeHealthChanged(event.UpdateEvent{ObjectOld: oldNode, ObjectNew: newNode})).To(BeTrue())
-
-		newNode = oldNode.DeepCopy()
-		newNode.Status.Conditions[0].LastTransitionTime = metav1.NewTime(oldNode.Status.Conditions[0].LastTransitionTime.Add(time.Minute))
-		Expect(controller.nodeHealthChanged(event.UpdateEvent{ObjectOld: oldNode, ObjectNew: newNode})).To(BeTrue())
-	})
-
-	It("reconciles added and replaced conditions", func() {
-		newNode := oldNode.DeepCopy()
-		newNode.Status.Conditions = append(newNode.Status.Conditions, corev1.NodeCondition{Type: corev1.NodeReady})
-		Expect(controller.nodeHealthChanged(event.UpdateEvent{ObjectOld: oldNode, ObjectNew: newNode})).To(BeTrue())
-
-		newNode = oldNode.DeepCopy()
-		newNode.Status.Conditions[0].Type = corev1.NodeReady
-		Expect(controller.nodeHealthChanged(event.UpdateEvent{ObjectOld: oldNode, ObjectNew: newNode})).To(BeTrue())
-	})
-
-	It("ignores reason-only changes for unrelated and fallback-only conditions", func() {
-		newNode := oldNode.DeepCopy()
-		newNode.Status.Conditions[0].Type = "UnrelatedCondition"
-		newNode.Status.Conditions[0].Reason = "NewReason"
-		oldNode.Status.Conditions[0].Type = "UnrelatedCondition"
-		Expect(controller.nodeHealthChanged(event.UpdateEvent{ObjectOld: oldNode, ObjectNew: newNode})).To(BeFalse())
-
-		oldNode.Status.Conditions[0].Type = corev1.NodeReady
-		newNode.Status.Conditions[0].Type = corev1.NodeReady
-		Expect(controller.nodeHealthChanged(event.UpdateEvent{ObjectOld: oldNode, ObjectNew: newNode})).To(BeFalse())
-	})
-
-	It("ignores unchanged conditions", func() {
-		Expect(controller.nodeHealthChanged(event.UpdateEvent{ObjectOld: oldNode, ObjectNew: oldNode.DeepCopy()})).To(BeFalse())
-	})
 })

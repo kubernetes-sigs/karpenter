@@ -184,8 +184,8 @@ const (
 	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
 	DisruptionReasonEmpty         DisruptionReason = "Empty"
 	DisruptionReasonDrifted       DisruptionReason = "Drifted"
-	// DisruptionReasonUnhealthy paces node repair through the shared disruption budget, replacing the standalone
-	// node.health controller's hardcoded 20% breaker. Repair is voluntary: budgeted, ordered, and pre-spinning.
+	// DisruptionReasonUnhealthy paces voluntary node repair through the shared disruption budget. Repair is ordered and
+	// pre-spins replacement capacity.
 	DisruptionReasonUnhealthy DisruptionReason = "Unhealthy"
 )
 

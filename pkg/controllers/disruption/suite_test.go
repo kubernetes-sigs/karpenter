@@ -608,6 +608,9 @@ var _ = Describe("Disruption Taints", func() {
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDisruptionReason)
+		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
+			v1.NodeClaimRepairTerminationGracePeriodAnnotationKey: (5 * time.Minute).String(),
+		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -622,6 +625,25 @@ var _ = Describe("Disruption Taints", func() {
 		})
 		Expect(nodeClaims).To(HaveLen(1))
 		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason)).To(BeNil())
+		Expect(nodeClaims[0].Annotations).ToNot(HaveKey(v1.NodeClaimRepairTerminationGracePeriodAnnotationKey))
+	})
+	It("should preserve a repair termination intent after NodeClaim deletion commits", func() {
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
+		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
+			v1.NodeClaimRepairTerminationGracePeriodAnnotationKey: (5 * time.Minute).String(),
+		})
+		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "test.karpenter.sh/preserve-deletion")
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeFalse())
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		ExpectSingletonReconciled(ctx, disruptionController)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Annotations).To(HaveKey(v1.NodeClaimRepairTerminationGracePeriodAnnotationKey))
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized

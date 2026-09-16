@@ -65,7 +65,12 @@ type consolidation struct {
 
 // NodePoolTotalsSetter is implemented by disruption methods that use balanced scoring.
 type NodePoolTotalsSetter interface {
+	NeedsNodePoolTotals() bool
 	SetNodePoolTotals(map[string]NodePoolTotals)
+}
+
+func (c *consolidation) NeedsNodePoolTotals() bool {
+	return true
 }
 
 func (c *consolidation) SetNodePoolTotals(totals map[string]NodePoolTotals) {

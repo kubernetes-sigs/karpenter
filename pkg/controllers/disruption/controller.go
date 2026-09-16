@@ -102,10 +102,15 @@ func NewController(ctx context.Context, clk clock.Clock, kubeClient client.Clien
 func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
 	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 	methods := []Method{}
-	// Repair runs first: fixing a fault outranks any discretionary rebalance. Registered only when the NodeRepair
-	// feature gate is on; NewRepair then panics if the provider defines no RepairPolicies (repair could never act).
-	if options.FromContext(ctx).FeatureGates.NodeRepair {
-		methods = append(methods, NewRepair(c))
+	// Repair runs first: fixing a fault outranks any discretionary rebalance. Do not register the method while the
+	// feature gate is disabled, since candidate construction performs cluster-wide API and scheduling work.
+	if options.FromContext(ctx).FeatureGates.NodeRepair && len(cp.RepairPolicies()) != 0 {
+		repair, err := NewRepair(c)
+		if err != nil {
+			log.Log.Error(err, "disabling node repair due to invalid repair policies")
+		} else {
+			methods = append(methods, repair)
+		}
 	}
 	return append(methods, []Method{
 		// Delete empty nodes across all consolidation policies (WhenEmpty, WhenEmptyOrUnderutilized, Balanced).
@@ -157,17 +162,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	outdatedNodes := lo.Reject(c.cluster.DeepCopyNodes(), func(s *state.StateNode, _ int) bool {
 		return c.queue.HasAny(s.ProviderID()) || s.MarkedForDeletion()
 	})
-	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
+	if err := c.cleanupOutdatedNodes(ctx, outdatedNodes); err != nil {
 		if errors.IsConflict(err) {
 			return reconciler.Result{Requeue: true}, nil
 		}
-		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing taint from nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
-	}
-	if err := state.ClearNodeClaimsCondition(ctx, c.kubeClient, c.clock, v1.ConditionTypeDisruptionReason, outdatedNodes...); err != nil {
-		if errors.IsConflict(err) {
-			return reconciler.Result{Requeue: true}, nil
-		}
-		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
+		return reconciler.Result{}, err
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
@@ -189,12 +188,50 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
+func (c *Controller) cleanupOutdatedNodes(ctx context.Context, outdatedNodes []*state.StateNode) error {
+	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
+		return serrors.Wrap(fmt.Errorf("removing taint from nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
+	}
+	if err := state.ClearNodeClaimsCondition(ctx, c.kubeClient, c.clock, v1.ConditionTypeDisruptionReason, outdatedNodes...); err != nil {
+		return serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
+	}
+	if err := c.queue.clearTerminationGracePeriodIntents(ctx, repairTerminationGracePeriodIntents(outdatedNodes)...); err != nil {
+		return fmt.Errorf("removing orphaned repair termination grace period intent, %w", err)
+	}
+	return nil
+}
+
+func repairTerminationGracePeriodIntents(nodes []*state.StateNode) []*v1.NodeClaim {
+	intents := make([]*v1.NodeClaim, 0, min(len(nodes), intentCleanupBatchSize))
+	for _, node := range nodes {
+		if node.NodeClaim == nil {
+			continue
+		}
+		if _, ok := node.NodeClaim.Annotations[v1.NodeClaimRepairTerminationGracePeriodAnnotationKey]; !ok {
+			continue
+		}
+		intents = append(intents, node.NodeClaim)
+		if len(intents) == intentCleanupBatchSize {
+			break
+		}
+	}
+	return intents
+}
+
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
-	candidates, nodePoolTotals, err := GetCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue, c.clusterCost)
+	var preFilter StateNodeFilter
+	if method, ok := disruption.(CandidatePreFilter); ok {
+		preFilter = method.ShouldConsider
+	}
+	totalsSetter, needsNodePoolTotals := disruption.(NodePoolTotalsSetter)
+	if needsNodePoolTotals {
+		needsNodePoolTotals = totalsSetter.NeedsNodePoolTotals()
+	}
+	candidates, nodePoolTotals, err := getCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, preFilter, disruption.Class(), c.queue, c.clusterCost, needsNodePoolTotals)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -207,8 +244,8 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, nil
 	}
 	// Pass precomputed NodePool totals to consolidation methods for balanced scoring
-	if setter, ok := disruption.(NodePoolTotalsSetter); ok {
-		setter.SetNodePoolTotals(nodePoolTotals)
+	if needsNodePoolTotals {
+		totalsSetter.SetNodePoolTotals(nodePoolTotals)
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
 	if err != nil {

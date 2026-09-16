@@ -67,6 +67,8 @@ const (
 	maxRetryDuration        = 1 * time.Hour
 	maxConcurrentReconciles = 100
 	retryDurationScale      = 80 * time.Millisecond
+	intentCleanupWorkers    = 10
+	intentCleanupBatchSize  = 100
 )
 
 type UnrecoverableError struct {
@@ -171,6 +173,9 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 		stateNodes := lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, stateNodes...))
 		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, q.clock, v1.ConditionTypeDisruptionReason, stateNodes...))
+		multiErr = multierr.Combine(multiErr, q.clearTerminationGracePeriodIntents(ctx, lo.Map(cmd.Candidates, func(candidate *Candidate, _ int) *v1.NodeClaim {
+			return candidate.NodeClaim
+		})...))
 		// Log the error
 		log.FromContext(ctx).Error(multiErr, "failed terminating nodes while executing a disruption command")
 	} else {
@@ -233,30 +238,22 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// then the termination controller will handle the eventual deletion of the nodes.
 	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
-		// A candidate may carry an explicit drain bound (repair sets one). Stamp the absolute termination deadline HERE,
-		// at actual deletion time, so replace-then-terminate latency doesn't erode the grace window. The lifecycle
-		// controller no-ops if the annotation already exists, so this candidate-level bound wins over the NodeClaim's TGP.
-		// TODO(kubernetes-sigs/karpenter#3029): self-stamping an absolute deadline separately from the deletion timestamp
-		// is an interim mechanism with two known gaps to resolve once the termination flow has a formal contract:
-		// (1) the deadline is absolute, so termination-controller processing delay eats into the drain (TGP is really a
-		// minimum drain time); and (2) it is not atomic with the delete — a crash between this patch and the delete can
-		// leave a stale timestamp. The right fix is a deletion-anchored deadline (DeletionTimestamp + TGP) owned by the
-		// termination contract.
-		if tgp := cmd.Candidates[i].TerminationGracePeriod; tgp != nil {
-			nc := cmd.Candidates[i].NodeClaim
-			stored := nc.DeepCopy()
-			nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
-				v1.NodeClaimTerminationTimestampAnnotationKey: q.clock.Now().Add(*tgp).Format(time.RFC3339),
-			})
-			if err := q.kubeClient.Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
-				errs[i] = err
-				return
-			}
+		// Persist the selected repair drain bound before deletion. If this controller restarts or its absolute-deadline
+		// patch fails after deletion commits, the lifecycle controller can reconstruct the deadline from DeletionTimestamp.
+		if err := q.ensureTerminationGracePeriodIntent(ctx, cmd.Candidates[i]); err != nil {
+			errs[i] = err
+			return
 		}
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
 			return q.kubeClient.Delete(ctx, cmd.Candidates[i].NodeClaim)
 		}); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
+			return
+		}
+		// Stamp a repair-specific drain deadline only after deletion succeeds, which is the command's commitment
+		// boundary. Failed delete attempts therefore cannot consume the bounded drain window.
+		if err := q.ensureTerminationDeadline(ctx, cmd.Candidates[i]); err != nil {
+			errs[i] = err
 			return
 		}
 		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()))...)
@@ -276,7 +273,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
 		// Repair records the eligible condition on the candidate; emit the per-condition/per-image unhealthy-disrupted
 		// metric here (at actual termination), not at command production, so an abandoned command doesn't over-count.
-		if cond := cmd.Candidates[i].RepairCondition; cond != "" {
+		if cmd.Reason() == v1.DisruptionReasonUnhealthy && cmd.Candidates[i].RepairCondition != "" {
 			// Termination mode reflects the drain bound repair actually applied (candidate.TerminationGracePeriod),
 			// not the NodeClaim's own Spec.TGP — a forceful (0) or bounded policy overrides it. nil means repair
 			// inherited the NodeClaim's mode.
@@ -285,7 +282,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 				mode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
 			}
 			NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
-				conditionLabel:               pretty.ToSnakeCase(string(cond)),
+				conditionLabel:               pretty.ToSnakeCase(string(cmd.Candidates[i].RepairCondition)),
 				metrics.NodePoolLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel:    cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
 				imageIDLabel:                 cmd.Candidates[i].NodeClaim.Status.ImageID,
@@ -295,6 +292,104 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
+	return multierr.Combine(errs...)
+}
+
+func (q *Queue) ensureTerminationGracePeriodIntent(ctx context.Context, candidate *Candidate) error {
+	if candidate.TerminationGracePeriod == nil {
+		return nil
+	}
+	nodeClaim := &v1.NodeClaim{}
+	if err := q.kubeClient.Get(ctx, client.ObjectKeyFromObject(candidate.NodeClaim), nodeClaim); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if value, ok := nodeClaim.Annotations[v1.NodeClaimRepairTerminationGracePeriodAnnotationKey]; ok {
+		if existing, err := time.ParseDuration(value); err == nil && existing >= 0 && existing <= *candidate.TerminationGracePeriod {
+			candidate.NodeClaim = nodeClaim
+			return nil
+		}
+	}
+	stored := nodeClaim.DeepCopy()
+	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
+		v1.NodeClaimRepairTerminationGracePeriodAnnotationKey: candidate.TerminationGracePeriod.String(),
+	})
+	if err := q.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+		return err
+	}
+	candidate.NodeClaim = nodeClaim
+	return nil
+}
+
+// ensureTerminationDeadline stamps a repair candidate's drain deadline at deletion commitment. Retries preserve an
+// existing earlier deadline so API failures cannot extend the committed drain window.
+func (q *Queue) ensureTerminationDeadline(ctx context.Context, candidate *Candidate) error {
+	if candidate.TerminationGracePeriod == nil {
+		return nil
+	}
+	return retry.OnError(retry.DefaultBackoff, errors.IsConflict, func() error {
+		nodeClaim := &v1.NodeClaim{}
+		if err := q.kubeClient.Get(ctx, client.ObjectKeyFromObject(candidate.NodeClaim), nodeClaim); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		var deadline time.Time
+		switch {
+		case !nodeClaim.DeletionTimestamp.IsZero():
+			deadline = nodeClaim.DeletionTimestamp.Add(*candidate.TerminationGracePeriod)
+		case candidate.terminationDeadline != nil:
+			deadline = *candidate.terminationDeadline
+		default:
+			deadline = q.clock.Now().Add(*candidate.TerminationGracePeriod)
+		}
+		candidate.terminationDeadline = lo.ToPtr(deadline)
+		if value, ok := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; ok {
+			if existing, err := time.Parse(time.RFC3339, value); err == nil && !existing.After(deadline) {
+				candidate.NodeClaim = nodeClaim
+				if _, hasIntent := nodeClaim.Annotations[v1.NodeClaimRepairTerminationGracePeriodAnnotationKey]; !hasIntent {
+					return nil
+				}
+				stored := nodeClaim.DeepCopy()
+				delete(nodeClaim.Annotations, v1.NodeClaimRepairTerminationGracePeriodAnnotationKey)
+				if err := q.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+					return err
+				}
+				candidate.NodeClaim = nodeClaim
+				return nil
+			}
+		}
+		stored := nodeClaim.DeepCopy()
+		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
+			v1.NodeClaimTerminationTimestampAnnotationKey: deadline.Format(time.RFC3339),
+		})
+		delete(nodeClaim.Annotations, v1.NodeClaimRepairTerminationGracePeriodAnnotationKey)
+		if err := q.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			return err
+		}
+		candidate.NodeClaim = nodeClaim
+		return nil
+	})
+}
+
+func (q *Queue) clearTerminationGracePeriodIntents(ctx context.Context, nodeClaims ...*v1.NodeClaim) error {
+	if len(nodeClaims) == 0 {
+		return nil
+	}
+	errs := make([]error, len(nodeClaims))
+	workqueue.ParallelizeUntil(ctx, min(intentCleanupWorkers, len(nodeClaims)), len(nodeClaims), func(i int) {
+		nodeClaim := &v1.NodeClaim{}
+		if err := q.kubeClient.Get(ctx, client.ObjectKeyFromObject(nodeClaims[i]), nodeClaim); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
+		}
+		if !nodeClaim.DeletionTimestamp.IsZero() {
+			return
+		}
+		if _, ok := nodeClaim.Annotations[v1.NodeClaimRepairTerminationGracePeriodAnnotationKey]; !ok {
+			return
+		}
+		stored := nodeClaim.DeepCopy()
+		delete(nodeClaim.Annotations, v1.NodeClaimRepairTerminationGracePeriodAnnotationKey)
+		errs[i] = q.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
+	})
 	return multierr.Combine(errs...)
 }
 
@@ -357,6 +452,8 @@ func (q *Queue) createReplacementNodeClaims(ctx context.Context, cmd *Command) e
 // 2. Spin up replacement nodes
 // 3. Add Command to the queue to wait to delete the candidates.
 func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
+	queueOwnsStaticReservation := true
+	defer q.releaseStaticReplacementReservationsIfOwned(cmd, &queueOwnsStaticReservation)
 	// First check if we can add the command.
 	providerIDs := lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
 		return c.ProviderID()
@@ -380,6 +477,8 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	// Update the command to only consider the successfully MarkDisrupted candidates
 	cmd.Candidates = markedCandidates
 
+	// From this point onward the provisioner releases static reservations whether creation succeeds or fails.
+	queueOwnsStaticReservation = false
 	if err := q.createReplacementNodeClaims(ctx, cmd); err != nil {
 		// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 		// we don't want to disrupt workloads with no way to provision new nodes for them.
@@ -432,6 +531,20 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		ConsolidationTypeLabel: cmd.ConsolidationType(),
 	})
 	return nil
+}
+
+func (q *Queue) releaseStaticReplacementReservationsIfOwned(cmd *Command, owned *bool) {
+	if !*owned {
+		return
+	}
+	staticReplacements := lo.Filter(cmd.Replacements, func(replacement *Replacement, _ int) bool {
+		return replacement.IsStaticNodeClaim
+	})
+	for nodePoolName, replacements := range lo.GroupBy(staticReplacements, func(replacement *Replacement) string {
+		return replacement.NodePoolName
+	}) {
+		q.cluster.NodePoolState.ReleaseNodeCount(nodePoolName, int64(len(replacements)))
+	}
 }
 
 // HasAny checks to see if the candidate is part of an currently executing command.

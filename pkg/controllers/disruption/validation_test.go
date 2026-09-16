@@ -20,17 +20,45 @@ import (
 	"context"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
+
+var _ = Describe("Repair Method Registration", func() {
+	It("disables only repair when the complete policy set is invalid", func() {
+		cloudProvider.RepairPolicy = nil
+		methodsWithoutRepair := NewMethodsWithRealValidator()
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{
+				ConditionType:   "BadNode",
+				ConditionStatus: corev1.ConditionFalse,
+				ReasonRegex:     "[",
+				Action:          cloudprovider.ReplaceNode,
+			},
+			{
+				ConditionType:   "BadNode",
+				ConditionStatus: corev1.ConditionFalse,
+				Action:          cloudprovider.ReplaceNode,
+			},
+		}
+
+		methods := NewMethodsWithRealValidator()
+		Expect(methods).To(HaveLen(len(methodsWithoutRepair)))
+		for _, method := range methods {
+			Expect(method.Reason()).NotTo(Equal(v1.DisruptionReasonUnhealthy))
+		}
+	})
+})
 
 func NewMethodsWithRealValidator() []disruption.Method {
 	return disruption.NewMethods(ctx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)

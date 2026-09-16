@@ -274,6 +274,18 @@ func (c *Cluster) DeepCopyNodes() StateNodes {
 	})
 }
 
+// DeepCopyNode returns a deep copy of the state node identified by providerID.
+func (c *Cluster) DeepCopyNode(providerID string) (*StateNode, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	node, ok := c.nodes[providerID]
+	if !ok {
+		return nil, false
+	}
+	return node.DeepCopy(), true
+}
+
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
 // batch
 func (c *Cluster) IsNodeNominated(providerID string) bool {
