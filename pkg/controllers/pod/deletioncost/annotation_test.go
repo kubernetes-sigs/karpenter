@@ -276,10 +276,13 @@ var _ = Describe("Annotation", func() {
 
 			counter := &countingClient{Client: env.Client}
 			q := deletioncost.NewQueue(counter)
+			before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedUnchanged})
 			q.Add(pod, rank, false)
 			ExpectObjectReconciled(ctx, env.Client, q, pod)
+			after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedUnchanged})
 
 			Expect(counter.PatchCount()).To(Equal(0))
+			Expect(after-before).To(Equal(1.0), "matchesDesired short-circuit should increment pod_labels_updated_total{result=skipped_unchanged}")
 		})
 
 		It("should surface 429 errors from Reconcile so controller-runtime can retry", func() {
@@ -301,9 +304,12 @@ var _ = Describe("Annotation", func() {
 
 			throttler := newThrottlingClient(env.Client, 1)
 			q := deletioncost.NewQueue(throttler)
+			before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
 			q.Add(pod, -11, false)
 			err := ExpectObjectReconcileFailed(ctx, env.Client, q, pod)
 			Expect(apierrors.IsTooManyRequests(err)).To(BeTrue())
+			after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
+			Expect(after-before).To(Equal(1.0), "retryable error should increment pod_labels_updated_total{result=error}")
 			// The item stays enqueued on retryable errors so controller-runtime
 			// picks it back up on its next tick.
 			Expect(q.Has(pod)).To(BeTrue())
@@ -348,13 +354,13 @@ var _ = Describe("Annotation", func() {
 			live.Labels["racing-writer"] = "true"
 			Expect(env.Client.Update(ctx, live)).To(Succeed())
 
-			before := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
+			before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
 			queue.Add(snapshot, -1, false)
 			result, err := queue.Reconcile(ctx, snapshot)
 			Expect(err).ToNot(HaveOccurred(), "409 must not surface as an error; the queue treats it as terminal")
 			Expect(result).To(BeZero())
 			Expect(queue.Has(snapshot)).To(BeFalse(), "queue must drop the item after Conflict")
-			after := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
+			after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
 			Expect(after-before).To(Equal(1.0), "Conflict should increment pods_updated_total{result=skipped_conflict}")
 
 			// Live state preserved: the racing writer's label update stuck,
@@ -380,12 +386,12 @@ var _ = Describe("Annotation", func() {
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), live)).To(Succeed())
 
 			q := deletioncost.NewQueue(&notFoundClient{Client: env.Client})
-			before := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
+			before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
 			q.Add(live, -1, false)
 			_, err := q.Reconcile(ctx, live)
 			Expect(err).ToNot(HaveOccurred(), "NotFound must not surface as an error; the queue treats it as terminal")
 			Expect(q.Has(live)).To(BeFalse(), "queue must drop the item after NotFound")
-			after := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
+			after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
 			Expect(after-before).To(Equal(1.0), "NotFound should increment pods_updated_total{result=skipped_notfound}")
 		})
 
@@ -436,7 +442,7 @@ var _ = Describe("Annotation", func() {
 		// PENDING: The current Queue implementation cannot preserve a mid-flight
 		// Add(pod, newRank) when the Add races an in-progress Reconcile. Add's
 		// "no source push when already enqueued" combined with complete()'s
-		// unconditional delete drops the newer desired state — the queue is
+		// unconditional delete drops the newer desired state the queue is
 		// empty after the racing Reconcile returns, and controller-runtime is
 		// never told to re-enqueue the pod. The 60s Controller.Reconcile cycle
 		// re-Adds and eventually converges, so real-world impact is bounded,
@@ -444,7 +450,7 @@ var _ = Describe("Annotation", func() {
 		//
 		// This spec asserts the intended lossless behavior. Un-Pending it once
 		// the queue is repaired (e.g. always push to source, or version-check
-		// during complete). See gc-a82ehs report for the trace + design options.
+		// during complete).
 		PIt("should preserve a mid-flight Add's desired state so the next reconcile lands the newer value", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
@@ -563,6 +569,38 @@ var _ = Describe("Annotation", func() {
 			updated := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
 			Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
+		})
+
+		It("should preserve unrelated annotations when clearing the pod-deletion-cost annotation", func() {
+			// Regression: clearAnnotation must delete only the pod-deletion-cost
+			// key. A future refactor to `updated.Annotations = nil` would still
+			// pass the base clear spec above because that pod only carries the
+			// PDC key. Seed a pod with an unrelated key and assert it survives.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			pod := rsOwnedPod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					corev1.PodDeletionCost:  "5",
+					"user.example.com/keep": "yes",
+				}},
+				NodeName: nodes[0].Name,
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			enqueueAndReconcile(pod, 0, true)
+
+			updated := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
+			Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
+			Expect(updated.Annotations).To(HaveKeyWithValue("user.example.com/keep", "yes"),
+				"unrelated annotation must survive a pod-deletion-cost clear")
 		})
 
 		It("should skip pods without annotations on do-not-disrupt nodes", func() {

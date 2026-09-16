@@ -136,7 +136,7 @@ func (q *Queue) complete(qk terminator.QueueKey) {
 // Reconcile drains one pod's annotation update. Terminal outcomes (success,
 // NotFound, Conflict) remove the pod from the queue. Retryable API errors
 // return the error so controller-runtime's rate limiter re-enqueues with
-// exponential backoff — 429s in particular flow through this path so a
+// exponential backoff. 429s in particular flow through this path so a
 // throttled apiserver naturally slows fan-out across all in-flight pods.
 func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, q.Name())
@@ -153,7 +153,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 
 	if q.matchesDesired(pod, item) {
 		q.complete(qk)
-		podsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_unchanged"})
+		podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_unchanged"})
 		return reconcile.Result{}, nil
 	}
 
@@ -164,7 +164,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		err = patchAnnotation(ctx, q.kubeClient, pod, strconv.Itoa(item.rank))
 	}
 	if err == nil {
-		podsUpdatedTotal.Inc(map[string]string{resultLabel: "updated"})
+		podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "updated"})
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
@@ -173,24 +173,20 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	// can distinguish target-disappeared from write-raced retries.
 	if apierrors.IsNotFound(err) {
 		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("skipping pod annotation update, target not found")
-		podsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_notfound"})
+		podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_notfound"})
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
 	if apierrors.IsConflict(err) {
 		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("skipping pod annotation update, write raced")
-		podsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_conflict"})
+		podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_conflict"})
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
-	podsUpdatedTotal.Inc(map[string]string{resultLabel: "error"})
+	podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "error"})
 	return reconcile.Result{}, err
 }
 
 func (q *Queue) matchesDesired(pod *corev1.Pod, item queueItem) bool {
-	if item.clear {
-		_, has := pod.Annotations[corev1.PodDeletionCost]
-		return !has
-	}
-	return pod.Annotations[corev1.PodDeletionCost] == strconv.Itoa(item.rank)
+	return podHasDesiredAnnotation(pod, item.rank, item.clear)
 }

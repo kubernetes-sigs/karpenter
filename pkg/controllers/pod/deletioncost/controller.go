@@ -50,7 +50,6 @@ const (
 
 // Controller ranks Karpenter-managed nodes by consolidation preference each
 // cycle and enqueues per-pod annotation writes on the fire-and-forget Queue.
-// Reconcile is serialized by the singleton reconciler adapter.
 type Controller struct {
 	clock         clock.Clock
 	kubeClient    client.Client
@@ -98,8 +97,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
+	// Advance the cursor only after enqueueing succeeds so a mid-reconcile
+	// error retries against the same state (see the assignment near the end
+	// of this method).
 	currentState := c.cluster.ConsolidationState()
-	if c.consolidationStateUnchanged(ctx, currentState) {
+	if currentState.Equal(c.lastConsolidationState) {
+		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
@@ -168,9 +171,8 @@ func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupB
 	return perNodePool
 }
 
-// tryEnqueueNode reads a node's pods, guards against a no-op annotation
-// write, and enqueues per-pod writes with the given rank and cleanup.
-// Returns true when the node was enqueued.
+// tryEnqueueNode returns true if the node had a pod whose annotation
+// needed changing and the writes were enqueued.
 func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, rank int, cleanup bool, perNodePool map[string]int) bool {
 	pods, _ := node.Pods(ctx, c.kubeClient)
 	if !nodeMutatesAnyPod(pods, rank, cleanup) {
@@ -207,31 +209,23 @@ func (c *Controller) enqueueCapped(ctx context.Context, nodes []*state.StateNode
 // its pod-deletion-cost annotation change. cleanup=true means "clear if
 // present"; cleanup=false means "match rank".
 func nodeMutatesAnyPod(pods []*corev1.Pod, rank int, cleanup bool) bool {
-	if cleanup {
-		for _, pod := range pods {
-			if _, ok := pod.Annotations[corev1.PodDeletionCost]; ok {
-				return true
-			}
-		}
-		return false
-	}
-	value := strconv.Itoa(rank)
 	for _, pod := range pods {
-		if pod.Annotations[corev1.PodDeletionCost] != value {
+		if !podHasDesiredAnnotation(pod, rank, cleanup) {
 			return true
 		}
 	}
 	return false
 }
 
-// consolidationStateUnchanged compares currentState to the cursor advanced
-// at the end of the last successful reconcile. It does not mutate the
-// cursor; Reconcile advances lastConsolidationState only after enqueueing
-// succeeds so a mid-reconcile error retries against the same state.
-func (c *Controller) consolidationStateUnchanged(ctx context.Context, currentState time.Time) bool {
-	if currentState.Equal(c.lastConsolidationState) {
-		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
-		return true
+// podHasDesiredAnnotation reports whether the pod already carries the
+// intended pod-deletion-cost state. cleanup=true means "annotation absent";
+// cleanup=false means "annotation equals rank". Shared with
+// Queue.matchesDesired so the controller's no-op guard and the queue's
+// idempotency short-circuit read the same rule.
+func podHasDesiredAnnotation(pod *corev1.Pod, rank int, cleanup bool) bool {
+	if cleanup {
+		_, has := pod.Annotations[corev1.PodDeletionCost]
+		return !has
 	}
-	return false
+	return pod.Annotations[corev1.PodDeletionCost] == strconv.Itoa(rank)
 }

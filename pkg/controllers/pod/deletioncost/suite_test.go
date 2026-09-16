@@ -20,7 +20,6 @@ import (
 	"context"
 	"math"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -28,7 +27,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	clock "k8s.io/utils/clock/testing"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -87,10 +85,8 @@ var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
-var fakeClock *clock.FakeClock
 var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
-var recorder *test.EventRecorder
 var queue *deletioncost.Queue
 
 func TestAPIs(t *testing.T) {
@@ -110,12 +106,10 @@ var _ = BeforeSuite(func() {
 
 	ctx = options.ToContext(ctx, opts)
 	cloudProvider = fake.NewCloudProvider()
-	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
-	recorder = test.NewEventRecorder()
 })
 
 var _ = AfterSuite(func() {
@@ -125,7 +119,6 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	cloudProvider.Reset()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-	recorder.Reset()
 	queue = deletioncost.NewQueue(env.Client)
 })
 

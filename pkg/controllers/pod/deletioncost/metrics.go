@@ -29,43 +29,29 @@ const (
 	resultLabel              = "result"
 )
 
-// noLabels is shared by all label-less metric calls so we don't allocate an
-// empty map on every increment.
-var noLabels = map[string]string{}
-
 var (
-	// nodes_ranked is a gauge of nodes annotated in the most recent reconcile
-	// cycle, partitioned by nodepool. Reset each cycle so pools whose count
-	// drops to zero don't linger at their prior value.
+	// nodes_ranked is a gauge of nodes with at least one pending
+	// pod-deletion-cost annotation change enqueued this cycle, partitioned by
+	// nodepool. Reset each cycle so pools whose count drops to zero don't
+	// linger at their prior value.
 	nodesRanked = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
 			Name:      "nodes_ranked",
-			Help:      "Number of nodes ranked in the most recent reconcile cycle by the pod deletion cost controller.",
+			Help:      "Number of nodes with at least one pending pod-deletion-cost annotation change enqueued this cycle.",
 		},
 		[]opmetrics.Label{metrics.NodePool},
 	)
-	podsUpdatedTotal = opmetrics.NewPrometheusCounter(
+	podLabelsUpdatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
-			Name:      "pods_updated_total",
-			Help:      "Number of pod deletion cost annotations updated in total. Labeled by result (updated, skipped_unchanged, skipped_notfound, skipped_conflict, error). The error label counts per-pod patch failures; skipped_notfound covers pods that vanished before write; skipped_conflict covers writes lost to a racing writer.",
+			Name:      "pod_labels_updated_total",
+			Help:      "Number of pod-deletion-cost annotation write attempts by outcome (updated, skipped_unchanged, skipped_notfound, skipped_conflict, error).",
 		},
-		[]opmetrics.Label{{Name: resultLabel, Help: "Outcome of the annotation write (updated, skipped_unchanged, skipped_notfound, skipped_conflict, error)."}},
-	)
-	rankingDurationSeconds = opmetrics.NewPrometheusHistogram(
-		crmetrics.Registry,
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: podDeletionCostSubsystem,
-			Name:      "ranking_duration_seconds",
-			Help:      "Duration of node ranking computation in seconds.",
-			Buckets:   metrics.DurationBuckets(),
-		},
-		[]opmetrics.Label{},
+		[]opmetrics.Label{{Name: resultLabel, Help: "Outcome of the annotation write."}},
 	)
 )

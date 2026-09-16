@@ -79,11 +79,11 @@ func makeCandidate(nodeName string, np *v1.NodePool, it *cloudprovider.InstanceT
 	sn := &state.StateNode{
 		Node: node,
 	}
-	// computeRescheduleDisruptionCost -> EvictionCost reads the
+	// ComputeRescheduleDisruptionCost -> EvictionCost reads the
 	// PodDeletionCostManagement feature gate from options on the context.
-	// Inject default Options so the gate lookup finds a context; the default
-	// (gate OFF) matches the fallback path these balanced-scoring tests
-	// exercise.
+	// Inject default Options so the gate lookup finds a context; direct
+	// gate-branching assertions live in pkg/controllers/disruption/suite_test.go
+	// ("Pod Eviction Cost" block).
 	return &Candidate{
 		StateNode:                sn,
 		instanceType:             it,

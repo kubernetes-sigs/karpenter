@@ -31,13 +31,13 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-// podsUpdatedDelta reads the current value of pods_updated_total for the given
+// podLabelsUpdatedDelta reads the current value of pod_labels_updated_total for the given
 // label combination, returning 0 when the collector has not yet emitted a
 // sample. crmetrics.Registry is process-global so counter values accumulate
 // across specs; capture pre, run the scenario, and assert on the delta.
-func podsUpdatedDelta(labels map[string]string) float64 {
+func podLabelsUpdatedDelta(labels map[string]string) float64 {
 	GinkgoHelper()
-	metric, ok := FindMetricWithLabelValues("karpenter_pod_deletion_cost_pods_updated_total", labels)
+	metric, ok := FindMetricWithLabelValues("karpenter_pod_deletion_cost_pod_labels_updated_total", labels)
 	if !ok || metric == nil {
 		return 0
 	}
@@ -67,7 +67,7 @@ var _ = Describe("Metrics", func() {
 		}
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		controller := deletioncost.NewController(fakeClock, env.Client, cloudProvider, cluster, queue)
+		controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
 		_, err := controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
@@ -76,7 +76,7 @@ var _ = Describe("Metrics", func() {
 		ExpectMetricGaugeValue(deletioncost.NodesRankedMetric, 3, map[string]string{metrics.NodePoolLabel: nodePool.Name})
 	})
 
-	It("should increment pods_updated_total{result=updated} on a successful annotation write", func() {
+	It("should increment pod_labels_updated_total{result=updated} on a successful annotation write", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -89,15 +89,15 @@ var _ = Describe("Metrics", func() {
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		before := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultUpdated})
+		before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultUpdated})
 		queue.Add(pod, -13, false)
 		ExpectObjectReconciled(ctx, env.Client, queue, pod)
-		after := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultUpdated})
+		after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultUpdated})
 		Expect(after-before).To(Equal(1.0),
-			"pods_updated_total{result=updated} should increment on a successful patch")
+			"pod_labels_updated_total{result=updated} should increment on a successful patch")
 	})
 
-	It("should increment pods_updated_total{result=error} when the patch surfaces a retryable error", func() {
+	It("should increment pod_labels_updated_total{result=error} when the patch surfaces a retryable error", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -112,11 +112,11 @@ var _ = Describe("Metrics", func() {
 
 		throttler := newThrottlingClient(env.Client, 1)
 		q := deletioncost.NewQueue(throttler)
-		before := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
+		before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
 		q.Add(pod, -7, false)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, q, pod)
-		after := podsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
+		after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
 		Expect(after-before).To(Equal(1.0),
-			"pods_updated_total{result=error} should increment on a per-pod patch failure")
+			"pod_labels_updated_total{result=error} should increment on a per-pod patch failure")
 	})
 })

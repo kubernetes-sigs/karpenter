@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -54,7 +53,6 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	if len(nodes) == 0 {
 		return nil, nil, nil, nil
 	}
-	defer metrics.Measure(rankingDurationSeconds, noLabels)()
 
 	// Cluster-wide PDB list. ValidatePodsDisruptable reuses this per node.
 	pdbs, err := pdb.NewLimits(ctx, kubeClient)
@@ -165,11 +163,18 @@ func classifyDisruptableNode(ctx context.Context, kubeClient client.Client, clk 
 	if verr != nil {
 		return partitionCleanupOnly
 	}
-	if hasNonRSOwnedPods(pods) || isConsolidationDisabled(node, nodePoolMap) || isInstanceTypeUnresolvable(node, nodePoolToInstanceTypesMap) {
+	if hasNonRSOwnedPods(pods) || isInstanceTypeUnresolvable(node, nodePoolToInstanceTypesMap) {
 		return partitionCleanupOnly
 	}
-	if isDrifted(node) {
+	// Check drift before consolidation-disabled so drifted nodes in a
+	// ConsolidateAfter=nil pool still land in Group B rather than Group D.
+	// The static-nodepool gate matches drift.ShouldDisrupt so we don't rank
+	// nodes the drift controller will never act on.
+	if isDrifted(node, nodePoolMap) {
 		return partitionDrifted
+	}
+	if isConsolidationDisabled(node, nodePoolMap) {
+		return partitionCleanupOnly
 	}
 	return partitionNormal
 }
@@ -232,11 +237,22 @@ func isGoingAway(node *state.StateNode) bool {
 	return false
 }
 
-func isDrifted(node *state.StateNode) bool {
+// isDrifted reports whether the node's NodeClaim carries a true Drifted
+// status condition AND is not owned by a static NodePool. Matches
+// drift.ShouldDisrupt so PDC and the drift controller agree on which nodes
+// the drift controller will act on.
+func isDrifted(node *state.StateNode, nodePoolMap map[string]*v1.NodePool) bool {
 	if node.NodeClaim == nil {
 		return false
 	}
-	return node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
+	if !node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue() {
+		return false
+	}
+	np, ok := nodePoolMap[node.Labels()[v1.NodePoolLabelKey]]
+	if ok && np != nil && np.Spec.Replicas != nil {
+		return false
+	}
+	return true
 }
 
 // hasNonRSOwnedPods reports whether any non-kube-system pod on the node has
@@ -280,7 +296,14 @@ func sortBySavingsRatio(ctx context.Context, kubeClient client.Client, nodes []*
 			it = m[labels[corev1.LabelInstanceTypeStable]]
 		}
 		offeringPrice := disruptionutils.ResolveOfferingPrice(labels, it)
-		pods, _ := n.Pods(ctx, kubeClient)
+		pods, err := n.Pods(ctx, kubeClient)
+		if err != nil {
+			// Transient informer read miss: log at V(1) and treat as
+			// zero-reschedulable so the base-cost floor drives the ratio.
+			// The next reconcile picks up the true pod list.
+			log.FromContext(ctx).V(1).WithValues("node", n.Name()).Error(err, "listing pods for savings-ratio sort; using base cost")
+			pods = nil
+		}
 		reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutils.IsReschedulable(p) })
 		disruptionCost := disruptionutils.ComputeRescheduleDisruptionCost(ctx, reschedulable)
 		ratio[n.Name()] = disruptionutils.SavingsRatio(offeringPrice, disruptionCost)

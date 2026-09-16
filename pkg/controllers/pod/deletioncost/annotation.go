@@ -26,9 +26,9 @@ import (
 // clearAnnotation removes pod-deletion-cost via merge-patch with optimistic
 // lock. MergeFromWithOptimisticLock is used so a concurrent writer of the
 // same annotation (customer kubectl, third-party HPAs, admission webhooks)
-// surfaces as a 409 Conflict — the queue's Reconcile then treats it as
+// surfaces as a 409 Conflict; the queue's Reconcile then treats it as
 // Skipped and lets the next cycle converge. See
-// pkg/controllers/nodeclaim/lifecycle/controller.go:295-309 for the same
+// pkg/controllers/nodeclaim/lifecycle/controller.go:306-320 for the same
 // annotation-race precedent.
 func clearAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.Pod) error {
 	// MergeFromWithOptions captures pod by pointer; mutate a copy so the diff is non-empty.

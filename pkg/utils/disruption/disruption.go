@@ -38,6 +38,9 @@ import (
 // designs/balanced-consolidation.md.
 const PerNodeBaseDisruptionCost = 1.0
 
+// ResolveOfferingPrice returns the instance-type offering price for a node's
+// zone and capacity-type labels, or 0 if the instance type is nil, the
+// offering is missing, or the price is NaN.
 func ResolveOfferingPrice(labels map[string]string, instanceType *cloudprovider.InstanceType) float64 {
 	if instanceType == nil {
 		return 0
@@ -136,6 +139,7 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 		cost += float64(*p.Spec.Priority) / math.Pow(2, 25)
 	}
 
+	// Clamp overall pod cost to [-10.0, 10.0] with the default at 1.0.
 	return lo.Clamp(cost, -10.0, 10.0)
 }
 
