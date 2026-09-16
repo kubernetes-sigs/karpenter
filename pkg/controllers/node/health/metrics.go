@@ -55,4 +55,5 @@ var NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
 		metrics.CapacityType,
 		ImageID,
 	},
+	opmetrics.Alpha,
 )
