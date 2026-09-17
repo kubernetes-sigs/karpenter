@@ -28,6 +28,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -52,6 +53,30 @@ var _ = Describe("TerminateFirstDrift", func() {
 		}}}})
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
+	}
+
+	// bindAntiAffinityPods binds `count` reschedulable, ReplicaSet-owned pods to the node that cannot co-locate (host
+	// anti-affinity), so rescheduling them requires `count` separate nodes.
+	bindAntiAffinityPods := func(node *corev1.Node, count int) {
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+		for i := 0; i < count; i++ {
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"tf-spread": "x"},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					}},
+				},
+				PodAntiRequirements: []corev1.PodAffinityTerm{{
+					TopologyKey:   corev1.LabelHostname,
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tf-spread": "x"}},
+				}},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+		}
 	}
 
 	Context("StaticDrift", func() {
@@ -195,6 +220,28 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
 			Expect(cmds[0].Replacements).To(HaveLen(0))
+			// The delete-only command must carry the pass-2 (credit-back) Results — that's what Record uses to nominate
+			// existing nodes for the freed pods. Pin the payload (kills the "drop Results" / "return pass-1" mutations):
+			// pass 2 places the pod on the credited reservation as a reserved NodeClaim; pass-1/empty Results would not.
+			Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
+			Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeReserved)).To(BeTrue())
+			Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
+		})
+
+		It("does NOT terminate-first when more reschedulable pods need the reservation than the freed slot can hold", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy, reserved-only pool
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			// Two reschedulable pods that can't co-locate need two nodes, but crediting the candidate's reservation frees
+			// only one slot. Pass 2 runs strict, so the surplus pod fails and we must NOT terminate-first — a fallback
+			// pass-2 would phantom-schedule both and wrongly terminate-first. Pins strict-vs-fallback in pass 2 (G1).
+			bindAntiAffinityPods(node, 2)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0)) // the candidate is reported Blocked, not silently skipped
 		})
 
 		It("does NOT terminate-first when the reservation is full AND otherwise unavailable (something else wrong)", func() {
@@ -210,6 +257,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			// The offering is unavailable, so the simulation can't stage a reserved replacement and drift is Blocked.
 			// Freeing the candidate's slot wouldn't fix an expiring/ICE'd reservation, so we must NOT terminate-first.
 			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0)) // the candidate is reported Blocked, not silently skipped
 		})
 
 		It("does NOT drift when TerminateFirstDrift is disabled and the reservation is full with no fallback (Blocked)", func() {
@@ -227,6 +275,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			// no command (matching upstream behavior for a full reserved-only node). Terminate-first is exactly what
 			// unblocks this case, and it's gated off here.
 			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0)) // the candidate is reported Blocked, not silently skipped
 		})
 
 		It("replaces-first when the reservation is full but an on-demand fallback exists", func() {
