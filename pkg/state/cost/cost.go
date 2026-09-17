@@ -53,6 +53,7 @@ var (
 		[]opmetrics.Label{
 			metrics.NodePool,
 		},
+		opmetrics.Alpha,
 	)
 )
 
