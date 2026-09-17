@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -237,22 +238,22 @@ func isGoingAway(node *state.StateNode) bool {
 	return false
 }
 
-// isDrifted reports whether the node's NodeClaim carries a true Drifted
-// status condition AND is not owned by a static NodePool. Matches
-// drift.ShouldDisrupt so PDC and the drift controller agree on which nodes
-// the drift controller will act on.
+// isDrifted mirrors drift.ShouldDisrupt (disruption/drift.go:58) so PDC and
+// the drift controller agree on drifted candidates. Static-pool nodes are
+// excluded: StaticDrift acts on them separately.
+//
+// TODO(followup): drift-condition read + IsStatic gate are duplicated across
+// disruption/drift.go:58, disruption/staticdrift.go:49, and other sites.
+// Track deduplication + PDC alignment with disruption.NewCandidate in a
+// separate PR post-merge.
 func isDrifted(node *state.StateNode, nodePoolMap map[string]*v1.NodePool) bool {
 	if node.NodeClaim == nil {
 		return false
 	}
-	if !node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue() {
+	if np := nodePoolMap[node.Labels()[v1.NodePoolLabelKey]]; np != nil && nodepoolutils.IsStatic(np) {
 		return false
 	}
-	np, ok := nodePoolMap[node.Labels()[v1.NodePoolLabelKey]]
-	if ok && np != nil && np.Spec.Replicas != nil {
-		return false
-	}
-	return true
+	return node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
 }
 
 // hasNonRSOwnedPods reports whether any non-kube-system pod on the node has
