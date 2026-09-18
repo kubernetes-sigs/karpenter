@@ -19,11 +19,13 @@ package node_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -65,7 +67,7 @@ var _ = BeforeSuite(func() {
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
-	metricsStateController = node.NewController(cluster)
+	metricsStateController = node.NewController(env.Clock, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -78,6 +80,7 @@ var _ = Describe("Node Metrics", func() {
 	var resources corev1.ResourceList
 
 	BeforeEach(func() {
+		env.Clock.SetTime(time.Now())
 		resources = corev1.ResourceList{
 			corev1.ResourcePods:   resource.MustParse("100"),
 			corev1.ResourceCPU:    resource.MustParse("5000"),
@@ -147,6 +150,94 @@ var _ = Describe("Node Metrics", func() {
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
 		}
+	})
+	Context("Expiry", func() {
+		const expireAfter = 30 * time.Minute
+		const terminationGracePeriod = 2 * time.Hour
+
+		var nodeClaim *v1.NodeClaim
+		var expiringNode *corev1.Node
+
+		BeforeEach(func() {
+			nodeClaim = test.NodeClaim(v1.NodeClaim{
+				Spec: v1.NodeClaimSpec{
+					ExpireAfter:            v1.MustParseNillableDuration(expireAfter.String()),
+					TerminationGracePeriod: &metav1.Duration{Duration: terminationGracePeriod},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID:  test.RandomProviderID(),
+					Allocatable: resources,
+				},
+			})
+			expiringNode = test.Node(test.NodeOptions{
+				ProviderID:  nodeClaim.Status.ProviderID,
+				Allocatable: resources,
+			})
+		})
+
+		// The NodeClaim creationTimestamp is assigned by the API server, so the countdown is aged by
+		// advancing the injected clock rather than by backdating the object.
+		expectExpiryMetrics := func(elapsed time.Duration) (float64, float64) {
+			GinkgoHelper()
+			ExpectApplied(ctx, env.Client, expiringNode, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{expiringNode}, []*v1.NodeClaim{nodeClaim})
+			env.Clock.Step(elapsed)
+			ExpectSingletonReconciled(ctx, metricsStateController)
+
+			expiration, found := FindMetricWithLabelValues("karpenter_nodes_time_until_expiration_seconds", map[string]string{"node_name": expiringNode.GetName()})
+			Expect(found).To(BeTrue())
+			forcedTermination, found := FindMetricWithLabelValues("karpenter_nodes_time_until_forced_termination_seconds", map[string]string{"node_name": expiringNode.GetName()})
+			Expect(found).To(BeTrue())
+			return expiration.GetGauge().GetValue(), forcedTermination.GetGauge().GetValue()
+		}
+
+		It("should count down to the expiration and forced termination deadlines", func() {
+			expiration, forcedTermination := expectExpiryMetrics(10 * time.Minute)
+			Expect(expiration).To(BeNumerically("~", (expireAfter - 10*time.Minute).Seconds(), 30))
+			Expect(forcedTermination).To(BeNumerically("~", (expireAfter + terminationGracePeriod - 10*time.Minute).Seconds(), 30))
+		})
+		It("should report a negative countdown once the expiration deadline has passed", func() {
+			expiration, forcedTermination := expectExpiryMetrics(45 * time.Minute)
+			Expect(expiration).To(BeNumerically("~", -(15 * time.Minute).Seconds(), 30))
+			Expect(forcedTermination).To(BeNumerically(">", 0))
+		})
+		It("should measure forced termination from the deletion timestamp once the NodeClaim is terminating", func() {
+			ExpectApplied(ctx, env.Client, expiringNode, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{expiringNode}, []*v1.NodeClaim{nodeClaim})
+			ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectSingletonReconciled(ctx, metricsStateController)
+
+			// Deletion happened well before the expiration deadline, so the countdown must not include expireAfter.
+			metric, found := FindMetricWithLabelValues("karpenter_nodes_time_until_forced_termination_seconds", map[string]string{"node_name": expiringNode.GetName()})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", terminationGracePeriod.Seconds(), 30))
+		})
+		It("should not emit the expiration metrics when the NodeClaim has neither expireAfter nor a termination grace period", func() {
+			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
+			nodeClaim.Spec.TerminationGracePeriod = nil
+
+			ExpectApplied(ctx, env.Client, expiringNode, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{expiringNode}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, metricsStateController)
+
+			_, found := FindMetricWithLabelValues("karpenter_nodes_time_until_expiration_seconds", map[string]string{"node_name": expiringNode.GetName()})
+			Expect(found).To(BeFalse())
+			_, found = FindMetricWithLabelValues("karpenter_nodes_time_until_forced_termination_seconds", map[string]string{"node_name": expiringNode.GetName()})
+			Expect(found).To(BeFalse())
+		})
+		It("should not emit the forced termination metric when the NodeClaim has no termination grace period", func() {
+			nodeClaim.Spec.TerminationGracePeriod = nil
+
+			ExpectApplied(ctx, env.Client, expiringNode, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{expiringNode}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, metricsStateController)
+
+			_, found := FindMetricWithLabelValues("karpenter_nodes_time_until_expiration_seconds", map[string]string{"node_name": expiringNode.GetName()})
+			Expect(found).To(BeTrue())
+			_, found = FindMetricWithLabelValues("karpenter_nodes_time_until_forced_termination_seconds", map[string]string{"node_name": expiringNode.GetName()})
+			Expect(found).To(BeFalse())
+		})
 	})
 	It("should remove the node metric gauge when the node is deleted", func() {
 		ExpectApplied(ctx, env.Client, node)

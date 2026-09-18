@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -66,6 +67,9 @@ var (
 	SystemOverhead      opmetrics.GaugeMetric
 	Lifetime            opmetrics.GaugeMetric
 	ClusterUtilization  opmetrics.GaugeMetric
+
+	TimeUntilExpiration        opmetrics.GaugeMetric
+	TimeUntilForcedTermination opmetrics.GaugeMetric
 )
 
 // Initialize metrics at runtime to ensure cloud provider's well-known labels are properly
@@ -148,6 +152,28 @@ func initializeMetrics() {
 		nodeLabelNames(),
 		opmetrics.Alpha,
 	)
+	TimeUntilExpiration = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "time_until_expiration_seconds",
+			Help:      "Seconds until the NodeClaim reaches its expireAfter deadline and Karpenter starts draining the node. Negative once the deadline has passed. Only emitted for NodeClaims with expireAfter set.",
+		},
+		nodeLabelNames(),
+		opmetrics.Alpha,
+	)
+	TimeUntilForcedTermination = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "time_until_forced_termination_seconds",
+			Help:      "Seconds until the NodeClaim's terminationGracePeriod elapses and the remaining pods are deleted regardless of PDBs. Negative once the deadline has passed. Only emitted for NodeClaims with terminationGracePeriod set that are either terminating or have expireAfter set.",
+		},
+		nodeLabelNames(),
+		opmetrics.Alpha,
+	)
 	ClusterUtilization = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
@@ -183,13 +209,15 @@ func nodeLabelNames() []opmetrics.Label {
 }
 
 type Controller struct {
+	clock       clock.Clock
 	cluster     *state.Cluster
 	metricStore *metrics.Store
 }
 
-func NewController(cluster *state.Cluster) *Controller {
+func NewController(clk clock.Clock, cluster *state.Cluster) *Controller {
 	initializeMetrics()
 	return &Controller{
+		clock:       clk,
 		cluster:     cluster,
 		metricStore: metrics.NewStore(),
 	}
@@ -204,7 +232,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	// Build per-node metrics
 	metricsMap := lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {
-		return client.ObjectKeyFromObject(n.Node).String(), buildMetrics(n)
+		return client.ObjectKeyFromObject(n.Node).String(), c.buildMetrics(n)
 	})
 
 	// Build cluster level metric
@@ -263,7 +291,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 	return res
 }
 
-func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
+func (c *Controller) buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	for gaugeMetric, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
 		SystemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
 		TotalPodRequests:    n.PodRequests(),
@@ -280,12 +308,53 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 			})
 		}
 	}
-	return append(res,
-		&metrics.StoreMetric{
-			GaugeMetric: Lifetime,
-			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+	res = append(res, &metrics.StoreMetric{
+		GaugeMetric: Lifetime,
+		Value:       c.clock.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+		Labels:      getNodeLabels(n),
+	})
+	if expirationTime, ok := getExpirationTime(n.NodeClaim); ok {
+		res = append(res, &metrics.StoreMetric{
+			GaugeMetric: TimeUntilExpiration,
+			Value:       expirationTime.Sub(c.clock.Now()).Seconds(),
 			Labels:      getNodeLabels(n),
 		})
+	}
+	if forcedTerminationTime, ok := getForcedTerminationTime(n.NodeClaim); ok {
+		res = append(res, &metrics.StoreMetric{
+			GaugeMetric: TimeUntilForcedTermination,
+			Value:       forcedTerminationTime.Sub(c.clock.Now()).Seconds(),
+			Labels:      getNodeLabels(n),
+		})
+	}
+	return res
+}
+
+// getExpirationTime returns the time at which the NodeClaim is eligible for expiration, matching the
+// deadline the expiration controller acts on.
+func getExpirationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
+	if nodeClaim == nil || nodeClaim.Spec.ExpireAfter.Duration == nil {
+		return time.Time{}, false
+	}
+	return nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration), true
+}
+
+// getForcedTerminationTime returns the time at which the remaining pods on the node are deleted regardless
+// of PDBs and pod terminationGracePeriodSeconds. Once termination has been initiated the deadline is known
+// exactly; before then, expiration is the only disruption Karpenter schedules in advance, so it is the only
+// deadline that can be anticipated.
+func getForcedTerminationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
+	if nodeClaim == nil || nodeClaim.Spec.TerminationGracePeriod == nil {
+		return time.Time{}, false
+	}
+	if !nodeClaim.DeletionTimestamp.IsZero() {
+		return nodeClaim.DeletionTimestamp.Add(nodeClaim.Spec.TerminationGracePeriod.Duration), true
+	}
+	expirationTime, ok := getExpirationTime(nodeClaim)
+	if !ok {
+		return time.Time{}, false
+	}
+	return expirationTime.Add(nodeClaim.Spec.TerminationGracePeriod.Duration), true
 }
 
 func getNodeLabelsWithResourceType(n *state.StateNode, resourceTypeName string) prometheus.Labels {
