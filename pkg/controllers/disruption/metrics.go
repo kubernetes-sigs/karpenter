@@ -29,11 +29,80 @@ const (
 	decisionLabel                = "decision"
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
+	policyLabel                  = "policy"
+)
+
+var (
+	MultiNodeConsolidationType = opmetrics.Value{
+		Name: "multi",
+		Help: "Consolidation that considers removing multiple nodes at once.",
+	}
+	SingleNodeConsolidationType = opmetrics.Value{
+		Name: "single",
+		Help: "Consolidation that considers removing a single node.",
+	}
+	EmptyConsolidationType = opmetrics.Value{
+		Name: "empty",
+		Help: "Consolidation that removes empty nodes.",
+	}
+)
+
+var (
+	ConsolidationType = opmetrics.Label{
+		Name:   ConsolidationTypeLabel,
+		Help:   "The consolidation algorithm that produced the decision.",
+		Values: []opmetrics.Value{MultiNodeConsolidationType, SingleNodeConsolidationType, EmptyConsolidationType},
+	}
+	// DecisionDim is the `decision` dimension for the voluntary-disruption decision
+	// counters, whose value is the command's action.
+	DecisionDim = opmetrics.Label{
+		Name: decisionLabel,
+		Help: "The disruption decision taken for the candidate(s).",
+		Values: []opmetrics.Value{
+			{
+				Name: string(NoOpDecision),
+				Help: "No disruption action was taken.",
+			},
+			{
+				Name: string(ReplaceDecision),
+				Help: "The candidate(s) were replaced with more efficient capacity.",
+			},
+			{
+				Name: string(DeleteDecision),
+				Help: "The candidate(s) were deleted without replacement.",
+			},
+		},
+	}
+	// ApprovalDim is the `decision` dimension for the balanced-consolidation move
+	// metrics, which score each candidate move and record whether it was approved or
+	// rejected — a disjoint value set from DecisionDim, so it is a separate Label.
+	ApprovalDim = opmetrics.Label{
+		Name: decisionLabel,
+		Help: "Whether a scored balanced-consolidation move was approved or rejected.",
+		Values: []opmetrics.Value{
+			{
+				Name: string(ApprovedDecision),
+				Help: "The move's cost savings justified the pod disruption; it was approved.",
+			},
+			{
+				Name: string(RejectedDecision),
+				Help: "The move's cost savings did not justify the pod disruption; it was rejected.",
+			},
+		},
+	}
+	Policy = opmetrics.Label{
+		Name: policyLabel,
+		Help: "The NodePool consolidation policy in effect for the move.",
+	}
 )
 
 func init() {
-	ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: MultiNodeConsolidationType})
-	ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: SingleNodeConsolidationType})
+	// Initialize the consolidation_type series that can time out to 0. Only the
+	// multi- and single-node algorithms run a bounded search that can hit a timeout;
+	// empty-node consolidation does not, so it is not pre-initialized here.
+	for _, ct := range []opmetrics.Value{MultiNodeConsolidationType, SingleNodeConsolidationType} {
+		ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: ct.Name})
+	}
 }
 
 var (
@@ -46,7 +115,8 @@ var (
 			Help:      "Duration of the disruption decision evaluation process in seconds. Labeled by method and consolidation type.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{metrics.ReasonLabel, ConsolidationTypeLabel},
+		[]opmetrics.Label{metrics.DisruptionReason, ConsolidationType},
+		opmetrics.Beta,
 	)
 	DecisionsPerformedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -56,7 +126,8 @@ var (
 			Name:      "decisions_total",
 			Help:      "Number of disruption decisions performed. Labeled by disruption decision, reason, and consolidation type.",
 		},
-		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+		[]opmetrics.Label{DecisionDim, metrics.DisruptionReason, ConsolidationType},
+		opmetrics.GA,
 	)
 	NodepoolDecisionsPerformed = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -66,7 +137,8 @@ var (
 			Name:      "decisions_by_nodepool_total",
 			Help:      "Number of disruption decisions performed by nodepool. Labeled by nodepool name, disruption decision, reason, and consolidation type.",
 		},
-		[]string{metrics.NodePoolLabel, decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+		[]opmetrics.Label{metrics.NodePool, DecisionDim, metrics.DisruptionReason, ConsolidationType},
+		opmetrics.Alpha,
 	)
 	EligibleNodes = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -76,7 +148,8 @@ var (
 			Name:      "eligible_nodes",
 			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption reason.",
 		},
-		[]string{metrics.ReasonLabel},
+		[]opmetrics.Label{metrics.DisruptionReason},
+		opmetrics.Beta,
 	)
 	ConsolidationTimeoutsTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -86,7 +159,8 @@ var (
 			Name:      "consolidation_timeouts_total",
 			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
 		},
-		[]string{ConsolidationTypeLabel},
+		[]opmetrics.Label{ConsolidationType},
+		opmetrics.Beta,
 	)
 	FailedValidationsTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -96,7 +170,8 @@ var (
 			Name:      "failed_validations_total",
 			Help:      "Number of candidates that were selected for disruption but failed validation. Labeled by consolidation type.",
 		},
-		[]string{ConsolidationTypeLabel},
+		[]opmetrics.Label{ConsolidationType},
+		opmetrics.Alpha,
 	)
 	NodePoolAllowedDisruptions = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -106,7 +181,8 @@ var (
 			Name:      "allowed_disruptions",
 			Help:      "The number of nodes for a given NodePool that can be concurrently disrupting at a point in time. Labeled by NodePool. Note that allowed disruptions can change very rapidly, as new nodes may be created and others may be deleted at any point.",
 		},
-		[]string{metrics.NodePoolLabel, metrics.ReasonLabel},
+		[]opmetrics.Label{metrics.NodePool, metrics.DisruptionReason},
+		opmetrics.GA,
 	)
 	NodePoolNodesConsumingBudgets = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -116,7 +192,8 @@ var (
 			Name:      "nodes_consuming_budgets",
 			Help:      "The number of nodes consuming the budget of a nodepool at a point in time. Labeled by NodePool.",
 		},
-		[]string{metrics.NodePoolLabel, metrics.ReasonLabel},
+		[]opmetrics.Label{metrics.NodePool, metrics.DisruptionReason},
+		opmetrics.Alpha,
 	)
 	DisruptionQueueFailuresTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -126,6 +203,28 @@ var (
 			Name:      "queue_failures_total",
 			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
-		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+		[]opmetrics.Label{DecisionDim, metrics.DisruptionReason, ConsolidationType},
+		opmetrics.Beta,
+	)
+	ConsolidationScoreHistogram = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Name:      "consolidation_score",
+			Help:      "Score of balanced consolidation moves. Labeled by decision, NodePool, and policy.",
+			Buckets:   []float64{0.1, 0.25, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0},
+		},
+		[]opmetrics.Label{ApprovalDim, metrics.NodePool, Policy},
+		opmetrics.Alpha,
+	)
+	ConsolidationMovesTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Name:      "consolidation_moves_total",
+			Help:      "Number of balanced consolidation moves. Labeled by decision, NodePool, and policy.",
+		},
+		[]opmetrics.Label{ApprovalDim, metrics.NodePool, Policy},
+		opmetrics.Alpha,
 	)
 )

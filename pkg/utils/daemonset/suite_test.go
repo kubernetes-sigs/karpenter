@@ -34,6 +34,27 @@ func TestReconciles(t *testing.T) {
 }
 
 var _ = Describe("DaemonSetUtils", func() {
+	It("should set unique Name and Namespace from the DaemonSet", func() {
+		ds1 := test.DaemonSet(test.DaemonSetOptions{
+			PodOptions: test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+			},
+		})
+		ds2 := test.DaemonSet(test.DaemonSetOptions{
+			PodOptions: test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}},
+			},
+		})
+		p1 := daemonset.PodForDaemonSet(ds1)
+		p2 := daemonset.PodForDaemonSet(ds2)
+		Expect(p1.Name).ToNot(BeEmpty())
+		Expect(p2.Name).ToNot(BeEmpty())
+		Expect(p1.Name).ToNot(Equal(p2.Name))
+		Expect(p1.Name).To(Equal(ds1.Name))
+		Expect(p1.Namespace).To(Equal(ds1.Namespace))
+		Expect(p2.Name).To(Equal(ds2.Name))
+		Expect(p2.Namespace).To(Equal(ds2.Namespace))
+	})
 	It("should merge resource limits into requests if no requests exists for the given container", func() {
 		inputRequirements := corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{

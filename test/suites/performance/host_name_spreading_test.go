@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
@@ -57,24 +56,24 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
 
 			// Performance assertions - hostname spreading may require more nodes
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("hostNameSpreading/scaleOut", 5*time.Minute)),
 				"Total scale-out time should be less than 5 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("hostNameSpreading/scaleOut", 0.38)),
 				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("hostNameSpreading/scaleOut", 0.40)),
 				"Average memory utilization should be greater than 55%")
-			Expect(scaleOutReport.KarpenterMemoryMB).To(BeNumerically("<", 300+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 300 MB during scale-out")
-			Expect(scaleOutReport.KarpenterCPUNanos).To(BeNumerically("<", 20*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 20s (100%) during scale-out")
+			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("hostNameSpreading/scaleOut", 680)),
+				"Karpenter controller P95 memory should be less than 680 MB during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("hostNameSpreading/scaleOut", 1.15)),
+				"Karpenter controller avg CPU should be less than 1.15 cores during scale-out")
 
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Scaling down deployments to trigger consolidation")
 			initialNodes := scaleOutReport.TotalNodes
 
 			// Scale down both deployments
-			smallDeployment.Spec.Replicas = lo.ToPtr(int32(350))
-			largeDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+			smallDeployment.Spec.Replicas = new(int32(350))
+			largeDeployment.Spec.Replicas = new(int32(350))
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring consolidation performance")
@@ -87,14 +86,14 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
 
 			// Consolidation assertions
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("hostNameSpreading/consolidation", 0.38)),
 				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("hostNameSpreading/consolidation", 0.40)),
 				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 300+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 300 MB during consolidation")
-			Expect(consolidationReport.KarpenterCPUNanos).To(BeNumerically("<", 24*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 24s (120%) during consolidation")
+			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("hostNameSpreading/consolidation", 575)),
+				"Karpenter controller P95 memory should be less than 575 MB during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("hostNameSpreading/consolidation", 1.00)),
+				"Karpenter controller avg CPU should be less than 1.00 cores during consolidation")
 
 		})
 	})

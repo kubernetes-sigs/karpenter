@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clock "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -43,7 +42,6 @@ var ctx context.Context
 var expirationController *expiration.Controller
 var env *test.Environment
 var cp *fake.CloudProvider
-var fakeClock *clock.FakeClock
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -52,11 +50,10 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
-	expirationController = expiration.NewController(fakeClock, env.Client, cp)
+	expirationController = expiration.NewController(env.Clock, env.Client, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -65,7 +62,7 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	ctx = options.ToContext(ctx, test.Options())
-	fakeClock.SetTime(time.Now())
+	env.Clock.SetTime(time.Now())
 })
 
 var _ = AfterEach(func() {
@@ -87,20 +84,23 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 		metrics.NodeClaimsDisruptedTotal.Reset()
+		metrics.PodsDisruptionInitiatedTotal.Reset()
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim)
 
 			// step forward to make the node expired
-			fakeClock.Step(60 * time.Second)
+			env.Clock.Step(60 * time.Second)
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel:   metrics.ExpiredReason,
-				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:              metrics.ExpiredReason,
+				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
 		})
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
@@ -108,13 +108,53 @@ var _ = Describe("Expiration", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 			// step forward to make the node expired
-			fakeClock.Step(60 * time.Second)
+			env.Clock.Step(60 * time.Second)
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel:   metrics.ExpiredReason,
-				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:              metrics.ExpiredReason,
+				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
+			})
+		})
+		It("should fire karpenter_pods_disruption_initiated_total by the count of reschedulable pods on the node when expired", func() {
+			// Bind 2 reschedulable pods to the node and 1 DaemonSet-owned pod (excluded).
+			nodeClaim.Status.NodeName = node.Name
+			isController := true
+			pod1 := test.Pod(test.PodOptions{NodeName: node.Name})
+			pod2 := test.Pod(test.PodOptions{NodeName: node.Name})
+			daemonsetPod := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1",
+						Kind:       "DaemonSet",
+						Name:       "ds",
+						UID:        "ds-uid",
+						Controller: &isController,
+					}},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod1, pod2, daemonsetPod)
+
+			// step forward to make the node expired
+			env.Clock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel:              metrics.ExpiredReason,
+				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
+			})
+			ExpectMetricCounterValue(metrics.PodsDisruptionInitiatedTotal, 2, map[string]string{
+				metrics.ReasonLabel:              metrics.ExpiredReason,
+				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
 		})
 	})
@@ -132,7 +172,7 @@ var _ = Describe("Expiration", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim)
 
 			// step forward to make the node expired
-			fakeClock.Step(60 * time.Second)
+			env.Clock.Step(60 * time.Second)
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 			if isNodeClaimManaged {
 				// with forceful termination, when we see a nodeclaim meets the conditions for expiration
@@ -163,7 +203,7 @@ var _ = Describe("Expiration", func() {
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// step forward to make the node expired
-		fakeClock.Step(60 * time.Second)
+		env.Clock.Step(60 * time.Second)
 		ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but nodeClaim will be
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
@@ -173,7 +213,7 @@ var _ = Describe("Expiration", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
 
-		fakeClock.SetTime(nodeClaim.CreationTimestamp.Add(time.Second * 100))
+		env.Clock.SetTime(nodeClaim.CreationTimestamp.Add(time.Second * 100))
 
 		result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
@@ -183,17 +223,21 @@ var _ = Describe("Expiration", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		// step forward to make the node expired
-		fakeClock.Step(60 * time.Second)
+		env.Clock.Step(60 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-			metrics.ReasonLabel:   metrics.ExpiredReason,
-			metrics.NodePoolLabel: nodePool.Name,
+			metrics.ReasonLabel:              metrics.ExpiredReason,
+			metrics.NodePoolLabel:            nodePool.Name,
+			metrics.ConsolidationPolicyLabel: "",
+			metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 		})
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-			metrics.ReasonLabel:   metrics.ExpiredReason,
-			metrics.NodePoolLabel: nodePool.Name,
+			metrics.ReasonLabel:              metrics.ExpiredReason,
+			metrics.NodePoolLabel:            nodePool.Name,
+			metrics.ConsolidationPolicyLabel: "",
+			metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 		})
 	})
 })

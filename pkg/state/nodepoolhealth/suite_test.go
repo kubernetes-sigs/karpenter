@@ -52,20 +52,20 @@ var _ = Describe("NodePoolHealthState", func() {
 		done := make(chan bool, 4)
 		sameUID := types.UID("test")
 		// Add exactly 2 false values (50% of buffer size 4)
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			go func() {
 				defer func() { done <- true }()
 				concurrentState.Update(sameUID, false)
 			}()
 		}
 		// Add exactly 2 true values
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			go func() {
 				defer func() { done <- true }()
 				concurrentState.Update(sameUID, true)
 			}()
 		}
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			<-done
 		}
 		// With proper locks: exactly 50% false = StatusUnhealthy

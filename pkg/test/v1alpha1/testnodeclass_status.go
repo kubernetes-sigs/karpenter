@@ -26,8 +26,8 @@ type TestNodeClassStatus struct {
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
-func (t *TestNodeClass) StatusConditions() status.ConditionSet {
-	return status.NewReadyConditions().For(t)
+func (t *TestNodeClass) StatusConditions(opts ...status.ForOption) status.ConditionSet {
+	return status.NewReadyConditions().For(t, opts...)
 }
 
 func (t *TestNodeClass) GetConditions() []status.Condition {

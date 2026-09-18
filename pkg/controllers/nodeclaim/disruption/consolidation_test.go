@@ -45,7 +45,7 @@ var _ = Describe("Underutilized", func() {
 			},
 		})
 		// set the lastPodEvent to 5 minutes in the past
-		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
+		nodeClaim.Status.LastPodEventTime.Time = env.Clock.Now().Add(-5 * time.Minute)
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, env.Client, nodeClaim, nodePool)
 	})
@@ -65,18 +65,18 @@ var _ = Describe("Underutilized", func() {
 				},
 			},
 		})
-		unmanagedNodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
+		unmanagedNodeClaim.Status.LastPodEventTime.Time = env.Clock.Now().Add(-5 * time.Minute)
 		unmanagedNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, env.Client, unmanagedNodeClaim, nodePool)
 
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
-		unmanagedNodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
+		unmanagedNodeClaim.Status.LastPodEventTime.Time = env.Clock.Now()
 		ExpectApplied(ctx, env.Client, unmanagedNodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
 		unmanagedNodeClaim = ExpectExists(ctx, env.Client, unmanagedNodeClaim)
 		Expect(unmanagedNodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsUnknown()).To(BeTrue())
 
-		fakeClock.Step(1 * time.Minute)
+		env.Clock.Step(1 * time.Minute)
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
 		unmanagedNodeClaim = ExpectExists(ctx, env.Client, unmanagedNodeClaim)
@@ -84,13 +84,13 @@ var _ = Describe("Underutilized", func() {
 	})
 	It("should mark NodeClaims as consolidatable", func() {
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
-		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
+		nodeClaim.Status.LastPodEventTime.Time = env.Clock.Now()
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeFalse())
 
-		fakeClock.Step(1 * time.Minute)
+		env.Clock.Step(1 * time.Minute)
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -101,20 +101,20 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.Status.LastPodEventTime.Time = time.Time{}
 
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		fakeClock.SetTime(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).LastTransitionTime.Time)
+		env.Clock.SetTime(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).LastTransitionTime.Time)
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeFalse())
 
-		fakeClock.Step(1 * time.Minute)
+		env.Clock.Step(1 * time.Minute)
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from the nodeClaim when lastPodEvent is too recent", func() {
-		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
+		nodeClaim.Status.LastPodEventTime.Time = env.Clock.Now()
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		ExpectApplied(ctx, env.Client, nodeClaim)
 

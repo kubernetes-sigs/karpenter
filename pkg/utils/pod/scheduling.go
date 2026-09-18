@@ -139,6 +139,10 @@ func IsPreempting(pod *corev1.Pod) bool {
 	return pod.Status.NominatedNodeName != ""
 }
 
+func IsPending(pod *corev1.Pod) bool {
+	return pod.Status.Phase == corev1.PodPending
+}
+
 func IsTerminal(pod *corev1.Pod) bool {
 	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }
@@ -266,8 +270,12 @@ func HasPodAntiAffinity(pod *corev1.Pod) bool {
 			len(pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0)
 }
 
-// HasDRARequirements returns true if any pod containers consume ResourceClaims
+// HasDRARequirements returns true if the pod references any ResourceClaims,
+// either at the pod level or consumed by any of its containers.
 func HasDRARequirements(pod *corev1.Pod) bool {
+	if len(pod.Spec.ResourceClaims) > 0 {
+		return true
+	}
 	for _, container := range pod.Spec.InitContainers {
 		if len(container.Resources.Claims) > 0 {
 			return true

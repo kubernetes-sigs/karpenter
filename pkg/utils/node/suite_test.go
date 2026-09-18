@@ -18,11 +18,15 @@ package node_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -37,6 +41,15 @@ var (
 	ctx context.Context
 	env *test.Environment
 )
+
+type listErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c *listErrorClient) List(context.Context, client.ObjectList, ...client.ListOption) error {
+	return c.err
+}
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -92,5 +105,63 @@ var _ = Describe("NodeUtils", func() {
 		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
+	})
+	It("should add node context to pod listing errors", func() {
+		node := test.Node()
+		listErr := errors.New("api unavailable")
+		kubeClient := &listErrorClient{Client: env.Client, err: listErr}
+
+		_, err := nodeutils.GetPods(ctx, kubeClient, node.Name)
+		Expect(err).To(MatchError(fmt.Sprintf("listing pods, %s (Node=%s)", listErr, node.Name)))
+		Expect(errors.Is(err, listErr)).To(BeTrue())
+
+		_, err = nodeutils.GetCurrentlyReschedulablePods(ctx, kubeClient, env.Clock, test.NewEventRecorder(), node)
+		Expect(err).To(MatchError(fmt.Sprintf("listing pods, %s (Node=%s)", listErr, node.Name)))
+		Expect(errors.Is(err, listErr)).To(BeTrue())
+	})
+	Context("ReschedulablePods", func() {
+		It("should return no pods for an empty node name", func() {
+			pods, err := nodeutils.ReschedulablePods(ctx, env.Client, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pods).To(BeEmpty())
+		})
+		It("should return no pods when no pods are bound to the node", func() {
+			testNode = test.Node()
+			ExpectApplied(ctx, env.Client, testNode)
+			pods, err := nodeutils.ReschedulablePods(ctx, env.Client, testNode.Name)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pods).To(BeEmpty())
+		})
+		It("should return only reschedulable pods bound to the node", func() {
+			testNode = test.Node()
+			ExpectApplied(ctx, env.Client, testNode)
+			isController := true
+			// 2 reschedulable pods (active, no DaemonSet/Node owner).
+			pod1 := test.Pod(test.PodOptions{NodeName: testNode.Name})
+			pod2 := test.Pod(test.PodOptions{NodeName: testNode.Name})
+			// 1 DaemonSet-owned pod (excluded by IsReschedulable).
+			daemonsetPod := test.Pod(test.PodOptions{
+				NodeName: testNode.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1",
+						Kind:       "DaemonSet",
+						Name:       "ds",
+						UID:        "ds-uid",
+						Controller: &isController,
+					}},
+				},
+			})
+			// 1 pod bound to a different node (excluded by field selector).
+			otherNode := test.Node()
+			ExpectApplied(ctx, env.Client, otherNode)
+			otherPod := test.Pod(test.PodOptions{NodeName: otherNode.Name})
+
+			ExpectApplied(ctx, env.Client, pod1, pod2, daemonsetPod, otherPod)
+
+			pods, err := nodeutils.ReschedulablePods(ctx, env.Client, testNode.Name)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pods).To(HaveLen(2))
+		})
 	})
 })

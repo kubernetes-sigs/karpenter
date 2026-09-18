@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -31,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -50,23 +53,24 @@ type Registration struct {
 	recorder          events.Recorder
 	npState           *nodepoolhealth.State
 	registrationHooks []cloudprovider.NodeLifecycleHook
+	clock             clock.Clock
 }
 
 //nolint:gocyclo
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered); !cond.IsUnknown() {
 		// Ensure that we always set the status condition to the latest generation
-		nodeClaim.StatusConditions().Set(*cond)
+		nodeClaim.StatusConditions(status.WithClock(r.clock)).Set(*cond)
 		return reconcile.Result{}, nil
 	}
 	node, err := nodeclaimutils.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
 	if err != nil {
 		if nodeclaimutils.IsNodeNotFoundError(err) {
-			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "NodeNotFound", "Node not registered with cluster")
+			nodeClaim.StatusConditions(status.WithClock(r.clock)).SetUnknownWithReason(v1.ConditionTypeRegistered, "NodeNotFound", "Node not registered with cluster")
 			return reconcile.Result{}, nil
 		}
 		if nodeclaimutils.IsDuplicateNodeError(err) {
-			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRegistered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
+			nodeClaim.StatusConditions(status.WithClock(r.clock)).SetFalse(v1.ConditionTypeRegistered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for nodeclaim, %w", err)
@@ -113,11 +117,12 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 		return hooksResult, hookErrors
 	}
 	log.FromContext(ctx).Info("registered nodeclaim")
-	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+	nodeClaim.StatusConditions(status.WithClock(r.clock)).SetTrue(v1.ConditionTypeRegistered)
 	nodeClaim.Status.NodeName = node.Name
 
 	metrics.NodesCreatedTotal.Inc(map[string]string{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.ZoneLabel:     nodeClaim.Labels[corev1.LabelTopologyZone],
 	})
 	if err := r.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
 		if errors.IsConflict(err) {
@@ -164,7 +169,7 @@ func (r *Registration) checkRegistrationHooks(ctx context.Context, nodeClaim *v1
 
 	if len(pendingHooks) > 0 {
 		log.FromContext(ctx).V(1).Info("awaiting registration hooks", "hooks", pendingHooks)
-		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "RegistrationHookPending", strings.Join(pendingHooks, ", "))
+		nodeClaim.StatusConditions(status.WithClock(r.clock)).SetUnknownWithReason(v1.ConditionTypeRegistered, "RegistrationHookPending", strings.Join(pendingHooks, ", "))
 		return mergedResult, multierr.Combine(errs...)
 	}
 	return reconcile.Result{}, nil
@@ -177,7 +182,7 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 	if nodePoolName != "" {
 		nodePool := &v1.NodePool{}
 		if err := r.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-			return err
+			return serrors.Wrap(fmt.Errorf("getting nodepool, %w", err), "NodePool", klog.KRef("", nodePoolName))
 		}
 		if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 			return o.Kind == object.GVK(nodePool).Kind && o.UID == nodePool.UID
@@ -185,12 +190,12 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 			return nil
 		}
 		stored := nodePool.DeepCopy()
-		if r.npState.DryRun(nodePool.UID, true).Status() == nodepoolhealth.StatusHealthy && nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+		if r.npState.DryRun(nodePool.UID, true).Status() == nodepoolhealth.StatusHealthy && nodePool.StatusConditions(status.WithClock(r.clock)).SetTrue(v1.ConditionTypeNodeRegistrationHealthy) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the status condition list
 			if err := r.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-				return err
+				return serrors.Wrap(fmt.Errorf("patching nodepool status, %w", err), "NodePool", klog.KObj(nodePool))
 			}
 		}
 		r.npState.Update(nodePool.UID, true)

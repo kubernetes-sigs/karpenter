@@ -45,8 +45,17 @@ type PerformanceReport struct {
 	PodsPerNode             float64       `json:"pods_per_node"`
 	Rounds                  int           `json:"rounds"`
 	Timestamp               time.Time     `json:"timestamp"`
-	KarpenterMemoryMB       float64       `json:"karpenter_memory_mb"`
-	KarpenterCPUNanos       int64         `json:"karpenter_cpu_nanos"`
-	MemoryProfileData       []byte        `json:"-"` // pprof heap profile at peak memory
-	CPUProfileData          []byte        `json:"-"` // pprof cpu profile at peak
+
+	// Karpenter pod resource usage from Kubernetes Metrics API (container-level)
+	KarpenterP95MemoryMB float64 `json:"karpenter_p95_memory_mb"`
+	KarpenterAvgMemoryMB float64 `json:"karpenter_avg_memory_mb"`
+	KarpenterMaxMemoryMB float64 `json:"karpenter_max_memory_mb"`
+	KarpenterP95CPUCores float64 `json:"karpenter_p95_cpu_cores"`
+	KarpenterAvgCPUCores float64 `json:"karpenter_avg_cpu_cores"`
+	KarpenterMaxCPUCores float64 `json:"karpenter_max_cpu_cores"`
+	MetricsSampleCount   int     `json:"metrics_sample_count"`
+
+	// pprof debug artifacts (not used for assertions, saved for offline analysis)
+	MemoryProfileData []byte `json:"-"`
+	CPUProfileData    []byte `json:"-"`
 }

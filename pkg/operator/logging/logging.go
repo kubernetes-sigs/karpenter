@@ -99,17 +99,17 @@ func (i ignoreDebugEventsSink) Init(ri logr.RuntimeInfo) {
 	i.sink.Init(ri)
 }
 func (i ignoreDebugEventsSink) Enabled(level int) bool { return i.sink.Enabled(level) }
-func (i ignoreDebugEventsSink) Info(level int, msg string, keysAndValues ...interface{}) {
+func (i ignoreDebugEventsSink) Info(level int, msg string, keysAndValues ...any) {
 	// ignore debug "events" logs
 	if level == 1 && i.name == "events" {
 		return
 	}
 	i.sink.Info(level, msg, keysAndValues...)
 }
-func (i ignoreDebugEventsSink) Error(err error, msg string, keysAndValues ...interface{}) {
+func (i ignoreDebugEventsSink) Error(err error, msg string, keysAndValues ...any) {
 	i.sink.Error(err, msg, keysAndValues...)
 }
-func (i ignoreDebugEventsSink) WithValues(keysAndValues ...interface{}) logr.LogSink {
+func (i ignoreDebugEventsSink) WithValues(keysAndValues ...any) logr.LogSink {
 	return &ignoreDebugEventsSink{name: i.name, sink: i.sink.WithValues(keysAndValues...)}
 }
 func (i ignoreDebugEventsSink) WithName(name string) logr.LogSink {

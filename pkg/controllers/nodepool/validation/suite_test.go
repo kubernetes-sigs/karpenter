@@ -54,7 +54,7 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cp = fake.NewCloudProvider()
-	nodePoolValidationController = NewController(env.Client, cp)
+	nodePoolValidationController = NewController(env.Clock, env.Client, cp)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)

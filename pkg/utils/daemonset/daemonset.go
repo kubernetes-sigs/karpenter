@@ -19,13 +19,20 @@ package daemonset
 import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func PodForDaemonSet(daemonSet *appsv1.DaemonSet) *corev1.Pod {
 	if daemonSet == nil {
 		return nil
 	}
-	pod := &corev1.Pod{Spec: daemonSet.Spec.Template.Spec}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      daemonSet.Name,
+			Namespace: daemonSet.Namespace,
+		},
+		Spec: daemonSet.Spec.Template.Spec,
+	}
 	// The API server performs defaulting to merge limits into requests for pods. However, this is not performed for higher
 	// level objects (e.g. deployments, daemonsets, etc). We should perform this defaulting ourselves when we create a fake
 	// pod for a daemonset.

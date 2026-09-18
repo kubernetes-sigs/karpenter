@@ -29,11 +29,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	corev1 "k8s.io/api/core/v1"
 
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/capacitybuffer"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
@@ -57,16 +62,27 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	statenodeclaimgc "sigs.k8s.io/karpenter/pkg/controllers/state/nodeclaimgc"
 	staticdeprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
 	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
 )
 
 type ControllerOptions struct {
-	registrationHooks []cloudprovider.NodeLifecycleHook
+	registrationHooks    []cloudprovider.NodeLifecycleHook
+	disableVPAPrediction bool
+}
+
+// WithoutVPAPrediction disables the VPA prediction controller. Use this when
+// a different prediction source is registered separately.
+func WithoutVPAPrediction() option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.disableVPAPrediction = true
+	}
 }
 
 // WithRegistrationHook registers a hook that blocks Karpenter from marking a node as registered
@@ -89,18 +105,20 @@ func NewControllers(
 	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
+	predictionStore *prediction.Store,
 	opts ...option.Function[ControllerOptions],
 ) []controller.Controller {
 	o := option.Resolve(opts...)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
-	evictionQueue := terminator.NewQueue(kubeClient, recorder)
+	deviceAllocationController := deviceallocation.NewController(kubeClient)
+	virtualPodCache := virtualpods.NewVirtualPodCache(kubeClient)
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache)
+	evictionQueue := terminator.NewQueue(clock, kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
-
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue, clusterCost),
 		provisioning.NewPodController(kubeClient, p, cluster),
 		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient, cloudProvider),
@@ -111,11 +129,12 @@ func NewControllers(
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
+		statenodeclaimgc.NewController(kubeClient, cluster),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
-		nodepoolreadiness.NewController(kubeClient, cloudProvider),
-		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider, npState),
+		nodepoolreadiness.NewController(clock, kubeClient, cloudProvider),
+		nodepoolregistrationhealth.NewController(clock, kubeClient, cloudProvider, npState),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
-		nodepoolvalidation.NewController(kubeClient, cloudProvider),
+		nodepoolvalidation.NewController(clock, kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState, o.registrationHooks),
@@ -125,6 +144,10 @@ func NewControllers(
 		nodehydration.NewController(kubeClient, cloudProvider),
 	}
 
+	if !options.FromContext(ctx).IgnoreDRARequests {
+		controllers = append(controllers, deviceAllocationController)
+	}
+
 	if !options.FromContext(ctx).DisableClusterStateObservability {
 		controllers = append(controllers,
 			metricspod.NewController(kubeClient, cluster),
@@ -132,20 +155,20 @@ func NewControllers(
 			metricsnode.NewController(cluster),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.EmitDeprecatedMetrics,
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey)...),
 			),
 			status.NewController[*v1.NodePool](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.EmitDeprecatedMetrics,
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 			),
 			status.NewGenericObjectController[*corev1.Node](
 				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"),
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey, v1.NodeInitializedLabelKey)...)),
 		)
@@ -157,12 +180,34 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
-		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock))
+		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))
 		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock, recorder))
 	}
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
-		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
+		controllers = append(controllers, nodeoverlay.NewController(clock, kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
+	}
+
+	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
+		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p, virtualPodCache))
+		if !options.FromContext(ctx).DisableClusterStateObservability {
+			// Emit the standard operator_status_condition_* metrics for CapacityBuffer.
+			// A GenericObjectController reads status.conditions reflectively, so the
+			// upstream CapacityBuffer type is used as-is without implementing operatorpkg's
+			// status.Object interface or persisting a Karpenter-specific Ready condition.
+			controllers = append(controllers,
+				status.NewGenericObjectController[*autoscalingv1beta1.CapacityBuffer](
+					kubeClient,
+					mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
+					status.EmitDeprecatedMetrics,
+					status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
+				),
+			)
+		}
+	}
+
+	if !o.disableVPAPrediction {
+		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
 	}
 
 	return controllers

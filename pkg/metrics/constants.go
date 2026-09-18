@@ -26,16 +26,26 @@ const (
 	// Common namespace for application metrics.
 	Namespace = "karpenter"
 
-	NodePoolLabel         = "nodepool"
-	ReasonLabel           = "reason"
-	ResourceTypeLabel     = "resource_type"
-	CapacityTypeLabel     = "capacity_type"
-	MinValuesRelaxedLabel = "min_values_relaxed"
+	// Metric label-name constants live in labels.go alongside their Label
+	// descriptions (help text and stable values).
 
 	// Reasons for CREATE/DELETE shared metrics
-	ProvisionedReason = "provisioned"
-	ExpiredReason     = "expired"
-	UnhealthyReason   = "unhealthy"
+	ProvisionedReason          = "provisioned"
+	ExpiredReason              = "expired"
+	UnhealthyReason            = "unhealthy"
+	GarbageCollectedReason     = "garbage_collected"
+	InsufficientCapacityReason = "insufficient_capacity"
+	NodeClassNotReadyReason    = "nodeclass_not_ready"
+	// Reasons emitted by the NodeClaim liveness controller when a NodeClaim is
+	// disrupted for failing to register or launch in time.
+	RegistrationTimeoutReason = "registration_timeout"
+	LaunchTimeoutReason       = "launch_timeout"
+
+	// termination_mode label values. Graceful and Eventual are also the canonical
+	// values for the disruption Graceful/Eventual classes in the disruption controller.
+	TerminationModeGraceful = "graceful"
+	TerminationModeEventual = "eventual"
+	TerminationModeForceful = "forceful"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.

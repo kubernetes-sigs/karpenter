@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
@@ -171,16 +172,26 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	}
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).Info("deleting unhealthy node")
-	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       metrics.UnhealthyReason,
-		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
-	})
+	labels := map[string]string{
+		metrics.ReasonLabel:              metrics.UnhealthyReason,
+		metrics.NodePoolLabel:            node.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel:        node.Labels[v1.CapacityTypeLabelKey],
+		metrics.ConsolidationPolicyLabel: "",
+		metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
+	}
+	metrics.NodeClaimsDisruptedTotal.Inc(labels)
+	// Pods on the node have not yet started draining at this point — list captures
+	// the pre-disruption state. Errors don't fail the reconcile; the metric reports 0.
+	reschedulablePods, err := nodeutils.ReschedulablePods(ctx, c.kubeClient, node.Name)
+	if err != nil {
+		log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", err.Error())
+	}
+	metrics.PodsDisruptionInitiatedTotal.Add(float64(len(reschedulablePods)), labels)
 	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
-		Condition:                 pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
+		ConditionLabel:            pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
-		ImageID:                   nodeClaim.Status.ImageID,
+		ImageIDLabel:              nodeClaim.Status.ImageID,
 	})
 	return reconcile.Result{}, nil
 }
@@ -196,7 +207,7 @@ func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.Node
 			terminationTime := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration)
 			// Determine requeue time
 			if requeueTime.IsZero() || requeueTime.After(terminationTime) {
-				nc = lo.ToPtr(nodeCondition)
+				nc = new(nodeCondition)
 				cpTerminationDuration = policy.TolerationDuration
 				requeueTime = terminationTime
 			}
@@ -245,12 +256,12 @@ func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOpt
 	}
 	unhealthyNodeCount := lo.CountBy(nodeList.Items, func(node corev1.Node) bool {
 		_, found := lo.Find(c.cloudProvider.RepairPolicies(), func(policy cloudprovider.RepairPolicy) bool {
-			nodeCondition := nodeutils.GetCondition(lo.ToPtr(node), policy.ConditionType)
+			nodeCondition := nodeutils.GetCondition(new(node), policy.ConditionType)
 			return nodeCondition.Status == policy.ConditionStatus
 		})
 		return found
 	})
-	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(allowedUnhealthyPercent), len(nodeList.Items), true))
+	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(new(allowedUnhealthyPercent), len(nodeList.Items), true))
 	return unhealthyNodeCount <= threshold, nil
 }
 

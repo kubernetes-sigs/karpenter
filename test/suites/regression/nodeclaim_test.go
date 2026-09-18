@@ -31,7 +31,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/awslabs/operatorpkg/object"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -153,7 +152,7 @@ var _ = Describe("NodeClaim", func() {
 					Kind:               "NodeClaim",
 					Name:               nodeClaim.Name,
 					UID:                nodeClaim.UID,
-					BlockOwnerDeletion: lo.ToPtr(true),
+					BlockOwnerDeletion: new(true),
 				},
 			))
 			env.EventuallyExpectCreatedNodeClaimCount("==", 1)

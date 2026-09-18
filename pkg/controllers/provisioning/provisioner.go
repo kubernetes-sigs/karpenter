@@ -30,11 +30,14 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
+
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -47,12 +50,14 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/utils/daemonset"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
@@ -77,29 +82,33 @@ func WithReason(reason string) func(*LaunchOptions) {
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	cloudProvider  cloudprovider.CloudProvider
-	kubeClient     client.Client
-	batcher        *Batcher[types.UID]
-	volumeTopology *scheduler.VolumeTopology
-	cluster        *state.Cluster
-	recorder       events.Recorder
-	cm             *pretty.ChangeMonitor
-	clock          clock.Clock
+	cloudProvider              cloudprovider.CloudProvider
+	kubeClient                 client.Client
+	batcher                    *Batcher[types.UID]
+	volumeTopology             *scheduler.VolumeTopology
+	cluster                    *state.Cluster
+	recorder                   events.Recorder
+	cm                         *pretty.ChangeMonitor
+	clock                      clock.Clock
+	deviceAllocationController *deviceallocation.Controller
+	virtualPodCache            *virtualpods.Cache
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
-	clock clock.Clock,
+	clock clock.Clock, deviceAllocationController *deviceallocation.Controller, virtualPodCache *virtualpods.Cache,
 ) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher[types.UID](clock),
-		cloudProvider:  cloudProvider,
-		kubeClient:     kubeClient,
-		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
-		cluster:        cluster,
-		recorder:       recorder,
-		cm:             pretty.NewChangeMonitor(),
-		clock:          clock,
+		batcher:                    NewBatcher[types.UID](clock),
+		cloudProvider:              cloudProvider,
+		kubeClient:                 kubeClient,
+		volumeTopology:             scheduler.NewVolumeTopology(kubeClient),
+		cluster:                    cluster,
+		recorder:                   recorder,
+		cm:                         pretty.NewChangeMonitor(),
+		clock:                      clock,
+		deviceAllocationController: deviceAllocationController,
+		virtualPodCache:            virtualPodCache,
 	}
 	return p
 }
@@ -137,6 +146,18 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	results, err := p.Schedule(ctx)
 	if err != nil {
 		return reconciler.Result{}, err
+	}
+	// Update CapacityBuffer state. Two things happen here:
+	// 1. Patch the Provisioning condition on each buffer (FitsExistingCapacity vs RequiresNewCapacity).
+	// 2. Update cluster.bufferPodCounts so the emptiness disruption path knows
+	//    which nodes host buffer capacity and should not be deleted as "empty".
+	//    Consolidation does NOT use this — it naturally accounts for buffer pods
+	//    because GetPendingPods injects them into the simulation's pending set.
+	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
+		if err := p.updateBufferProvisioningStatus(ctx, results); err != nil {
+			log.FromContext(ctx).Error(err, "updating CapacityBuffer provisioning status")
+		}
+		p.cluster.UpdateBufferPodCounts(bufferPodCountsFromResults(results))
 	}
 	if len(results.NewNodeClaims) == 0 {
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
@@ -194,6 +215,12 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	})
 	scheduler.IgnoredPodCount.Set(float64(len(rejectedPods)), nil)
 	p.consolidationWarnings(ctx, pods)
+	// Inject CapacityBuffer virtual pods AFTER the Validate filter so we don't
+	// run PVC topology checks on synthetic pods or pollute cluster state with
+	// their "decisions". Gated by the feature flag.
+	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
+		pods = append(pods, p.virtualPodCache.GetAll(ctx)...)
+	}
 	return pods, nil
 }
 
@@ -239,6 +266,7 @@ func (p *Provisioner) NewScheduler(
 	ctx context.Context,
 	pods []*corev1.Pod,
 	stateNodes []*state.StateNode,
+	deletingPodUIDs sets.Set[types.UID],
 	opts ...scheduler.Options,
 ) (*scheduler.Scheduler, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
@@ -293,6 +321,14 @@ func (p *Provisioner) NewScheduler(
 		return nil, fmt.Errorf("getting volume topology requirements, %w", err)
 	}
 
+	// Inject cluster-level default topology spread constraints (from --scheduler-config) into the scheduling-time pod
+	// copies for any pod that declares none of its own, mirroring kube-scheduler's PodTopologySpread plugin. This is
+	// done here, once at ingestion (before the first topology.Update), so all downstream machinery - TopologyGroup
+	// synthesis, ScheduleAnyway relaxation, and consolidation - flows through the existing per-pod path with no new
+	// logic. The injected constraints exist only on these scheduling-time copies and are never written back to the API
+	// server.
+	scheduler.NewDefaultTopologySpreadInjector(p.kubeClient).Inject(ctx, pods)
+
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
 	if err != nil {
@@ -302,8 +338,25 @@ func (p *Provisioner) NewScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
+
+	// Build the DRA device allocator for this scheduling loop. Slice/device gathering happens here (rather than in the
+	// scheduler) so the same filtering can be reused by other schedulers, e.g. disruption. When DRA support is disabled,
+	// the allocator is left nil and the scheduler short-circuits DRA pods.
+	var allocator *dynamicresources.Allocator
+	if !options.FromContext(ctx).IgnoreDRARequests {
+		inClusterSlices, err := p.gatherResourceSlices(ctx, stateNodes)
+		if err != nil {
+			return nil, fmt.Errorf("gathering resourceslices, %w", err)
+		}
+		allocatedDevices, err := p.gatherAllocatedDevices(ctx, deletingPodUIDs)
+		if err != nil {
+			return nil, fmt.Errorf("gathering allocated devices, %w", err)
+		}
+		allocator = dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, dynamicresources.BuildAttributeBindings(instanceTypes), p.kubeClient, deletingPodUIDs)
+	}
+
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, allocator, opts...), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -341,6 +394,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(pods) == 0 {
 		return scheduler.Results{}, nil
 	}
+	deletingPodUIDs := sets.New(lo.Map(deletingNodePods, func(p *corev1.Pod, _ int) types.UID { return p.UID })...)
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
 
 	opts := []scheduler.Options{
@@ -355,6 +409,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		ctx,
 		pods,
 		nodes.Active(),
+		deletingPodUIDs,
 		opts...,
 	)
 	if err != nil {
@@ -401,11 +456,15 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 			"duration", time.Since(start),
 		).Info("found provisionable pod(s)")
 	}
-	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
-	p.cluster.MarkPodSchedulingDecisions(ctx, results.PodErrors, results.NodePoolToPodMapping(),
+	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods.
+	// Virtual buffer pods are excluded — they never exist in etcd, so their entries would never be
+	// cleaned up and would leak memory when buffers are deleted or scaled down.
+	p.cluster.MarkPodSchedulingDecisions(ctx,
+		filterVirtualPodErrors(results.PodErrors),
+		filterVirtualPodMapping(results.NodePoolToPodMapping()),
 		// Only passing existing nodes here and not new nodeClaims because
 		// these nodeClaims don't have a name until they are created
-		results.ExistingNodeToPodMapping())
+		filterVirtualPodMapping(results.ExistingNodeToPodMapping()))
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }
@@ -532,9 +591,9 @@ func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 // getVolumeTopologyRequirements collects volume topology requirements for each pod
 // WITHOUT modifying the pods. These requirements will be added to nodeRequirements
 // (for NodeClaim zone selection) but NOT to pod affinities (for correct TSC counting).
-func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, map[types.UID]scheduling.Requirements, error) {
+func (p *Provisioner) getVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, map[types.UID][]scheduling.Requirements, error) {
 	var schedulablePods []*corev1.Pod
-	volumeReqs := make(map[types.UID]scheduling.Requirements)
+	volumeReqs := make(map[types.UID][]scheduling.Requirements)
 	for _, pod := range pods {
 		reqs, err := p.volumeTopology.GetRequirements(ctx, pod)
 		if err != nil {

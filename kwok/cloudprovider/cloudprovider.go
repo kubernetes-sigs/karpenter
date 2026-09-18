@@ -21,13 +21,13 @@ import (
 	_ "embed"
 	stderrors "errors"
 	"fmt"
+	"maps"
 	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+	kwokutils "sigs.k8s.io/karpenter/kwok/utils"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -183,9 +184,8 @@ func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.
 }
 
 func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
-	newName := strings.ReplaceAll(namesgenerator.GetRandomName(0), "_", "-")
 	//nolint
-	newName = fmt.Sprintf("%s-%d", newName, rand.Uint32())
+	newName := fmt.Sprintf("kwok-%s-%s-%d", nodeClaim.Name, kwokutils.RandomName(), rand.Uint32())
 
 	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	req, found := lo.Find(nodeClaim.Spec.Requirements, func(req v1.NodeSelectorRequirementWithMinValues) bool {
@@ -238,9 +238,7 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1.NodeClaim, offering *cloudprovider.Offering) map[string]string {
 	ret := make(map[string]string, len(labels))
 	// start with labels on the nodeclaim
-	for k, v := range labels {
-		ret[k] = v
-	}
+	maps.Copy(ret, labels)
 
 	// add the derived nodeclaim requirement labels
 	for _, r := range nodeClaim.Spec.Requirements {
@@ -275,9 +273,7 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 
 func addKwokAnnotation(annotations map[string]string) map[string]string {
 	ret := make(map[string]string, len(annotations)+1)
-	for k, v := range annotations {
-		ret[k] = v
-	}
+	maps.Copy(ret, annotations)
 	ret[v1alpha1.KwokLabelKey] = v1alpha1.KwokLabelValue
 	return ret
 }

@@ -180,3 +180,39 @@ func ConsolidationRejected(node *corev1.Node, nodeClaim *v1.NodeClaim, command s
 		},
 	}
 }
+
+func consolidationScoreMessage(score, threshold float64, k int32, savingsPct, disruptionPct float64) string {
+	return fmt.Sprintf("score %.2f >= threshold %.2f (k: %d, savings %.1f%%, disruption %.1f%%)",
+		score, threshold, k, savingsPct, disruptionPct)
+}
+
+func ConsolidationApproved(node *corev1.Node, nodeClaim *v1.NodeClaim, score, threshold float64, k int32, savingsPct, disruptionPct float64) []events.Event {
+	msg := consolidationScoreMessage(score, threshold, k, savingsPct, disruptionPct)
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           corev1.EventTypeNormal,
+			Reason:         events.ConsolidationApproved,
+			Message:        msg,
+			DedupeValues:   []string{string(node.UID)},
+		},
+		{
+			InvolvedObject: nodeClaim,
+			Type:           corev1.EventTypeNormal,
+			Reason:         events.ConsolidationApproved,
+			Message:        msg,
+			DedupeValues:   []string{string(nodeClaim.UID)},
+		},
+	}
+}
+
+func ConsolidationApprovedMultiNode(nodePool *v1.NodePool, score, threshold float64, k int32, savingsPct, disruptionPct float64) events.Event {
+	msg := consolidationScoreMessage(score, threshold, k, savingsPct, disruptionPct)
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.ConsolidationApproved,
+		Message:        msg,
+		DedupeValues:   []string{string(nodePool.UID)},
+	}
+}

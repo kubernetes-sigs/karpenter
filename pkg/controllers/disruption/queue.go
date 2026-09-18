@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
@@ -55,6 +56,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
@@ -163,12 +165,12 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 		})
 		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
 			decisionLabel:          string(cmd.Decision()),
-			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.Reason())),
-			ConsolidationTypeLabel: string(cmd.Decision()),
+			metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
+			ConsolidationTypeLabel: cmd.ConsolidationType(),
 		})
 		stateNodes := lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, stateNodes...))
-		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, v1.ConditionTypeDisruptionReason, stateNodes...))
+		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, q.clock, v1.ConditionTypeDisruptionReason, stateNodes...))
 		// Log the error
 		log.FromContext(ctx).Error(multiErr, "failed terminating nodes while executing a disruption command")
 	} else {
@@ -238,11 +240,20 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			return
 		}
 		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()))...)
-		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-			metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.Reason())),
-			metrics.NodePoolLabel:     cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel: cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-		})
+		// Drift also flows through this queue, so only report a policy for consolidation.
+		consolidationPolicy := ""
+		if cmd.ConsolidationType() != "" {
+			consolidationPolicy = pretty.ToSnakeCase(string(cmd.Candidates[i].NodePool.Spec.Disruption.ConsolidationPolicy))
+		}
+		labels := map[string]string{
+			metrics.ReasonLabel:              strings.ToLower(string(cmd.Reason())),
+			metrics.NodePoolLabel:            cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
+			metrics.ConsolidationPolicyLabel: consolidationPolicy,
+			metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(cmd.Candidates[i].NodeClaim),
+		}
+		metrics.NodeClaimsDisruptedTotal.Inc(labels)
+		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
@@ -265,7 +276,7 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 				return e
 			}
 			stored := nodeClaim.DeepCopy()
-			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(cmd.Reason()), string(cmd.Reason()))
+			nodeClaim.StatusConditions(status.WithClock(q.clock)).SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(cmd.Reason()), string(cmd.Reason()))
 			return q.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored))
 		}); err != nil {
 			errs[i] = client.IgnoreNotFound(err)

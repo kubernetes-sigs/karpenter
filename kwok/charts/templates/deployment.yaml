@@ -101,7 +101,7 @@ spec:
                   divisor: 1m
                   resource: requests.cpu
             - name: FEATURE_GATES
-              value: "StaticCapacity={{ .Values.settings.featureGates.staticCapacity }},SpotToSpotConsolidation={{ .Values.settings.featureGates.spotToSpotConsolidation }},NodeRepair={{ .Values.settings.featureGates.nodeRepair }}"
+              value: "StaticCapacity={{ .Values.settings.featureGates.staticCapacity }},SpotToSpotConsolidation={{ .Values.settings.featureGates.spotToSpotConsolidation }},NodeRepair={{ .Values.settings.featureGates.nodeRepair }},CapacityBuffer={{ .Values.settings.featureGates.capacityBuffer }}"
           {{- with .Values.settings.batchMaxDuration }}
             - name: BATCH_MAX_DURATION
               value: "{{ . }}"
@@ -117,6 +117,11 @@ spec:
           {{- with .Values.settings.minValuesPolicy }}
             - name: MIN_VALUES_POLICY
               value: "{{ . }}"
+          {{- end }}
+          {{- with .Values.settings.schedulerConfig }}
+            - name: SCHEDULER_CONFIG
+              value: |
+                {{- nindent 16 . }}
           {{- end }}
           {{- with .Values.controller.env }}
             {{- toYaml . | nindent 12 }}

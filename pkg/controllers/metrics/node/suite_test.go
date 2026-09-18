@@ -19,22 +19,22 @@ package node_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -42,10 +42,10 @@ import (
 )
 
 var ctx context.Context
-var fakeClock *clock.FakeClock
 var env *test.Environment
 var cluster *state.Cluster
 var nodeController *informer.NodeController
+var nodeClaimController *informer.NodeClaimController
 var metricsStateController *node.Controller
 var cloudProvider *fake.CloudProvider
 
@@ -61,9 +61,10 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
+	clusterCost := cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
+	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	metricsStateController = node.NewController(cluster)
 })
 
@@ -90,9 +91,37 @@ var _ = Describe("Node Metrics", func() {
 		ExpectSingletonReconciled(ctx, metricsStateController)
 
 		for k, v := range resources {
+			// A plain node with no NodeClaim is not managed by Karpenter.
 			metric, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 				"node_name":               node.GetName(),
 				metrics.ResourceTypeLabel: k.String(),
+				"managed":                 "false",
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
+		}
+	})
+	It("should set the managed label on per-node metrics for Karpenter-managed nodes", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			Status: v1.NodeClaimStatus{
+				ProviderID:  test.RandomProviderID(),
+				Allocatable: resources,
+			},
+		})
+		managedNode := test.Node(test.NodeOptions{
+			ProviderID:  nodeClaim.Status.ProviderID,
+			Allocatable: resources,
+		})
+
+		ExpectApplied(ctx, env.Client, managedNode, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeController, nodeClaimController, []*corev1.Node{managedNode}, []*v1.NodeClaim{nodeClaim})
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		for k, v := range resources {
+			metric, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
+				"node_name":               managedNode.GetName(),
+				metrics.ResourceTypeLabel: k.String(),
+				"managed":                 "true",
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
@@ -106,6 +135,7 @@ var _ = Describe("Node Metrics", func() {
 
 		metric, found := FindMetricWithLabelValues("karpenter_nodes_current_lifetime_seconds", map[string]string{
 			"node_name": node.GetName(),
+			"managed":   "false",
 		})
 		Expect(found).To(BeTrue())
 		Expect(metric.GetGauge().GetValue()).To(BeNumerically(">=", 0))

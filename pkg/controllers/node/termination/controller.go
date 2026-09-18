@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
@@ -201,7 +202,7 @@ func (c *Controller) awaitDrain(
 	nodeTerminationTime *time.Time,
 ) (reconcile.Result, error) {
 	if nodeClaim != nil && nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained) == nil {
-		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
+		nodeClaim.StatusConditions(status.WithClock(c.clock)).SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
 	}
 	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
@@ -222,7 +223,7 @@ func (c *Controller) awaitDrain(
 	}
 
 	if nodeClaim != nil {
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrained)
+		nodeClaim.StatusConditions(status.WithClock(c.clock)).SetTrue(v1.ConditionTypeDrained)
 	}
 	return reconcile.Result{}, nil
 }
@@ -249,7 +250,7 @@ func (c *Controller) awaitVolumeDetachment(
 		// There are no remaining volume attachments blocking instance termination. If we've already updated the status
 		// condition, fall through. Otherwise, update the status condition and requeue.
 		if nodeClaim != nil {
-			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeVolumesDetached)
+			nodeClaim.StatusConditions(status.WithClock(c.clock)).SetTrue(v1.ConditionTypeVolumesDetached)
 		}
 		return reconcile.Result{}, nil
 	}
@@ -261,7 +262,7 @@ func (c *Controller) awaitVolumeDetachment(
 		// must have expired.
 		c.recorder.Publish(terminatorevents.NodeAwaitingVolumeDetachmentEvent(node, pendingVolumeAttachments...))
 		if nodeClaim != nil {
-			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeVolumesDetached, "AwaitingVolumeDetachment", "AwaitingVolumeDetachment")
+			nodeClaim.StatusConditions(status.WithClock(c.clock)).SetUnknownWithReason(v1.ConditionTypeVolumesDetached, "AwaitingVolumeDetachment", "AwaitingVolumeDetachment")
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
@@ -270,7 +271,7 @@ func (c *Controller) awaitVolumeDetachment(
 	// case we should set the status condition to false (requeing if it wasn't already) and then fall through to instance
 	// termination.
 	if nodeClaim != nil {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeVolumesDetached, "TerminationGracePeriodElapsed", "TerminationGracePeriodElapsed")
+		nodeClaim.StatusConditions(status.WithClock(c.clock)).SetFalse(v1.ConditionTypeVolumesDetached, "TerminationGracePeriodElapsed", "TerminationGracePeriodElapsed")
 	}
 	return reconcile.Result{}, nil
 }
@@ -291,7 +292,7 @@ func (c *Controller) awaitInstanceTermination(
 	if cloudprovider.IgnoreNodeClaimNotFoundError(deleteErr) != nil {
 		return reconcile.Result{}, deleteErr
 	}
-	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
+	nodeClaim.StatusConditions(status.WithClock(c.clock)).SetTrue(v1.ConditionTypeInstanceTerminating)
 	if !cloudprovider.IsNodeClaimNotFoundError(deleteErr) {
 		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 	}
@@ -326,7 +327,7 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 		return volumeAttachments, nil
 	}
 	// Create list of non-drain-able Pods associated with Node
-	pods, err := nodeutils.GetPods(ctx, kubeClient, node)
+	pods, err := nodeutils.GetPods(ctx, kubeClient, node.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +372,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 
 		metrics.NodesTerminatedTotal.Inc(map[string]string{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
+			metrics.ZoneLabel:     n.Labels[corev1.LabelTopologyZone],
 		})
 
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp

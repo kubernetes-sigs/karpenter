@@ -22,7 +22,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -130,10 +129,10 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 			ms := captureMemStats()
 
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.apply(np, it)
 					}
 				}
 			}
@@ -160,8 +159,8 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 				for _, offering := range it.Offerings {
 					if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
 						priceUpdates[offering.Requirements.String()] = &priceUpdate{
-							OverlayUpdate: lo.ToPtr("-10%"),
-							lowestWeight:  lo.ToPtr(int32(10)),
+							OverlayUpdate: new("-10%"),
+							lowestWeight:  new(int32(10)),
 						}
 					}
 				}
@@ -176,9 +175,9 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 			ms := captureMemStats()
 
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				for _, it := range instanceTypes {
-					_, _ = store.apply("default", it)
+					_ = store.apply("default", it)
 				}
 			}
 
@@ -213,9 +212,9 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 			ms := captureMemStats()
 
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				for _, it := range instanceTypes {
-					_, _ = store.apply("default", it)
+					_ = store.apply("default", it)
 				}
 			}
 
@@ -234,10 +233,10 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 
 			ms := captureMemStats()
 
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.apply(np, it)
 					}
 				}
 			}
@@ -262,7 +261,7 @@ var _ = Describe("Memory Usage Scale With NodePools", func() {
 	DescribeTable("should scale linearly with node pool count",
 		func(count int) {
 			nodePools := make([]string, count)
-			for i := 0; i < count; i++ {
+			for i := range count {
 				nodePools[i] = fmt.Sprintf("nodepool-%d", i)
 			}
 
@@ -270,10 +269,10 @@ var _ = Describe("Memory Usage Scale With NodePools", func() {
 
 			ms := captureMemStats()
 
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.apply(np, it)
 					}
 				}
 			}
@@ -309,10 +308,10 @@ var _ = Describe("Memory Usage Scale With InstanceTypes", func() {
 
 			ms := captureMemStats()
 
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				for _, np := range nodePools {
 					for _, it := range instanceTypes {
-						_, _ = store.apply(np, it)
+						_ = store.apply(np, it)
 					}
 				}
 			}
@@ -354,13 +353,12 @@ func createRealisticInstanceTypes(count int) []*cloudprovider.InstanceType {
 			cpuValue := 2 * (idx%8 + 1)
 			memoryValue := 4 * (idx%8 + 1)
 
-			instanceTypes = append(instanceTypes, fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: name,
-				Resources: corev1.ResourceList{
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(name,
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpuValue)),
 					corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", memoryValue)),
-				},
-			}))
+				}),
+			))
 			idx++
 		}
 		if idx >= count {
@@ -387,8 +385,8 @@ func createStoreWithOverlays(instanceTypes []*cloudprovider.InstanceType, nodePo
 			for _, offering := range it.Offerings {
 				if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
 					priceUpdates[offering.Requirements.String()] = &priceUpdate{
-						OverlayUpdate: lo.ToPtr("-10%"),
-						lowestWeight:  lo.ToPtr(int32(10)),
+						OverlayUpdate: new("-10%"),
+						lowestWeight:  new(int32(10)),
 					}
 				}
 			}

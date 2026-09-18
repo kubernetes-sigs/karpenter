@@ -59,7 +59,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	npState = nodepoolhealth.NewState()
-	controller = registrationhealth.NewController(env.Client, cloudProvider, npState)
+	controller = registrationhealth.NewController(env.Clock, env.Client, cloudProvider, npState)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)

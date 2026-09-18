@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/test/pkg/debug"
@@ -61,16 +60,16 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1100), "Should have 1100 total pods")
 
 			// Performance assertions
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 4*time.Minute),
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("doNotDisrupt/scaleOut", 4*time.Minute)),
 				"Total scale-out time should be less than 4 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("doNotDisrupt/scaleOut", 0.38)),
 				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("doNotDisrupt/scaleOut", 0.40)),
 				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterMemoryMB).To(BeNumerically("<", 350+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 350 MB during scale-out")
-			Expect(scaleOutReport.KarpenterCPUNanos).To(BeNumerically("<", 20*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 20s (100%) during scale-out")
+			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("doNotDisrupt/scaleOut", 645)),
+				"Karpenter controller P95 memory should be less than 645 MB during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("doNotDisrupt/scaleOut", 1.10)),
+				"Karpenter controller avg CPU should be less than 1.10 cores during scale-out")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")
@@ -92,8 +91,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			initialNodes := scaleOutReport.TotalNodes
 
 			// Scale down small and large deployments (keep do-not-disrupt unchanged)
-			smallDeployment.Spec.Replicas = lo.ToPtr(int32(250))
-			largeDeployment.Spec.Replicas = lo.ToPtr(int32(250))
+			smallDeployment.Spec.Replicas = new(int32(250))
+			largeDeployment.Spec.Replicas = new(int32(250))
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring consolidation with disruption protection")
@@ -105,16 +104,16 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.TotalPods).To(BeNumerically(">=", 600), "Should have at least 600 total pods after scale-in (250+250+100)")
 			Expect(consolidationReport.PodsNetChange).To(BeNumerically(">=", -500), "Should have net reduction of 500 pods")
 
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 35*time.Minute),
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("doNotDisrupt/consolidation", 35*time.Minute)),
 				"Consolidation should complete within 35 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.38),
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("doNotDisrupt/consolidation", 0.38)),
 				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.40),
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("doNotDisrupt/consolidation", 0.40)),
 				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterMemoryMB).To(BeNumerically("<", 320+MemoryOverheadMB()),
-				"Karpenter controller memory should be less than 320 MB during consolidation")
-			Expect(consolidationReport.KarpenterCPUNanos).To(BeNumerically("<", 20*1e9+CPUOverheadNanos()),
-				"Karpenter controller CPU should be less than 20s (100%) during consolidation")
+			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("doNotDisrupt/consolidation", 585)),
+				"Karpenter controller P95 memory should be less than 585 MB during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("doNotDisrupt/consolidation", 0.80)),
+				"Karpenter controller avg CPU should be less than 0.80 cores during consolidation")
 
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()

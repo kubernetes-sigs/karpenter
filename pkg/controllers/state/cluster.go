@@ -85,6 +85,20 @@ type Cluster struct {
 	unsyncedStartTime   time.Time
 	lastUnsyncedLogTime time.Time
 	antiAffinityPods    sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
+
+	// bufferPodCounts tracks how many virtual CapacityBuffer pods the provisioner's
+	// scheduling simulation placed on each node (keyed by providerID). This is
+	// rebuilt wholesale after every provisioning pass — it is NOT incremental.
+	//
+	// Used by:
+	//   - disruption/emptiness.go: prevents empty-consolidation of nodes that host
+	//     buffer capacity (HasBufferPods check in ShouldDisrupt).
+	//
+	// NOT used by consolidation — consolidation naturally accounts for buffer pods
+	// because SimulateScheduling calls GetPendingPods which injects virtual pods
+	// into the pending set. Any replacement must fit both real and virtual pods.
+	bufferPodCountsMu sync.RWMutex
+	bufferPodCounts   map[string]int
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
@@ -100,6 +114,8 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		nodePoolResources:         map[string]corev1.ResourceList{},
 
 		NodePoolState: NewNodePoolState(),
+
+		bufferPodCounts: map[string]int{},
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -216,7 +232,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 // currently bound to a node. The pod returned may not be up-to-date with respect to status, however since the
 // anti-affinity terms can't be modified, they will be correct.
 func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node) bool) {
-	c.antiAffinityPods.Range(func(key, value interface{}) bool {
+	c.antiAffinityPods.Range(func(key, value any) bool {
 		pod := value.(*corev1.Pod)
 		c.mu.RLock()
 		defer c.mu.RUnlock()
@@ -278,6 +294,33 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	if n, ok := c.nodes[providerID]; ok {
 		n.Nominate(ctx, c.clock) // extends nomination window if already nominated
 	}
+}
+
+// UpdateBufferPodCounts replaces the entire buffer pod count mapping with the
+// new counts. Called by the provisioner after each scheduling pass to reflect
+// which nodes are hosting virtual buffer pods. Nodes not in the map are cleared.
+//
+// The mapping is derived from Results.ExistingNodes — each ExistingNode.Pods
+// entry that carries the fake-pod annotation is counted. When buffer capacity
+// is consumed (real pods take the space), virtual pods move to other nodes or
+// new NodeClaims, and this map updates accordingly on the next pass.
+func (c *Cluster) UpdateBufferPodCounts(counts map[string]int) {
+	c.bufferPodCountsMu.Lock()
+	defer c.bufferPodCountsMu.Unlock()
+	c.bufferPodCounts = counts
+}
+
+// HasBufferPods returns true if the node with the given providerID has at least
+// one virtual buffer pod placed on it during the last provisioning pass.
+func (c *Cluster) HasBufferPods(providerID string) bool {
+	return c.BufferPodCount(providerID) > 0
+}
+
+// BufferPodCount returns the number of virtual buffer pods on the node.
+func (c *Cluster) BufferPodCount(providerID string) int {
+	c.bufferPodCountsMu.RLock()
+	defer c.bufferPodCountsMu.RUnlock()
+	return c.bufferPodCounts[providerID]
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
@@ -404,6 +447,14 @@ func (c *Cluster) NodeClaimExists(nodeClaimName string) bool {
 	return ok
 }
 
+func (c *Cluster) UnlaunchedNodeClaimExists(nodeClaimName string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	providerID, ok := c.nodeClaimNameToProviderID[nodeClaimName]
+	return ok && providerID == ""
+}
+
 // AckPods marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
 func (c *Cluster) AckPods(pods ...*corev1.Pod) {
 	now := c.clock.Now()
@@ -425,6 +476,7 @@ func (c *Cluster) PodAckTime(podKey types.NamespacedName) time.Time {
 // It updates podHealthyNodePoolScheduledTime for pods scheduled against nodePool that have
 // NodeRegistrationHealthy=true. This also marks when the pod is first seen as schedulable for pod metrics.
 // We'll only emit a metric for a pod if we haven't done it before.
+// nolint:gocyclo
 func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[*corev1.Pod]error, npPods map[string][]*corev1.Pod, ncPods map[string][]*corev1.Pod) {
 	now := c.clock.Now()
 	for pod := range podErrors {
@@ -450,6 +502,13 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 		}
 		for _, p := range pods {
 			nn := client.ObjectKeyFromObject(p)
+			// Skip pods that are already bound to a node (e.g. pods from deleting nodes
+			// included in the scheduling simulation for capacity planning). Storing a new
+			// timestamp for already-bound pods would cause negative metric values since
+			// their PodScheduled LastTransitionTime is in the past.
+			if podutils.IsScheduled(p) {
+				continue
+			}
 			c.podsSchedulableTimes.LoadOrStore(nn, now)
 			_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, now)
 			// If we already attempted this, we don't need to emit another metric.
@@ -593,6 +652,7 @@ func (c *Cluster) Reset() {
 	c.podAcks = sync.Map{}
 	c.podsSchedulingAttempted = sync.Map{}
 	c.podsSchedulableTimes = sync.Map{}
+	c.bufferPodCounts = map[string]int{}
 }
 
 // sets the cluster to be synced or unsynced for unit testing
@@ -796,10 +856,11 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 		return client.IgnoreNotFound(serrors.Wrap(fmt.Errorf("getting CSINode to determine volume limit, %w", err), "CSINode", klog.KRef("", n.Node.Name)))
 	}
 	for _, driver := range csiNode.Spec.Drivers {
-		if driver.Allocatable == nil {
+		if driver.Allocatable == nil || driver.Allocatable.Count == nil {
+			n.volumeUsage.AddUnbounded(driver.Name)
 			continue
 		}
-		n.volumeUsage.AddLimit(driver.Name, int(lo.FromPtr(driver.Allocatable.Count)))
+		n.volumeUsage.AddLimit(driver.Name, int(*driver.Allocatable.Count))
 	}
 	return nil
 }

@@ -95,9 +95,10 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 				NewNodeClaims: []*scheduling.NodeClaim{{NodeClaimTemplate: *nct}},
 			}
 			cmds = append(cmds, Command{
-				Candidates:   []*Candidate{c},
-				Replacements: replacementsFromNodeClaims(result.NewNodeClaims...),
-				Results:      result,
+				Candidates:          []*Candidate{c},
+				Replacements:        replacementsFromNodeClaims(result.NewNodeClaims...),
+				Results:             result,
+				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{c}),
 			})
 		}
 	}

@@ -29,6 +29,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
@@ -205,15 +206,15 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 	}
 	validatedCandidates, err := c.validateCandidates(ctx, cmd.Candidates...)
 	if err != nil {
-		return err
+		return fmt.Errorf("validating candidates, %w", err)
 	}
 	if err := c.validateCommand(ctx, cmd, validatedCandidates); err != nil {
-		return err
+		return fmt.Errorf("validating command, %w", err)
 	}
 	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
 	// the following GitHub issue: https://github.com/kubernetes-sigs/karpenter/issues/1167.
 	if _, err = c.validateCandidates(ctx, validatedCandidates...); err != nil {
-		return err
+		return fmt.Errorf("revalidating candidates, %w", err)
 	}
 	return nil
 }
@@ -298,7 +299,7 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 	if len(candidates) == 0 {
 		return NewValidationError(fmt.Errorf("no candidates"))
 	}
-	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, v.clock, v.recorder, candidates...)
+	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, v.clock, v.recorder, []scheduling.Options{scheduling.IsConsolidationSimulation}, candidates...)
 	if err != nil {
 		return fmt.Errorf("simluating scheduling, %w", err)
 	}

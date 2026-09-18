@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -49,6 +51,7 @@ type Controller struct {
 	cloudProvider     cloudprovider.CloudProvider
 	clusterState      *state.Cluster
 	instanceTypeStore *InstanceTypeStore
+	clock             clock.Clock
 }
 
 func (c *Controller) Name() string {
@@ -56,12 +59,13 @@ func (c *Controller) Name() string {
 }
 
 // NewController constructs a controller for node overlay validation
-func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore, clusterState *state.Cluster) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore, clusterState *state.Cluster) *Controller {
 	return &Controller{
 		kubeClient:        kubeClient,
 		cloudProvider:     cp,
 		instanceTypeStore: instanceTypeStore,
 		clusterState:      clusterState,
+		clock:             clk,
 	}
 }
 
@@ -82,12 +86,20 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	temporaryStore := newInternalInstanceTypeStore()
 	nodePoolToInstanceTypes := map[string][]*cloudprovider.InstanceType{}
 
+	evaluatedNodePoolItems := make([]v1.NodePool, 0, len(nodePoolList.Items))
+	var errs error
 	for i := range nodePoolList.Items {
 		its, err := c.cloudProvider.GetInstanceTypes(ctx, &nodePoolList.Items[i])
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("listing instance types, %w", err)
+			// Track the error so we can return it as a multierr below. We keep
+			// going so that a single broken NodePool (for example a missing
+			// NodeClass) does not block overlays from being applied to the
+			// healthy ones.
+			errs = multierr.Append(errs, fmt.Errorf("listing instance types for nodepool %q, %w", nodePoolList.Items[i].Name, err))
+			continue
 		}
 		nodePoolToInstanceTypes[nodePoolList.Items[i].Name] = its
+		evaluatedNodePoolItems = append(evaluatedNodePoolItems, nodePoolList.Items[i])
 	}
 
 	overlayList.OrderByWeight()
@@ -97,11 +109,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			continue
 		}
 
-		if !c.validateAndUpdateInstanceTypeOverrides(temporaryStore, nodePoolList.Items, nodePoolToInstanceTypes, overlayList.Items[i]) {
+		if !c.validateAndUpdateInstanceTypeOverrides(temporaryStore, evaluatedNodePoolItems, nodePoolToInstanceTypes, overlayList.Items[i]) {
 			overlaysWithConflict = append(overlaysWithConflict, overlayList.Items[i].Name)
 		}
 	}
-	temporaryStore.evaluatedNodePools.Insert(lo.Map(nodePoolList.Items, func(np v1.NodePool, _ int) string {
+	temporaryStore.evaluatedNodePools.Insert(lo.Map(evaluatedNodePoolItems, func(np v1.NodePool, _ int) string {
 		return np.Name
 	})...)
 
@@ -116,6 +128,15 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
 
+	// If some NodePools failed to resolve instance types, return the
+	// aggregated errors so controller-runtime logs them via its standard
+	// "Reconciler error" path and requeues via the rate limiter to recover
+	// from transient errors (for example temporary API failures or a
+	// NodeClass that has not been created yet) without waiting for the full
+	// 6h polling interval.
+	if errs != nil {
+		return reconcile.Result{}, errs
+	}
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil
 }
 
@@ -251,11 +272,11 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 	errs := make([]error, 0, len(overlayList))
 	for i := range overlayList {
 		stored := overlayList[i].DeepCopy()
-		overlayList[i].StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+		overlayList[i].StatusConditions(status.WithClock(c.clock)).SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 		if err, ok := overlayWithRuntimeValidationFailure[overlayList[i].Name]; ok {
-			overlayList[i].StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
+			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
 		} else if lo.Contains(overlaysWithConflict, overlayList[i].Name) {
-			overlayList[i].StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
+			overlayList[i].StatusConditions(status.WithClock(c.clock)).SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
 		}
 
 		if !equality.Semantic.DeepEqual(stored, overlayList[i]) {

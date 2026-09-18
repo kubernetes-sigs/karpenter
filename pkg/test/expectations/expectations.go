@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/singleton"
@@ -39,6 +40,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -47,6 +49,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -56,6 +59,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -63,6 +67,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/test"
 	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
@@ -72,15 +77,18 @@ const (
 	RequestInterval           = 1 * time.Second
 )
 
-type Bindings map[*corev1.Pod]*Binding
+type ProvisioningResult struct {
+	Bindings                        map[*corev1.Pod]*Binding
+	ResourceClaimAllocationMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata
+}
 
 type Binding struct {
 	NodeClaim *v1.NodeClaim
 	Node      *corev1.Node
 }
 
-func (b Bindings) Get(p *corev1.Pod) *Binding {
-	for k, v := range b {
+func (r ProvisioningResult) Get(p *corev1.Pod) *Binding {
+	for k, v := range r.Bindings {
 		if client.ObjectKeyFromObject(k) == client.ObjectKeyFromObject(p) {
 			return v
 		}
@@ -172,7 +180,7 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
-		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}); !errors.IsNotFound(err) {
+		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}); !errors.IsNotFound(err) {
 			Expect(err).To(BeNil())
 		}
 		ExpectNotFound(ctx, c, object)
@@ -247,7 +255,11 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	for _, object := range []client.Object{
 		&corev1.Pod{},
 		&corev1.Node{},
+		&corev1.Service{},
+		&corev1.ReplicationController{},
 		&appsv1.DaemonSet{},
+		&appsv1.ReplicaSet{},
+		&appsv1.StatefulSet{},
 		&nodev1.RuntimeClass{},
 		&policyv1.PodDisruptionBudget{},
 		&corev1.PersistentVolumeClaim{},
@@ -257,6 +269,8 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&testv1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
 		&v1alpha1.NodeOverlay{},
+		&resourcev1.ResourceClaim{},
+		&resourcev1.ResourceClaimTemplate{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
@@ -264,9 +278,24 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 				GinkgoHelper()
 				defer wg.Done()
 				defer GinkgoRecover()
-				Expect(c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
-					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}})).ToNot(HaveOccurred())
+				err := c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
+					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: new(int64(0))}})
+				// Fail open for CRDs that don't exist on this k8s version (e.g. ResourceClaim on < 1.34)
+				if err != nil && !meta.IsNoMatchError(err) {
+					Expect(err).ToNot(HaveOccurred())
+				}
 			}(object, namespace.Name)
+		}
+	}
+	// Clean up cluster-scoped DRA objects. These aren't namespaced, so they're deleted once rather than per-namespace.
+	// Fail open on clusters where these types aren't served (e.g. K8s < 1.34).
+	for _, object := range []client.Object{
+		&resourcev1.DeviceClass{},
+		&resourcev1.ResourceSlice{},
+	} {
+		err := c.DeleteAllOf(ctx, object, &client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: new(int64(0))}})
+		if err != nil && !meta.IsNoMatchError(err) {
+			Expect(err).ToNot(HaveOccurred())
 		}
 	}
 	wg.Wait()
@@ -296,11 +325,11 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
+func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
 	GinkgoHelper()
-	bindings := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
+	result := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
 	podKeys := sets.NewString(lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
-	for pod, binding := range bindings {
+	for pod, binding := range result.Bindings {
 		// Only bind the pods that are passed through
 		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
 			// We have to manually bind the pod to the node when using a fakeClient by setting the value for pod.Spec.NodeName
@@ -313,37 +342,47 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 				ExpectManualBinding(ctx, c, pod, binding.Node)
 			}
 			Expect(cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
+
+			if result.ResourceClaimAllocationMetadata != nil {
+				expectDRAClaimsAllocated(ctx, c, pod, binding, result.ResourceClaimAllocationMetadata)
+			}
 		}
 	}
-	return bindings
+	return result
 }
 
 //nolint:gocyclo
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
 		ExpectApplied(ctx, c, pod)
 	}
+	// envtest has no kube-controller-manager, so the controller that generates ResourceClaims from
+	// ResourceClaimTemplates and records them in pod status does not run. Emulate it so the provisioner's claim
+	// resolution sees resolvable claims.
+	for _, pod := range pods {
+		ExpectResourceClaimsProcessed(ctx, c, pod)
+	}
 	// TODO: Check the error on the provisioner scheduling round
 	results, err := provisioner.Schedule(ctx)
-	bindings := Bindings{}
+	result := ProvisioningResult{Bindings: map[*corev1.Pod]*Binding{}}
 	if err != nil {
 		log.Printf("error provisioning in test, %s", err)
-		return bindings
+		return result
 	}
 	for _, m := range results.NewNodeClaims {
 		// TODO: Check the error on the provisioner launch
 		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
 		if err != nil {
-			return bindings
+			return result
 		}
 		nodeClaim := &v1.NodeClaim{}
 		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
 		nodeClaim, node := ExpectNodeClaimDeployedAndStateUpdated(ctx, c, cluster, cloudProvider, nodeClaim)
 		if nodeClaim != nil && node != nil {
 			for _, pod := range m.Pods {
-				bindings[pod] = &Binding{
+				result.Bindings[pod] = &Binding{
 					NodeClaim: nodeClaim,
 					Node:      node,
 				}
@@ -352,15 +391,16 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	}
 	for _, node := range results.ExistingNodes {
 		for _, pod := range node.Pods {
-			bindings[pod] = &Binding{
+			result.Bindings[pod] = &Binding{
 				Node: node.Node,
 			}
 			if node.NodeClaim != nil {
-				bindings[pod].NodeClaim = node.NodeClaim
+				result.Bindings[pod].NodeClaim = node.NodeClaim
 			}
 		}
 	}
-	return bindings
+	result.ResourceClaimAllocationMetadata = results.DRAClaimAllocationMetadata
+	return result
 }
 
 func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) scheduling.Results {
@@ -405,7 +445,268 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true"})
 	nc.Status.NodeName = node.Name
 	ExpectApplied(ctx, c, nc, node)
+	expectResourceSlicesCreated(ctx, c, cloudProvider, nc, node)
 	return nc, node, nil
+}
+
+func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudprovider.CloudProvider, nc *v1.NodeClaim, node *corev1.Node) {
+	GinkgoHelper()
+
+	instanceTypeName := nc.Labels[corev1.LabelInstanceTypeStable]
+	if instanceTypeName == "" {
+		return
+	}
+	np := &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nc.Labels[v1.NodePoolLabelKey]}}
+	np.Spec.Template.Spec.NodeClassRef = nc.Spec.NodeClassRef
+	instanceTypes, err := cp.GetInstanceTypes(ctx, np)
+	Expect(err).ToNot(HaveOccurred())
+	it, found := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
+		return it.Name == instanceTypeName
+	})
+	Expect(found).To(BeTrue(), "instance type %q not found in cloud provider", instanceTypeName)
+	if len(it.DynamicResources.ResourceSliceTemplates) == 0 {
+		return
+	}
+	Expect(node.UID).ToNot(BeEmpty(), "node %q has no UID, cannot create owner reference", node.Name)
+
+	// Group templates by driver to set ResourceSliceCount correctly
+	templatesByDriver := map[string][]*cloudprovider.ResourceSliceTemplate{}
+	for _, t := range it.DynamicResources.ResourceSliceTemplates {
+		templatesByDriver[t.Driver.Value()] = append(templatesByDriver[t.Driver.Value()], t)
+	}
+
+	for driver, templates := range templatesByDriver {
+		poolName := test.NodeLocalPoolName(driver, node.Name)
+		sliceCount := int64(len(templates))
+		for i, t := range templates {
+			devices := make([]resourcev1.Device, len(t.Devices))
+			for j, d := range t.Devices {
+				device := resourcev1.Device{
+					Name:             d.Name.Value(),
+					Attributes:       d.Attributes,
+					Capacity:         d.Capacity,
+					ConsumesCounters: d.ConsumesCounters,
+				}
+				// Only set AllowMultipleAllocations when true; leaving it nil for exclusive devices preserves the
+				// pre-capacity publish behavior (and a capacity RequestPolicy requires it to be true).
+				if d.AllowMultipleAllocations {
+					device.AllowMultipleAllocations = lo.ToPtr(true)
+				}
+				devices[j] = device
+			}
+
+			sliceName := fmt.Sprintf("%s-%s", node.Name, strings.ReplaceAll(strings.ReplaceAll(driver, ".", "-"), "/", "-"))
+			if sliceCount > 1 {
+				sliceName = fmt.Sprintf("%s-%d", sliceName, i)
+			}
+			slice := &resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: sliceName,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "v1",
+						Kind:       "Node",
+						Name:       node.Name,
+						UID:        node.UID,
+					}},
+				},
+				Spec: resourcev1.ResourceSliceSpec{
+					Driver:   driver,
+					NodeName: &node.Name,
+					Pool: resourcev1.ResourcePool{
+						Name:               poolName,
+						Generation:         1,
+						ResourceSliceCount: sliceCount,
+					},
+					Devices:        devices,
+					SharedCounters: t.SharedCounters,
+				},
+			}
+			ExpectApplied(ctx, c, slice)
+		}
+	}
+}
+
+// ExpectResourceClaimsProcessed emulates the in-cluster ResourceClaim controller for a pod. For each of the pod's
+// ResourceClaim references it ensures pod.Status.ResourceClaimStatuses is populated:
+//   - A direct ResourceClaimName reference must already exist on the cluster; otherwise the expectation fails.
+//   - A ResourceClaimTemplateName reference causes a ResourceClaim to be generated from the named template (if it
+//     hasn't been already) and recorded in the pod status.
+//
+// This runs before provisioner.Schedule so the allocator's claim resolution can resolve every referenced claim.
+func ExpectResourceClaimsProcessed(ctx context.Context, c client.Client, pod *corev1.Pod) {
+	GinkgoHelper()
+	if len(pod.Spec.ResourceClaims) == 0 {
+		return
+	}
+	existingStatuses := sets.New(lo.Map(pod.Status.ResourceClaimStatuses, func(s corev1.PodResourceClaimStatus, _ int) string {
+		return s.Name
+	})...)
+	for i := range pod.Spec.ResourceClaims {
+		pc := &pod.Spec.ResourceClaims[i]
+		if existingStatuses.Has(pc.Name) {
+			continue
+		}
+		var claimName string
+		switch {
+		case pc.ResourceClaimName != nil:
+			// The claim must have been created by the test beforehand.
+			claim := &resourcev1.ResourceClaim{}
+			Expect(c.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: *pc.ResourceClaimName}, claim)).To(Succeed(),
+				"referenced ResourceClaim %s/%s must exist before provisioning", pod.Namespace, *pc.ResourceClaimName)
+			claimName = *pc.ResourceClaimName
+		case pc.ResourceClaimTemplateName != nil:
+			template := &resourcev1.ResourceClaimTemplate{}
+			Expect(c.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: *pc.ResourceClaimTemplateName}, template)).To(Succeed(),
+				"referenced ResourceClaimTemplate %s/%s must exist before provisioning", pod.Namespace, *pc.ResourceClaimTemplateName)
+			claimName = fmt.Sprintf("%s-%s", pod.Name, pc.Name)
+			claim := &resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace:   pod.Namespace,
+					Name:        claimName,
+					Labels:      template.Spec.Labels,
+					Annotations: template.Spec.Annotations,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "v1",
+						Kind:       "Pod",
+						Name:       pod.Name,
+						UID:        pod.UID,
+					}},
+				},
+				Spec: template.Spec.Spec,
+			}
+			ExpectApplied(ctx, c, claim)
+		default:
+			Fail(fmt.Sprintf("pod %s/%s claim reference %q has neither ResourceClaimName nor ResourceClaimTemplateName", pod.Namespace, pod.Name, pc.Name))
+		}
+		pod.Status.ResourceClaimStatuses = append(pod.Status.ResourceClaimStatuses, corev1.PodResourceClaimStatus{
+			Name:              pc.Name,
+			ResourceClaimName: lo.ToPtr(claimName),
+		})
+	}
+	ExpectApplied(ctx, c, pod)
+}
+
+// ExpectDeviceAllocationReconciled hydrates the deviceallocation controller (unblocking AllocatedDevices) and reconciles
+// every ResourceClaim currently on the cluster. In production, hydration is triggered by a manager runnable after cache
+// sync; in envtest there is no running controller manager, so tests must call this explicitly before a provisioning
+// round that relies on the in-cluster allocated-device set.
+func ExpectDeviceAllocationReconciled(ctx context.Context, c client.Client, controller *deviceallocation.Controller) {
+	GinkgoHelper()
+	// Hydrate is guarded by sync.Once internally, so calling it multiple times is safe.
+	controller.Hydrate(ctx)
+	// Reconcile every existing claim to pick up allocation-status changes committed by prior provisioning runs.
+	claimList := &resourcev1.ResourceClaimList{}
+	Expect(c.List(ctx, claimList)).To(Succeed())
+	for i := range claimList.Items {
+		ExpectReconciled(ctx, controller, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&claimList.Items[i])})
+	}
+}
+
+// ExpectNodeClaimDRADrivers asserts the NodeClaim carries the karpenter.sh/requested-dra-drivers annotation listing exactly the
+// expected driver names (order-independent).
+func ExpectNodeClaimDRADrivers(nc *v1.NodeClaim, drivers ...string) {
+	GinkgoHelper()
+	annotation, ok := nc.Annotations[v1.DRADriversAnnotationKey]
+	Expect(ok).To(BeTrue(), "NodeClaim %s missing %s annotation", nc.Name, v1.DRADriversAnnotationKey)
+	Expect(strings.Split(annotation, ",")).To(ConsistOf(drivers))
+}
+
+// ExpectResourceClaimAllocated asserts a ResourceClaim has an allocation referencing the expected driver, and that
+// every allocated device belongs to that driver. Returns the pool-qualified device identities ("pool/device") for
+// further assertions. Pool qualification matters because node-local template devices reuse the same device name
+// across nodes — only the pool distinguishes them.
+func ExpectResourceClaimAllocated(ctx context.Context, c client.Client, namespace, name, driver string) []string {
+	GinkgoHelper()
+	claim := &resourcev1.ResourceClaim{}
+	Expect(c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, claim)).To(Succeed())
+	Expect(claim.Status.Allocation).ToNot(BeNil(), "ResourceClaim %s/%s has no allocation", namespace, name)
+	results := claim.Status.Allocation.Devices.Results
+	Expect(results).ToNot(BeEmpty())
+	devices := make([]string, 0, len(results))
+	for _, r := range results {
+		Expect(r.Driver).To(Equal(driver))
+		devices = append(devices, fmt.Sprintf("%s/%s", r.Pool, r.Device))
+	}
+	return devices
+}
+
+// ExpectInstanceTypeOptionNames returns the names of a NodeClaim's candidate instance type options.
+func ExpectInstanceTypeOptionNames(nc *scheduling.NodeClaim) []string {
+	GinkgoHelper()
+	return lo.Map(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })
+}
+
+func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.Pod, binding *Binding, claimMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
+	GinkgoHelper()
+
+	instanceTypeName := binding.Node.Labels[corev1.LabelInstanceTypeStable]
+	itID := unique.Make(instanceTypeName)
+
+	for i := range pod.Spec.ResourceClaims {
+		podClaim := &pod.Spec.ResourceClaims[i]
+		// Resolve the backing claim name the same way the allocator does: a direct ResourceClaimName, otherwise the
+		// generated name recorded in pod status (for ResourceClaimTemplate references). A reference with no generated
+		// claim is skipped — there is nothing to allocate.
+		claimName, ok := resolvedClaimName(pod, podClaim)
+		if !ok {
+			continue
+		}
+		key := types.NamespacedName{Namespace: pod.Namespace, Name: claimName}
+
+		claim := &resourcev1.ResourceClaim{}
+		Expect(c.Get(ctx, key, claim)).To(Succeed())
+		if claim.Status.Allocation != nil {
+			continue
+		}
+
+		meta, ok := claimMetadata[key]
+		Expect(ok).To(BeTrue(), "missing DRA allocation metadata for claim %s", key)
+		devices, ok := meta.Devices[itID]
+		Expect(ok).To(BeTrue(), "no device allocation for instance type %q in claim %s", instanceTypeName, key)
+
+		// The API server requires each DeviceRequestAllocationResult.Request to name a real request in the claim. The
+		// allocator records the owning (sub-)request on each device.
+		results := make([]resourcev1.DeviceRequestAllocationResult, len(devices))
+		for i, device := range devices {
+			poolName := device.DeviceID.Pool.Value()
+			if device.DeviceID.Template {
+				poolName = test.NodeLocalPoolName(device.DeviceID.Driver.Value(), binding.Node.Name)
+			}
+			results[i] = resourcev1.DeviceRequestAllocationResult{
+				Request: device.RequestName.String(),
+				Driver:  device.DeviceID.Driver.Value(),
+				Pool:    poolName,
+				Device:  device.DeviceID.Device.Value(),
+			}
+		}
+
+		claim.Status.Allocation = &resourcev1.AllocationResult{
+			Devices: resourcev1.DeviceAllocationResult{
+				Results: results,
+			},
+		}
+		ExpectApplied(ctx, c, claim)
+	}
+}
+
+// resolvedClaimName returns the name of the ResourceClaim backing a pod's claim reference: a direct ResourceClaimName,
+// otherwise the generated name recorded in pod.Status.ResourceClaimStatuses for a ResourceClaimTemplate reference. The
+// second return is false when no claim was generated for the reference. This mirrors the allocator's own resolution so
+// the test framework allocates the same claims the allocator did.
+func resolvedClaimName(pod *corev1.Pod, pc *corev1.PodResourceClaim) (string, bool) {
+	if pc.ResourceClaimName != nil {
+		return *pc.ResourceClaimName, true
+	}
+	for i := range pod.Status.ResourceClaimStatuses {
+		status := &pod.Status.ResourceClaimStatuses[i]
+		if status.Name == pc.Name {
+			if status.ResourceClaimName == nil {
+				return "", false
+			}
+			return *status.ResourceClaimName, true
+		}
+	}
+	return "", false
 }
 
 func ExpectNodeClaimDeployedAndStateUpdated(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, *corev1.Node) {
@@ -438,20 +739,20 @@ func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeC
 	}
 }
 
-func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeClaims ...*v1.NodeClaim) {
+func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, clk clock.Clock, nodeClaims ...*v1.NodeClaim) {
 	GinkgoHelper()
 	for i := range nodeClaims {
 		nodeClaims[i] = ExpectExists(ctx, c, nodeClaims[i])
-		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeLaunched)
-		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeRegistered)
-		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeInitialized)
+		nodeClaims[i].StatusConditions(status.WithClock(clk)).SetTrue(v1.ConditionTypeLaunched)
+		nodeClaims[i].StatusConditions(status.WithClock(clk)).SetTrue(v1.ConditionTypeRegistered)
+		nodeClaims[i].StatusConditions(status.WithClock(clk)).SetTrue(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }
 
-func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
+func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, clk clock.Clock, nodes ...*corev1.Node) {
 	GinkgoHelper()
-	ExpectMakeNodesReady(ctx, c, nodes...)
+	ExpectMakeNodesReady(ctx, c, clk, nodes...)
 
 	for i := range nodes {
 		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
@@ -461,7 +762,7 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 	}
 }
 
-func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
+func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, clk clock.Clock, nodes ...*corev1.Node) {
 	for i := range nodes {
 		nodes[i] = ExpectExists(ctx, c, nodes[i])
 		nodes[i].Status.Phase = corev1.NodeRunning
@@ -469,8 +770,8 @@ func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*cor
 			{
 				Type:               corev1.NodeReady,
 				Status:             corev1.ConditionFalse,
-				LastHeartbeatTime:  metav1.Now(),
-				LastTransitionTime: metav1.Now(),
+				LastHeartbeatTime:  metav1.NewTime(clk.Now()),
+				LastTransitionTime: metav1.NewTime(clk.Now()),
 				Reason:             "NotReady",
 			},
 		}
@@ -481,7 +782,7 @@ func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*cor
 	}
 }
 
-func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
+func ExpectMakeNodesReady(ctx context.Context, c client.Client, clk clock.Clock, nodes ...*corev1.Node) {
 	for i := range nodes {
 		nodes[i] = ExpectExists(ctx, c, nodes[i])
 		nodes[i].Status.Phase = corev1.NodeRunning
@@ -489,8 +790,8 @@ func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*corev1
 			{
 				Type:               corev1.NodeReady,
 				Status:             corev1.ConditionTrue,
-				LastHeartbeatTime:  metav1.Now(),
-				LastTransitionTime: metav1.Now(),
+				LastHeartbeatTime:  metav1.NewTime(clk.Now()),
+				LastTransitionTime: metav1.NewTime(clk.Now()),
 				Reason:             "KubeletReady",
 			},
 		}
@@ -705,11 +1006,11 @@ func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1.Nod
 	return ret
 }
 
-func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController *informer.NodeController, nodeClaimStateController *informer.NodeClaimController, nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
+func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, clk clock.Clock, nodeStateController *informer.NodeController, nodeClaimStateController *informer.NodeClaimController, nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 	GinkgoHelper()
 
-	ExpectMakeNodesInitialized(ctx, c, nodes...)
-	ExpectMakeNodeClaimsInitialized(ctx, c, nodeClaims...)
+	ExpectMakeNodesInitialized(ctx, c, clk, nodes...)
+	ExpectMakeNodeClaimsInitialized(ctx, c, clk, nodeClaims...)
 
 	// Inform cluster state about node and nodeclaim readiness
 	for _, n := range nodes {

@@ -65,7 +65,7 @@ var _ = Describe("NodePoolUtils", func() {
 			nps := lo.Times(10, func(_ int) *v1.NodePool {
 				return test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
-						Weight: lo.ToPtr[int32](int32(rand.IntN(100) + 1)), //nolint:gosec
+						Weight: new(int32(rand.IntN(100) + 1)), //nolint:gosec
 					},
 				})
 			})

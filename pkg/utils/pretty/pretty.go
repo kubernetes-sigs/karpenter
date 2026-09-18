@@ -29,7 +29,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-func Concise(o interface{}) string {
+func Concise(o any) string {
 	bytes, err := json.Marshal(o)
 	if err != nil {
 		return err.Error()

@@ -21,9 +21,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -32,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Launch struct {
@@ -39,12 +42,13 @@ type Launch struct {
 	cloudProvider cloudprovider.CloudProvider
 	cache         *cache.Cache // exists due to eventual consistency on the cache
 	recorder      events.Recorder
+	clock         clock.Clock
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); !cond.IsUnknown() {
 		// Ensure that we always set the status condition to the latest generation
-		nodeClaim.StatusConditions().Set(*cond)
+		nodeClaim.StatusConditions(status.WithClock(l.clock)).Set(*cond)
 		if cond.IsTrue() {
 			// Once the NodeClaim has successfully marked as launched, we no longer need to store it
 			l.cache.Delete(string(nodeClaim.UID))
@@ -71,7 +75,7 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	}
 	l.cache.SetDefault(string(nodeClaim.UID), created)
 	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
-	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+	nodeClaim.StatusConditions(status.WithClock(l.clock)).SetTrue(v1.ConditionTypeLaunched)
 	return reconcile.Result{}, nil
 }
 
@@ -87,9 +91,11 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 				return nil, client.IgnoreNotFound(err)
 			}
 			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-				metrics.ReasonLabel:       "insufficient_capacity",
-				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				metrics.ReasonLabel:              metrics.InsufficientCapacityReason,
+				metrics.NodePoolLabel:            nodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel:        nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 			})
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
@@ -98,17 +104,19 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 				return nil, client.IgnoreNotFound(err)
 			}
 			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-				metrics.ReasonLabel:       "nodeclass_not_ready",
-				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				metrics.ReasonLabel:              metrics.NodeClassNotReadyReason,
+				metrics.NodePoolLabel:            nodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel:        nodeClaim.Labels[v1.CapacityTypeLabelKey],
+				metrics.ConsolidationPolicyLabel: "",
+				metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 			})
 			return nil, nil
 		default:
 			var createError *cloudprovider.CreateError
 			if errors.As(err, &createError) {
-				nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeLaunched, createError.ConditionReason, createError.ConditionMessage)
+				nodeClaim.StatusConditions(status.WithClock(l.clock)).SetUnknownWithReason(v1.ConditionTypeLaunched, createError.ConditionReason, createError.ConditionMessage)
 			} else {
-				nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
+				nodeClaim.StatusConditions(status.WithClock(l.clock)).SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
 			}
 			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		}

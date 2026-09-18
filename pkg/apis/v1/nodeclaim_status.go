@@ -57,9 +57,11 @@ type NodeClaimStatus struct {
 	// Allocatable is the estimated allocatable capacity of the node
 	// +optional
 	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
-	//nolint:kubeapilinter
 	// Conditions contains signals for health and readiness
 	// +optional
+	// +listType=map
+	// +listMapKey=type
+	//nolint:kubeapilinter
 	Conditions []status.Condition `json:"conditions,omitempty"`
 	//nolint:kubeapilinter
 	// LastPodEventTime is updated with the last time a pod was scheduled
@@ -69,12 +71,12 @@ type NodeClaimStatus struct {
 	LastPodEventTime metav1.Time `json:"lastPodEventTime,omitempty"`
 }
 
-func (in *NodeClaim) StatusConditions() status.ConditionSet {
+func (in *NodeClaim) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	return status.NewReadyConditions(
 		ConditionTypeLaunched,
 		ConditionTypeRegistered,
 		ConditionTypeInitialized,
-	).For(in)
+	).For(in, opts...)
 }
 
 func (in *NodeClaim) GetConditions() []status.Condition {

@@ -22,6 +22,7 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,13 +41,15 @@ import (
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	clock         clock.Clock
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
+		clock:         clk,
 	}
 }
 
@@ -68,9 +71,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	}
 	switch {
 	case errors.IsNotFound(err):
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassNotFound", "NodeClass not found on cluster")
+		nodePool.StatusConditions(status.WithClock(c.clock)).SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassNotFound", "NodeClass not found on cluster")
 	case !nodeClass.GetDeletionTimestamp().IsZero():
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassTerminating", "NodeClass is Terminating")
+		nodePool.StatusConditions(status.WithClock(c.clock)).SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassTerminating", "NodeClass is Terminating")
 	default:
 		c.setReadyCondition(nodePool, nodeClass)
 	}
@@ -92,11 +95,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.Object) {
 	ready := nodeClass.StatusConditions().Get(status.ConditionReady)
 	if ready.IsUnknown() {
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassReadinessUnknown", "Node Class Readiness Unknown")
+		nodePool.StatusConditions(status.WithClock(c.clock)).SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassReadinessUnknown", "Node Class Readiness Unknown")
 	} else if ready.IsFalse() {
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, ready.Reason, ready.Message)
+		nodePool.StatusConditions(status.WithClock(c.clock)).SetFalse(v1.ConditionTypeNodeClassReady, ready.Reason, ready.Message)
 	} else {
-		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+		nodePool.StatusConditions(status.WithClock(c.clock)).SetTrue(v1.ConditionTypeNodeClassReady)
 	}
 }
 

@@ -33,7 +33,8 @@ var InstanceTerminationDurationSeconds = opmetrics.NewPrometheusHistogram(
 		Help:      "Duration of CloudProvider Instance termination in seconds.",
 		Buckets:   prometheus.ExponentialBuckets(1, 2, 11), //The threshold values generated here are 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
 	},
-	[]string{metrics.NodePoolLabel},
+	[]opmetrics.Label{metrics.NodePool},
+	opmetrics.Beta,
 )
 
 var NodeClaimTerminationDurationSeconds = opmetrics.NewPrometheusHistogram(
@@ -44,5 +45,6 @@ var NodeClaimTerminationDurationSeconds = opmetrics.NewPrometheusHistogram(
 		Name:      "termination_duration_seconds",
 		Help:      "Duration of NodeClaim termination in seconds.",
 		Buckets:   prometheus.ExponentialBuckets(1, 2, 12)}, //The threshold values generated here are 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024. 2048
-	[]string{metrics.NodePoolLabel},
+	[]opmetrics.Label{metrics.NodePool},
+	opmetrics.Beta,
 )

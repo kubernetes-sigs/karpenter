@@ -4,7 +4,7 @@ on:
     inputs:
       k8s_version:
         type: string
-        default: "1.35"
+        default: "1.36"
       suite:
         type: string
         required: true

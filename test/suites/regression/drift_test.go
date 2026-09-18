@@ -275,7 +275,7 @@ var _ = Describe("Drift", Ordered, func() {
 			windowStart := time.Now().Add(-time.Minute * 15).UTC()
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{
 				Nodes:    "0",
-				Schedule: lo.ToPtr(fmt.Sprintf("%d %d * * *", windowStart.Minute(), windowStart.Hour())),
+				Schedule: new(fmt.Sprintf("%d %d * * *", windowStart.Minute(), windowStart.Hour())),
 				Duration: &metav1.Duration{Duration: time.Minute * 30},
 			}}
 

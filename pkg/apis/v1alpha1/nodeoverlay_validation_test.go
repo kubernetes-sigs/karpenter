@@ -23,7 +23,6 @@ import (
 	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -237,14 +236,14 @@ var _ = Describe("CEL/Validation", func() {
 		})
 	})
 	It("shout not be able to set both price and priceAdjustment", func() {
-		nodeOverlay.Spec.Price = lo.ToPtr("0.432")
-		nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+10%")
+		nodeOverlay.Spec.Price = new("0.432")
+		nodeOverlay.Spec.PriceAdjustment = new("+10%")
 		Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 	})
 	Context("priceAdjustment", func() {
 		DescribeTable("Invalid Input",
 			func(input string) {
-				nodeOverlay.Spec.Price = lo.ToPtr(input)
+				nodeOverlay.Spec.Price = new(input)
 				Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			},
 			Entry("No explicit plus sign allowed", "+42"),
@@ -266,58 +265,58 @@ var _ = Describe("CEL/Validation", func() {
 			Entry("less -100% integer ", "-129"),
 		)
 		It("should not allow an unsigned priceAdjustment percentage", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("1%")
+			nodeOverlay.Spec.PriceAdjustment = new("1%")
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 		})
 		It("should not allow an unsigned priceAdjustment integer", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("1")
+			nodeOverlay.Spec.PriceAdjustment = new("1")
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 		})
 		It("should not allow an unsigned priceAdjustment float", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("1.3")
+			nodeOverlay.Spec.PriceAdjustment = new("1.3")
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 		})
 		It("should allow positive percentage value for priceAdjustment field", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+1%")
+			nodeOverlay.Spec.PriceAdjustment = new("+1%")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow negative percentage less then 0%", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("-1%")
+			nodeOverlay.Spec.PriceAdjustment = new("-1%")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow negative percentage -100%", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("-100%")
+			nodeOverlay.Spec.PriceAdjustment = new("-100%")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow positive percentage greater then 100%", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+100.102%")
+			nodeOverlay.Spec.PriceAdjustment = new("+100.102%")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow positive percentage greater then 100% with an integer", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+298%")
+			nodeOverlay.Spec.PriceAdjustment = new("+298%")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow positive integer value", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+43")
+			nodeOverlay.Spec.PriceAdjustment = new("+43")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow negative integer value", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("-43")
+			nodeOverlay.Spec.PriceAdjustment = new("-43")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow positive float value", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+34.43")
+			nodeOverlay.Spec.PriceAdjustment = new("+34.43")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow negative float value", func() {
-			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("-34.43")
+			nodeOverlay.Spec.PriceAdjustment = new("-34.43")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 	})
 	Context("price", func() {
 		DescribeTable("Invalid Input",
 			func(input string) {
-				nodeOverlay.Spec.Price = lo.ToPtr(input)
+				nodeOverlay.Spec.Price = new(input)
 				Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			},
 			Entry("No explicit plus sign allowed", "+42"),
@@ -337,11 +336,11 @@ var _ = Describe("CEL/Validation", func() {
 			Entry("No leading digit after sign", "-.42"),
 		)
 		It("should allow integer value", func() {
-			nodeOverlay.Spec.Price = lo.ToPtr("43")
+			nodeOverlay.Spec.Price = new("43")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow float value", func() {
-			nodeOverlay.Spec.Price = lo.ToPtr("34.43")
+			nodeOverlay.Spec.Price = new("34.43")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 	})

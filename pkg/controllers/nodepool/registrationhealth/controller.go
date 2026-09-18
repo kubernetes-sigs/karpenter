@@ -19,8 +19,10 @@ package registrationhealth
 import (
 	"context"
 
+	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/clock"
 
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 
@@ -44,14 +46,16 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	npState       *nodepoolhealth.State
+	clock         clock.Clock
 }
 
 // NewController will create a controller to reset NodePool's registration health when there is an update to NodePool/NodeClass spec
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, npState *nodepoolhealth.State) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, npState *nodepoolhealth.State) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		npState:       npState,
+		clock:         clk,
 	}
 }
 
@@ -88,7 +92,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy) == nil ||
 		nodePool.Status.NodeClassObservedGeneration != nodeClass.GetGeneration() ||
 		nodePool.Generation != nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).ObservedGeneration {
-		nodePool.StatusConditions().SetUnknown(v1.ConditionTypeNodeRegistrationHealthy)
+		nodePool.StatusConditions(status.WithClock(c.clock)).SetUnknown(v1.ConditionTypeNodeRegistrationHealthy)
 		c.npState.SetStatus(nodePool.UID, nodepoolhealth.StatusUnknown)
 	}
 

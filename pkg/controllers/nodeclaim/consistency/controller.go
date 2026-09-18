@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -143,11 +144,11 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 	}
 	// If status condition for consistent state is not true and no issues are found, set the status condition to true
 	if !nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeConsistentStateFound) && !hasIssues {
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsistentStateFound)
+		nodeClaim.StatusConditions(status.WithClock(c.clock)).SetTrue(v1.ConditionTypeConsistentStateFound)
 	}
 	// If there are issues then set the status condition for consistent state as false
 	if hasIssues {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeConsistentStateFound, "ConsistencyCheckFailed", "Consistency Check Failed")
+		nodeClaim.StatusConditions(status.WithClock(c.clock)).SetFalse(v1.ConditionTypeConsistentStateFound, "ConsistencyCheckFailed", "Consistency Check Failed")
 	}
 	return nil
 }

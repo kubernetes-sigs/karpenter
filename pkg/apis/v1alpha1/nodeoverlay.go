@@ -32,13 +32,10 @@ type NodeSelectorRequirement struct {
 	// +required
 	Key string `json:"key"`
 
-	// NOTE below: The code generator works strangely, and will union these
-	// enum values into the ones already defined on v1.NodeSelectorOperator
-
 	//nolint:kubeapilinter
 	// Represents a key's relationship to a set of values.
 	// Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
-	// +kubebuilder:validation:Enum:=Gte;Lte
+	// +kubebuilder:validation:Enum:=In;NotIn;Exists;DoesNotExist;Gt;Lt;Gte;Lte
 	// +required
 	Operator corev1.NodeSelectorOperator `json:"operator,omitempty"`
 	//nolint:kubeapilinter
@@ -57,8 +54,7 @@ func (r NodeSelectorRequirement) AsNodeSelectorRequirement() corev1.NodeSelector
 }
 
 type NodeOverlaySpec struct {
-	//nolint:kubeapilinter
-	// Requirements constrain when this NodeOverlay is applied during scheduling simulations.
+	// requirements constrain when this NodeOverlay is applied during scheduling simulations.
 	// These requirements can match:
 	// - Well-known labels (e.g., node.kubernetes.io/instance-type, karpenter.sh/nodepool)
 	// - Custom labels from NodePool's spec.template.labels
@@ -67,6 +63,7 @@ type NodeOverlaySpec struct {
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt', 'Lt', 'Gte' or 'Lte' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt' || x.operator == 'Gte' || x.operator == 'Lte') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
+	// +listType=atomic
 	Requirements []NodeSelectorRequirement `json:"requirements,omitempty"`
 	//nolint:kubeapilinter
 	// PriceAdjustment specifies the price change for matching instance types. Accepts either:
