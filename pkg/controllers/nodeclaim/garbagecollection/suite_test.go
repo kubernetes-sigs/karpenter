@@ -109,6 +109,40 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
+	It("should set the DisruptionReason condition to GarbageCollected before deleting the NodeClaim", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		nodeClaim, node, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
+		Expect(err).ToNot(HaveOccurred())
+		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, node)
+		env.Clock.SetTime(time.Now().Add(time.Second * 20))
+		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
+
+		// A finalizer keeps the NodeClaim around after the delete so the condition it was deleted with is
+		// still readable, the way the termination controller would see it.
+		nodeClaim.Finalizers = append(nodeClaim.Finalizers, v1.TerminationFinalizer)
+		ExpectApplied(ctx, env.Client, nodeClaim)
+
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeFalse())
+		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.IsTrue()).To(BeTrue())
+		Expect(cond.Reason).To(Equal(nodeclaimgarbagecollection.DisruptionReasonGarbageCollected))
+		Expect(cond.Message).To(ContainSubstring(nodeClaim.Status.ProviderID))
+
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
 	It("shouldn't delete the NodeClaim when the Node is there in a Ready state and the instance is gone", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
