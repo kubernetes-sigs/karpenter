@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
@@ -46,6 +47,38 @@ func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
 
 // DisruptionTerminationMode returns the termination_mode metric label value for a
 // disrupted NodeClaim, derived from its terminationGracePeriod.
+// ExpirationTime returns the time at which the NodeClaim becomes eligible for expiration.
+func ExpirationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
+	if nodeClaim == nil || nodeClaim.Spec.ExpireAfter.Duration == nil {
+		return time.Time{}, false
+	}
+	return nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration), true
+}
+
+// ForcedTerminationTime returns the time at which the remaining pods on the NodeClaim's node are deleted
+// regardless of PDBs and pod terminationGracePeriodSeconds.
+//
+// The termination timestamp annotation is the deadline the termination controller enforces, so it wins
+// wherever it is set — node health moves it earlier than the grace period alone would imply. Before it is
+// written the deadline is derived the way the lifecycle controller derives it, falling back to expiration
+// since that is the only termination Karpenter schedules in advance.
+func ForcedTerminationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
+	if nodeClaim == nil || nodeClaim.Spec.TerminationGracePeriod == nil {
+		return time.Time{}, false
+	}
+	if terminationTime, err := time.Parse(time.RFC3339, nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]); err == nil {
+		return terminationTime, true
+	}
+	if !nodeClaim.DeletionTimestamp.IsZero() {
+		return nodeClaim.DeletionTimestamp.Add(nodeClaim.Spec.TerminationGracePeriod.Duration), true
+	}
+	expirationTime, ok := ExpirationTime(nodeClaim)
+	if !ok {
+		return time.Time{}, false
+	}
+	return expirationTime.Add(nodeClaim.Spec.TerminationGracePeriod.Duration), true
+}
+
 func DisruptionTerminationMode(nodeClaim *v1.NodeClaim) string {
 	if nodeClaim == nil || nodeClaim.Spec.TerminationGracePeriod == nil {
 		return metrics.TerminationModeGraceful

@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -158,7 +159,7 @@ func initializeMetrics() {
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "time_until_expiration_seconds",
-			Help:      "Seconds until the NodeClaim reaches its expireAfter deadline and Karpenter starts draining the node. Negative once the deadline has passed. Only emitted for NodeClaims with expireAfter set.",
+			Help:      "Seconds until the node reaches its expireAfter deadline and Karpenter begins draining it, negative once that deadline has passed. Only emitted when expireAfter is configured.",
 		},
 		nodeLabelNames(),
 		opmetrics.Alpha,
@@ -169,7 +170,7 @@ func initializeMetrics() {
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "time_until_forced_termination_seconds",
-			Help:      "Seconds until the NodeClaim's terminationGracePeriod elapses and the remaining pods are deleted regardless of PDBs. Negative once the deadline has passed. Only emitted for NodeClaims with terminationGracePeriod set that are either terminating or have expireAfter set.",
+			Help:      "Seconds until the remaining pods on the node are deleted regardless of PDBs, negative once that deadline has passed. Only emitted when terminationGracePeriod is configured, and before termination begins it assumes expiration triggers it, so it is an upper bound.",
 		},
 		nodeLabelNames(),
 		opmetrics.Alpha,
@@ -313,14 +314,14 @@ func (c *Controller) buildMetrics(n *state.StateNode) (res []*metrics.StoreMetri
 		Value:       c.clock.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
 		Labels:      getNodeLabels(n),
 	})
-	if expirationTime, ok := getExpirationTime(n.NodeClaim); ok {
+	if expirationTime, ok := nodeclaimutils.ExpirationTime(n.NodeClaim); ok {
 		res = append(res, &metrics.StoreMetric{
 			GaugeMetric: TimeUntilExpiration,
 			Value:       expirationTime.Sub(c.clock.Now()).Seconds(),
 			Labels:      getNodeLabels(n),
 		})
 	}
-	if forcedTerminationTime, ok := getForcedTerminationTime(n.NodeClaim); ok {
+	if forcedTerminationTime, ok := nodeclaimutils.ForcedTerminationTime(n.NodeClaim); ok {
 		res = append(res, &metrics.StoreMetric{
 			GaugeMetric: TimeUntilForcedTermination,
 			Value:       forcedTerminationTime.Sub(c.clock.Now()).Seconds(),
@@ -328,33 +329,6 @@ func (c *Controller) buildMetrics(n *state.StateNode) (res []*metrics.StoreMetri
 		})
 	}
 	return res
-}
-
-// getExpirationTime returns the time at which the NodeClaim is eligible for expiration, matching the
-// deadline the expiration controller acts on.
-func getExpirationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
-	if nodeClaim == nil || nodeClaim.Spec.ExpireAfter.Duration == nil {
-		return time.Time{}, false
-	}
-	return nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration), true
-}
-
-// getForcedTerminationTime returns the time at which the remaining pods on the node are deleted regardless
-// of PDBs and pod terminationGracePeriodSeconds. Once termination has been initiated the deadline is known
-// exactly; before then, expiration is the only disruption Karpenter schedules in advance, so it is the only
-// deadline that can be anticipated.
-func getForcedTerminationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
-	if nodeClaim == nil || nodeClaim.Spec.TerminationGracePeriod == nil {
-		return time.Time{}, false
-	}
-	if !nodeClaim.DeletionTimestamp.IsZero() {
-		return nodeClaim.DeletionTimestamp.Add(nodeClaim.Spec.TerminationGracePeriod.Duration), true
-	}
-	expirationTime, ok := getExpirationTime(nodeClaim)
-	if !ok {
-		return time.Time{}, false
-	}
-	return expirationTime.Add(nodeClaim.Spec.TerminationGracePeriod.Duration), true
 }
 
 func getNodeLabelsWithResourceType(n *state.StateNode, resourceTypeName string) prometheus.Labels {
