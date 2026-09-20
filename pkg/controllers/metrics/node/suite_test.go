@@ -219,6 +219,7 @@ var _ = Describe("Node Metrics", func() {
 			Expect(forcedTermination).To(BeNumerically("~", (expireAfter + terminationGracePeriod - 45*time.Minute).Seconds(), 5))
 		})
 		It("should measure forced termination from the deletion timestamp once the NodeClaim is terminating", func() {
+			Expect(nodeClaim.Annotations).ToNot(HaveKey(v1.NodeClaimTerminationTimestampAnnotationKey))
 			applyAndUpdateState()
 			ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -229,17 +230,38 @@ var _ = Describe("Node Metrics", func() {
 			Expect(found).To(BeTrue())
 			Expect(forcedTermination).To(BeNumerically("~", terminationGracePeriod.Seconds(), 5))
 		})
-		It("should measure forced termination from the termination timestamp annotation when it is set", func() {
-			// Node health brings the deadline forward, so the grace period alone overstates the headroom.
+		It("should prefer the termination timestamp annotation over the deletion timestamp", func() {
+			// Node health brings the deadline forward on an unhealthy node that is already terminating, so
+			// the grace period measured from the deletion timestamp overstates the remaining headroom.
 			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
 				v1.NodeClaimTerminationTimestampAnnotationKey: env.Clock.Now().Add(5 * time.Minute).Format(time.RFC3339),
 			})
 			applyAndUpdateState()
+			ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectSingletonReconciled(ctx, metricsStateController)
 
 			forcedTermination, found := gaugeValue(forcedTerminationMetric)
 			Expect(found).To(BeTrue())
 			Expect(forcedTermination).To(BeNumerically("~", (5 * time.Minute).Seconds(), 5))
+		})
+		It("should remove both metrics once the node is gone", func() {
+			applyAndUpdateState()
+			ExpectSingletonReconciled(ctx, metricsStateController)
+			_, found := gaugeValue(expirationMetric)
+			Expect(found).To(BeTrue())
+			_, found = gaugeValue(forcedTerminationMetric)
+			Expect(found).To(BeTrue())
+
+			ExpectDeleted(ctx, env.Client, expiringNode, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(expiringNode))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectSingletonReconciled(ctx, metricsStateController)
+
+			_, found = gaugeValue(expirationMetric)
+			Expect(found).To(BeFalse())
+			_, found = gaugeValue(forcedTerminationMetric)
+			Expect(found).To(BeFalse())
 		})
 		It("should not emit either metric when the NodeClaim has neither expireAfter nor a termination grace period", func() {
 			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
