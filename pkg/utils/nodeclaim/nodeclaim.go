@@ -45,8 +45,6 @@ func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
 	})
 }
 
-// DisruptionTerminationMode returns the termination_mode metric label value for a
-// disrupted NodeClaim, derived from its terminationGracePeriod.
 // ExpirationTime returns the time at which the NodeClaim becomes eligible for expiration.
 func ExpirationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
 	if nodeClaim == nil || nodeClaim.Spec.ExpireAfter.Duration == nil {
@@ -84,6 +82,8 @@ func ForcedTerminationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
 	return expirationTime.Add(nodeClaim.Spec.TerminationGracePeriod.Duration), true
 }
 
+// DisruptionTerminationMode returns the termination_mode metric label value for a
+// disrupted NodeClaim, derived from its terminationGracePeriod.
 func DisruptionTerminationMode(nodeClaim *v1.NodeClaim) string {
 	if nodeClaim == nil || nodeClaim.Spec.TerminationGracePeriod == nil {
 		return metrics.TerminationModeGraceful
