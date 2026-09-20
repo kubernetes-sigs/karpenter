@@ -62,12 +62,17 @@ func ExpirationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
 // wherever it is set — node health moves it earlier than the grace period alone would imply. Before it is
 // written the deadline is derived the way the lifecycle controller derives it, falling back to expiration
 // since that is the only termination Karpenter schedules in advance.
+//
+// An annotation that is present but unparseable reports no deadline rather than falling through: the
+// termination controller fails its reconcile on one, so no deadline is enforced at all, and a fallback
+// here would report headroom against a termination that is not progressing.
 func ForcedTerminationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
 	if nodeClaim == nil || nodeClaim.Spec.TerminationGracePeriod == nil {
 		return time.Time{}, false
 	}
-	if terminationTime, err := time.Parse(time.RFC3339, nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]); err == nil {
-		return terminationTime, true
+	if annotation, exists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
+		terminationTime, err := time.Parse(time.RFC3339, annotation)
+		return terminationTime, err == nil
 	}
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return nodeClaim.DeletionTimestamp.Add(nodeClaim.Spec.TerminationGracePeriod.Duration), true

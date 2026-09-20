@@ -170,7 +170,7 @@ func initializeMetrics() {
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "time_until_forced_termination_seconds",
-			Help:      "Seconds until the remaining pods on the node are deleted regardless of PDBs, negative once that deadline has passed. Only emitted when terminationGracePeriod is configured, and before termination begins it assumes expiration triggers it, so it is an upper bound.",
+			Help:      "Seconds until the remaining pods on the node are deleted regardless of PDBs, negative once that deadline has passed. Exact once termination has begun; before then it is an upper bound predicted from expireAfter, since an earlier disruption would start the grace period sooner. Only emitted when terminationGracePeriod is configured.",
 		},
 		nodeLabelNames(),
 		opmetrics.Alpha,

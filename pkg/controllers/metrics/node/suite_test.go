@@ -263,6 +263,19 @@ var _ = Describe("Node Metrics", func() {
 			_, found = gaugeValue(forcedTerminationMetric)
 			Expect(found).To(BeFalse())
 		})
+		It("should not emit the forced termination metric when the annotation cannot be parsed", func() {
+			// The termination controller errors out on one, so there is no deadline to report.
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
+				v1.NodeClaimTerminationTimestampAnnotationKey: "not-a-timestamp",
+			})
+			applyAndUpdateState()
+			ExpectSingletonReconciled(ctx, metricsStateController)
+
+			_, found := gaugeValue(forcedTerminationMetric)
+			Expect(found).To(BeFalse())
+			_, found = gaugeValue(expirationMetric)
+			Expect(found).To(BeTrue())
+		})
 		It("should not emit either metric when the NodeClaim has neither expireAfter nor a termination grace period", func() {
 			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
 			nodeClaim.Spec.TerminationGracePeriod = nil
