@@ -53,14 +53,9 @@ import (
 const (
 	// agingConstant (τ) is the time a node must wait past its toleration to earn one rank tier of standing. It sets the
 	// starvation bound: a node overtakes a steadily-refreshed rival Δrank tiers up after Δrank·τ. See resiliency §3.1.2.
-	agingConstant = 30 * time.Minute
-	// repairSimulationAttemptsPerPass bounds full-cluster scheduling simulations in one disruption pass. Candidates
-	// that fail simulation are retried with process-local backoff, allowing lower-ranked candidates to make progress.
-	repairSimulationAttemptsPerPass = 10
-	repairSimulationBackoffBase     = time.Minute
-	repairSimulationBackoffMax      = 10 * time.Minute
-	repairDecisionLogRetention      = time.Hour
-	repairDecisionLogPruneInterval  = 10 * time.Minute
+	agingConstant                  = 30 * time.Minute
+	repairDecisionLogRetention     = time.Hour
+	repairDecisionLogPruneInterval = 10 * time.Minute
 	// repairUnhealthyThreshold stops repair for a NodePool when a correlated failure makes more than this fraction of
 	// its nodes unhealthy. Disruption budgets continue to pace concurrent repairs below this safety threshold.
 	repairUnhealthyThreshold = "20%"
@@ -73,21 +68,19 @@ type Repair struct {
 	consolidation
 	ranks                map[int]int // configured priority -> dense rank
 	policyMatcher        *health.RepairPolicyMatcher
-	simulationRetriesMu  sync.Mutex
-	simulationRetries    map[types.UID]repairSimulationRetry
 	decisionLogsMu       sync.Mutex
 	decisionLogs         map[types.UID]repairDecisionLogState
 	nextDecisionLogPrune time.Time
 }
 
-type repairSimulationRetry struct {
-	failures   int
-	retryAfter time.Time
-}
-
 type repairDecisionLogState struct {
 	fingerprint string
 	lastSeen    time.Time
+}
+
+type repairNodeEvaluation struct {
+	score  float64
+	result *health.RepairPolicyResult
 }
 
 // NewRepair validates and compiles the provider's complete repair policy set before constructing the method.
@@ -98,11 +91,10 @@ func NewRepair(c consolidation) (*Repair, error) {
 		return nil, err
 	}
 	return &Repair{
-		consolidation:     c,
-		ranks:             denseRanks(policies),
-		policyMatcher:     policyMatcher,
-		simulationRetries: make(map[types.UID]repairSimulationRetry),
-		decisionLogs:      make(map[types.UID]repairDecisionLogState),
+		consolidation: c,
+		ranks:         denseRanks(policies),
+		policyMatcher: policyMatcher,
+		decisionLogs:  make(map[types.UID]repairDecisionLogState),
 	}, nil
 }
 
@@ -115,9 +107,7 @@ func (r *Repair) ShouldConsider(ctx context.Context, node *state.StateNode) bool
 	}
 	now := r.clock.Now()
 	r.logRepairPolicyDecisions(ctx, node.Node, now)
-	return lo.SomeBy(node.Node.Status.Conditions, func(condition corev1.NodeCondition) bool {
-		return r.policyMatcher.Evaluate(condition, now) != nil
-	})
+	return r.evaluateNode(node.Node, now).result != nil
 }
 
 // ShouldDisrupt is a predicate that filters candidates to nodes that have an unhealthy condition matching a
@@ -136,12 +126,13 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
 		return false
 	}
-	r.logRepairPolicyDecisions(ctx, c.Node, r.clock.Now())
-	result, _ := r.matchRepairPolicy(c.Node)
-	if result == nil {
+	now := r.clock.Now()
+	r.logRepairPolicyDecisions(ctx, c.Node, now)
+	evaluation := r.evaluateNode(c.Node, now)
+	if evaluation.result == nil {
 		return false
 	}
-	if c.hasPodBlockers && result.TerminationGracePeriod == nil && c.NodeClaim.Spec.TerminationGracePeriod == nil {
+	if c.hasPodBlockers && evaluation.result.TerminationGracePeriod == nil && c.NodeClaim.Spec.TerminationGracePeriod == nil {
 		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
 			"repair requires a termination grace period to bypass blocking pods")...)
 		return false
@@ -152,21 +143,19 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 // ComputeCommands orders eligible candidates by the repair score and returns one replace-then-terminate command for the
 // highest-scoring candidate whose NodePool has budget. Only one command per pass, mirroring drift.
 func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
-	r.sortCandidates(candidates)
-	r.pruneSimulationRetries(candidates)
+	now := r.clock.Now()
+	r.sortCandidates(candidates, now)
 	trippedPools, err := r.breakerTrippedPools(ctx)
 	if err != nil {
 		return []Command{}, err
 	}
-	now := r.clock.Now()
-	simulationAttempts := 0
 	for _, candidate := range candidates {
 		if trippedPools[candidate.NodePool.Name] {
 			r.recorder.Publish(disruptionevents.NodeRepairBlocked(candidate.Node, candidate.NodeClaim, candidate.NodePool,
 				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", repairUnhealthyThreshold, candidate.NodePool.Name))...)
 			continue
 		}
-		command, ok, err := r.commandForCandidate(ctx, candidate, disruptionBudgetMapping, now, &simulationAttempts)
+		command, ok, err := r.commandForCandidate(ctx, candidate, disruptionBudgetMapping)
 		if err != nil {
 			return []Command{}, err
 		}
@@ -181,37 +170,26 @@ func (r *Repair) commandForCandidate(
 	ctx context.Context,
 	candidate *Candidate,
 	disruptionBudgetMapping map[string]int,
-	now time.Time,
-	simulationAttempts *int,
 ) (Command, bool, error) {
 	if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 		return Command{}, false, nil
 	}
-	nodeClaimUID := candidate.NodeClaim.UID
-	dynamicCandidate := !candidate.OwnedByStaticNodePool()
-	if dynamicCandidate && !r.allowSimulation(nodeClaimUID, now, simulationAttempts) {
-		return Command{}, false, nil
-	}
-	candidate, results, ok, backoff, err := r.replacementForCandidate(ctx, candidate)
+	candidate, results, ok, err := r.replacementForCandidate(ctx, candidate)
 	if err != nil {
 		return Command{}, false, err
 	}
 	if !ok {
-		if dynamicCandidate && backoff {
-			r.recordSimulationFailure(nodeClaimUID, now)
-		}
 		return Command{}, false, nil
 	}
-	if dynamicCandidate {
-		r.forgetSimulationFailure(nodeClaimUID)
+	evaluation := r.evaluateNode(candidate.Node, r.clock.Now())
+	if evaluation.result == nil {
+		return Command{}, false, nil
 	}
 	// Set the candidate's drain bound; the queue stamps the absolute deadline at actual deletion time (after the
 	// replacement is healthy), so repair is never an unbounded hang and a forceful (0) policy skips the drain for
 	// conditions the kubelet can't evict through — without pre-spin latency eroding the window.
-	candidate.TerminationGracePeriod = r.effectiveDrainBound(candidate)
-	if _, cond := r.matchRepairPolicy(candidate.Node); cond != nil {
-		candidate.RepairCondition = cond.Type
-	}
+	candidate.TerminationGracePeriod = effectiveDrainBound(candidate, evaluation.result)
+	candidate.RepairCondition = evaluation.result.ConditionType
 	return Command{
 		Candidates:          []*Candidate{candidate},
 		Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
@@ -220,61 +198,10 @@ func (r *Repair) commandForCandidate(
 	}, true, nil
 }
 
-func (r *Repair) allowSimulation(nodeClaimUID types.UID, now time.Time, attempts *int) bool {
-	if *attempts >= repairSimulationAttemptsPerPass {
-		return false
-	}
-	r.simulationRetriesMu.Lock()
-	defer r.simulationRetriesMu.Unlock()
-	if retry, ok := r.simulationRetries[nodeClaimUID]; ok && now.Before(retry.retryAfter) {
-		return false
-	}
-	(*attempts)++
-	return true
-}
-
-func (r *Repair) recordSimulationFailure(nodeClaimUID types.UID, now time.Time) {
-	r.simulationRetriesMu.Lock()
-	defer r.simulationRetriesMu.Unlock()
-	if r.simulationRetries == nil {
-		r.simulationRetries = make(map[types.UID]repairSimulationRetry)
-	}
-	retry := r.simulationRetries[nodeClaimUID]
-	retry.failures++
-	delay := repairSimulationBackoffBase
-	for i := 1; i < retry.failures && delay < repairSimulationBackoffMax; i++ {
-		delay = min(delay*2, repairSimulationBackoffMax)
-	}
-	retry.retryAfter = now.Add(delay)
-	r.simulationRetries[nodeClaimUID] = retry
-}
-
-func (r *Repair) forgetSimulationFailure(nodeClaimUID types.UID) {
-	r.simulationRetriesMu.Lock()
-	defer r.simulationRetriesMu.Unlock()
-	delete(r.simulationRetries, nodeClaimUID)
-}
-
-func (r *Repair) pruneSimulationRetries(candidates []*Candidate) {
-	active := sets.New[types.UID]()
-	for _, candidate := range candidates {
-		active.Insert(candidate.NodeClaim.UID)
-	}
-	r.simulationRetriesMu.Lock()
-	defer r.simulationRetriesMu.Unlock()
-	for nodeClaimUID := range r.simulationRetries {
-		if !active.Has(nodeClaimUID) {
-			delete(r.simulationRetries, nodeClaimUID)
-		}
-	}
-}
-
-func (r *Repair) sortCandidates(candidates []*Candidate) {
-	ranks := r.ranks
-	now := r.clock.Now()
+func (r *Repair) sortCandidates(candidates []*Candidate, now time.Time) {
 	scores := make(map[*Candidate]float64, len(candidates))
 	for _, candidate := range candidates {
-		scores[candidate] = r.score(candidate, ranks, now)
+		scores[candidate] = r.evaluateNode(candidate.Node, now).score
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		si, sj := scores[candidates[i]], scores[candidates[j]]
@@ -321,19 +248,19 @@ func (r *Repair) breakerTrippedPools(ctx context.Context) (map[string]bool, erro
 	return tripped, nil
 }
 
-func (r *Repair) replacementForCandidate(ctx context.Context, candidate *Candidate) (*Candidate, pscheduling.Results, bool, bool, error) {
+func (r *Repair) replacementForCandidate(ctx context.Context, candidate *Candidate) (*Candidate, pscheduling.Results, bool, error) {
 	if candidate.OwnedByStaticNodePool() {
 		current, err := r.revalidateCandidate(ctx, candidate)
 		if err != nil || current == nil {
-			return nil, pscheduling.Results{}, false, false, err
+			return nil, pscheduling.Results{}, false, err
 		}
 		results, ok := r.staticReplacement(current)
-		return current, results, ok, false, nil
+		return current, results, ok, nil
 	}
 	return r.dynamicReplacement(ctx, candidate)
 }
 
-func (r *Repair) dynamicReplacement(ctx context.Context, candidate *Candidate) (*Candidate, pscheduling.Results, bool, bool, error) {
+func (r *Repair) dynamicReplacement(ctx context.Context, candidate *Candidate) (*Candidate, pscheduling.Results, bool, error) {
 	// Repair pre-spins for all reschedulable workload, including pods whose eviction is currently blocked.
 	results, err := simulateScheduling(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, nil,
 		simulationOptions{
@@ -345,28 +272,28 @@ func (r *Repair) dynamicReplacement(ctx context.Context, candidate *Candidate) (
 	)
 	if err != nil {
 		if errors.Is(err, errCandidateDeleting) {
-			return nil, pscheduling.Results{}, false, false, nil
+			return nil, pscheduling.Results{}, false, nil
 		}
 		if isCandidateBlockedError(err) {
 			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(err.Error()))...)
-			return nil, pscheduling.Results{}, false, true, nil
+			return nil, pscheduling.Results{}, false, nil
 		}
-		return nil, pscheduling.Results{}, false, false, err
+		return nil, pscheduling.Results{}, false, err
 	}
 	if !results.AllNonPendingPodsScheduled() {
 		r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
-		return nil, pscheduling.Results{}, false, true, nil
+		return nil, pscheduling.Results{}, false, nil
 	}
 	current, err := r.revalidateCandidate(ctx, candidate)
 	if err != nil || current == nil {
-		return nil, pscheduling.Results{}, false, false, err
+		return nil, pscheduling.Results{}, false, err
 	}
 	// Revalidation refreshes health and PDB admission. If any input that affected the scheduling result also changed,
 	// discard this pass instead of pairing fresh candidate state with stale replacement capacity.
 	if !sameSchedulingInputs(candidate, current) {
-		return nil, pscheduling.Results{}, false, false, nil
+		return nil, pscheduling.Results{}, false, nil
 	}
-	return current, results, true, false, nil
+	return current, results, true, nil
 }
 
 func (r *Repair) revalidateCandidate(ctx context.Context, candidate *Candidate) (*Candidate, error) {
@@ -471,25 +398,36 @@ func (r *Repair) staticReplacement(candidate *Candidate) (pscheduling.Results, b
 	}, true
 }
 
-// score computes E = rank + age/τ for a node: the argmax of that expression over ALL of the node's eligible matching
-// conditions, not just the highest-priority one. Age is time past toleration (post-eligibility), so a flakier signal's
-// longer toleration never leaks into its standing. Taking the argmax keeps inter-node ordering consistent: a node's
-// importance is its most urgent eligible condition, so a low-priority-but-long-starving condition still lifts the node
-// even when a fresh high-priority condition also trips.
+// evaluateNode centrally computes the repair score and the action-driving condition from one Node snapshot. The score
+// is the argmax of rank + age/τ across all eligible matching policies. The action-driving condition remains the
+// highest-priority eligible policy, with earlier eligibility breaking ties, until candidate resolution lands.
 // TODO: re-introduce a per-NodePool backoff term (subtracted here) once the NodePool backoff implementation lands
 // (kubernetes-sigs/karpenter#3178) — it was ripped out to avoid duplicating that mechanism.
-func (r *Repair) score(c *Candidate, ranks map[int]int, now time.Time) float64 {
-	best := 0.0
-	for _, cond := range c.Node.Status.Conditions {
-		for _, policy := range r.policyMatcher.EligiblePolicies(cond, now) {
-			age := now.Sub(cond.LastTransitionTime.Add(policy.TolerationDuration))
-			if age < 0 {
-				age = 0
+func (r *Repair) evaluateNode(node *corev1.Node, now time.Time) repairNodeEvaluation {
+	evaluation := repairNodeEvaluation{}
+	var governingPolicy cloudprovider.RepairPolicy
+	hasGoverningPolicy := false
+	var governingCondition *corev1.NodeCondition
+	governingDeadline := time.Time{}
+	for i := range node.Status.Conditions {
+		condition := &node.Status.Conditions[i]
+		for _, policy := range r.policyMatcher.EligiblePolicies(*condition, now) {
+			age := now.Sub(condition.LastTransitionTime.Add(policy.TolerationDuration))
+			evaluation.score = max(evaluation.score, float64(r.ranks[policy.Priority])+age.Minutes()/agingConstant.Minutes())
+			deadline := condition.LastTransitionTime.Add(policy.TolerationDuration)
+			if !hasGoverningPolicy || policy.Priority > governingPolicy.Priority ||
+				(policy.Priority == governingPolicy.Priority && deadline.Before(governingDeadline)) {
+				governingPolicy = policy
+				hasGoverningPolicy = true
+				governingCondition = condition
+				governingDeadline = deadline
 			}
-			best = max(best, float64(ranks[policy.Priority])+age.Minutes()/agingConstant.Minutes())
 		}
 	}
-	return best
+	if governingCondition != nil {
+		evaluation.result = r.policyMatcher.Evaluate(*governingCondition, now)
+	}
+	return evaluation
 }
 
 // denseRanks compresses the set of configured policy priorities into contiguous tiers (adjacent tiers one apart),
@@ -503,32 +441,6 @@ func denseRanks(policies []cloudprovider.RepairPolicy) map[int]int {
 		ranks[p] = i // lowest priority -> rank 0, ascending
 	}
 	return ranks
-}
-
-// matchRepairPolicy evaluates the reason-aware policy group for the highest-priority unhealthy condition selected by
-// voluntary repair. Candidate resolution across multiple unhealthy conditions is intentionally left to the follow-up
-// repair orchestration work; this preserves the existing voluntary ordering while making each condition's eligibility
-// deterministic and reason-aware.
-func (r *Repair) matchRepairPolicy(node *corev1.Node) (*health.RepairPolicyResult, *corev1.NodeCondition) {
-	var best *cloudprovider.RepairPolicy
-	var bestCond *corev1.NodeCondition
-	deadline := time.Time{}
-	now := r.clock.Now()
-	for _, cond := range node.Status.Conditions {
-		for _, policy := range r.policyMatcher.EligiblePolicies(cond, now) {
-			terminationTime := cond.LastTransitionTime.Add(policy.TolerationDuration)
-			if best == nil || policy.Priority > best.Priority ||
-				(policy.Priority == best.Priority && terminationTime.Before(deadline)) {
-				p := policy
-				c := cond
-				best, bestCond, deadline = &p, &c, terminationTime
-			}
-		}
-	}
-	if bestCond == nil {
-		return nil, nil
-	}
-	return r.policyMatcher.Evaluate(*bestCond, now), bestCond
 }
 
 func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node, now time.Time) {
@@ -602,9 +514,8 @@ func (r *Repair) clearRepairPolicyDecisionLog(node *corev1.Node) {
 // bound, so the NodeClaim's own TerminationGracePeriod is inherited (the default disruption behavior).
 // TODO: the termination-timestamp deadline is a stopgap — replace once the termination flow has a formal contract
 // (kubernetes-sigs/karpenter#3029, Formalize Node Termination Contract).
-func (r *Repair) effectiveDrainBound(c *Candidate) *time.Duration {
-	result, _ := r.matchRepairPolicy(c.Node)
-	if result == nil || result.TerminationGracePeriod == nil {
+func effectiveDrainBound(c *Candidate, result *health.RepairPolicyResult) *time.Duration {
+	if result.TerminationGracePeriod == nil {
 		return nil // inherit the NodeClaim's own TerminationGracePeriod
 	}
 	effective := *result.TerminationGracePeriod

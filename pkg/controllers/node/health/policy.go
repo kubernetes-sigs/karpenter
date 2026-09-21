@@ -46,13 +46,12 @@ type compiledPolicy struct {
 
 type policyGroup struct {
 	specificPolicies []compiledPolicy
-	fallbackPolicy   *compiledPolicy
-	fallbackCount    int
 }
 
 // RepairPolicyMatcher validates and evaluates provider repair policies.
 type RepairPolicyMatcher struct {
-	groups map[policyKey]policyGroup
+	groups         map[policyKey]policyGroup
+	fallbackPolicy compiledPolicy
 }
 
 // RepairPolicyResult is the eligible repair behavior for one current NodeCondition.
@@ -79,40 +78,49 @@ type repairDecision struct {
 // NewRepairPolicyMatcher validates and compiles a complete provider repair policy set.
 func NewRepairPolicyMatcher(policies []cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.RepairAction]) (*RepairPolicyMatcher, error) {
 	groups := map[policyKey]policyGroup{}
-	groupKeys := make([]policyKey, 0)
+	var fallbackPolicy compiledPolicy
+	hasFallbackPolicy := false
 	var errs error
 
 	for i, policy := range policies {
 		key := policyKey{conditionType: policy.ConditionType, conditionStatus: policy.ConditionStatus}
-		group, ok := groups[key]
-		if !ok {
-			groupKeys = append(groupKeys, key)
-		}
+		group := groups[key]
 		compiled, err := compileRepairPolicy(i, policy, supportedActions)
 		errs = multierr.Append(errs, err)
 
 		if policy.ReasonRegex == "" {
-			group.fallbackCount++
-			group.fallbackPolicy = &compiled
+			if hasFallbackPolicy {
+				errs = multierr.Append(errs, fmt.Errorf(
+					"repair policy set has multiple default fallbacks: %+v and %+v",
+					fallbackPolicy.RepairPolicy,
+					compiled.RepairPolicy,
+				))
+			} else {
+				fallbackPolicy = compiled
+				hasFallbackPolicy = true
+			}
 		} else {
 			group.specificPolicies = append(group.specificPolicies, compiled)
 		}
 		groups[key] = group
 	}
 
-	for _, key := range groupKeys {
-		group := groups[key]
-		if group.fallbackCount != 1 {
-			errs = multierr.Append(errs, repairPolicyError(
-				key,
-				fmt.Errorf("must have exactly one condition-level fallback, found %d", group.fallbackCount),
-			))
-		}
+	if !hasFallbackPolicy {
+		errs = multierr.Append(errs, fmt.Errorf("repair policy set must define one default fallback"))
+	} else if fallbackPolicy.Action != cloudprovider.ReplaceNode {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"default fallback policy %+v must use action %q",
+			fallbackPolicy.RepairPolicy,
+			cloudprovider.ReplaceNode,
+		))
 	}
 	if errs != nil {
 		return nil, errs
 	}
-	return &RepairPolicyMatcher{groups: groups}, nil
+	return &RepairPolicyMatcher{
+		groups:         groups,
+		fallbackPolicy: fallbackPolicy,
+	}, nil
 }
 
 func compileRepairPolicy(index int, policy cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.RepairAction]) (compiledPolicy, error) {
@@ -120,7 +128,6 @@ func compileRepairPolicy(index int, policy cloudprovider.RepairPolicy, supported
 	compiled := compiledPolicy{RepairPolicy: policy}
 	key := policyKey{conditionType: policy.ConditionType, conditionStatus: policy.ConditionStatus}
 	errs := validateRepairPolicy(index, policy, supportedActions)
-	errs = multierr.Append(errs, validateRepairPolicyFallback(index, policy))
 
 	reasonRegex, err := compileRepairPolicyReasonRegex(index, policy)
 	if err != nil {
@@ -136,40 +143,33 @@ func validateRepairPolicy(index int, policy cloudprovider.RepairPolicy, supporte
 	appendError := func(err error) {
 		errs = multierr.Append(errs, repairPolicyError(key, err))
 	}
+	policyValue := fmt.Sprintf("policy[%d]=%+v", index, policy)
 
 	if policy.ConditionType == "" {
-		appendError(fmt.Errorf("policy[%d] has an empty condition type", index))
+		appendError(fmt.Errorf("%s has an empty condition type", policyValue))
 	}
 	if !validConditionStatus(policy.ConditionStatus) {
-		appendError(fmt.Errorf("policy[%d] has invalid condition status %q", index, policy.ConditionStatus))
+		appendError(fmt.Errorf("%s has invalid condition status %q", policyValue, policy.ConditionStatus))
 	}
 	if policy.TolerationDuration < 0 {
-		appendError(fmt.Errorf("policy[%d] has negative toleration duration %s", index, policy.TolerationDuration))
+		appendError(fmt.Errorf("%s has negative toleration duration %s", policyValue, policy.TolerationDuration))
 	}
 	if policy.TerminationGracePeriod != nil && *policy.TerminationGracePeriod < 0 {
-		appendError(fmt.Errorf("policy[%d] has negative termination grace period %s", index, *policy.TerminationGracePeriod))
+		appendError(fmt.Errorf("%s has negative termination grace period %s", policyValue, *policy.TerminationGracePeriod))
 	}
 	if policy.Priority < minRepairPolicyPriority || policy.Priority > maxRepairPolicyPriority {
 		appendError(fmt.Errorf(
-			"policy[%d] has priority %d outside the supported range [%d, %d]",
-			index,
+			"%s has priority %d outside the supported range [%d, %d]",
+			policyValue,
 			policy.Priority,
 			minRepairPolicyPriority,
 			maxRepairPolicyPriority,
 		))
 	}
 	if !supportedActions.Has(policy.Action) {
-		appendError(fmt.Errorf("policy[%d] has unsupported action %q", index, policy.Action))
+		appendError(fmt.Errorf("%s has unsupported action %q", policyValue, policy.Action))
 	}
 	return errs
-}
-
-func validateRepairPolicyFallback(index int, policy cloudprovider.RepairPolicy) error {
-	if policy.ReasonRegex == "" && policy.Action != cloudprovider.ReplaceNode {
-		key := policyKey{conditionType: policy.ConditionType, conditionStatus: policy.ConditionStatus}
-		return repairPolicyError(key, fmt.Errorf("policy[%d] condition-level fallback must use action %q", index, cloudprovider.ReplaceNode))
-	}
-	return nil
 }
 
 func compileRepairPolicyReasonRegex(index int, policy cloudprovider.RepairPolicy) (*regexp.Regexp, error) {
@@ -178,7 +178,7 @@ func compileRepairPolicyReasonRegex(index int, policy cloudprovider.RepairPolicy
 	}
 	reasonRegex, err := regexp.Compile(policy.ReasonRegex)
 	if err != nil {
-		return nil, fmt.Errorf("policy[%d] has invalid reason regex %q, %w", index, policy.ReasonRegex, err)
+		return nil, fmt.Errorf("policy[%d]=%+v has invalid reason regex, %w", index, policy, err)
 	}
 	return reasonRegex, nil
 }
@@ -270,7 +270,7 @@ func (p *RepairPolicyMatcher) evaluateDecision(condition corev1.NodeCondition, n
 	}
 	if decision.matchingPolicies == 0 {
 		decision.fallback = true
-		decision.considerPolicy(*group.fallbackPolicy, condition.LastTransitionTime.Time, now)
+		decision.considerPolicy(p.fallbackFor(condition), condition.LastTransitionTime.Time, now)
 	}
 	return decision, true
 }
@@ -290,7 +290,14 @@ func (p *RepairPolicyMatcher) matchingPolicies(condition corev1.NodeCondition) (
 	if len(matches) != 0 {
 		return matches, true
 	}
-	return []compiledPolicy{*group.fallbackPolicy}, true
+	return []compiledPolicy{p.fallbackFor(condition)}, true
+}
+
+func (p *RepairPolicyMatcher) fallbackFor(condition corev1.NodeCondition) compiledPolicy {
+	fallback := p.fallbackPolicy
+	fallback.ConditionType = condition.Type
+	fallback.ConditionStatus = condition.Status
+	return fallback
 }
 
 func (d *repairDecision) considerPolicy(policy compiledPolicy, transitionTime, now time.Time) {

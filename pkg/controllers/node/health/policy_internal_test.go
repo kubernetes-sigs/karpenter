@@ -18,7 +18,6 @@ package health
 
 import (
 	"slices"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -32,7 +31,7 @@ import (
 
 var _ = Describe("Repair Policies", func() {
 	supportedActions := sets.New(cloudprovider.RebootNode, cloudprovider.ReplaceNode)
-	validFallback := cloudprovider.RepairPolicy{
+	defaultFallback := cloudprovider.RepairPolicy{
 		ConditionType:      "AcceleratorReady",
 		ConditionStatus:    corev1.ConditionFalse,
 		TolerationDuration: 30 * time.Minute,
@@ -57,7 +56,7 @@ var _ = Describe("Repair Policies", func() {
 			}
 		},
 		Entry("accepts valid policies",
-			[]cloudprovider.RepairPolicy{validSpecific, validFallback},
+			[]cloudprovider.RepairPolicy{validSpecific, defaultFallback},
 			supportedActions,
 			"",
 		),
@@ -71,11 +70,13 @@ var _ = Describe("Repair Policies", func() {
 				{
 					ConditionType:   "ConditionFalse",
 					ConditionStatus: corev1.ConditionFalse,
+					ReasonRegex:     ".*",
 					Action:          cloudprovider.ReplaceNode,
 				},
 				{
 					ConditionType:   "ConditionUnknown",
 					ConditionStatus: corev1.ConditionUnknown,
+					ReasonRegex:     ".*",
 					Action:          cloudprovider.ReplaceNode,
 				},
 			},
@@ -106,13 +107,13 @@ var _ = Describe("Repair Policies", func() {
 					ReasonRegex:     "[",
 					Action:          cloudprovider.RebootNode,
 				},
-				validFallback,
+				defaultFallback,
 			},
 			supportedActions,
 			"invalid reason regex",
 		),
 		Entry("rejects an unsupported action",
-			[]cloudprovider.RepairPolicy{validSpecific, validFallback},
+			[]cloudprovider.RepairPolicy{validSpecific, defaultFallback},
 			sets.New(cloudprovider.ReplaceNode),
 			`unsupported action "RebootNode"`,
 		),
@@ -156,49 +157,51 @@ var _ = Describe("Repair Policies", func() {
 			supportedActions,
 			"priority 101 outside the supported range [0, 100]",
 		),
-		Entry("rejects a missing fallback",
+		Entry("rejects a missing default fallback",
 			[]cloudprovider.RepairPolicy{validSpecific},
 			supportedActions,
-			"exactly one condition-level fallback, found 0",
+			"must define one default fallback",
 		),
-		Entry("rejects multiple fallbacks",
-			[]cloudprovider.RepairPolicy{validFallback, validFallback},
+		Entry("rejects multiple default fallbacks",
+			[]cloudprovider.RepairPolicy{
+				defaultFallback,
+				{
+					ConditionType:   "StorageReady",
+					ConditionStatus: corev1.ConditionFalse,
+					Action:          cloudprovider.ReplaceNode,
+				},
+			},
 			supportedActions,
-			"exactly one condition-level fallback, found 2",
+			"multiple default fallbacks",
 		),
-		Entry("requires a replacement fallback",
+		Entry("requires a replacement default fallback",
 			[]cloudprovider.RepairPolicy{{
 				ConditionType:   "AcceleratorReady",
 				ConditionStatus: corev1.ConditionFalse,
 				Action:          cloudprovider.RebootNode,
 			}},
 			supportedActions,
-			`condition-level fallback must use action "ReplaceNode"`,
+			"default fallback policy",
 		),
 	)
 
-	It("reports fallback validation errors in first-seen condition order", func() {
+	It("includes the complete policy in validation errors", func() {
 		policies := []cloudprovider.RepairPolicy{
 			{
-				ConditionType:   "ZCondition",
+				ConditionType:   "AcceleratorReady",
 				ConditionStatus: corev1.ConditionFalse,
-				ReasonRegex:     "reason",
-				Action:          cloudprovider.ReplaceNode,
+				ReasonRegex:     "[",
+				Priority:        17,
+				Action:          cloudprovider.RebootNode,
 			},
-			{
-				ConditionType:   "ACondition",
-				ConditionStatus: corev1.ConditionFalse,
-				ReasonRegex:     "reason",
-				Action:          cloudprovider.ReplaceNode,
-			},
+			defaultFallback,
 		}
 
 		_, err := NewRepairPolicyMatcher(policies, supportedActions)
 		Expect(err).To(HaveOccurred())
-		zIndex := strings.Index(err.Error(), "condition=ZCondition")
-		aIndex := strings.Index(err.Error(), "condition=ACondition")
-		Expect(zIndex).To(BeNumerically(">=", 0))
-		Expect(aIndex).To(BeNumerically(">", zIndex))
+		Expect(err.Error()).To(ContainSubstring("ConditionType:AcceleratorReady"))
+		Expect(err.Error()).To(ContainSubstring("ReasonRegex:["))
+		Expect(err.Error()).To(ContainSubstring("Priority:17"))
 	})
 
 	Context("Matching", func() {
@@ -375,6 +378,29 @@ var _ = Describe("Repair Policies", func() {
 			Expect(decision.fallback).To(BeTrue())
 			Expect(decision.action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(decision.matchingPolicies).To(Equal(1))
+		})
+
+		It("uses the default fallback across supported conditions", func() {
+			crossConditionMatcher, err := NewRepairPolicyMatcher([]cloudprovider.RepairPolicy{
+				defaultFallback,
+				{
+					ConditionType:   "StorageReady",
+					ConditionStatus: corev1.ConditionFalse,
+					ReasonRegex:     "^KnownStorageFailure$",
+					Action:          cloudprovider.RebootNode,
+				},
+			}, supportedActions)
+			Expect(err).NotTo(HaveOccurred())
+
+			storageCondition := condition
+			storageCondition.Type = "StorageReady"
+			storageCondition.Reason = "NewStorageFailure"
+			decision := evaluate(crossConditionMatcher, storageCondition, now.Add(31*time.Minute))
+
+			Expect(decision).NotTo(BeNil())
+			Expect(decision.fallback).To(BeTrue())
+			Expect(decision.action).To(Equal(cloudprovider.ReplaceNode))
+			Expect(decision.condition.Type).To(Equal(corev1.NodeConditionType("StorageReady")))
 		})
 
 		It("treats a non-empty match-all expression as a specific policy", func() {

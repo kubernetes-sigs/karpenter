@@ -170,6 +170,7 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 		{
 			ConditionType:          corev1.NodeReady,
 			ConditionStatus:        corev1.ConditionUnknown,
+			ReasonRegex:            ".*",
 			TolerationDuration:     10 * time.Minute,
 			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
 			Action:                 cloudprovider.ReplaceNode,

@@ -76,7 +76,8 @@ type RepairPolicy struct {
 	// ConditionStatus identifies the unhealthy condition state.
 	ConditionStatus corev1.ConditionStatus
 	// ReasonRegex is a Go regular expression matched against the current NodeCondition reason using regexp.MatchString.
-	// An empty value defines the condition-level fallback.
+	// An empty value defines the policy set's default fallback. Exactly one default fallback is required and applies
+	// when no reason-specific policy matches any provider-supported condition type and status.
 	ReasonRegex string
 	// TolerationDuration is added to the NodeCondition LastTransitionTime to determine when this policy becomes eligible.
 	TolerationDuration time.Duration

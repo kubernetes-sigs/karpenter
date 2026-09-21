@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -29,59 +28,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
-
-func TestRepairSimulationAttemptsAreBoundedAndMakeProgress(t *testing.T) {
-	repair := &Repair{simulationRetries: make(map[types.UID]repairSimulationRetry)}
-	now := time.Unix(1, 0)
-	nodeClaimUIDs := make([]types.UID, repairSimulationAttemptsPerPass*2+5)
-	for i := range nodeClaimUIDs {
-		nodeClaimUIDs[i] = types.UID(fmt.Sprintf("nodeclaim-%d", i))
-	}
-
-	first := attemptRepairSimulationPass(repair, nodeClaimUIDs, now)
-	if len(first) != repairSimulationAttemptsPerPass || first[0] != nodeClaimUIDs[0] {
-		t.Fatalf("expected the first bounded candidate batch, got %v", first)
-	}
-	second := attemptRepairSimulationPass(repair, nodeClaimUIDs, now)
-	if len(second) != repairSimulationAttemptsPerPass || second[0] != nodeClaimUIDs[repairSimulationAttemptsPerPass] {
-		t.Fatalf("expected backoff to advance to the second candidate batch, got %v", second)
-	}
-	third := attemptRepairSimulationPass(repair, nodeClaimUIDs, now)
-	if len(third) != 5 || third[0] != nodeClaimUIDs[repairSimulationAttemptsPerPass*2] {
-		t.Fatalf("expected every remaining candidate to make progress, got %v", third)
-	}
-
-	now = now.Add(repairSimulationBackoffBase)
-	attempts := 0
-	if !repair.allowSimulation(nodeClaimUIDs[0], now, &attempts) {
-		t.Fatal("expected a failed candidate to become eligible after backoff")
-	}
-
-	repair.pruneSimulationRetries([]*Candidate{{StateNode: &state.StateNode{NodeClaim: &v1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{UID: nodeClaimUIDs[0]},
-	}}}})
-	if len(repair.simulationRetries) != 1 {
-		t.Fatalf("expected stale retry entries to be pruned, got %d", len(repair.simulationRetries))
-	}
-}
-
-func attemptRepairSimulationPass(repair *Repair, nodeClaimUIDs []types.UID, now time.Time) []types.UID {
-	attempts := 0
-	attempted := make([]types.UID, 0, repairSimulationAttemptsPerPass)
-	for _, nodeClaimUID := range nodeClaimUIDs {
-		if !repair.allowSimulation(nodeClaimUID, now, &attempts) {
-			continue
-		}
-		attempted = append(attempted, nodeClaimUID)
-		repair.recordSimulationFailure(nodeClaimUID, now)
-	}
-	return attempted
-}
 
 func TestRepairPolicyDecisionLogsOnlyOnTransitions(t *testing.T) {
 	repair := &Repair{decisionLogs: make(map[types.UID]repairDecisionLogState)}
