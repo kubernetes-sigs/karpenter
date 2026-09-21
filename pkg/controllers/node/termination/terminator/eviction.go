@@ -273,6 +273,10 @@ func (q *Queue) evict(ctx context.Context, pod *corev1.Pod) (reconcile.Result, e
 		if apierrors.IsTooManyRequests(err) || message == multiplePodDisruptionBudgetsError {
 			node, err2 := podutils.NodeForPod(ctx, q.kubeClient, pod)
 			if err2 != nil {
+				// If the pod has no node, we should exit without evicting
+				if apierrors.IsNotFound(err2) {
+					return reconcile.Result{}, nil
+				}
 				return reconcile.Result{}, err2
 			}
 			errorMessage := lo.Ternary(message == multiplePodDisruptionBudgetsError, "eviction does not support multiple PDBs", "evicting pod violates a PDB")
