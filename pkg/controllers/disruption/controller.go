@@ -75,6 +75,10 @@ type ControllerOptions struct {
 	methods []Method
 }
 
+type nodePoolTotalsConsumer interface {
+	setNodePoolTotals(map[string]NodePoolTotals)
+}
+
 func WithMethods(methods ...Method) option.Function[ControllerOptions] {
 	return func(o *ControllerOptions) {
 		o.methods = methods
@@ -227,10 +231,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if method, ok := disruption.(CandidatePreFilter); ok {
 		preFilter = method.ShouldConsider
 	}
-	totalsSetter, needsNodePoolTotals := disruption.(NodePoolTotalsSetter)
-	if needsNodePoolTotals {
-		needsNodePoolTotals = totalsSetter.NeedsNodePoolTotals()
-	}
+	totalsConsumer, needsNodePoolTotals := disruption.(nodePoolTotalsConsumer)
 	candidates, nodePoolTotals, err := getCandidatesWithTotals(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, preFilter, disruption.Class(), c.queue, c.clusterCost, needsNodePoolTotals)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
@@ -245,7 +246,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 	// Pass precomputed NodePool totals to consolidation methods for balanced scoring
 	if needsNodePoolTotals {
-		totalsSetter.SetNodePoolTotals(nodePoolTotals)
+		totalsConsumer.setNodePoolTotals(nodePoolTotals)
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
 	if err != nil {

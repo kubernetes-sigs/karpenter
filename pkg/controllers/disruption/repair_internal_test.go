@@ -83,13 +83,6 @@ func attemptRepairSimulationPass(repair *Repair, nodeClaimUIDs []types.UID, now 
 	return attempted
 }
 
-func TestRepairDoesNotRequestNodePoolTotals(t *testing.T) {
-	var setter NodePoolTotalsSetter = &Repair{}
-	if setter.NeedsNodePoolTotals() {
-		t.Fatal("expected repair to skip balanced-scoring NodePool totals")
-	}
-}
-
 func TestRepairPolicyDecisionLogsOnlyOnTransitions(t *testing.T) {
 	repair := &Repair{decisionLogs: make(map[types.UID]repairDecisionLogState)}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: types.UID("node-uid")}}

@@ -58,23 +58,9 @@ type consolidation struct {
 	cloudProvider          cloudprovider.CloudProvider
 	recorder               events.Recorder
 	lastConsolidationState time.Time
-	// evaluator is initialized non-nil at construction. SetNodePoolTotals
-	// replaces it with a balancedEvaluator carrying the new totals.
+	// evaluator is initialized non-nil at construction. Consolidation methods
+	// that use balanced scoring replace it with an evaluator carrying NodePool totals.
 	evaluator Evaluator
-}
-
-// NodePoolTotalsSetter is implemented by disruption methods that use balanced scoring.
-type NodePoolTotalsSetter interface {
-	NeedsNodePoolTotals() bool
-	SetNodePoolTotals(map[string]NodePoolTotals)
-}
-
-func (c *consolidation) NeedsNodePoolTotals() bool {
-	return true
-}
-
-func (c *consolidation) SetNodePoolTotals(totals map[string]NodePoolTotals) {
-	c.evaluator = NewBalancedEvaluator(totals, c.recorder)
 }
 
 func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,

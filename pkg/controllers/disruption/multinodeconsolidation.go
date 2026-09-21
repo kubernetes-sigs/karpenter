@@ -47,6 +47,10 @@ func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOp
 	}
 }
 
+func (m *MultiNodeConsolidation) setNodePoolTotals(totals map[string]NodePoolTotals) {
+	m.evaluator = NewBalancedEvaluator(totals, m.recorder)
+}
+
 // nolint:gocyclo
 func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if m.IsConsolidated() {

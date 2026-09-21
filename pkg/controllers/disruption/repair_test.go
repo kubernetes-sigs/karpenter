@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	karpenterevents "sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -482,6 +483,47 @@ var _ = Describe("Repair", func() {
 		}
 		markUnhealthy(nodes[0], "BadNode")
 		markUnhealthy(nodes[1], "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		Expect(queue.GetCommands()).To(HaveLen(1))
+	})
+
+	It("should stop repairing a NodePool when more than 20% of its nodes are unhealthy", func() {
+		const count = 10
+		nodeClaims, nodes := test.NodeClaimsAndNodes(count, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		for i := range nodes {
+			initNode(nodeClaims[i], nodes[i])
+		}
+		// Only the first condition is eligible. The breaker must also count the two fresh conditions because correlated
+		// failure protection begins when a node becomes unhealthy, not after its repair toleration elapses.
+		markUnhealthy(nodes[0], "BadNode")
+		env.Clock.Step(31 * time.Minute)
+		markUnhealthy(nodes[1], "BadNode")
+		markUnhealthy(nodes[2], "BadNode")
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		Expect(queue.GetCommands()).To(BeEmpty())
+		blockedEvents := lo.Filter(recorder.Events(), func(event karpenterevents.Event, _ int) bool {
+			return event.Reason == karpenterevents.NodeRepairBlocked
+		})
+		Expect(blockedEvents).To(HaveLen(3))
+		Expect(lo.Map(blockedEvents, func(event karpenterevents.Event, _ int) string {
+			return string(event.InvolvedObject.(metav1.Object).GetUID())
+		})).To(ConsistOf(string(nodes[0].UID), string(nodeClaims[0].UID), string(nodePool.UID)))
+		for _, event := range blockedEvents {
+			Expect(event.Type).To(Equal(corev1.EventTypeWarning))
+		}
+	})
+
+	It("should round the repair circuit-breaker threshold up for small NodePools", func() {
+		const count = 3
+		nodeClaims, nodes := test.NodeClaimsAndNodes(count, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		for i := range nodes {
+			initNode(nodeClaims[i], nodes[i])
+		}
+		markUnhealthy(nodes[0], "BadNode")
 		env.Clock.Step(31 * time.Minute)
 
 		ExpectSingletonReconciled(ctx, repairController)

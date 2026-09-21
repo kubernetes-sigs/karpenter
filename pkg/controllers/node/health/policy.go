@@ -237,6 +237,12 @@ func (p *RepairPolicyMatcher) EligiblePolicies(condition corev1.NodeCondition, n
 	return eligible
 }
 
+// Matches returns true when the condition is covered by the provider policy set, regardless of toleration.
+func (p *RepairPolicyMatcher) Matches(condition corev1.NodeCondition) bool {
+	_, ok := p.matchingPolicies(condition)
+	return ok
+}
+
 // DecisionLogValues returns structured diagnostic values for a supported condition, including waiting decisions.
 func (p *RepairPolicyMatcher) DecisionLogValues(condition corev1.NodeCondition, now time.Time) []any {
 	decision, ok := p.evaluateDecision(condition, now)

@@ -33,6 +33,9 @@ const (
 	NoCompatibleInstanceTypes = "NoCompatibleInstanceTypes"
 	Nominated                 = "Nominated"
 
+	// node repair
+	NodeRepairBlocked = "NodeRepairBlocked"
+
 	// node/termination/terminator
 	Disrupted                      = "Disrupted"
 	Evicted                        = "Evicted"

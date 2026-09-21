@@ -31,6 +31,7 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,6 +61,9 @@ const (
 	repairSimulationBackoffMax      = 10 * time.Minute
 	repairDecisionLogRetention      = time.Hour
 	repairDecisionLogPruneInterval  = 10 * time.Minute
+	// repairUnhealthyThreshold stops repair for a NodePool when a correlated failure makes more than this fraction of
+	// its nodes unhealthy. Disruption budgets continue to pace concurrent repairs below this safety threshold.
+	repairUnhealthyThreshold = "20%"
 )
 
 // Repair is a voluntary disruption method that remediates unhealthy nodes. It replaces the standalone node.health
@@ -150,9 +154,18 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	r.sortCandidates(candidates)
 	r.pruneSimulationRetries(candidates)
+	trippedPools, err := r.breakerTrippedPools(ctx)
+	if err != nil {
+		return []Command{}, err
+	}
 	now := r.clock.Now()
 	simulationAttempts := 0
 	for _, candidate := range candidates {
+		if trippedPools[candidate.NodePool.Name] {
+			r.recorder.Publish(disruptionevents.NodeRepairBlocked(candidate.Node, candidate.NodeClaim, candidate.NodePool,
+				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", repairUnhealthyThreshold, candidate.NodePool.Name))...)
+			continue
+		}
 		command, ok, err := r.commandForCandidate(ctx, candidate, disruptionBudgetMapping, now, &simulationAttempts)
 		if err != nil {
 			return []Command{}, err
@@ -276,8 +289,36 @@ func (r *Repair) sortCandidates(candidates []*Candidate) {
 	})
 }
 
-func (r *Repair) NeedsNodePoolTotals() bool {
-	return false
+// breakerTrippedPools returns the NodePools whose unhealthy-node fraction exceeds repairUnhealthyThreshold. A node
+// counts as unhealthy as soon as one of its current conditions matches the provider policy set, regardless of policy
+// toleration. The threshold rounds up so one unhealthy node does not halt repair in small pools.
+func (r *Repair) breakerTrippedPools(ctx context.Context) (map[string]bool, error) {
+	nodeList := &corev1.NodeList{}
+	if err := r.kubeClient.List(ctx, nodeList, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+	total := map[string]int{}
+	unhealthy := map[string]int{}
+	for i := range nodeList.Items {
+		node := &nodeList.Items[i]
+		nodePool := node.Labels[v1.NodePoolLabelKey]
+		if nodePool == "" {
+			continue
+		}
+		total[nodePool]++
+		if lo.SomeBy(node.Status.Conditions, r.policyMatcher.Matches) {
+			unhealthy[nodePool]++
+		}
+	}
+	tripped := map[string]bool{}
+	thresholdValue := intstr.FromString(repairUnhealthyThreshold)
+	for nodePool, count := range total {
+		threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(&thresholdValue, count, true))
+		if unhealthy[nodePool] > threshold {
+			tripped[nodePool] = true
+		}
+	}
+	return tripped, nil
 }
 
 func (r *Repair) replacementForCandidate(ctx context.Context, candidate *Candidate) (*Candidate, pscheduling.Results, bool, bool, error) {
