@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -124,9 +125,28 @@ func buildManyNodePool(template *v1.NodePool, index int) *v1.NodePool {
 // the pool's taint. Pod resources stay small (100m / 128Mi) so bin-packing
 // is not the constraint; the signal we care about is per-pool reconciler
 // cost.
+//
+// The zone topologySpreadConstraint is what puts the scheduler's topology
+// path in scope. With no spread constraint, pod affinity, or pod
+// anti-affinity on these pods, Topology.Update builds no TopologyGroup, so
+// the per-pod domain construction and filtering that scales with NodePool
+// count never executes and this test cannot observe it however many
+// NodePools it creates.
+//
+// Zone rather than hostname: the domain universe comes from NodePool
+// template requirements and instance-type offerings, and KWOK's catalog
+// declares four zones for every instance type. Hostname domains do not
+// exist until the nodes do.
+//
+// ScheduleAnyway rather than DoNotSchedule: the phase assertions require
+// every pod to land, and a hard zone constraint on a pool-pinned workload
+// can be infeasible. The topology work is reached either way, because the
+// TopologyGroup and its domain walk are built for any spread constraint
+// regardless of WhenUnsatisfiable.
 func buildManyNodePoolDeployment(poolName string, replicas int32) *appsv1.Deployment {
+	depName := fmt.Sprintf("%s-dep", poolName)
 	opts := test.CreateDeploymentOptions(
-		fmt.Sprintf("%s-dep", poolName),
+		depName,
 		replicas,
 		manyNodePoolsPodCPU,
 		manyNodePoolsPodMemory,
@@ -136,6 +156,16 @@ func buildManyNodePoolDeployment(poolName string, replicas int32) *appsv1.Deploy
 			Operator: corev1.TolerationOpEqual,
 			Value:    poolName,
 			Effect:   corev1.TaintEffectNoSchedule,
+		}}),
+		test.WithTopologySpreadConstraints([]corev1.TopologySpreadConstraint{{
+			MaxSkew:           1,
+			TopologyKey:       corev1.LabelTopologyZone,
+			WhenUnsatisfiable: corev1.ScheduleAnyway,
+			// CreateDeploymentOptions labels the pods app=<name>, so this
+			// selects this deployment's own replicas and nothing else.
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": depName},
+			},
 		}}),
 	)
 	return test.Deployment(opts)
