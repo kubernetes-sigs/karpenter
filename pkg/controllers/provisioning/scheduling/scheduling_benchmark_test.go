@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -139,6 +140,45 @@ func BenchmarkSchedulingMultiNodePool(b *testing.B) {
 	}
 }
 
+// BenchmarkSchedulingMultiNodePoolTopology times a full provisioning pass over the
+// same (NodePoolCount, PodCount) grid: Topology construction, Scheduler
+// construction, and Solve. BenchmarkSchedulingMultiNodePool builds the scheduler in
+// its fixture, before ResetTimer, so everything NewTopology does is excluded from
+// its numbers. Provisioner.Reconcile pays that cost on every pass, and the parts of
+// it that scale with NodePool count (buildDomainGroups over the NodePool list, and
+// the per-pod domain filtering in NewTopologyGroup) are exactly what a
+// NodePool-count grid exists to expose.
+func BenchmarkSchedulingMultiNodePoolTopology(b *testing.B) {
+	for _, nodePoolCount := range []int{5, 10, 20} {
+		for _, podCount := range []int{100, 500, 1000} {
+			b.Run(fmt.Sprintf("%dNP_%dPods", nodePoolCount, podCount), func(b *testing.B) {
+				benchmarkSchedulerMultiNodePoolTopology(b, makeDiversePodsPinnedRoundRobin(podCount, nodePoolCount), nodePoolCount)
+			})
+		}
+	}
+}
+
+func benchmarkSchedulerMultiNodePoolTopology(b *testing.B, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) {
+	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
+	opts = append(opts, scheduling.NumConcurrentReconciles(5))
+	fixture := buildMultiNodePoolFixture(nodePoolCount)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scheduler, err := newMultiNodePoolScheduler(ctx, fixture, pods, opts...)
+		if err != nil {
+			b.Fatalf("creating scheduler, %s", err)
+		}
+		results, err := scheduler.Solve(ctx, pods)
+		if err != nil {
+			b.Fatalf("expected scheduler to schedule all pods without error, got %s", err)
+		}
+		if len(results.PodErrors) > 0 {
+			b.Fatalf("expected all pods to schedule, got %d pods that didn't", len(results.PodErrors))
+		}
+	}
+}
+
 // makeDiversePodsPinnedRoundRobin returns diverse pods with each pod's
 // NodeSelector set to nodePoolIndexLabel = (podIndex mod nodePoolCount). This
 // keeps the workload diversity of makeDiversePods while ensuring every pod
@@ -175,7 +215,18 @@ func benchmarkSchedulerMultiNodePool(b *testing.B, pods []*corev1.Pod, nodePoolC
 	}
 }
 
-func setupMultiNodePoolScheduler(ctx context.Context, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
+// multiNodePoolFixture holds the state a multi-NodePool benchmark reuses across
+// iterations: the fake cloud provider's instance types, the NodePools, the client,
+// and the cluster. Provisioner.Reconcile rebuilds only the Topology and the
+// Scheduler on every pass, so those two are built per iteration instead.
+type multiNodePoolFixture struct {
+	nodePools               []*v1.NodePool
+	instanceTypesByNodePool map[string][]*cloudprovider.InstanceType
+	kubeClient              client.Client
+	clk                     clock.Clock
+}
+
+func buildMultiNodePoolFixture(nodePoolCount int) *multiNodePoolFixture {
 	cloudProvider = fake.NewCloudProvider()
 	// Reduced to 100 (vs 400 for the single-NodePool benches) so the 20-NodePool x 1000-pod cell stays within CI wall-clock budget.
 	instanceTypes := fake.InstanceTypes(100)
@@ -207,28 +258,43 @@ func setupMultiNodePoolScheduler(ctx context.Context, pods []*corev1.Pod, nodePo
 		instanceTypesByNodePool[np.Name] = instanceTypes
 	}
 
-	client := fakecr.NewFakeClient()
-	clock := &clock.RealClock{}
-	cluster = state.NewCluster(clock, client, cloudProvider)
-	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, nodePools, instanceTypesByNodePool, pods, opts...)
+	kubeClient := fakecr.NewFakeClient()
+	clk := &clock.RealClock{}
+	cluster = state.NewCluster(clk, kubeClient, cloudProvider)
+	return &multiNodePoolFixture{
+		nodePools:               nodePools,
+		instanceTypesByNodePool: instanceTypesByNodePool,
+		kubeClient:              kubeClient,
+		clk:                     clk,
+	}
+}
+
+// newMultiNodePoolScheduler builds the Topology and the Scheduler that a single
+// provisioning pass builds. Both are per-reconcile state in production.
+func newMultiNodePoolScheduler(ctx context.Context, f *multiNodePoolFixture, pods []*corev1.Pod, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
+	topology, err := scheduling.NewTopology(ctx, f.kubeClient, cluster, nil, f.nodePools, f.instanceTypesByNodePool, pods, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating topology, %w", err)
 	}
 	return scheduling.NewScheduler(
 		ctx,
-		client,
-		nodePools,
+		f.kubeClient,
+		f.nodePools,
 		cluster,
 		nil,
 		topology,
-		instanceTypesByNodePool,
+		f.instanceTypesByNodePool,
 		nil,
 		events.NewRecorder(&record.FakeRecorder{}),
-		clock,
+		f.clk,
 		nil, // volumeReqsByPod
 		nil, // allocator
 		opts...,
 	), nil
+}
+
+func setupMultiNodePoolScheduler(ctx context.Context, pods []*corev1.Pod, nodePoolCount int, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
+	return newMultiNodePoolScheduler(ctx, buildMultiNodePoolFixture(nodePoolCount), pods, opts...)
 }
 
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
