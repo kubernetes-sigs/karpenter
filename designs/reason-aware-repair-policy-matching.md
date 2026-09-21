@@ -30,8 +30,9 @@ or replacement.
 
 - **Reason regex:** A Go regular expression that a provider uses to select the
   current `NodeCondition.reason`.
-- **Condition-level fallback:** A policy with an empty `ReasonRegex` that
-  preserves replacement behavior when no reason-specific policy matches.
+- **Default fallback:** The single policy with an empty `ReasonRegex`. Its
+  replacement behavior applies to any supported condition when no
+  reason-specific policy matches.
 - **Eligible policy:** A matching policy whose toleration has elapsed.
 - **Eligible result:** The behavior produced by combining the eligible policies
   for one current condition.
@@ -45,8 +46,7 @@ or replacement.
    one policy to recognize that family without enumerating every complete
    reason string.
 3. A diagnostic agent introduces a reason before its cloud-provider policy is
-   updated. Karpenter must preserve the existing condition-level replacement
-   behavior.
+   updated. Karpenter must preserve default replacement behavior.
 4. More than one policy matches a reason. A short-toleration reboot may become
    eligible before a longer-toleration replacement without policy list order
    changing the result.
@@ -66,8 +66,8 @@ or replacement.
 ## What This Review Needs Consensus On
 
 1. Cloud providers select stable reason values with Go regular expressions and
-   define an explicit replacement fallback with an empty `ReasonRegex` for each
-   supported condition state.
+   define one replacement fallback with an empty `ReasonRegex` for the complete
+   policy set.
 2. Karpenter evaluates overlapping policies independently, then combines their
    eligible action, termination grace period, and eligibility time without
    relying on list order.
@@ -90,9 +90,9 @@ toleration, drain limit, or action without changing the producer.
 
 For each current condition, Karpenter evaluates all matching reason-specific
 policies. Once policies become eligible, it combines their action, termination
-grace period, and eligibility time using fixed rules. An explicit condition-level
-replacement policy with an empty `ReasonRegex` preserves the behavior used by
-node repair today when no reason-specific policy matches.
+grace period, and eligibility time using fixed rules. One default replacement
+policy with an empty `ReasonRegex` preserves repair behavior when no
+reason-specific policy matches a supported condition.
 
 ### Proposed Spec
 
@@ -116,7 +116,7 @@ type RepairPolicy struct {
 	// ConditionStatus identifies the unhealthy state.
 	ConditionStatus corev1.ConditionStatus
 	// ReasonRegex selects the current NodeCondition.reason.
-	// An empty value defines the condition-level fallback.
+	// An empty value defines the policy set's default fallback.
 	ReasonRegex string
 	// TolerationDuration is the time the matching condition must persist
 	// before this policy becomes eligible.
@@ -134,8 +134,8 @@ committed action to the lifecycle defined by the
 [reboot RFC](https://github.com/kubernetes-sigs/karpenter/pull/3259).
 `NoAction` is not a third repair operation. A provider omits condition states
 that Karpenter should never repair. Within a supported condition state, the
-explicit fallback preserves today's replacement behavior for reasons without a
-specific rule. Introducing a policy-level suppression result would change that
+default fallback preserves replacement behavior for reasons without a specific
+rule. Introducing a policy-level suppression result would change that
 compatibility contract and belongs with future customer policy and veto
 semantics.
 
@@ -161,9 +161,11 @@ A provider can group stable reason values that share behavior:
 }
 ```
 
-The second policy is the required condition-level fallback. It gives a new
-`AcceleratorReady=False` reason the same replacement behavior it would receive
-from a condition-level policy today.
+The second policy is the policy set's default fallback. It supports
+`AcceleratorReady=False` directly and supplies the same replacement behavior
+for an unmatched reason under any other condition type and status represented
+in the policy set. A provider can use a non-empty `.*` policy when one supported
+condition needs behavior that differs from the default.
 
 #### Policy Validation
 
@@ -176,9 +178,9 @@ Validation rejects a policy set containing:
 - An empty condition type, invalid condition status, invalid non-empty
   `ReasonRegex`, or unsupported `Action`.
 - A negative toleration or negative termination grace period.
-- Missing or multiple policies with an empty `ReasonRegex` for one supported
-  condition type and status.
-- A condition-level fallback whose action is not `ReplaceNode`.
+- Missing or multiple policies with an empty `ReasonRegex` across the complete
+  policy set.
+- A default fallback whose action is not `ReplaceNode`.
 - A `RebootNode` policy when the cloud provider does not implement
   `CloudProvider.Reboot`.
 
@@ -217,10 +219,11 @@ eligibleAt(policy, condition) =
 
 Go's `MatchString` performs unanchored substring matching. Providers add `^`
 and `$` when a policy must match the complete reason. An empty `ReasonRegex` is
-not compiled and identifies the condition-level fallback. Using absence for the
-fallback keeps the policy role separate from regex syntax and follows the Go
-zero-value convention for optional matching. A non-empty match-all expression
-such as `.*` remains a reason-specific policy rather than a fallback alias.
+not compiled and identifies the policy set's default fallback. Using absence
+for the fallback keeps the policy role separate from regex syntax and follows
+the Go zero-value convention for optional matching. A non-empty match-all
+expression such as `.*` remains a reason-specific policy rather than a fallback
+alias.
 
 Karpenter first evaluates every policy with a non-empty `ReasonRegex`. If at
 least one reason-specific policy matches, only those policies participate in
@@ -228,10 +231,13 @@ eligibility. A specific match that is still within its toleration suppresses
 the fallback. This prevents a generic replacement policy from bypassing the
 confidence delay selected for a known diagnosis.
 
-Karpenter evaluates the condition-level fallback only when no reason-specific
-policy matches the current reason. Conditions without reason-specific behavior
-can use a single fallback. For example, `Ready=Unknown` can retain its
-condition-level repair behavior without assigning meaning to its reason.
+Karpenter evaluates the default fallback only when no reason-specific policy
+matches the current reason. The fallback applies only when the condition type
+and status appear somewhere in the provider policy set, so unrelated Node
+conditions remain unsupported. When the fallback applies outside the condition
+pair written on its policy entry, the result carries the current condition's
+type, status, and reason with the fallback's action, toleration, priority, and
+termination grace period.
 
 #### Eligible Policy Merging
 
@@ -310,7 +316,7 @@ flowchart TD
     P["Validated provider policies"] --> M
     M --> S{"Any specific regex matches?"}
     S -->|Yes| E["Evaluate all specific matches"]
-    S -->|No| F["Evaluate the condition-level fallback"]
+    S -->|No| F["Evaluate the policy-set default fallback"]
     E --> W{"Any matching policies eligible?"}
     F --> W
     W -->|No| N["No eligible result for this condition"]
@@ -327,9 +333,9 @@ determines eligible repair behavior. Disruption budgets, vetoes, Pod Disruption
 Budgets, replacement capacity, and commitment remain owned by shared
 disruption.
 
-Existing condition-level repair behavior is represented by an explicit policy
-with an empty `ReasonRegex`. This makes compatibility visible in provider policy
-and prevents an unknown reason from silently disabling repair.
+Default replacement behavior is represented by the policy set's one policy with
+an empty `ReasonRegex`. This makes compatibility visible in provider policy and
+prevents an unknown reason from silently disabling repair.
 
 Matching emits no ordering field. Cross-Node ordering remains owned by shared
 disruption and is outside this RFC.
@@ -422,10 +428,12 @@ set `Action` on every policy and `ReasonRegex` on reason-specific policies. The
 feature remains gated while providers migrate, and validation disables node
 repair when required fields are absent.
 
-An existing condition-level policy leaves `ReasonRegex` empty and sets
-`Action: ReplaceNode`. Keeping its existing condition type, status, and
-toleration preserves which Nodes become eligible. The voluntary repair RFC
-separately defines how eligible replacement is admitted and executed.
+Providers select one existing condition-level policy as the default by leaving
+`ReasonRegex` empty and setting `Action: ReplaceNode`. Other existing
+condition-level policies use a non-empty `.*` expression to preserve their
+condition-specific type, status, toleration, priority, and drain bound. The
+voluntary repair RFC separately defines how eligible replacement is admitted
+and executed.
 
 This RFC adds no customer-facing Kubernetes API and requires no changes to
 existing NodePool or NodeClaim manifests.
@@ -441,8 +449,8 @@ Before Node Repair reaches beta:
   [#3192](https://github.com/kubernetes-sigs/karpenter/pull/3192) and the reboot
   lifecycle in [#3259](https://github.com/kubernetes-sigs/karpenter/pull/3259)
   are available for the actions defined here.
-- Every supported cloud provider supplies a validated policy set with explicit
-  replacement fallbacks and documents which reasons are stable
+- Every supported cloud provider supplies a validated policy set with one
+  replacement fallback and documents which reasons are stable
   machine-readable policy inputs.
 - Tests cover complete-set validation, repair-only disablement, overlapping
   expressions, fallback suppression, all three merge rules, restart
