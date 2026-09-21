@@ -8,30 +8,51 @@ on:
       - main
 
 jobs:
+  # index pins the artifact name each leg uploads, and the compare job below keys
+  # off the same index. timeoutMinutes is a per-leg wall clock ceiling. Measured
+  # on ubuntu-latest at -count=6, the disruption leg's Run Test step took 37m40s
+  # and the scheduling leg's took 16m22s; at -count=4 those come to roughly 26
+  # and 12 minutes. The ceilings below sit above those with room for a slower
+  # runner, and are deliberately tight enough that a hang is caught in minutes
+  # rather than at GitHub's 360 minute default.
   before:
     name: Before PR
     strategy:
       fail-fast: false
       matrix:
-        path: ["pkg/controllers/provisioning/scheduling", "pkg/controllers/disruption"]
+        include:
+          - index: 0
+            path: "pkg/controllers/provisioning/scheduling"
+            timeoutMinutes: 30
+          - index: 1
+            path: "pkg/controllers/disruption"
+            timeoutMinutes: 45
     uses: ./.github/workflows/run-bench-test.yaml
     secrets: inherit
     with:
       path: ${{ matrix.path }}
-      runName: before-${{ strategy.job-index }}
+      runName: before-${{ matrix.index }}
       githubSha: ${{ github.event.pull_request.base.sha }}
+      timeoutMinutes: ${{ matrix.timeoutMinutes }}
   after:
     name: After PR
     strategy:
       fail-fast: false
       matrix:
-        path: ["pkg/controllers/provisioning/scheduling", "pkg/controllers/disruption"]
+        include:
+          - index: 0
+            path: "pkg/controllers/provisioning/scheduling"
+            timeoutMinutes: 30
+          - index: 1
+            path: "pkg/controllers/disruption"
+            timeoutMinutes: 45
     uses: ./.github/workflows/run-bench-test.yaml
     secrets: inherit
     with:
       path: ${{ matrix.path }}
-      runName: after-${{ strategy.job-index }}
+      runName: after-${{ matrix.index }}
       githubSha: ${{ github.sha }}
+      timeoutMinutes: ${{ matrix.timeoutMinutes }}
   compare:
     name: Compare Results
     needs: [before, after]
