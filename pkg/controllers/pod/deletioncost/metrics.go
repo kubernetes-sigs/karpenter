@@ -29,31 +29,71 @@ const (
 	resultLabel              = "result"
 )
 
+// Well-known `result` dimension values. These are metric-only values, so they
+// are first-class opmetrics.Value vars: the value string and its documentation
+// live in one place and emission sites refer to it by .Name.
 var (
-	// nodes_ranked is a gauge of nodes with at least one pending
+	ResultUpdated = opmetrics.Value{
+		Name: "updated",
+		Help: "The annotation was patched to the planned value.",
+	}
+	ResultSkippedUnchanged = opmetrics.Value{
+		Name: "skipped_unchanged",
+		Help: "The pod already carried the planned annotation, so no write was issued.",
+	}
+	ResultSkippedNotFound = opmetrics.Value{
+		Name: "skipped_notfound",
+		Help: "The pod was gone before the write landed.",
+	}
+	ResultSkippedConflict = opmetrics.Value{
+		Name: "skipped_conflict",
+		Help: "Another writer won the race; the next reconcile re-observes the pod.",
+	}
+	ResultError = opmetrics.Value{
+		Name: "error",
+		Help: "The write failed with a retryable API error and will be retried.",
+	}
+)
+
+// Result is the `result` dimension for the annotation-write counter. Exported so
+// metric-assertion specs in the external test package name the same values the
+// emission sites use.
+var Result = opmetrics.Label{
+	Name:   resultLabel,
+	Help:   "Outcome of the pod-deletion-cost annotation write.",
+	Values: []opmetrics.Value{ResultUpdated, ResultSkippedUnchanged, ResultSkippedNotFound, ResultSkippedConflict, ResultError},
+}
+
+var (
+	// nodes_with_pending_annotation_writes counts nodes with at least one pending
 	// pod-deletion-cost annotation change enqueued this cycle, partitioned by
-	// nodepool. Reset each cycle so pools whose count drops to zero don't
-	// linger at their prior value.
-	nodesRanked = opmetrics.NewPrometheusGauge(
+	// nodepool. A node only lands here when one of its pods would actually change
+	// annotation, so the gauge tracks enqueued work rather than nodes examined.
+	// Reset each cycle so pools whose count drops to zero do not linger at their
+	// prior value.
+	nodesWithPendingAnnotationWrites = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
-			Name:      "nodes_ranked",
+			Name:      "nodes_with_pending_annotation_writes",
 			Help:      "Number of nodes with at least one pending pod-deletion-cost annotation change enqueued this cycle.",
 		},
 		[]opmetrics.Label{metrics.NodePool},
 		opmetrics.Alpha,
 	)
-	podLabelsUpdatedTotal = opmetrics.NewPrometheusCounter(
+	// pod_annotation_writes_total counts write attempts, not successes. The
+	// `result` dimension carries the updated-vs-skipped-vs-error split, matching
+	// the neutral naming of voluntary_disruption_decisions_total.
+	podAnnotationWritesTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: podDeletionCostSubsystem,
-			Name:      "pod_labels_updated_total",
-			Help:      "Number of pod-deletion-cost annotation write attempts by outcome (updated, skipped_unchanged, skipped_notfound, skipped_conflict, error).",
+			Name:      "pod_annotation_writes_total",
+			Help:      "Number of pod-deletion-cost annotation write attempts. Labeled by outcome.",
 		},
-		[]opmetrics.Label{{Name: resultLabel, Help: "Outcome of the annotation write."}},
+		[]opmetrics.Label{Result},
 		opmetrics.Alpha,
 	)
 )

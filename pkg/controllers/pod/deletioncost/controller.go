@@ -131,10 +131,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	perNodePool := c.enqueueAnnotationWrites(ctx, groupA, groupBC, groupD)
 
 	// Reset before Set so pools whose count fell to zero don't linger.
-	nodesRanked.Reset()
+	nodesWithPendingAnnotationWrites.Reset()
 	total := 0
 	for np, count := range perNodePool {
-		nodesRanked.Set(float64(count), map[string]string{metrics.NodePoolLabel: np})
+		nodesWithPendingAnnotationWrites.Set(float64(count), map[string]string{metrics.NodePoolLabel: np})
 		total += count
 	}
 
@@ -155,7 +155,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 // under the remaining cap. Nodes whose pods already carry the planned
 // annotation state are skipped so they don't consume the cap. Pods are
 // read from the informer cache on demand. Returns per-nodepool counts of
-// nodes annotated (drives the nodes_ranked gauge).
+// nodes annotated (drives the nodes_with_pending_annotation_writes gauge).
 func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupBC, groupD []*state.StateNode) map[string]int {
 	perNodePool := map[string]int{}
 	for _, node := range groupA {

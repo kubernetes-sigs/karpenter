@@ -276,13 +276,13 @@ var _ = Describe("Annotation", func() {
 
 			counter := &countingClient{Client: env.Client}
 			q := deletioncost.NewQueue(counter)
-			before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedUnchanged})
+			before := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultSkippedUnchanged.Name})
 			q.Add(pod, rank, false)
 			ExpectObjectReconciled(ctx, env.Client, q, pod)
-			after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedUnchanged})
+			after := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultSkippedUnchanged.Name})
 
 			Expect(counter.PatchCount()).To(Equal(0))
-			Expect(after-before).To(Equal(1.0), "matchesDesired short-circuit should increment pod_labels_updated_total{result=skipped_unchanged}")
+			Expect(after-before).To(Equal(1.0), "matchesDesired short-circuit should increment pod_annotation_writes_total{result=skipped_unchanged}")
 		})
 
 		It("should surface 429 errors from Reconcile so controller-runtime can retry", func() {
@@ -304,12 +304,12 @@ var _ = Describe("Annotation", func() {
 
 			throttler := newThrottlingClient(env.Client, 1)
 			q := deletioncost.NewQueue(throttler)
-			before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
+			before := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultError.Name})
 			q.Add(pod, -11, false)
 			err := ExpectObjectReconcileFailed(ctx, env.Client, q, pod)
 			Expect(apierrors.IsTooManyRequests(err)).To(BeTrue())
-			after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
-			Expect(after-before).To(Equal(1.0), "retryable error should increment pod_labels_updated_total{result=error}")
+			after := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultError.Name})
+			Expect(after-before).To(Equal(1.0), "retryable error should increment pod_annotation_writes_total{result=error}")
 			// The item stays enqueued on retryable errors so controller-runtime
 			// picks it back up on its next tick.
 			Expect(q.Has(pod)).To(BeTrue())
@@ -354,13 +354,13 @@ var _ = Describe("Annotation", func() {
 			live.Labels["racing-writer"] = "true"
 			Expect(env.Client.Update(ctx, live)).To(Succeed())
 
-			before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
+			before := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultSkippedConflict.Name})
 			queue.Add(snapshot, -1, false)
 			result, err := queue.Reconcile(ctx, snapshot)
 			Expect(err).ToNot(HaveOccurred(), "409 must not surface as an error; the queue treats it as terminal")
 			Expect(result).To(BeZero())
 			Expect(queue.Has(snapshot)).To(BeFalse(), "queue must drop the item after Conflict")
-			after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedConflict})
+			after := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultSkippedConflict.Name})
 			Expect(after-before).To(Equal(1.0), "Conflict should increment pods_updated_total{result=skipped_conflict}")
 
 			// Live state preserved: the racing writer's label update stuck,
@@ -386,12 +386,12 @@ var _ = Describe("Annotation", func() {
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), live)).To(Succeed())
 
 			q := deletioncost.NewQueue(&notFoundClient{Client: env.Client})
-			before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
+			before := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultSkippedNotFound.Name})
 			q.Add(live, -1, false)
 			_, err := q.Reconcile(ctx, live)
 			Expect(err).ToNot(HaveOccurred(), "NotFound must not surface as an error; the queue treats it as terminal")
 			Expect(q.Has(live)).To(BeFalse(), "queue must drop the item after NotFound")
-			after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultSkippedNotFound})
+			after := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultSkippedNotFound.Name})
 			Expect(after-before).To(Equal(1.0), "NotFound should increment pods_updated_total{result=skipped_notfound}")
 		})
 

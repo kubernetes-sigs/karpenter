@@ -153,7 +153,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 
 	if q.matchesDesired(pod, item) {
 		q.complete(qk)
-		podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_unchanged"})
+		podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultSkippedUnchanged.Name})
 		return reconcile.Result{}, nil
 	}
 
@@ -164,7 +164,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		err = patchAnnotation(ctx, q.kubeClient, pod, strconv.Itoa(item.rank))
 	}
 	if err == nil {
-		podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "updated"})
+		podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultUpdated.Name})
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
@@ -173,17 +173,17 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	// can distinguish target-disappeared from write-raced retries.
 	if apierrors.IsNotFound(err) {
 		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("skipping pod annotation update, target not found")
-		podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_notfound"})
+		podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultSkippedNotFound.Name})
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
 	if apierrors.IsConflict(err) {
 		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("skipping pod annotation update, write raced")
-		podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "skipped_conflict"})
+		podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultSkippedConflict.Name})
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
-	podLabelsUpdatedTotal.Inc(map[string]string{resultLabel: "error"})
+	podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultError.Name})
 	return reconcile.Result{}, err
 }
 

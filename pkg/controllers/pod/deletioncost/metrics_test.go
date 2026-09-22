@@ -31,17 +31,28 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-// podLabelsUpdatedDelta reads the current value of pod_labels_updated_total for the given
+// podAnnotationWritesDelta reads the current value of pod_annotation_writes_total for the given
 // label combination, returning 0 when the collector has not yet emitted a
 // sample. crmetrics.Registry is process-global so counter values accumulate
 // across specs; capture pre, run the scenario, and assert on the delta.
-func podLabelsUpdatedDelta(labels map[string]string) float64 {
+func podAnnotationWritesDelta(labels map[string]string) float64 {
 	GinkgoHelper()
-	metric, ok := FindMetricWithLabelValues("karpenter_pod_deletion_cost_pod_labels_updated_total", labels)
+	metric, ok := FindMetricWithLabelValues("karpenter_pod_deletion_cost_pod_annotation_writes_total", labels)
 	if !ok || metric == nil {
 		return 0
 	}
 	return lo.FromPtr(metric.Counter.Value)
+}
+
+// nodesWithPendingAnnotationWritesGauge reads the current value of
+// nodes_with_pending_annotation_writes for the given label combination. The
+// gauge is Reset then Set on every reconcile, so the value is absolute rather
+// than cumulative and needs no pre/post delta.
+func nodesWithPendingAnnotationWritesGauge(labels map[string]string) float64 {
+	GinkgoHelper()
+	metric, ok := FindMetricWithLabelValues("karpenter_pod_deletion_cost_nodes_with_pending_annotation_writes", labels)
+	Expect(ok).To(BeTrue(), "karpenter_pod_deletion_cost_nodes_with_pending_annotation_writes should be available")
+	return lo.FromPtr(metric.Gauge.Value)
 }
 
 var _ = Describe("Metrics", func() {
@@ -53,7 +64,7 @@ var _ = Describe("Metrics", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 	})
 
-	It("should set nodes_ranked to the number of nodes ranked in the last reconcile", func() {
+	It("should set nodes_with_pending_annotation_writes to the number of nodes enqueued in the last reconcile", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -71,12 +82,12 @@ var _ = Describe("Metrics", func() {
 		_, err := controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
-		// nodesRanked is a Set() gauge, reset each cycle. All three nodes
-		// share the same nodepool.
-		ExpectMetricGaugeValue(deletioncost.NodesRankedMetric, 3, map[string]string{metrics.NodePoolLabel: nodePool.Name})
+		// The gauge is Set() and reset each cycle. All three nodes share the
+		// same nodepool, so the pool-scoped series carries the full count.
+		Expect(nodesWithPendingAnnotationWritesGauge(map[string]string{metrics.NodePoolLabel: nodePool.Name})).To(Equal(3.0))
 	})
 
-	It("should increment pod_labels_updated_total{result=updated} on a successful annotation write", func() {
+	It("should increment pod_annotation_writes_total{result=updated} on a successful annotation write", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -89,15 +100,15 @@ var _ = Describe("Metrics", func() {
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-		before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultUpdated})
+		before := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultUpdated.Name})
 		queue.Add(pod, -13, false)
 		ExpectObjectReconciled(ctx, env.Client, queue, pod)
-		after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultUpdated})
+		after := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultUpdated.Name})
 		Expect(after-before).To(Equal(1.0),
-			"pod_labels_updated_total{result=updated} should increment on a successful patch")
+			"pod_annotation_writes_total{result=updated} should increment on a successful patch")
 	})
 
-	It("should increment pod_labels_updated_total{result=error} when the patch surfaces a retryable error", func() {
+	It("should increment pod_annotation_writes_total{result=error} when the patch surfaces a retryable error", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -112,11 +123,11 @@ var _ = Describe("Metrics", func() {
 
 		throttler := newThrottlingClient(env.Client, 1)
 		q := deletioncost.NewQueue(throttler)
-		before := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
+		before := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultError.Name})
 		q.Add(pod, -7, false)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, q, pod)
-		after := podLabelsUpdatedDelta(map[string]string{deletioncost.ResultLabel: deletioncost.ResultError})
+		after := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultError.Name})
 		Expect(after-before).To(Equal(1.0),
-			"pod_labels_updated_total{result=error} should increment on a per-pod patch failure")
+			"pod_annotation_writes_total{result=error} should increment on a per-pod patch failure")
 	})
 })
