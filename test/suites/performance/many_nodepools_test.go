@@ -23,6 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -143,6 +144,22 @@ func buildManyNodePool(template *v1.NodePool, index int) *v1.NodePool {
 // can be infeasible. The topology work is reached either way, because the
 // TopologyGroup and its domain walk are built for any spread constraint
 // regardless of WhenUnsatisfiable.
+//
+// NodeTaintsPolicy Honor rather than the unset default: unset means Ignore,
+// and under Ignore TopologyDomainGroup.ForEachDomain calls the per-domain
+// callback and continues without looking at taints at all. That skips the
+// per-domain taint walk this fixture exists to stress, because every
+// NodePool contributes its own NoSchedule taint to each of the four zone
+// domains, so the walk is the part that grows with NodePool count. Honor
+// makes ForEachDomain run Taints.ToleratesPod over each domain's taint
+// groups until one matches the pod, which is the cost the per-pool
+// scheduler path actually pays in a tainted multi-tenant cluster.
+//
+// Honor does not change where pods land here. The zone domain set is the
+// same four zones under both policies, because every instance type in the
+// KWOK catalog offers all four zones and each pod tolerates its own pool's
+// taint, so every domain keeps at least one tolerated taint group. Only
+// the cost of arriving at that domain set changes.
 func buildManyNodePoolDeployment(poolName string, replicas int32) *appsv1.Deployment {
 	depName := fmt.Sprintf("%s-dep", poolName)
 	opts := test.CreateDeploymentOptions(
@@ -161,6 +178,7 @@ func buildManyNodePoolDeployment(poolName string, replicas int32) *appsv1.Deploy
 			MaxSkew:           1,
 			TopologyKey:       corev1.LabelTopologyZone,
 			WhenUnsatisfiable: corev1.ScheduleAnyway,
+			NodeTaintsPolicy:  lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 			// CreateDeploymentOptions labels the pods app=<name>, so this
 			// selects this deployment's own replicas and nothing else.
 			LabelSelector: &metav1.LabelSelector{
