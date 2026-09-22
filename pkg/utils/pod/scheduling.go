@@ -54,7 +54,7 @@ func IsReschedulable(pod *corev1.Pod) bool {
 
 // IsIgnoredDuringDisruptionSimulation returns true if the pod opted out of being rescheduled when its node is disrupted
 func IsIgnoredDuringDisruptionSimulation(pod *corev1.Pod) bool {
-	return pod.Annotations[v1.IgnoreDuringDisruptionSimulationAnnotationKey] == "true"
+	return pod.Annotations[v1.IgnoreDisruptionSimulationAnnotationKey] == "true"
 }
 
 // IsEvictable checks if a pod is evictable by Karpenter by ensuring that the pod:

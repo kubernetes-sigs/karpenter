@@ -465,7 +465,7 @@ var _ = Describe("Emptiness", func() {
 		It("should delete nodes whose only pods are ignored during disruption simulation", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{v1.IgnoreDuringDisruptionSimulationAnnotationKey: "true"},
+					Annotations: map[string]string{v1.IgnoreDisruptionSimulationAnnotationKey: "true"},
 				},
 				NodeSelector: map[string]string{corev1.LabelHostname: node.Name},
 			})
@@ -488,7 +488,7 @@ var _ = Describe("Emptiness", func() {
 		It("should ignore nodes with pods that set the ignore-during-disruption-simulation annotation to false", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{v1.IgnoreDuringDisruptionSimulationAnnotationKey: "false"},
+					Annotations: map[string]string{v1.IgnoreDisruptionSimulationAnnotationKey: "false"},
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
