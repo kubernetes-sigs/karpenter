@@ -47,12 +47,16 @@ const (
 
 // Karpenter specific annotations
 const (
-	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
-	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
-	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
-	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
-	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
-	NodeClaimMinValuesRelaxedAnnotationKey     = apis.Group + "/nodeclaim-min-values-relaxed"
+	DoNotDisruptAnnotationKey = apis.Group + "/do-not-disrupt"
+	// IgnoreDuringDisruptionSimulationAnnotationKey marks a pod that doesn't need to be rescheduled when its node is
+	// disrupted. When set to "true", Karpenter still evicts the pod but leaves it out of scheduling simulations, so a
+	// pod that can only run on its current node (e.g. a hard hostname selector) doesn't block consolidation.
+	IgnoreDuringDisruptionSimulationAnnotationKey = apis.Group + "/ignore-during-disruption-simulation"
+	ProviderCompatibilityAnnotationKey            = apis.CompatibilityGroup + "/provider"
+	NodePoolHashAnnotationKey                     = apis.Group + "/nodepool-hash"
+	NodePoolHashVersionAnnotationKey              = apis.Group + "/nodepool-hash-version"
+	NodeClaimTerminationTimestampAnnotationKey    = apis.Group + "/nodeclaim-termination-timestamp"
+	NodeClaimMinValuesRelaxedAnnotationKey        = apis.Group + "/nodeclaim-min-values-relaxed"
 	// DRADriversAnnotationKey records the comma-separated set of DRA driver names whose devices were allocated to pods
 	// scheduled to this NodeClaim. The initialization controller can gate on these drivers having published their
 	// ResourceSlices before marking the node initialized.

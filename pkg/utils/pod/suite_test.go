@@ -245,6 +245,31 @@ var _ = Describe("IsDisruptable", func() {
 	})
 })
 
+var _ = Describe("IsReschedulable", func() {
+	It("should be reschedulable for an active pod without annotation", func() {
+		p := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+		Expect(pod.IsReschedulable(p)).To(BeTrue())
+	})
+	It("should not be reschedulable for a pod ignored during disruption simulation", func() {
+		p := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{v1.IgnoreDuringDisruptionSimulationAnnotationKey: "true"},
+			},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		}
+		Expect(pod.IsReschedulable(p)).To(BeFalse())
+	})
+	It("should be reschedulable when the ignore-during-disruption-simulation annotation isn't \"true\"", func() {
+		p := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{v1.IgnoreDuringDisruptionSimulationAnnotationKey: "false"},
+			},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		}
+		Expect(pod.IsReschedulable(p)).To(BeTrue())
+	})
+})
+
 var _ = Describe("HasDRARequirements", func() {
 	It("should return false when the pod references no ResourceClaims", func() {
 		p := &corev1.Pod{

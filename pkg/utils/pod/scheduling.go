@@ -41,13 +41,20 @@ func IsActive(pod *corev1.Pod) bool {
 // - Is an active pod (isn't terminal or actively terminating) OR Is owned by a StatefulSet and Is Terminating
 // - Isn't owned by a DaemonSet
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+// - Doesn't have the "karpenter.sh/ignore-during-disruption-simulation" annotation set to "true"
 func IsReschedulable(pod *corev1.Pod) bool {
 	// StatefulSet pods can be handled differently here because we know that StatefulSet pods MUST
 	// get deleted before new pods are re-created. This means that we can model terminating pods for StatefulSets
 	// differently for higher availability by considering terminating pods for scheduling
 	return (IsActive(pod) || (IsOwnedByStatefulSet(pod) && IsTerminating(pod))) &&
 		!IsOwnedByDaemonSet(pod) &&
-		!IsOwnedByNode(pod)
+		!IsOwnedByNode(pod) &&
+		!IsIgnoredDuringDisruptionSimulation(pod)
+}
+
+// IsIgnoredDuringDisruptionSimulation returns true if the pod opted out of being rescheduled when its node is disrupted
+func IsIgnoredDuringDisruptionSimulation(pod *corev1.Pod) bool {
+	return pod.Annotations[v1.IgnoreDuringDisruptionSimulationAnnotationKey] == "true"
 }
 
 // IsEvictable checks if a pod is evictable by Karpenter by ensuring that the pod:
