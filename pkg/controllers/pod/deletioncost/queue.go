@@ -51,19 +51,14 @@ const (
 	maxReconciles = 5000
 )
 
-// queueItem carries the desired annotation state for a single pod. Rank is
-// the target value; clear=true means remove the annotation instead of writing
-// Rank (Group D).
 type queueItem struct {
 	rank  int
 	clear bool
 }
 
 // Queue is a controller-runtime-backed fire-and-forget queue for pod
-// deletion-cost annotation writes. It is modeled after the eviction queue
-// (pkg/controllers/node/termination/terminator/eviction.go): Add enqueues
-// per-pod desired state, Reconcile drains one pod per invocation, and
-// controller-runtime provides retry/backoff/logging/metrics plumbing.
+// deletion-cost annotation writes, modeled after the eviction queue
+// (pkg/controllers/node/termination/terminator/eviction.go).
 type Queue struct {
 	sync.Mutex
 
@@ -168,9 +163,8 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
-	// NotFound: pod is already gone. Conflict: another writer raced us and
-	// won; next reconcile will re-observe. Counted separately so dashboards
-	// can distinguish target-disappeared from write-raced retries.
+	// NotFound and Conflict are counted separately so dashboards can
+	// distinguish target-disappeared from write-raced retries.
 	if apierrors.IsNotFound(err) {
 		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("skipping pod annotation update, target not found")
 		podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultSkippedNotFound.Name})

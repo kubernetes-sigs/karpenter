@@ -314,7 +314,6 @@ var _ = Describe("Annotation", func() {
 			// picks it back up on its next tick.
 			Expect(q.Has(pod)).To(BeTrue())
 
-			// Second reconcile succeeds now that the throttler is drained.
 			ExpectObjectReconciled(ctx, env.Client, q, pod)
 			Expect(q.Has(pod)).To(BeFalse())
 
@@ -399,7 +398,7 @@ var _ = Describe("Annotation", func() {
 			// The queue is keyed by (namespace, name, UID). A pod that arrives
 			// through the fetch adapter with a different UID than what was
 			// enqueued is a different pod entirely and must exit without
-			// evicting or annotating.
+			// annotating.
 			pod := rsOwnedPod(test.PodOptions{})
 			queue.Add(pod, -1, false)
 			Expect(queue.Has(pod)).To(BeTrue())
@@ -442,7 +441,7 @@ var _ = Describe("Annotation", func() {
 		// PENDING: The current Queue implementation cannot preserve a mid-flight
 		// Add(pod, newRank) when the Add races an in-progress Reconcile. Add's
 		// "no source push when already enqueued" combined with complete()'s
-		// unconditional delete drops the newer desired state the queue is
+		// unconditional delete drops the newer desired state: the queue is
 		// empty after the racing Reconcile returns, and controller-runtime is
 		// never told to re-enqueue the pod. The 60s Controller.Reconcile cycle
 		// re-Adds and eventually converges, so real-world impact is bounded,

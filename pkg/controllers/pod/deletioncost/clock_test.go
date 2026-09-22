@@ -34,8 +34,7 @@ import (
 // builds a state.Cluster. Handing it its own clock.FakeClock instead still
 // compiles and leaves most specs green, but it decouples the cluster's view of
 // time from the env.Clock.Step calls the specs in this package depend on: the
-// steps advance the test's clock while state-layer time reads stay frozen. This
-// suite carried that second clock until commit 6bda2f1e.
+// steps advance the test's clock while state-layer time reads stay frozen.
 //
 // Cluster.IsNodeNominated reads the cluster's own clock rather than one the
 // caller passes in, which makes it the cheapest observable that tells the two

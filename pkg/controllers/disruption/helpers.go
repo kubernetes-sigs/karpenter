@@ -265,10 +265,9 @@ func NodePoolStats(cluster *state.Cluster) (numNodes, disrupting map[string]int)
 
 // NodePoolBudgetMap returns per-NodePool remaining disruption budget for the
 // given reason. Result equals MustGetAllowedDisruptions minus already-disrupting,
-// clamped at 0. Logs a V(1) message when the clamp fires. Consumed by the
-// deletion-cost controller; BuildDisruptionBudgetMapping keeps its own inline
-// clamp path because it needs both allowed and remaining for metrics and
-// events.
+// clamped at 0. Consumed by the deletion-cost controller;
+// BuildDisruptionBudgetMapping keeps its own inline clamp path because it needs
+// both allowed and remaining for metrics and events.
 func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[string]*v1.NodePool, numNodes, disrupting map[string]int, reason v1.DisruptionReason) map[string]int {
 	out := map[string]int{}
 	for name, np := range nodePools {

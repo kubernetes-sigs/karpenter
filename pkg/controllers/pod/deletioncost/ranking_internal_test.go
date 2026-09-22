@@ -31,9 +31,6 @@ import (
 // (RankForBC, nodeMutatesAnyPod, lo.GroupBy sort-preservation contract).
 // The dot import shares Ginkgo's global spec registry with suite_test.go so
 // these run under the same RunSpecs entrypoint.
-// RankForBC endpoint spec (returns -n and -1) is subsumed by the sweep
-// below. Ranking-level contiguity is asserted end-to-end in ranking_test.go
-// "should assign sequential ranks starting from -len(nodes)".
 var _ = Describe("RankForBC", func() {
 	It("produces contiguous negative ranks over n = 1..10", func() {
 		for n := 1; n <= 10; n++ {

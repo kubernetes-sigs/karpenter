@@ -38,7 +38,7 @@ import (
 
 // pdbListFailingClient wraps a client.Client and returns an error when asked
 // to List PodDisruptionBudget objects; all other calls pass through unchanged.
-// Used to drive the fetchPDBs error path in RankNodes at the reconcile level.
+// Used to drive the PDB-list error path in RankNodes at the reconcile level.
 type pdbListFailingClient struct {
 	client.Client
 }
@@ -87,8 +87,7 @@ var _ = Describe("Controller", func() {
 	// pkg/controllers/controllers.go (see the guarded NewController call there):
 	// when the gate is off the controller is never instantiated. The gate is
 	// read once at process start and is not dynamic, so there is no in-Reconcile
-	// runtime check to test. The registration-time guard is a compile-time
-	// property of controllers.go and is covered by that file's structure alone.
+	// runtime check to test.
 
 	It("should reconcile and update pod annotations when feature gate is enabled", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
@@ -126,7 +125,6 @@ var _ = Describe("Controller", func() {
 		}
 		Expect(ranks).To(ConsistOf("-1", "-2"))
 
-		// After the drain, the fire-and-forget queue must be empty for both pods.
 		Expect(queue.Has(pod0)).To(BeFalse())
 		Expect(queue.Has(pod1)).To(BeFalse())
 	})
@@ -197,15 +195,14 @@ var _ = Describe("Controller", func() {
 	})
 
 	It("should retry on the same state after a failed reconcile (skip cursor is not advanced on error)", func() {
-		// Regression test for C3: prior to the fix, the lastConsolidationState
-		// cursor was advanced inside shouldSkipUnchanged, which ran before the
-		// remainder of Reconcile. A mid-reconcile error therefore left the
-		// cursor advanced and the next reconcile short-circuited, silently
-		// dropping the retry. The fix moves the assignment to the tail of
-		// Reconcile after UpdatePodDeletionCosts returns nil.
+		// Regression: the lastConsolidationState cursor used to be advanced at
+		// the unchanged-state check, ahead of the rest of Reconcile. A
+		// mid-reconcile error therefore left the cursor advanced and the next
+		// reconcile short-circuited, silently dropping the retry. The
+		// assignment now sits at the tail of Reconcile.
 		//
 		// Setup: one node with the disrupted taint so RankNodes reaches
-		// fetchPDBs. First reconcile uses a client whose PDB list fails →
+		// the PDB list. First reconcile uses a client whose PDB list fails →
 		// error. Flip the toggle so the second reconcile succeeds. The pod
 		// must end up annotated: if the cursor had been advanced by the first
 		// failed reconcile, the second reconcile would take the "unchanged"
@@ -224,7 +221,6 @@ var _ = Describe("Controller", func() {
 		failing := &toggleablePDBListFailingClient{Client: env.Client, fail: true}
 		controller := deletioncost.NewController(env.Clock, failing, cloudProvider, cluster, queue)
 
-		// First reconcile fails at fetchPDBs.
 		_, err := controller.Reconcile(ctx)
 		Expect(err).To(HaveOccurred())
 
@@ -300,8 +296,8 @@ var _ = Describe("Controller", func() {
 	Context("Deferred: per-NodePool error granularity", func() {
 		It("should _Deferred_ abort the entire reconcile when the PDB list fails, leaving healthy NodePools' pods unannotated", func() {
 			// Set up TWO NodePools. Node 0 belongs to nodePool (with a disrupted
-			// taint so RankNodes triggers fetchPDBs). Nodes 1 and 2 belong to
-			// otherPool and are healthy under a per-NodePool granular error
+			// taint so RankNodes reaches the PDB list). Nodes 1 and 2 belong to
+			// otherPool and are healthy; under a per-NodePool granular error
 			// path they would still be ranked and annotated. Under the current
 			// abort-all behavior, none of the three pods gets an annotation.
 			otherPool := test.NodePool()
@@ -310,13 +306,11 @@ var _ = Describe("Controller", func() {
 			otherPool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 			ExpectApplied(ctx, env.Client, nodePool, otherPool)
 
-			// Node 0: on nodePool, tainted disrupted so fetchPDBs runs.
 			ncPool0, nodePool0 := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
 			})
 			nodePool0.Spec.Taints = append(nodePool0.Spec.Taints, v1.DisruptedNoScheduleTaint)
-			// Nodes 1 and 2: on otherPool, healthy.
 			ncOther1, nodeOther1 := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: otherPool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},

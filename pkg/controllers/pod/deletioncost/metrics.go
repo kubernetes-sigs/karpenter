@@ -65,12 +65,10 @@ var Result = opmetrics.Label{
 }
 
 var (
-	// nodes_with_pending_annotation_writes counts nodes with at least one pending
-	// pod-deletion-cost annotation change enqueued this cycle, partitioned by
-	// nodepool. A node only lands here when one of its pods would actually change
-	// annotation, so the gauge tracks enqueued work rather than nodes examined.
-	// Reset each cycle so pools whose count drops to zero do not linger at their
-	// prior value.
+	// A node only lands in this gauge when one of its pods would actually change
+	// annotation, so it tracks enqueued work rather than nodes examined. Reset
+	// each cycle so pools whose count drops to zero do not linger at their prior
+	// value.
 	nodesWithPendingAnnotationWrites = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{

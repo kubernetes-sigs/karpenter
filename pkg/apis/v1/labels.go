@@ -58,9 +58,8 @@ const (
 	// ResourceSlices before marking the node initialized.
 	DRADriversAnnotationKey = apis.Group + "/requested-dra-drivers"
 	// DisruptionCostAnnotationKey is the user-facing Karpenter annotation for
-	// expressing the cost of evicting a pod during consolidation. Customers
-	// set this on workloads to influence which pods Karpenter prefers to
-	// evict during consolidation.
+	// expressing the cost of evicting a pod during consolidation. Customers set
+	// it on workloads to influence which pods Karpenter prefers to evict.
 	//
 	// This annotation is read by pkg/utils/disruption.EvictionCost. When the
 	// PodDeletionCostManagement feature gate is enabled, Karpenter writes

@@ -117,8 +117,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	// Delegate map construction to the disruption package so PDC and
-	// consolidation share instance-type lookups.
+	// Shared with consolidation so both resolve instance types identically.
 	nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
 		return reconciler.Result{}, fmt.Errorf("building node pool map, %w", err)
@@ -138,7 +137,6 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		total += count
 	}
 
-	// Advance the skip cursor only after enqueueing succeeded.
 	c.lastConsolidationState = currentState
 
 	if total > 0 {
@@ -147,15 +145,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }
 
-// enqueueAnnotationWrites walks the ranked groups and pushes per-pod
-// annotation writes onto the Queue. Group A is uncapped and writes the
-// math.MinInt32 sentinel so disrupted-tainted or marked-for-deletion nodes
-// always annotate promptly. Groups B/C share a per-cycle cap and write
-// sequential ranks derived from RankForBC. Group D clears annotations
-// under the remaining cap. Nodes whose pods already carry the planned
-// annotation state are skipped so they don't consume the cap. Pods are
-// read from the informer cache on demand. Returns per-nodepool counts of
-// nodes annotated (drives the nodes_with_pending_annotation_writes gauge).
+// enqueueAnnotationWrites pushes per-pod annotation writes onto the Queue.
+// Group A is exempt from the per-cycle cap so disrupted-tainted and
+// marked-for-deletion nodes always annotate promptly. Nodes whose pods
+// already carry the planned state are skipped and do not consume the cap.
+// Returns per-nodepool counts of nodes annotated.
 func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupBC, groupD []*state.StateNode) map[string]int {
 	perNodePool := map[string]int{}
 	for _, node := range groupA {
@@ -171,8 +165,6 @@ func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupB
 	return perNodePool
 }
 
-// tryEnqueueNode returns true if the node had a pod whose annotation
-// needed changing and the writes were enqueued.
 func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, rank int, cleanup bool, perNodePool map[string]int) bool {
 	pods, _ := node.Pods(ctx, c.kubeClient)
 	if !nodeMutatesAnyPod(pods, rank, cleanup) {
@@ -185,9 +177,8 @@ func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, 
 	return true
 }
 
-// enqueueCapped walks nodes and enqueues per-node writes until budget
-// non-no-op nodes have been reached. rankAt derives per-position rank and
-// cleanup flag. Returns the count of nodes actually enqueued.
+// enqueueCapped spends budget on nodes that actually mutate a pod; no-op
+// nodes do not consume a slot.
 func (c *Controller) enqueueCapped(ctx context.Context, nodes []*state.StateNode, budget int, perNodePool map[string]int, rankAt func(i int) (int, bool)) int {
 	if budget <= 0 {
 		return 0
@@ -205,9 +196,6 @@ func (c *Controller) enqueueCapped(ctx context.Context, nodes []*state.StateNode
 	return count
 }
 
-// nodeMutatesAnyPod reports whether at least one pod on the node would see
-// its pod-deletion-cost annotation change. cleanup=true means "clear if
-// present"; cleanup=false means "match rank".
 func nodeMutatesAnyPod(pods []*corev1.Pod, rank int, cleanup bool) bool {
 	for _, pod := range pods {
 		if !podHasDesiredAnnotation(pod, rank, cleanup) {
@@ -218,10 +206,9 @@ func nodeMutatesAnyPod(pods []*corev1.Pod, rank int, cleanup bool) bool {
 }
 
 // podHasDesiredAnnotation reports whether the pod already carries the
-// intended pod-deletion-cost state. cleanup=true means "annotation absent";
-// cleanup=false means "annotation equals rank". Shared with
-// Queue.matchesDesired so the controller's no-op guard and the queue's
-// idempotency short-circuit read the same rule.
+// intended pod-deletion-cost state. Shared with Queue.matchesDesired so the
+// controller's no-op guard and the queue's idempotency short-circuit read the
+// same rule.
 func podHasDesiredAnnotation(pod *corev1.Pod, rank int, cleanup bool) bool {
 	if cleanup {
 		_, has := pod.Annotations[corev1.PodDeletionCost]

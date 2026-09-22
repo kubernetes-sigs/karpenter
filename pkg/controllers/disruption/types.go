@@ -340,9 +340,9 @@ func (c Command) SourceCost() float64 {
 
 // EstimatedSavings returns the estimated cost savings from this consolidation.
 // Unknown prices degrade silently: an unpriceable source node carries Price 0
-// (see disruptionutils.ResolveOfferingPrice) and deflates savings, while a replacement with no
-// available compatible offering contributes 0 to destination cost and inflates
-// them.
+// (see disruptionutils.ResolveOfferingPrice) and deflates savings, while a
+// replacement with no available compatible offering contributes 0 to
+// destination cost and inflates them.
 func (c Command) EstimatedSavings() float64 {
 	sourcePrice := c.SourceCost()
 

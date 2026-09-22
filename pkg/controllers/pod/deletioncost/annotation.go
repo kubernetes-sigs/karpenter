@@ -28,7 +28,7 @@ import (
 // same annotation (customer kubectl, third-party HPAs, admission webhooks)
 // surfaces as a 409 Conflict; the queue's Reconcile then treats it as
 // Skipped and lets the next cycle converge. See
-// pkg/controllers/nodeclaim/lifecycle/controller.go:306-320 for the same
+// pkg/controllers/nodeclaim/lifecycle/controller.go for the same
 // annotation-race precedent.
 func clearAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.Pod) error {
 	// MergeFromWithOptions captures pod by pointer; mutate a copy so the diff is non-empty.
@@ -42,7 +42,6 @@ func clearAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.
 // optimistic lock. Symmetric with clearAnnotation; see that function's
 // comment for the Conflict-detection rationale.
 func patchAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.Pod, value string) error {
-	// MergeFromWithOptions captures pod by pointer; mutate a copy so the diff is non-empty.
 	updated := pod.DeepCopy()
 	if updated.Annotations == nil {
 		updated.Annotations = map[string]string{}

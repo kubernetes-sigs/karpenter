@@ -212,8 +212,6 @@ var _ = Describe("Ranking", func() {
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Group D clears the annotation on the StatefulSet pod; Group C
-			// gets a strictly-negative rank on the normal pod.
 			expectPodAnnotationCleared(stsPod)
 			Expect(expectPodRank(normalPod)).To(BeNumerically("<", 0))
 		})
@@ -269,7 +267,7 @@ var _ = Describe("Ranking", func() {
 			// is applied, the disruption controller does not re-check
 			// do-not-disrupt (queue.go waitOrTerminate + validation.go
 			// validateCandidates both run pre-taint only). A late do-not-
-			// disrupt flip must NOT re-route the node to Group D Group A
+			// disrupt flip must NOT re-route the node to Group D; Group A
 			// treatment stays aligned with actual controller behavior.
 			// Direct-helper because both classifications produce the same
 			// annotated pod-deletion-cost (MinInt32 vs. cleared), and we need
@@ -403,7 +401,6 @@ var _ = Describe("Ranking", func() {
 			driftedPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
 			ExpectApplied(ctx, env.Client, driftedPod)
 
-			// Node 2: normal (Group C)
 			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name})
 			ExpectApplied(ctx, env.Client, normalPod)
 
@@ -424,8 +421,8 @@ var _ = Describe("Ranking", func() {
 	Context("Per-NodePool budgets", func() {
 		It("should respect per-NodePool consolidation budgets across multiple pools", func() {
 			// Two NodePools with different budgets:
-			//   poolA: Nodes "100%" normal node lands in Group C
-			//   poolB: Nodes "0"   normal node overflows to Group D
+			//   poolA: Nodes "100%", so its normal node lands in Group C
+			//   poolB: Nodes "0",    so its normal node overflows to Group D
 			poolA := test.NodePool()
 			poolA.Name = "pool-a"
 			poolA.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
@@ -497,8 +494,8 @@ var _ = Describe("Ranking", func() {
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Deterministic which node lands in Group B vs. Group D depends
-			// on the sort tie-break, so read both pods and assert on the set:
+			// Which node lands in Group B vs. Group D depends on the sort
+			// tie-break, so read both pods and assert on the set:
 			// exactly one carries a strictly-negative rank (Group B) and the
 			// other has no annotation (Group D overflow).
 			// Drain both pods so the fire-and-forget writes have landed.
@@ -525,7 +522,7 @@ var _ = Describe("Ranking", func() {
 	Context("ConsolidateAfter=nil (consolidation disabled)", func() {
 		// The outer BeforeEach forces ConsolidateAfter=0s so tests exercise
 		// active partitioning. This Context leaves it unset so
-		// isConsolidationDisabled fires and routes the pool to Group D the
+		// isConsolidationDisabled fires and routes the pool to Group D, the
 		// steady-state branch that the shared fixture would otherwise mask.
 		It("should route a nil-ConsolidateAfter pool to Group D while a 0s pool stays in Group C", func() {
 			// Two NodePools side by side:
@@ -723,7 +720,6 @@ var _ = Describe("Ranking", func() {
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
 			})
-			// PDB blocks pods labeled app=blocked.
 			minAvail := intstr.FromString("100%")
 			pdb := &policyv1.PodDisruptionBudget{
 				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: "default"},
@@ -758,7 +754,6 @@ var _ = Describe("Ranking", func() {
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Every Group A pod carries math.MinInt32.
 			for _, p := range groupAPods {
 				Expect(expectPodRank(p)).To(Equal(math.MinInt32))
 			}
@@ -817,7 +812,6 @@ var _ = Describe("Ranking", func() {
 			_, err := controller.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
-			// All 10 Group A pods annotated with math.MinInt32.
 			for _, p := range groupAPods {
 				Expect(expectPodRank(p)).To(Equal(math.MinInt32))
 			}
@@ -892,7 +886,7 @@ var _ = Describe("Ranking", func() {
 	})
 
 	// Direct-helper edge tests. These cover partition cases that are
-	// observable only in the NodeRank slice (multi-Group-A pod-count
+	// observable only in the returned partition slices (multi-Group-A pod-count
 	// tiebreak, negative classification of disrupted-but-not-PDB-blocked
 	// nodes, RankNodes' own empty-input handling). The Reconcile-driven
 	// variants would assert on annotation values that don't distinguish
@@ -907,7 +901,7 @@ var _ = Describe("Ranking", func() {
 		It("should _Edge_ classify a disrupted node as Group A even without PDB-blocked pods", func() {
 			// Group A is defined solely by the karpenter.sh/disrupted taint
 			// (RFC #2935 "Draining"). A tainted node belongs in Group A
-			// regardless of PDB state or non-RS-owned pods on the node the
+			// regardless of PDB state or non-RS-owned pods on the node; the
 			// disruption path has already committed to termination.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
@@ -924,7 +918,6 @@ var _ = Describe("Ranking", func() {
 			disruptedPod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
 			ExpectApplied(ctx, env.Client, disruptedPod)
 
-			// Node 1: normal.
 			normalPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
 			ExpectApplied(ctx, env.Client, normalPod)
 
@@ -990,7 +983,6 @@ var _ = Describe("Ranking", func() {
 			}
 			ExpectApplied(ctx, env.Client, pdb)
 
-			// Node 2: normal
 			ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: nodes[2].Name}))
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
@@ -1020,10 +1012,10 @@ var _ = Describe("Ranking", func() {
 		})
 
 		// Bare and StatefulSet pods route their host node to Group D.
-		// Job, DaemonSet, and kube-system pods do not they fall through
-		// to Group C. Observes CleanupOnly on NodeRank because Group C
-		// and Group D produce different annotation states but the same
-		// helper output shape.
+		// Job, DaemonSet, and kube-system pods do not; they fall through
+		// to Group C. Asserts on the returned partitions directly because
+		// Group C and Group D produce different annotation states but the
+		// same helper output shape.
 		DescribeTable("should _Edge_ classify non-RS-owned pods as Group D (not disruptable)",
 			func(ownerRef *metav1.OwnerReference, expectGroupD bool) {
 				nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
@@ -1083,7 +1075,7 @@ var _ = Describe("Ranking", func() {
 		)
 
 		It("should _Edge_ route a non-tainted node with a PDB-blocked pod to Group D", func() {
-			// Cluster has NO tainted node exercises the steady-state path.
+			// Cluster has NO tainted node, exercising the steady-state path.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -1114,7 +1106,6 @@ var _ = Describe("Ranking", func() {
 
 			// Non-tainted PDB-blocked node → Group D, annotation cleared.
 			expectPodAnnotationCleared(pdbBlockedPod)
-			// Normal node → Group C.
 			Expect(expectPodRank(normalPod)).To(BeNumerically("<", 0))
 			Expect(expectPodRank(normalPod)).To(BeNumerically(">", math.MinInt32))
 		})
@@ -1162,7 +1153,7 @@ var _ = Describe("Ranking", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			// Fake instance-type map so ResolveOfferingPrice returns a positive
-			// price for both nodes otherwise Price=0 collapses both ratios to 0
+			// price for both nodes; otherwise Price=0 collapses both ratios to 0
 			// and the tie-break drops to node name, which is non-deterministic.
 			itMap := map[string]map[string]*cloudprovider.InstanceType{
 				nodePool.Name: {it: &cloudprovider.InstanceType{
@@ -1199,7 +1190,7 @@ var _ = Describe("Ranking", func() {
 		It("should _Edge_ exclude kube-system bare pods from Group D", func() {
 			// hasNonRSOwnedPods explicitly skips kube-system, since system
 			// components (coredns, kube-proxy) are legitimately unowned and
-			// should not push their host node into Group D those nodes
+			// should not push their host node into Group D; those nodes
 			// remain consolidation candidates.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
