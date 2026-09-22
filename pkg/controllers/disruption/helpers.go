@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -50,34 +49,17 @@ import (
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
-type candidateBlockedError struct {
-	error
+// SimulationOptions configures disruption-specific scheduling behavior.
+type SimulationOptions struct {
+	// IncludeBlockedCandidatePods includes candidate pods even when PodDisruptionBudgets currently prevent eviction.
+	IncludeBlockedCandidatePods bool
 }
 
-func newCandidateBlockedError(err error) *candidateBlockedError {
-	return &candidateBlockedError{error: err}
-}
-
-func isCandidateBlockedError(err error) bool {
-	var blockedError *candidateBlockedError
-	return errors.As(err, &blockedError)
-}
-
-type simulationOptions struct {
-	includeBlockedCandidatePods bool
-	ensureReplacementNodePool   string
-	candidatePodsOnly           bool
-}
-
-func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
-	schedulerOpts []scheduling.Options, candidates ...*Candidate,
-) (scheduling.Results, error) {
-	return simulateScheduling(ctx, kubeClient, cluster, provisioner, clk, recorder, schedulerOpts, simulationOptions{}, candidates...)
-}
-
+// SimulateScheduling determines whether candidate workloads can be rescheduled after disruption.
+//
 //nolint:gocyclo
-func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
-	schedulerOpts []scheduling.Options, simulationOpts simulationOptions, candidates ...*Candidate,
+func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
+	schedulerOpts []scheduling.Options, simulationOpts SimulationOptions, candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.DeepCopyNodes()
@@ -95,12 +77,35 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return scheduling.Results{}, errCandidateDeleting
 	}
 
-	pods, candidatePods, deletingNodePods, err := podsForSchedulingSimulation(
-		ctx, kubeClient, provisioner, clk, recorder, deletingNodes, simulationOpts, candidates,
-	)
+	pods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
-		return scheduling.Results{}, err
+		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
+
+	var candidatePods []*corev1.Pod
+	if simulationOpts.IncludeBlockedCandidatePods {
+		candidatePods = lo.FlatMap(candidates, func(candidate *Candidate, _ int) []*corev1.Pod {
+			return candidate.reschedulablePods
+		})
+	} else {
+		// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
+		pdbs, err := pdb.NewLimits(ctx, kubeClient)
+		if err != nil {
+			return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+		}
+		candidatePods = lo.FlatMap(candidates, func(candidate *Candidate, _ int) []*corev1.Pod {
+			return lo.Filter(candidate.reschedulablePods, func(p *corev1.Pod, _ int) bool {
+				return pdbs.IsCurrentlyReschedulable(p, clk, recorder)
+			})
+		})
+	}
+	pods = append(pods, candidatePods...)
+
+	deletingNodePods, err := deletingNodes.CurrentlyReschedulablePods(ctx, kubeClient, clk, recorder)
+	if err != nil {
+		return scheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
+	}
+	pods = append(pods, deletingNodePods...)
 
 	var opts []scheduling.Options
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
@@ -126,90 +131,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("scheduling pods, %w", err)
 	}
-	forcedReplacement, err := ensureCandidateReplacement(ctx, scheduler, &results, candidatePods, simulationOpts.ensureReplacementNodePool)
-	if err != nil {
-		return scheduling.Results{}, err
-	}
-	// Apply the instance-type bound after adding a forced one-for-one replacement so it receives the same truncation
-	// and minValues validation as ordinary scheduler results.
 	results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
-	if forcedReplacement != nil && !lo.Contains(results.NewNodeClaims, forcedReplacement) {
-		return scheduling.Results{}, newCandidateBlockedError(fmt.Errorf(
-			"forced replacement for NodePool %q did not satisfy minValues after instance type truncation",
-			simulationOpts.ensureReplacementNodePool,
-		))
-	}
-	recordUninitializedNodeErrors(&results, deletingNodePods)
-	return results, nil
-}
-
-func podsForSchedulingSimulation(
-	ctx context.Context,
-	kubeClient client.Client,
-	provisioner *provisioning.Provisioner,
-	clk clock.Clock,
-	recorder events.Recorder,
-	deletingNodes state.StateNodes,
-	simulationOpts simulationOptions,
-	candidates []*Candidate,
-) (pods, candidatePods, deletingNodePods []*corev1.Pod, err error) {
-	if !simulationOpts.candidatePodsOnly {
-		// Generic disruption simulations include pending workload so they don't make a decision that conflicts with
-		// capacity Karpenter is already trying to provision. Empty repair only needs a validated one-for-one
-		// replacement and deliberately skips unrelated pending workload.
-		pods, err = provisioner.GetPendingPods(ctx)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("determining pending pods, %w", err)
-		}
-	}
-	// Candidate pod UIDs tell the DRA allocator to release devices held on the node being replaced.
-	candidatePods, err = candidatePodsForSimulation(ctx, kubeClient, clk, recorder, simulationOpts, candidates)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	pods = append(pods, candidatePods...)
-	if simulationOpts.candidatePodsOnly {
-		return pods, candidatePods, nil, nil
-	}
-	// Pods on unrelated deleting nodes matter to generic simulations, but not to the dedicated empty-repair
-	// replacement. Their provisioning is already owned by the command or controller deleting those nodes.
-	deletingNodePods, err = deletingNodes.CurrentlyReschedulablePods(ctx, kubeClient, clk, recorder)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
-	}
-	return append(pods, deletingNodePods...), candidatePods, deletingNodePods, nil
-}
-
-func ensureCandidateReplacement(
-	ctx context.Context,
-	scheduler *scheduling.Scheduler,
-	results *scheduling.Results,
-	candidatePods []*corev1.Pod,
-	nodePoolName string,
-) (*scheduling.NodeClaim, error) {
-	if nodePoolName == "" {
-		return nil, nil
-	}
-	candidatePodUIDs := sets.New(lo.Map(candidatePods, func(pod *corev1.Pod, _ int) types.UID {
-		return pod.UID
-	})...)
-	hasCandidateReplacement := lo.SomeBy(results.NewNodeClaims, func(nodeClaim *scheduling.NodeClaim) bool {
-		return lo.SomeBy(nodeClaim.Pods, func(pod *corev1.Pod) bool {
-			return candidatePodUIDs.Has(pod.UID)
-		})
-	})
-	if hasCandidateReplacement {
-		return nil, nil
-	}
-	replacement, err := scheduler.NewNodeClaimForNodePool(ctx, nodePoolName)
-	if err != nil {
-		return nil, newCandidateBlockedError(err)
-	}
-	results.NewNodeClaims = append(results.NewNodeClaims, replacement)
-	return replacement, nil
-}
-
-func recordUninitializedNodeErrors(results *scheduling.Results, deletingNodePods []*corev1.Pod) {
 	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *corev1.Pod) (client.ObjectKey, any) {
 		return client.ObjectKeyFromObject(p), nil
 	})
@@ -233,32 +155,7 @@ func recordUninitializedNodeErrors(results *scheduling.Results, deletingNodePods
 			}
 		}
 	}
-}
-
-func candidatePodsForSimulation(
-	ctx context.Context,
-	kubeClient client.Client,
-	clk clock.Clock,
-	recorder events.Recorder,
-	simulationOpts simulationOptions,
-	candidates []*Candidate,
-) ([]*corev1.Pod, error) {
-	if simulationOpts.includeBlockedCandidatePods {
-		return lo.FlatMap(candidates, func(candidate *Candidate, _ int) []*corev1.Pod {
-			return candidate.reschedulablePods
-		}), nil
-	}
-	// Generic disruption does not provision for pods that cannot currently be evicted. Repair opts out because its
-	// bounded drain owns when those pods leave, while replacement planning must still account for their demand.
-	pdbs, err := pdb.NewLimits(ctx, kubeClient)
-	if err != nil {
-		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
-	}
-	return lo.FlatMap(candidates, func(candidate *Candidate, _ int) []*corev1.Pod {
-		return lo.Filter(candidate.reschedulablePods, func(p *corev1.Pod, _ int) bool {
-			return pdbs.IsCurrentlyReschedulable(p, clk, recorder)
-		})
-	}), nil
+	return results, nil
 }
 
 // UninitializedNodeError tracks a special pod error for disruption where pods schedule to a node
@@ -304,23 +201,6 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue, clusterCost *cost.ClusterCost,
 ) ([]*Candidate, map[string]NodePoolTotals, error) {
-	return getCandidatesWithTotals(ctx, cluster, kubeClient, recorder, clk, cloudProvider, shouldDisrupt, nil, disruptionClass, queue, clusterCost, true)
-}
-
-func getCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
-	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, preFilter StateNodeFilter, disruptionClass string, queue *Queue, clusterCost *cost.ClusterCost,
-	needsNodePoolTotals bool,
-) ([]*Candidate, map[string]NodePoolTotals, error) {
-	allNodes := cluster.DeepCopyNodes()
-	candidateNodes := allNodes
-	if preFilter != nil {
-		candidateNodes = lo.Filter(allNodes, func(node *state.StateNode, _ int) bool {
-			return preFilter(ctx, node)
-		})
-		if len(candidateNodes) == 0 {
-			return nil, map[string]NodePoolTotals{}, nil
-		}
-	}
 	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, nil, err
@@ -329,23 +209,16 @@ func getCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	if err != nil {
 		return nil, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	allCandidates := lo.FilterMap(candidateNodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
+	allNodes := cluster.DeepCopyNodes()
+	allCandidates := lo.FilterMap(allNodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil
 	})
-	nodePoolTotals := map[string]NodePoolTotals{}
-	if needsNodePoolTotals {
-		// Compute totals using ALL nodes for disruption cost denominator (RFC requirement:
-		// "Non-candidate nodes still contribute to the denominators").
-		nodePoolTotals = computeNodePoolTotals(ctx, allCandidates, stateNodesToSlice(allNodes), clusterCost)
-	}
+	// Compute totals using ALL nodes for disruption cost denominator (RFC requirement:
+	// "Non-candidate nodes still contribute to the denominators").
+	nodePoolTotals := computeNodePoolTotals(ctx, allCandidates, []*state.StateNode(allNodes), clusterCost)
 	filtered := lo.Filter(allCandidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) })
 	return filtered, nodePoolTotals, nil
-}
-
-// stateNodesToSlice converts StateNodes to []*StateNode for computeNodePoolTotals.
-func stateNodesToSlice(nodes state.StateNodes) []*state.StateNode {
-	return []*state.StateNode(nodes)
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map

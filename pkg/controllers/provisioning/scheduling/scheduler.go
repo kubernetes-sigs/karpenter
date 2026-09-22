@@ -704,10 +704,26 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 
 	errs := make([]error, len(s.nodeClaimTemplates))
 	parallelizeUntil(s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) bool {
-		its, err := s.instanceTypesWithinLimits(ctx, s.nodeClaimTemplates[i])
-		if err != nil {
-			errs[i] = err
-			return true
+		its := s.nodeClaimTemplates[i].InstanceTypeOptions
+		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
+		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
+			// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
+			nodesRemaining, ok := remaining[resources.Node]
+			if ok && nodesRemaining.IsZero() {
+				errs[i] = serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				return true
+			}
+			its = filterByRemainingResources(its, remaining)
+			if len(its) == 0 {
+				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				return true
+			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
+				log.FromContext(ctx).V(1).WithValues(
+					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
+				).Info("instance types were excluded because they would breach limits",
+					"excluded", len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
+					"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
+			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
 		r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
@@ -771,78 +787,6 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		return nil
 	}
 	return multierr.Combine(errs...)
-}
-
-// NewNodeClaimForNodePool constructs one empty replacement through the same instance-type, DaemonSet overhead,
-// offering, minValues, and NodePool-limit filters used by ordinary scheduling.
-func (s *Scheduler) NewNodeClaimForNodePool(ctx context.Context, nodePoolName string) (*NodeClaim, error) {
-	nodeClaimTemplate, ok := lo.Find(s.nodeClaimTemplates, func(template *NodeClaimTemplate) bool {
-		return template.NodePoolName == nodePoolName
-	})
-	if !ok {
-		return nil, serrors.Wrap(fmt.Errorf("nodepool is unavailable to the scheduler"), "NodePool", klog.KRef("", nodePoolName))
-	}
-	instanceTypes, err := s.instanceTypesWithinLimits(ctx, nodeClaimTemplate)
-	if err != nil {
-		return nil, err
-	}
-
-	nodeClaim := NewNodeClaim(
-		nodeClaimTemplate,
-		s.topology,
-		s.daemonOverheadGroups[nodeClaimTemplate],
-		instanceTypes,
-		s.reservationManager,
-		s.reservedOfferingMode,
-	)
-	placeholder := &corev1.Pod{}
-	placeholder.UID = types.UID("replacement-" + nodePoolName)
-	for _, taint := range nodeClaim.Spec.Taints {
-		placeholder.Spec.Tolerations = append(placeholder.Spec.Tolerations, corev1.Toleration{
-			Key:      taint.Key,
-			Operator: corev1.TolerationOpExists,
-			Effect:   taint.Effect,
-		})
-	}
-	s.updateCachedPodData(ctx, placeholder)
-	requirements, compatibleInstanceTypes, offerings, allocation, err := nodeClaim.CanAdd(
-		ctx,
-		placeholder,
-		s.cachedPodData[placeholder.UID],
-		scheduling.Volumes{},
-		s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort,
-		s.allocator,
-	)
-	if err != nil {
-		return nil, serrors.Wrap(fmt.Errorf("constructing replacement nodeclaim, %w", err), "NodePool", klog.KRef("", nodePoolName))
-	}
-	nodeClaim.Add(ctx, placeholder, s.cachedPodData[placeholder.UID], requirements, compatibleInstanceTypes, scheduling.Volumes{}, offerings, allocation, s.allocator)
-	nodeClaim.Pods = nil
-	nodeClaim.FinalizeScheduling()
-	return nodeClaim, nil
-}
-
-func (s *Scheduler) instanceTypesWithinLimits(ctx context.Context, nodeClaimTemplate *NodeClaimTemplate) ([]*cloudprovider.InstanceType, error) {
-	instanceTypes := nodeClaimTemplate.InstanceTypeOptions
-	remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]
-	if !ok {
-		return instanceTypes, nil
-	}
-	if nodesRemaining, ok := remaining[resources.Node]; ok && nodesRemaining.IsZero() {
-		return nil, serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName))
-	}
-	filtered := filterByRemainingResources(instanceTypes, remaining)
-	if len(filtered) == 0 {
-		return nil, serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName))
-	}
-	if len(instanceTypes) != len(filtered) {
-		log.FromContext(ctx).V(1).WithValues(
-			"NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName),
-		).Info("instance types were excluded because they would breach limits",
-			"excluded", len(instanceTypes)-len(filtered),
-			"total", len(instanceTypes))
-	}
-	return filtered, nil
 }
 
 func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod, nodePoolMap map[string]*v1.NodePool, enforceConsolidateAfter bool) {

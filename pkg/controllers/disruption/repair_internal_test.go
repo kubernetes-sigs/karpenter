@@ -17,86 +17,84 @@ limitations under the License.
 package disruption
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 )
 
-func TestRepairPolicyDecisionLogsOnlyOnTransitions(t *testing.T) {
-	repair := &Repair{decisionLogs: make(map[types.UID]repairDecisionLogState)}
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: types.UID("node-uid")}}
-	now := time.Unix(1, 0)
-
-	if !repair.recordRepairPolicyDecisionLog(node, "waiting", now) {
-		t.Fatal("expected the first waiting decision to be logged")
+func TestEvaluateNodeUsesMaximumEligiblePolicyScore(t *testing.T) {
+	now := time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC)
+	policies := []cloudprovider.RepairPolicy{
+		{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
+		{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.ReplaceNode},
+		{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
 	}
-	if repair.recordRepairPolicyDecisionLog(node, "waiting", now.Add(time.Minute)) {
-		t.Fatal("expected an unchanged waiting decision to be deduplicated")
-	}
-	if !repair.recordRepairPolicyDecisionLog(node, "eligible", now.Add(2*time.Minute)) {
-		t.Fatal("expected the transition to eligible to be logged")
-	}
-
-	repair.clearRepairPolicyDecisionLog(node)
-	if !repair.recordRepairPolicyDecisionLog(node, "waiting", now.Add(3*time.Minute)) {
-		t.Fatal("expected a decision to be logged again after the condition clears")
-	}
-}
-
-func TestRepairPolicyDecisionLogsPruneDeletedNodes(t *testing.T) {
-	repair := &Repair{
-		decisionLogs: map[types.UID]repairDecisionLogState{
-			"deleted": {fingerprint: "waiting", lastSeen: time.Unix(1, 0)},
-		},
-	}
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: types.UID("node-uid")}}
-	now := time.Unix(1, 0).Add(repairDecisionLogRetention + time.Second)
-
-	repair.recordRepairPolicyDecisionLog(node, "waiting", now)
-	if _, ok := repair.decisionLogs["deleted"]; ok {
-		t.Fatal("expected stale decision-log state for a deleted node to be pruned")
-	}
-}
-
-func TestRepairPolicyDecisionLoggingDoesNoWorkWhenDisabled(t *testing.T) {
-	matcher, err := health.NewRepairPolicyMatcher(
-		[]cloudprovider.RepairPolicy{{
-			ConditionType:   "BadNode",
-			ConditionStatus: corev1.ConditionFalse,
-			Action:          cloudprovider.ReplaceNode,
-		}},
-		sets.New(cloudprovider.ReplaceNode),
-	)
+	matcher, err := health.NewRepairPolicyMatcher(policies, sets.New(cloudprovider.ReplaceNode))
 	if err != nil {
 		t.Fatalf("creating repair policy matcher, %v", err)
 	}
 	repair := &Repair{
 		policyMatcher: matcher,
-		decisionLogs:  make(map[types.UID]repairDecisionLogState),
+		ranks:         denseRanks(policies),
 	}
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "node", UID: types.UID("node-uid")},
-		Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
-			Type:               "BadNode",
+	node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
+		{
+			Type:               "LowPriority",
 			Status:             corev1.ConditionFalse,
-			LastTransitionTime: metav1.NewTime(time.Unix(1, 0)),
-		}}},
+			LastTransitionTime: metav1.NewTime(now.Add(-180 * time.Minute)),
+		},
+		{
+			Type:               "HighPriority",
+			Status:             corev1.ConditionFalse,
+			LastTransitionTime: metav1.NewTime(now.Add(-45 * time.Minute)),
+		},
+	}}}
+
+	evaluation := repair.evaluateNode(node, now)
+	if evaluation.score != 6 {
+		t.Fatalf("expected maximum eligible score 6, got %v", evaluation.score)
 	}
-	ctx := log.IntoContext(context.Background(), logr.Discard())
+	if evaluation.result == nil || evaluation.result.ConditionType != "HighPriority" {
+		t.Fatalf("expected the high-priority condition to govern the action, got %#v", evaluation.result)
+	}
+}
 
-	repair.logRepairPolicyDecisions(ctx, node, time.Unix(2, 0))
+func TestEvaluateNodeUsesEarliestDeadlineForEqualPriorityConditions(t *testing.T) {
+	now := time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC)
+	policies := []cloudprovider.RepairPolicy{
+		{ConditionType: "Earlier", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 20 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
+		{ConditionType: "Later", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
+		{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+	}
+	matcher, err := health.NewRepairPolicyMatcher(policies, sets.New(cloudprovider.ReplaceNode))
+	if err != nil {
+		t.Fatalf("creating repair policy matcher, %v", err)
+	}
+	repair := &Repair{
+		policyMatcher: matcher,
+		ranks:         denseRanks(policies),
+	}
+	node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
+		{
+			Type:               "Earlier",
+			Status:             corev1.ConditionFalse,
+			LastTransitionTime: metav1.NewTime(now.Add(-40 * time.Minute)),
+		},
+		{
+			Type:               "Later",
+			Status:             corev1.ConditionFalse,
+			LastTransitionTime: metav1.NewTime(now.Add(-15 * time.Minute)),
+		},
+	}}}
 
-	if len(repair.decisionLogs) != 0 {
-		t.Fatalf("expected disabled decision logging to avoid tracking state, got %d entries", len(repair.decisionLogs))
+	evaluation := repair.evaluateNode(node, now)
+	if evaluation.result == nil || evaluation.result.ConditionType != "Earlier" {
+		t.Fatalf("expected the earlier eligible deadline to govern, got %#v", evaluation.result)
 	}
 }

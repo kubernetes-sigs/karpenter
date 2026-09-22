@@ -74,26 +74,18 @@ type Method interface {
 }
 
 type CandidateFilter func(context.Context, *Candidate) bool
-type StateNodeFilter func(context.Context, *state.StateNode) bool
-
-// CandidatePreFilter allows a disruption method to cheaply reject state nodes before NodePool, instance type, PDB,
-// and pod candidate construction. It is an optimization only; ShouldDisrupt remains the authoritative predicate.
-type CandidatePreFilter interface {
-	ShouldConsider(context.Context, *state.StateNode) bool
-}
 
 // Candidate is a state.StateNode that we are considering for disruption along with extra information to be used in
 // making that determination
 type Candidate struct {
 	*state.StateNode
-	instanceType        *cloudprovider.InstanceType
-	NodePool            *v1.NodePool
-	zone                string
-	capacityType        string
-	DisruptionCost      float64
-	reschedulablePods   []*corev1.Pod
-	hasPodBlockers      bool
-	terminationDeadline *time.Time
+	instanceType      *cloudprovider.InstanceType
+	NodePool          *v1.NodePool
+	zone              string
+	capacityType      string
+	DisruptionCost    float64
+	reschedulablePods []*corev1.Pod
+	hasPodBlockers    bool
 
 	// Price is the cheapest compatible offering price for this candidate.
 	// Precomputed at creation to avoid repeated offering lookups.
@@ -101,9 +93,10 @@ type Candidate struct {
 	// RescheduleDisruptionCost is 1.0 (base) + sum of positive pod eviction costs
 	// for reschedulable pods. Used by balanced scoring.
 	RescheduleDisruptionCost float64
-	// TerminationGracePeriod, when set, bounds this candidate's drain. The queue stamps the absolute termination
-	// deadline (now + this) at actual deletion time, so replace-then-terminate latency doesn't erode the window. nil
-	// inherits the NodeClaim's own TerminationGracePeriod. Repair sets it (min(policy, NodeClaim TGP)) in ComputeCommands.
+	// TerminationGracePeriod, when set, bounds this candidate's drain. After replacement readiness, the queue stamps
+	// the absolute termination deadline (now + this) immediately before requesting deletion, so replacement-launch
+	// latency doesn't erode the window. nil inherits the NodeClaim's own TerminationGracePeriod. Repair sets it
+	// (min(policy, NodeClaim TGP)) in ComputeCommands.
 	TerminationGracePeriod *time.Duration
 	// RepairCondition, when non-empty, is the node condition that made this candidate eligible for repair. Repair sets
 	// it in ComputeCommands; the queue emits the per-condition unhealthy-disrupted metric off it at actual termination.

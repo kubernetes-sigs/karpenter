@@ -326,13 +326,17 @@ var _ = Describe("Repair Policies", func() {
 					Action:          cloudprovider.ReplaceNode,
 				},
 			}
-			sameActionMatcher, err := NewRepairPolicyMatcher(policies, supportedActions)
-			Expect(err).NotTo(HaveOccurred())
+			reversed := slices.Clone(policies)
+			slices.Reverse(reversed)
+			for _, orderedPolicies := range [][]cloudprovider.RepairPolicy{policies, reversed} {
+				sameActionMatcher, err := NewRepairPolicyMatcher(orderedPolicies, supportedActions)
+				Expect(err).NotTo(HaveOccurred())
 
-			decision := evaluate(sameActionMatcher, condition, now.Add(25*time.Minute))
-			Expect(decision).NotTo(BeNil())
-			Expect(decision.eligiblePolicies).To(Equal(2))
-			Expect(decision.eligibleAt).To(Equal(now.Add(10 * time.Minute)))
+				decision := evaluate(sameActionMatcher, condition, now.Add(25*time.Minute))
+				Expect(decision).NotTo(BeNil())
+				Expect(decision.eligiblePolicies).To(Equal(2))
+				Expect(decision.eligibleAt).To(Equal(now.Add(10 * time.Minute)))
+			}
 		})
 
 		It("selects the shortest termination grace period from eligible policies", func() {
@@ -370,6 +374,44 @@ var _ = Describe("Repair Policies", func() {
 			)
 		})
 
+		It("selects the shortest termination grace period across eligible actions", func() {
+			longGracePeriod := 15 * time.Minute
+			shortGracePeriod := 5 * time.Minute
+			crossActionPolicies := []cloudprovider.RepairPolicy{
+				{
+					ConditionType:          condition.Type,
+					ConditionStatus:        condition.Status,
+					ReasonRegex:            "XID48",
+					TerminationGracePeriod: &longGracePeriod,
+					Action:                 cloudprovider.ReplaceNode,
+				},
+				{
+					ConditionType:          condition.Type,
+					ConditionStatus:        condition.Status,
+					ReasonRegex:            "48Error",
+					TerminationGracePeriod: &shortGracePeriod,
+					Action:                 cloudprovider.RebootNode,
+				},
+				{
+					ConditionType:   condition.Type,
+					ConditionStatus: condition.Status,
+					Action:          cloudprovider.ReplaceNode,
+				},
+			}
+			reversed := slices.Clone(crossActionPolicies)
+			slices.Reverse(reversed)
+			for _, orderedPolicies := range [][]cloudprovider.RepairPolicy{crossActionPolicies, reversed} {
+				gracePeriodMatcher, err := NewRepairPolicyMatcher(orderedPolicies, supportedActions)
+				Expect(err).NotTo(HaveOccurred())
+
+				result := gracePeriodMatcher.Evaluate(condition, now)
+				Expect(result).NotTo(BeNil())
+				Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+				Expect(result.TerminationGracePeriod).NotTo(BeNil())
+				Expect(*result.TerminationGracePeriod).To(Equal(shortGracePeriod))
+			}
+		})
+
 		It("uses the fallback for an unknown reason", func() {
 			condition.Reason = "NewFailureCode"
 			decision := evaluate(matcher, condition, now)
@@ -401,6 +443,10 @@ var _ = Describe("Repair Policies", func() {
 			Expect(decision.fallback).To(BeTrue())
 			Expect(decision.action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(decision.condition.Type).To(Equal(corev1.NodeConditionType("StorageReady")))
+			eligible := crossConditionMatcher.EligiblePolicies(storageCondition, now.Add(31*time.Minute))
+			Expect(eligible).To(HaveLen(1))
+			Expect(eligible[0].ConditionType).To(Equal(storageCondition.Type))
+			Expect(eligible[0].ConditionStatus).To(Equal(storageCondition.Status))
 		})
 
 		It("treats a non-empty match-all expression as a specific policy", func() {
@@ -482,14 +528,33 @@ var _ = Describe("Repair Policies", func() {
 		})
 
 		It("reconstructs eligibility from the current condition after restart", func() {
-			Expect(evaluate(matcher, condition, now.Add(15*time.Minute)).action).To(Equal(cloudprovider.RebootNode))
-			condition.Reason = "NewFailureCode"
-
-			restartedMatcher, err := NewRepairPolicyMatcher(policies, supportedActions)
+			reasonPolicies := []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      condition.Type,
+					ConditionStatus:    condition.Status,
+					ReasonRegex:        "^ImmediateReason$",
+					TolerationDuration: 30 * time.Minute,
+					Action:             cloudprovider.ReplaceNode,
+				},
+				{
+					ConditionType:      condition.Type,
+					ConditionStatus:    condition.Status,
+					TolerationDuration: 2 * time.Hour,
+					Action:             cloudprovider.ReplaceNode,
+				},
+			}
+			condition.LastTransitionTime = metav1.NewTime(now.Add(-time.Hour))
+			condition.Reason = "UnknownReason"
+			initialMatcher, err := NewRepairPolicyMatcher(reasonPolicies, supportedActions)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(evaluate(restartedMatcher, condition, now.Add(35*time.Minute))).To(
-				Equal(evaluate(matcher, condition, now.Add(35*time.Minute))),
-			)
+			Expect(initialMatcher.Evaluate(condition, now)).To(BeNil())
+
+			condition.Reason = "ImmediateReason"
+			restartedMatcher, err := NewRepairPolicyMatcher(reasonPolicies, supportedActions)
+			Expect(err).NotTo(HaveOccurred())
+			result := restartedMatcher.Evaluate(condition, now)
+			Expect(result).NotTo(BeNil())
+			Expect(result.EligibleAt).To(Equal(now.Add(-30 * time.Minute)))
 		})
 	})
 

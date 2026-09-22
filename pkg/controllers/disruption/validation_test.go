@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,14 +31,38 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Repair Method Registration", func() {
-	It("disables only repair when the complete policy set is invalid", func() {
+	var enabledCtx context.Context
+
+	BeforeEach(func() {
+		enabledCtx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}}))
+	})
+
+	It("registers repair when the feature gate is enabled and policies are valid", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{{
+			ConditionType:   "BadNode",
+			ConditionStatus: corev1.ConditionFalse,
+			Action:          cloudprovider.ReplaceNode,
+		}}
+
+		methods := disruption.NewMethods(enabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		Expect(repairMethodCount(methods)).To(Equal(1))
+	})
+
+	It("panics when repair is enabled without any policies", func() {
 		cloudProvider.RepairPolicy = nil
-		methodsWithoutRepair := NewMethodsWithRealValidator()
+
+		Expect(func() {
+			disruption.NewMethods(enabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		}).To(PanicWith("node repair requires the cloud provider to define RepairPolicies, but it defines none"))
+	})
+
+	It("disables only repair when the complete policy set is invalid", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{
 				ConditionType:   "BadNode",
@@ -52,13 +77,32 @@ var _ = Describe("Repair Method Registration", func() {
 			},
 		}
 
-		methods := NewMethodsWithRealValidator()
+		methods := disruption.NewMethods(enabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		disabledCtx := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
+		methodsWithoutRepair := disruption.NewMethods(disabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+
+		Expect(repairMethodCount(methods)).To(BeZero())
 		Expect(methods).To(HaveLen(len(methodsWithoutRepair)))
-		for _, method := range methods {
-			Expect(method.Reason()).NotTo(Equal(v1.DisruptionReasonUnhealthy))
-		}
+	})
+
+	It("does not register repair when the feature gate is disabled", func() {
+		cloudProvider.RepairPolicy = nil
+		disabledCtx := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
+
+		methods := disruption.NewMethods(disabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		Expect(repairMethodCount(methods)).To(BeZero())
 	})
 })
+
+func repairMethodCount(methods []disruption.Method) int {
+	count := 0
+	for _, method := range methods {
+		if _, ok := method.(*disruption.Repair); ok {
+			count++
+		}
+	}
+	return count
+}
 
 func NewMethodsWithRealValidator() []disruption.Method {
 	return disruption.NewMethods(ctx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)

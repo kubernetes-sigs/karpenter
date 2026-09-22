@@ -239,7 +239,7 @@ func (p *RepairPolicyMatcher) EligiblePolicies(condition corev1.NodeCondition, n
 
 // Matches returns true when the condition is covered by the provider policy set, regardless of toleration.
 func (p *RepairPolicyMatcher) Matches(condition corev1.NodeCondition) bool {
-	_, ok := p.matchingPolicies(condition)
+	_, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]
 	return ok
 }
 

@@ -58,9 +58,18 @@ type consolidation struct {
 	cloudProvider          cloudprovider.CloudProvider
 	recorder               events.Recorder
 	lastConsolidationState time.Time
-	// evaluator is initialized non-nil at construction. Consolidation methods
-	// that use balanced scoring replace it with an evaluator carrying NodePool totals.
+	// evaluator is initialized non-nil at construction. SetNodePoolTotals
+	// replaces it with a balancedEvaluator carrying the new totals.
 	evaluator Evaluator
+}
+
+// NodePoolTotalsSetter is implemented by disruption methods that use balanced scoring.
+type NodePoolTotalsSetter interface {
+	SetNodePoolTotals(map[string]NodePoolTotals)
+}
+
+func (c *consolidation) SetNodePoolTotals(totals map[string]NodePoolTotals) {
+	c.evaluator = NewBalancedEvaluator(totals, c.recorder)
 }
 
 func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
@@ -150,7 +159,8 @@ func (c *consolidation) sortCandidates(_ context.Context, candidates []*Candidat
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	var err error
 	// Run scheduling simulation to compute consolidation option
-	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.clock, c.recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, candidates...)
+	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.clock, c.recorder,
+		[]pscheduling.Options{pscheduling.IsConsolidationSimulation}, SimulationOptions{}, candidates...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {

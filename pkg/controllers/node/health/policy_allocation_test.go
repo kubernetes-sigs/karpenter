@@ -67,4 +67,16 @@ func TestRepairPolicyMatcherEvaluateDoesNotAllocatePerMatchingPolicy(t *testing.
 	if allocations > 1 {
 		t.Fatalf("expected only the returned result to allocate, got %.2f allocations", allocations)
 	}
+
+	allocations = testing.AllocsPerRun(1000, func() {
+		benchmarkRepairPolicyMatches = matcher.Matches(condition)
+	})
+	if !benchmarkRepairPolicyMatches {
+		t.Fatal("expected the repair policy to cover the condition")
+	}
+	if allocations != 0 {
+		t.Fatalf("expected checking condition coverage not to allocate, got %.2f allocations", allocations)
+	}
 }
+
+var benchmarkRepairPolicyMatches bool

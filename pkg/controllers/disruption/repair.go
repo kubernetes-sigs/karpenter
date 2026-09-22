@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -53,29 +51,20 @@ import (
 const (
 	// agingConstant (τ) is the time a node must wait past its toleration to earn one rank tier of standing. It sets the
 	// starvation bound: a node overtakes a steadily-refreshed rival Δrank tiers up after Δrank·τ. See resiliency §3.1.2.
-	agingConstant                  = 30 * time.Minute
-	repairDecisionLogRetention     = time.Hour
-	repairDecisionLogPruneInterval = 10 * time.Minute
+	agingConstant = 30 * time.Minute
 	// repairUnhealthyThreshold stops repair for a NodePool when a correlated failure makes more than this fraction of
 	// its nodes unhealthy. Disruption budgets continue to pace concurrent repairs below this safety threshold.
 	repairUnhealthyThreshold = "20%"
 )
 
 // Repair is a voluntary disruption method that remediates unhealthy nodes. It replaces the standalone node.health
-// controller: repair rides the shared disruption budget (reason "Unhealthy"), pre-spins a replacement before
-// terminating (replace-then-terminate), orders candidates by rank + age/τ, and is vetoed by do-not-repair.
+// controller: repair rides the shared disruption budget (reason "Unhealthy"), verifies replacement capacity before
+// terminating workload-bearing nodes, orders candidates by rank + age/τ, and is vetoed by do-not-repair.
 type Repair struct {
 	consolidation
-	ranks                map[int]int // configured priority -> dense rank
-	policyMatcher        *health.RepairPolicyMatcher
-	decisionLogsMu       sync.Mutex
-	decisionLogs         map[types.UID]repairDecisionLogState
-	nextDecisionLogPrune time.Time
-}
-
-type repairDecisionLogState struct {
-	fingerprint string
-	lastSeen    time.Time
+	ranks              map[int]int // configured priority -> dense rank
+	policyMatcher      *health.RepairPolicyMatcher
+	decisionLogMonitor *pretty.ChangeMonitor
 }
 
 type repairNodeEvaluation struct {
@@ -86,28 +75,19 @@ type repairNodeEvaluation struct {
 // NewRepair validates and compiles the provider's complete repair policy set before constructing the method.
 func NewRepair(c consolidation) (*Repair, error) {
 	policies := c.cloudProvider.RepairPolicies()
+	if len(policies) == 0 {
+		panic("node repair requires the cloud provider to define RepairPolicies, but it defines none")
+	}
 	policyMatcher, err := health.NewRepairPolicyMatcher(policies, sets.New(cloudprovider.ReplaceNode))
 	if err != nil {
 		return nil, err
 	}
 	return &Repair{
-		consolidation: c,
-		ranks:         denseRanks(policies),
-		policyMatcher: policyMatcher,
-		decisionLogs:  make(map[types.UID]repairDecisionLogState),
+		consolidation:      c,
+		ranks:              denseRanks(policies),
+		policyMatcher:      policyMatcher,
+		decisionLogMonitor: pretty.NewChangeMonitor(),
 	}, nil
-}
-
-// ShouldConsider cheaply rejects healthy or not-yet-eligible nodes before disruption candidate construction.
-func (r *Repair) ShouldConsider(ctx context.Context, node *state.StateNode) bool {
-	if !options.FromContext(ctx).FeatureGates.NodeRepair ||
-		node.Node == nil ||
-		node.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
-		return false
-	}
-	now := r.clock.Now()
-	r.logRepairPolicyDecisions(ctx, node.Node, now)
-	return r.evaluateNode(node.Node, now).result != nil
 }
 
 // ShouldDisrupt is a predicate that filters candidates to nodes that have an unhealthy condition matching a
@@ -140,8 +120,9 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	return true
 }
 
-// ComputeCommands orders eligible candidates by the repair score and returns one replace-then-terminate command for the
-// highest-scoring candidate whose NodePool has budget. Only one command per pass, mirroring drift.
+// ComputeCommands orders eligible candidates by the repair score and returns one command for the highest-scoring
+// candidate whose NodePool has budget. Workload-bearing candidates pre-spin replacement capacity; empty candidates may
+// produce a delete-only command. Only one command per pass, mirroring drift.
 func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	now := r.clock.Now()
 	r.sortCandidates(candidates, now)
@@ -185,9 +166,9 @@ func (r *Repair) commandForCandidate(
 	if evaluation.result == nil {
 		return Command{}, false, nil
 	}
-	// Set the candidate's drain bound; the queue stamps the absolute deadline at actual deletion time (after the
-	// replacement is healthy), so repair is never an unbounded hang and a forceful (0) policy skips the drain for
-	// conditions the kubelet can't evict through — without pre-spin latency eroding the window.
+	// Set the candidate's drain bound; after any replacement is healthy, the queue stamps the absolute deadline
+	// immediately before requesting deletion. A forceful (0) policy skips the drain for conditions the kubelet can't
+	// evict through, without replacement-launch latency eroding the window.
 	candidate.TerminationGracePeriod = effectiveDrainBound(candidate, evaluation.result)
 	candidate.RepairCondition = evaluation.result.ConditionType
 	return Command{
@@ -262,20 +243,12 @@ func (r *Repair) replacementForCandidate(ctx context.Context, candidate *Candida
 
 func (r *Repair) dynamicReplacement(ctx context.Context, candidate *Candidate) (*Candidate, pscheduling.Results, bool, error) {
 	// Repair pre-spins for all reschedulable workload, including pods whose eviction is currently blocked.
-	results, err := simulateScheduling(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, nil,
-		simulationOptions{
-			includeBlockedCandidatePods: true,
-			ensureReplacementNodePool:   candidate.NodePool.Name,
-			candidatePodsOnly:           len(candidate.reschedulablePods) == 0,
-		},
+	results, err := SimulateScheduling(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, nil,
+		SimulationOptions{IncludeBlockedCandidatePods: true},
 		candidate,
 	)
 	if err != nil {
 		if errors.Is(err, errCandidateDeleting) {
-			return nil, pscheduling.Results{}, false, nil
-		}
-		if isCandidateBlockedError(err) {
-			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(err.Error()))...)
 			return nil, pscheduling.Results{}, false, nil
 		}
 		return nil, pscheduling.Results{}, false, err
@@ -449,23 +422,22 @@ func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node
 		return
 	}
 	decisions := make([][]any, 0, len(node.Status.Conditions))
-	var fingerprint strings.Builder
 	for _, condition := range node.Status.Conditions {
 		values := r.policyMatcher.DecisionLogValues(condition, now)
 		if len(values) == 0 {
 			continue
 		}
 		decisions = append(decisions, values)
-		for _, value := range values {
-			_, _ = fmt.Fprintf(&fingerprint, "%T=%v\x00", value, value)
-		}
-		fingerprint.WriteByte('\n')
+	}
+	key := string(node.UID)
+	if key == "" {
+		key = node.Name
 	}
 	if len(decisions) == 0 {
-		r.clearRepairPolicyDecisionLog(node)
+		r.decisionLogMonitor.HasChanged(key, decisions)
 		return
 	}
-	if !r.recordRepairPolicyDecisionLog(node, fingerprint.String(), now) {
+	if !r.decisionLogMonitor.HasChanged(key, decisions) {
 		return
 	}
 	for _, values := range decisions {
@@ -475,43 +447,10 @@ func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node
 	}
 }
 
-func (r *Repair) recordRepairPolicyDecisionLog(node *corev1.Node, fingerprint string, now time.Time) bool {
-	key := node.UID
-	if key == "" {
-		key = types.UID(node.Name)
-	}
-	r.decisionLogsMu.Lock()
-	defer r.decisionLogsMu.Unlock()
-	if r.decisionLogs == nil {
-		r.decisionLogs = make(map[types.UID]repairDecisionLogState)
-	}
-	if r.nextDecisionLogPrune.IsZero() || !now.Before(r.nextDecisionLogPrune) {
-		cutoff := now.Add(-repairDecisionLogRetention)
-		for uid, state := range r.decisionLogs {
-			if state.lastSeen.Before(cutoff) {
-				delete(r.decisionLogs, uid)
-			}
-		}
-		r.nextDecisionLogPrune = now.Add(repairDecisionLogPruneInterval)
-	}
-	previous, ok := r.decisionLogs[key]
-	r.decisionLogs[key] = repairDecisionLogState{fingerprint: fingerprint, lastSeen: now}
-	return !ok || previous.fingerprint != fingerprint
-}
-
-func (r *Repair) clearRepairPolicyDecisionLog(node *corev1.Node) {
-	key := node.UID
-	if key == "" {
-		key = types.UID(node.Name)
-	}
-	r.decisionLogsMu.Lock()
-	defer r.decisionLogsMu.Unlock()
-	delete(r.decisionLogs, key)
-}
-
-// effectiveDrainBound returns the drain bound for the candidate, carried on the Command and applied by the queue at
-// deletion time: min(matched policy TGP, NodeClaim TGP), or 0 for a forceful policy. nil means the policy sets no
-// bound, so the NodeClaim's own TerminationGracePeriod is inherited (the default disruption behavior).
+// effectiveDrainBound returns the drain bound for the candidate, carried on the Command and applied by the queue
+// immediately before requesting deletion: min(matched policy TGP, NodeClaim TGP), or 0 for a forceful policy. nil
+// means the policy sets no bound, so the NodeClaim's own TerminationGracePeriod is inherited (the default disruption
+// behavior).
 // TODO: the termination-timestamp deadline is a stopgap — replace once the termination flow has a formal contract
 // (kubernetes-sigs/karpenter#3029, Formalize Node Termination Contract).
 func effectiveDrainBound(c *Candidate, result *health.RepairPolicyResult) *time.Duration {

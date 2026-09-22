@@ -295,48 +295,21 @@ func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx c
 	// In Kubernetes, every object has a terminationGracePeriodSeconds, defaulted to and un-changeable from 0. There is an additional TerminationGracePeriodSeconds in the PodSpec which can be configured.
 	// We use the kubernetes object TerminationGracePeriod to infer that the DeletionTimestamp is always equal to the time the NodeClaim is deleted.
 	// This should not be confused with the NodeClaim.spec.terminationGracePeriod field introduced in Karpenter Custom Resources.
-	terminationGracePeriod, invalidRepairIntent := nodeClaimTerminationGracePeriod(nodeClaim)
-	if terminationGracePeriod != nil && !nodeClaim.DeletionTimestamp.IsZero() {
-		terminationTimeString := nodeClaim.DeletionTimestamp.Time.Add(*terminationGracePeriod).Format(time.RFC3339)
+	if nodeClaim.Spec.TerminationGracePeriod != nil && !nodeClaim.DeletionTimestamp.IsZero() {
+		terminationTimeString := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339)
 		return c.annotateTerminationGracePeriodTerminationTime(ctx, nodeClaim, terminationTimeString)
-	}
-	if invalidRepairIntent {
-		return c.clearRepairTerminationGracePeriodIntent(ctx, nodeClaim)
 	}
 
 	return nil
 }
 
-func nodeClaimTerminationGracePeriod(nodeClaim *v1.NodeClaim) (*time.Duration, bool) {
-	var terminationGracePeriod *time.Duration
-	if nodeClaim.Spec.TerminationGracePeriod != nil {
-		terminationGracePeriod = lo.ToPtr(nodeClaim.Spec.TerminationGracePeriod.Duration)
-	}
-	if value, ok := nodeClaim.Annotations[v1.NodeClaimRepairTerminationGracePeriodAnnotationKey]; ok {
-		repairTerminationGracePeriod, err := time.ParseDuration(value)
-		if err != nil || repairTerminationGracePeriod < 0 {
-			return terminationGracePeriod, true
-		}
-		if terminationGracePeriod == nil || repairTerminationGracePeriod < *terminationGracePeriod {
-			terminationGracePeriod = &repairTerminationGracePeriod
-		}
-	}
-	return terminationGracePeriod, false
-}
-
-func (c *Controller) clearRepairTerminationGracePeriodIntent(ctx context.Context, nodeClaim *v1.NodeClaim) error {
-	stored := nodeClaim.DeepCopy()
-	delete(nodeClaim.Annotations, v1.NodeClaimRepairTerminationGracePeriodAnnotationKey)
-	return client.IgnoreNotFound(c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})))
-}
-
 func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.Context, nodeClaim *v1.NodeClaim, terminationTime string) error {
 	stored := nodeClaim.DeepCopy()
 	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
-	delete(nodeClaim.Annotations, v1.NodeClaimRepairTerminationGracePeriodAnnotationKey)
 
-	// The disruption queue and lifecycle controller can both update the repair deadline while deletion commits.
-	// Optimistic locking prevents either controller from overwriting a concurrent annotation update.
+	// We use client.MergeFromWithOptimisticLock because patching a terminationGracePeriod annotation
+	// can cause races with the health controller, as that controller sets the current time as the terminationGracePeriod annotation
+	// Here, We want to resolve any conflict and not overwrite the terminationGracePeriod annotation
 	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 		return client.IgnoreNotFound(err)
 	}

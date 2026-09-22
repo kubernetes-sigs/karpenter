@@ -76,20 +76,20 @@ type RepairPolicy struct {
 	// ConditionStatus identifies the unhealthy condition state.
 	ConditionStatus corev1.ConditionStatus
 	// ReasonRegex is a Go regular expression matched against the current NodeCondition reason using regexp.MatchString.
-	// An empty value defines the policy set's default fallback. Exactly one default fallback is required and applies
-	// when no reason-specific policy matches any provider-supported condition type and status.
+	// An empty value defines the policy set's default fallback. Exactly one default fallback is required; it applies to
+	// any supported condition type and status when no reason-specific policy for that pair matches the current reason.
 	ReasonRegex string
 	// TolerationDuration is added to the NodeCondition LastTransitionTime to determine when this policy becomes eligible.
 	TolerationDuration time.Duration
 	// TerminationGracePeriod is the Axis-2 drain bound for repair of this condition:
 	//   nil      -> inherit the NodePool/NodeClaim TerminationGracePeriod
 	//   non-zero -> min(this, nodeclaim.TerminationGracePeriod) — bound the drain even on a pool that set none,
-	//               so repair is never the unbounded 19-day hang.
+	//               so repair cannot wait indefinitely on eviction.
 	//   0        -> forceful: skip the drain for conditions the kubelet can't evict through (wedged kernel,
 	//               lost heartbeat).
 	TerminationGracePeriod *time.Duration
-	// Priority is an ordering weight (0-100) for repair. Higher repairs first. Collisions are expected and
-	// unresolved; only the ordering matters, not the magnitude (it is compressed to a dense rank).
+	// Priority is an ordering weight (0-100) for repair. Higher repairs first. Only relative ordering matters; values
+	// are compressed to dense ranks, with earlier eligibility breaking equal-priority ties across conditions.
 	Priority int
 	// Action is the repair operation requested by this policy.
 	Action RepairAction

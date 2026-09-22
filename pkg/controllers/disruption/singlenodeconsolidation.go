@@ -48,10 +48,6 @@ func NewSingleNodeConsolidation(c consolidation, opts ...option.Function[MethodO
 	}
 }
 
-func (s *SingleNodeConsolidation) setNodePoolTotals(totals map[string]NodePoolTotals) {
-	s.evaluator = NewBalancedEvaluator(totals, s.recorder)
-}
-
 // ComputeCommand generates a disruption command given candidates
 // nolint:gocyclo
 func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
