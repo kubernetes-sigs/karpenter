@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -60,7 +61,10 @@ type consolidation struct {
 	lastConsolidationState time.Time
 	// evaluator is initialized non-nil at construction. SetNodePoolTotals
 	// replaces it with a balancedEvaluator carrying the new totals.
-	evaluator Evaluator
+	evaluator        Evaluator
+	session          *provisioning.SimulationSession
+	sessionMethod    string
+	sessionAttempted bool
 }
 
 // NodePoolTotalsSetter is implemented by disruption methods that use balanced scoring.
@@ -70,6 +74,76 @@ type NodePoolTotalsSetter interface {
 
 func (c *consolidation) SetNodePoolTotals(totals map[string]NodePoolTotals) {
 	c.evaluator = NewBalancedEvaluator(totals, c.recorder)
+}
+
+func (c *consolidation) prepareSimulationSession(ctx context.Context) (pscheduling.PreparedSchedulerStats, error) {
+	opts := []pscheduling.Options{
+		pscheduling.IsConsolidationSimulation,
+		pscheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy),
+	}
+	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
+		opts = append(opts, pscheduling.IgnorePreferences)
+	}
+	session, err := c.provisioner.NewSimulationSession(ctx, c.cluster.DeepCopyNodes(), opts...)
+	if err != nil {
+		c.session = nil
+		return pscheduling.PreparedSchedulerStats{}, err
+	}
+	c.session = session
+	return session.Stats(), nil
+}
+
+func (c *consolidation) clearSimulationSession() {
+	c.session = nil
+	c.sessionMethod = ""
+	c.sessionAttempted = false
+}
+
+func (c *consolidation) beginSimulationSession(ctx context.Context, method string) func() {
+	if !options.FromContext(ctx).FeatureGates.DisruptionSimulationReuse {
+		return func() {}
+	}
+	c.sessionMethod = method
+	c.sessionAttempted = false
+	return c.clearSimulationSession
+}
+
+func (c *consolidation) ensureSimulationSession(ctx context.Context) {
+	if c.sessionMethod == "" || c.sessionAttempted {
+		return
+	}
+	c.sessionAttempted = true
+	started := time.Now()
+	stats, err := c.prepareSimulationSession(ctx)
+	SimulationSessionDurationSeconds.Observe(time.Since(started).Seconds(), map[string]string{
+		ConsolidationTypeLabel: c.sessionMethod,
+		stageLabel:             SimulationSessionStageBuild.Name,
+	})
+	if err != nil {
+		SimulationSessionTotal.Inc(map[string]string{
+			ConsolidationTypeLabel: c.sessionMethod,
+			outcomeLabel:           SimulationSessionResultFallback.Name,
+		})
+		log.FromContext(ctx).Error(err, "building pass-scoped simulation session, falling back to legacy scheduling")
+		return
+	}
+	SimulationSessionTotal.Inc(map[string]string{
+		ConsolidationTypeLabel: c.sessionMethod,
+		outcomeLabel:           SimulationSessionResultCreated.Name,
+	})
+	for kind, count := range map[string]int{
+		SimulationInputKindTopologyStateNode.Name: stats.Nodes,
+		SimulationInputKindNodePool.Name:          stats.NodePools,
+		SimulationInputKindNodePoolTemplate.Name:  stats.Templates,
+		SimulationInputKindInstanceType.Name:      stats.InstanceTypes,
+		SimulationInputKindDaemonSetPod.Name:      stats.DaemonSetPods,
+		SimulationInputKindTopologyKey.Name:       stats.TopologyKeys,
+	} {
+		SimulationSessionSharedInputCount.Observe(float64(count), map[string]string{
+			ConsolidationTypeLabel: c.sessionMethod,
+			kindLabel:              kind,
+		})
+	}
 }
 
 func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
@@ -158,8 +232,14 @@ func (c *consolidation) sortCandidates(_ context.Context, candidates []*Candidat
 // nolint:gocyclo
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	var err error
+	c.ensureSimulationSession(ctx)
 	// Run scheduling simulation to compute consolidation option
-	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.clock, c.recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, SimulationOptions{}, candidates...)
+	var results pscheduling.Results
+	if c.session == nil {
+		results, err = SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.clock, c.recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, SimulationOptions{}, candidates...)
+	} else {
+		results, err = SimulateSchedulingWithSession(ctx, c.kubeClient, c.cluster, c.provisioner, c.session, c.sessionMethod, c.clock, c.recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, SimulationOptions{}, candidates...)
+	}
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {
