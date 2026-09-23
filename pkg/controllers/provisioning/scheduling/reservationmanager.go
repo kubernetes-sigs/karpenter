@@ -18,7 +18,9 @@ package scheduling
 
 import (
 	"fmt"
+	"maps"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -50,6 +52,18 @@ func NewReservationManager(instanceTypes map[string][]*cloudprovider.InstanceTyp
 	return &ReservationManager{
 		reservations: map[string]sets.Set[string]{},
 		capacity:     capacity,
+	}
+}
+
+func (rm *ReservationManager) Clone() *ReservationManager {
+	if rm == nil {
+		return nil
+	}
+	return &ReservationManager{
+		reservations: lo.MapValues(rm.reservations, func(reservations sets.Set[string], _ string) sets.Set[string] {
+			return reservations.Clone()
+		}),
+		capacity: maps.Clone(rm.capacity),
 	}
 }
 
