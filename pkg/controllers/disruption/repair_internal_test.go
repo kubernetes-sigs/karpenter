@@ -65,7 +65,7 @@ func TestEvaluateNodeUsesMaximumEligiblePolicyScore(t *testing.T) {
 	}
 }
 
-func TestEvaluateNodeUsesEarliestDeadlineForEqualPriorityConditions(t *testing.T) {
+func TestEvaluateNodeUsesEarliestEligibleAtForEqualPriorityConditions(t *testing.T) {
 	now := time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC)
 	policies := []cloudprovider.RepairPolicy{
 		{ConditionType: "Earlier", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 20 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
@@ -80,21 +80,24 @@ func TestEvaluateNodeUsesEarliestDeadlineForEqualPriorityConditions(t *testing.T
 		policyMatcher: matcher,
 		ranks:         denseRanks(policies),
 	}
-	node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
-		{
-			Type:               "Earlier",
-			Status:             corev1.ConditionFalse,
-			LastTransitionTime: metav1.NewTime(now.Add(-40 * time.Minute)),
-		},
-		{
-			Type:               "Later",
-			Status:             corev1.ConditionFalse,
-			LastTransitionTime: metav1.NewTime(now.Add(-15 * time.Minute)),
-		},
-	}}}
-
-	evaluation := repair.evaluateNode(node, now)
-	if evaluation.result == nil || evaluation.result.ConditionType != "Earlier" {
-		t.Fatalf("expected the earlier eligible deadline to govern, got %#v", evaluation.result)
+	earlier := corev1.NodeCondition{
+		Type:               "Earlier",
+		Status:             corev1.ConditionFalse,
+		LastTransitionTime: metav1.NewTime(now.Add(-40 * time.Minute)),
+	}
+	later := corev1.NodeCondition{
+		Type:               "Later",
+		Status:             corev1.ConditionFalse,
+		LastTransitionTime: metav1.NewTime(now.Add(-15 * time.Minute)),
+	}
+	for _, conditions := range [][]corev1.NodeCondition{
+		{earlier, later},
+		{later, earlier},
+	} {
+		node := &corev1.Node{Status: corev1.NodeStatus{Conditions: conditions}}
+		evaluation := repair.evaluateNode(node, now)
+		if evaluation.result == nil || evaluation.result.ConditionType != "Earlier" {
+			t.Fatalf("expected the earliest eligible result to govern for conditions %#v, got %#v", conditions, evaluation.result)
+		}
 	}
 }

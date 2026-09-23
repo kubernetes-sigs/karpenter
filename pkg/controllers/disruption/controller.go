@@ -102,8 +102,8 @@ func NewController(ctx context.Context, clk clock.Clock, kubeClient client.Clien
 func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
 	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 	methods := []Method{}
-	// Repair runs first: fixing a fault outranks any discretionary rebalance. Registered only when the NodeRepair
-	// feature gate is on; NewRepair panics if the provider defines no RepairPolicies.
+	// Repair runs first: fixing a fault outranks any discretionary rebalance. Do not register the method while the
+	// feature gate is disabled, since candidate construction performs cluster-wide API and scheduling work.
 	if options.FromContext(ctx).FeatureGates.NodeRepair {
 		repair, err := NewRepair(c)
 		if err != nil {

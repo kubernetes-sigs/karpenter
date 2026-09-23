@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -75,6 +76,29 @@ type Method interface {
 
 type CandidateFilter func(context.Context, *Candidate) bool
 
+// candidateValidationError identifies expected candidate invalidation so revalidation can distinguish stale state
+// from API failures.
+type candidateValidationError struct {
+	err error
+}
+
+func newCandidateValidationError(err error) error {
+	return &candidateValidationError{err: err}
+}
+
+func (e *candidateValidationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *candidateValidationError) Unwrap() error {
+	return e.err
+}
+
+func isCandidateValidationError(err error) bool {
+	var validationErr *candidateValidationError
+	return errors.As(err, &validationErr)
+}
+
 // Candidate is a state.StateNode that we are considering for disruption along with extra information to be used in
 // making that determination
 type Candidate struct {
@@ -93,10 +117,10 @@ type Candidate struct {
 	// RescheduleDisruptionCost is 1.0 (base) + sum of positive pod eviction costs
 	// for reschedulable pods. Used by balanced scoring.
 	RescheduleDisruptionCost float64
-	// TerminationGracePeriod, when set, bounds this candidate's drain. After replacement readiness, the queue stamps
-	// the absolute termination deadline (now + this) immediately before requesting deletion, so replacement-launch
-	// latency doesn't erode the window. nil inherits the NodeClaim's own TerminationGracePeriod. Repair sets it
-	// (min(policy, NodeClaim TGP)) in ComputeCommands.
+	// TerminationGracePeriod, when set, bounds this candidate's drain. After any required replacements are ready, the
+	// queue stamps the absolute termination deadline (now + this) immediately before requesting deletion, so
+	// replacement-launch latency doesn't erode the window. nil inherits the NodeClaim's own TerminationGracePeriod.
+	// Repair sets it (min(policy, NodeClaim TGP)) in ComputeCommands.
 	TerminationGracePeriod *time.Duration
 	// RepairCondition, when non-empty, is the node condition that made this candidate eligible for repair. Repair sets
 	// it in ComputeCommands; the queue emits the per-condition unhealthy-disrupted metric off it at actual termination.
@@ -175,15 +199,15 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 ) (*Candidate, error) {
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
 	if queue.HasAny(node.ProviderID()) {
-		return nil, fmt.Errorf("candidate is already being disrupted")
+		return nil, newCandidateValidationError(fmt.Errorf("candidate is already being disrupted"))
 	}
 	if disruptionClass == RepairDisruptionClass && node.NodeClaim != nil && node.Labels()[v1.NodePoolLabelKey] == "" {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim,
 			"repair requires a NodePool to construct and budget a safe replacement")...)
-		return nil, serrors.Wrap(fmt.Errorf("repair requires a nodepool"), "NodeClaim", klog.KObj(node.NodeClaim))
+		return nil, newCandidateValidationError(serrors.Wrap(fmt.Errorf("repair requires a nodepool"), "NodeClaim", klog.KObj(node.NodeClaim)))
 	}
 	if err := validateNodeForDisruption(node, recorder, clk, disruptionClass); err != nil {
-		return nil, err
+		return nil, newCandidateValidationError(err)
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
@@ -193,12 +217,15 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// skip any candidates where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool not found (NodePool=%s)", nodePoolName))...)
-		return nil, serrors.Wrap(fmt.Errorf("nodepool not found"), "NodePool", klog.KRef("", nodePoolName))
+		return nil, newCandidateValidationError(serrors.Wrap(fmt.Errorf("nodepool not found"), "NodePool", klog.KRef("", nodePoolName)))
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
 	pods, hasPodBlockers, err := validatePodsForDisruption(ctx, kubeClient, recorder, clk, node, pdbs, disruptionClass)
 	if err != nil {
+		if state.IsPodBlockEvictionError(err) {
+			return nil, newCandidateValidationError(err)
+		}
 		return nil, err
 	}
 	return newCandidate(ctx, clk, node, nodePool, instanceType, pods, hasPodBlockers), nil

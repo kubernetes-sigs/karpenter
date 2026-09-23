@@ -233,9 +233,9 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// then the termination controller will handle the eventual deletion of the nodes.
 	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
-		// A candidate may carry an explicit drain bound (repair sets one). After replacement readiness, stamp the
-		// absolute termination deadline immediately before requesting deletion so replacement-launch latency doesn't
-		// erode the grace window. The lifecycle controller no-ops if the annotation already exists, so this
+		// A candidate may carry an explicit drain bound (repair sets one). After any required replacements are ready,
+		// stamp the absolute termination deadline immediately before requesting deletion so replacement-launch latency
+		// doesn't erode the grace window. The lifecycle controller no-ops if the annotation already exists, so this
 		// candidate-level bound wins over the NodeClaim's TGP.
 		if tgp := cmd.Candidates[i].TerminationGracePeriod; tgp != nil {
 			stored := cmd.Candidates[i].NodeClaim

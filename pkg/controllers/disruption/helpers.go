@@ -88,7 +88,8 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 			return candidate.reschedulablePods
 		})
 	} else {
-		// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
+		// Generic disruption does not provision for pods that cannot currently be evicted. Repair opts out because its
+		// bounded drain owns when those pods leave, while replacement planning must still account for their demand.
 		pdbs, err := pdb.NewLimits(ctx, kubeClient)
 		if err != nil {
 			return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)

@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
-func TestRepairPolicyMatcherEvaluateDoesNotAllocatePerMatchingPolicy(t *testing.T) {
+func TestRepairPolicyMatcherHotPathsDoNotAllocatePerPolicy(t *testing.T) {
 	policies := make([]cloudprovider.RepairPolicy, 0, 101)
 	for range 100 {
 		policies = append(policies, cloudprovider.RepairPolicy{

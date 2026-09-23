@@ -307,9 +307,7 @@ func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.C
 	stored := nodeClaim.DeepCopy()
 	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 
-	// We use client.MergeFromWithOptimisticLock because patching a terminationGracePeriod annotation
-	// can cause races with the health controller, as that controller sets the current time as the terminationGracePeriod annotation
-	// Here, We want to resolve any conflict and not overwrite the terminationGracePeriod annotation
+	// Use optimistic locking so a concurrent termination-deadline update is not overwritten.
 	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 		return client.IgnoreNotFound(err)
 	}

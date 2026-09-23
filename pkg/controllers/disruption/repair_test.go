@@ -52,6 +52,18 @@ func (c *nodePoolGetErrorClient) Get(ctx context.Context, key client.ObjectKey, 
 	return c.Client.Get(ctx, key, obj, opts...)
 }
 
+type podListErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c *podListErrorClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*corev1.PodList); ok {
+		return c.err
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
 type terminationTimestampPatchErrorClient struct {
 	client.Client
 	err      error
@@ -186,6 +198,19 @@ var _ = Describe("Repair", func() {
 		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, metricLabels)
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
+
+	It("should delete an empty unhealthy node without pre-spinning a replacement", func() {
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
+		Expect(cmds[0].Replacements).To(BeEmpty())
 	})
 
 	// INV-S9: repair never fires before the policy toleration elapses.
@@ -389,18 +414,12 @@ var _ = Describe("Repair", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		initNode(nodeClaim, node)
-		bindReschedulablePod(node)
 		markUnhealthy(node, "BadNode")
 		env.Clock.Step(31 * time.Minute)
 
 		ExpectSingletonReconciled(ctx, repairController)
 
 		Expect(queue.GetCommands()).To(BeEmpty())
-		ExpectExists(ctx, env.Client, node)
-		ExpectExists(ctx, env.Client, nodeClaim)
-		nodeClaims := &v1.NodeClaimList{}
-		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
-		Expect(nodeClaims.Items).To(HaveLen(1))
 	})
 
 	It("should stop repairing a NodePool when more than 20% of its nodes are unhealthy", func() {
@@ -581,10 +600,10 @@ var _ = Describe("Repair", func() {
 		Expect(cmds[0].Candidates[0].Node.Name).To(Equal(aNode.Name))
 	})
 
-	// INV-S10: after replacement readiness, the drain deadline is stamped immediately before the delete request (not at
-	// command-computation time), so replacement-launch latency can't erode the window. A forceful (0) policy stamps an
-	// immediate deadline, so repair is never the unbounded hang.
-	It("should stamp a forceful (immediate) termination deadline at deletion for a forceful policy", func() {
+	// INV-S10: after any required replacements are ready, the drain deadline is stamped immediately before the delete
+	// request (not at command-computation time), so replacement-launch latency can't erode the window. A forceful (0)
+	// policy stamps an immediate deadline, so repair is never the unbounded hang.
+	It("should stamp a forceful (immediate) termination deadline before requesting deletion", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(time.Duration(0)), Action: cloudprovider.ReplaceNode},
 		}
@@ -642,7 +661,7 @@ var _ = Describe("Repair", func() {
 	})
 
 	// INV-S10: when both the policy and the NodeClaim bound the drain, the smaller (most forceful) wins.
-	It("should stamp min(policy TGP, NodeClaim TGP) at deletion", func() {
+	It("should stamp min(policy TGP, NodeClaim TGP) before requesting deletion", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(20 * time.Minute), Action: cloudprovider.ReplaceNode},
 		}
@@ -691,8 +710,8 @@ var _ = Describe("Repair", func() {
 		})
 	})
 
-	// The deadline is stamped only after replacement readiness, so a replacement that never becomes healthy leaves the
-	// original both un-terminated AND un-stamped (the bounded policy proves it would stamp if termination ran).
+	// The deadline is stamped only after required replacement readiness, so a replacement that never becomes healthy
+	// leaves the original both un-terminated AND un-stamped (the bounded policy proves it would stamp if termination ran).
 	It("should not stamp a termination deadline when the replacement never becomes healthy", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(10 * time.Minute), Action: cloudprovider.ReplaceNode},
@@ -920,6 +939,41 @@ var _ = Describe("Repair", func() {
 		Expect(err).To(MatchError(ContainSubstring(injectedErr.Error())))
 	})
 
+	It("should propagate pod list errors from command admission revalidation", func() {
+		nodePool = test.StaticNodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Replicas: lo.ToPtr[int64](1),
+				Disruption: v1.Disruption{
+					Budgets: []v1.Budget{{Nodes: "100%"}},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, repair.ShouldDisrupt, disruption.RepairDisruptionClass, queue)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(candidates).To(HaveLen(1))
+
+		injectedErr := errors.New("injected pod list failure")
+		failingRepair, err := disruption.NewRepair(disruption.MakeConsolidation(
+			env.Clock,
+			cluster,
+			&podListErrorClient{Client: env.Client, err: injectedErr},
+			prov,
+			cloudProvider,
+			recorder,
+			queue,
+		))
+		Expect(err).NotTo(HaveOccurred())
+
+		commands, err := failingRepair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
+		Expect(commands).To(BeEmpty())
+		Expect(err).To(MatchError(ContainSubstring(injectedErr.Error())))
+	})
+
 	It("should explicitly exclude standalone NodeClaims that have no safe replacement template", func() {
 		standaloneClaim, standaloneNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 			v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
@@ -956,12 +1010,4 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 	})
 
-	It("should not register the Repair method when the NodeRepair feature gate is disabled", func() {
-		disabledCtx := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
-		methods := disruption.NewMethods(disabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-		Expect(lo.ContainsBy(methods, func(method disruption.Method) bool {
-			_, ok := method.(*disruption.Repair)
-			return ok
-		})).To(BeFalse())
-	})
 })

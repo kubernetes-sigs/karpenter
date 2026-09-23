@@ -58,7 +58,7 @@ const (
 )
 
 // Repair is a voluntary disruption method that remediates unhealthy nodes. It replaces the standalone node.health
-// controller: repair rides the shared disruption budget (reason "Unhealthy"), verifies replacement capacity before
+// controller: repair rides the shared disruption budget (reason "Unhealthy"), verifies rescheduling capacity before
 // terminating workload-bearing nodes, orders candidates by rank + age/τ, and is vetoed by do-not-repair.
 type Repair struct {
 	consolidation
@@ -121,8 +121,8 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 }
 
 // ComputeCommands orders eligible candidates by the repair score and returns one command for the highest-scoring
-// candidate whose NodePool has budget. Workload-bearing candidates pre-spin replacement capacity; empty candidates may
-// produce a delete-only command. Only one command per pass, mirroring drift.
+// candidate whose NodePool has budget. Workload-bearing candidates verify rescheduling capacity and pre-spin any
+// required replacement; empty candidates may produce a delete-only command. Only one command per pass, mirroring drift.
 func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	now := r.clock.Now()
 	r.sortCandidates(candidates, now)
@@ -166,7 +166,7 @@ func (r *Repair) commandForCandidate(
 	if evaluation.result == nil {
 		return Command{}, false, nil
 	}
-	// Set the candidate's drain bound; after any replacement is healthy, the queue stamps the absolute deadline
+	// Set the candidate's drain bound; after any required replacements are ready, the queue stamps the absolute deadline
 	// immediately before requesting deletion. A forceful (0) policy skips the drain for conditions the kubelet can't
 	// evict through, without replacement-launch latency eroding the window.
 	candidate.TerminationGracePeriod = effectiveDrainBound(candidate, evaluation.result)
@@ -308,8 +308,11 @@ func (r *Repair) revalidateCandidate(ctx context.Context, candidate *Candidate) 
 		RepairDisruptionClass,
 	)
 	if err != nil {
-		log.FromContext(ctx).V(1).Info("discarding repair candidate after revalidation", "Node", klog.KObj(candidate.Node), "error", err)
-		return nil, nil //nolint:nilerr // Candidate validation failures make this candidate stale for the current pass.
+		if isCandidateValidationError(err) {
+			log.FromContext(ctx).V(1).Info("discarding repair candidate after revalidation", "Node", klog.KObj(candidate.Node), "error", err)
+			return nil, nil //nolint:nilerr // Candidate validation failures make this candidate stale for the current pass.
+		}
+		return nil, fmt.Errorf("revalidating repair candidate, %w", err)
 	}
 	if !r.ShouldDisrupt(ctx, current) {
 		return nil, nil

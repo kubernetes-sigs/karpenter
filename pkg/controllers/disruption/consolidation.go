@@ -58,8 +58,8 @@ type consolidation struct {
 	cloudProvider          cloudprovider.CloudProvider
 	recorder               events.Recorder
 	lastConsolidationState time.Time
-	// evaluator is initialized non-nil at construction. SetNodePoolTotals
-	// replaces it with a balancedEvaluator carrying the new totals.
+	// evaluator is initialized non-nil at construction. Consolidation methods
+	// that use balanced scoring replace it with an evaluator carrying NodePool totals.
 	evaluator Evaluator
 }
 
