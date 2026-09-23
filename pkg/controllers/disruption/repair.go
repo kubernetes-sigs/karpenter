@@ -72,22 +72,23 @@ type repairNodeEvaluation struct {
 	result *health.RepairPolicyResult
 }
 
-// NewRepair validates and compiles the provider's complete repair policy set before constructing the method.
-func NewRepair(c consolidation) (*Repair, error) {
+// NewRepair validates and compiles the provider's complete repair policy set before constructing the method. It panics
+// when the provider defines no policies or the complete set is invalid.
+func NewRepair(c consolidation) *Repair {
 	policies := c.cloudProvider.RepairPolicies()
 	if len(policies) == 0 {
 		panic("node repair requires the cloud provider to define RepairPolicies, but it defines none")
 	}
 	policyMatcher, err := health.NewRepairPolicyMatcher(policies, sets.New(cloudprovider.ReplaceNode))
 	if err != nil {
-		return nil, err
+		panic(fmt.Sprintf("node repair requires valid RepairPolicies: %v", err))
 	}
 	return &Repair{
 		consolidation:      c,
 		ranks:              denseRanks(policies),
 		policyMatcher:      policyMatcher,
 		decisionLogMonitor: pretty.NewChangeMonitor(),
-	}, nil
+	}
 }
 
 // ShouldDisrupt is a predicate that filters candidates to nodes that have an unhealthy condition matching a

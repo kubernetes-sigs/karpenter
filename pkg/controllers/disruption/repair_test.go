@@ -148,9 +148,7 @@ var _ = Describe("Repair", func() {
 	// newRepairController builds an isolated repair-only disruption controller. Repair caches RepairPolicies() at
 	// construction, so specs that override cloudProvider.RepairPolicy must call this again to pick up the new policies.
 	newRepairController := func() {
-		var err error
-		repair, err = disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-		Expect(err).NotTo(HaveOccurred())
+		repair = disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue))
 		repairController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 			disruption.WithMethods(repair))
 	}
@@ -632,8 +630,7 @@ var _ = Describe("Repair", func() {
 		injectedErr := errors.New("injected termination timestamp patch failure")
 		failingClient := &terminationTimestampPatchErrorClient{Client: env.Client, err: injectedErr, failNext: true}
 		failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, prov)
-		failingRepair, err := disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, failingClient, prov, cloudProvider, recorder, failingQueue))
-		Expect(err).NotTo(HaveOccurred())
+		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, failingClient, prov, cloudProvider, recorder, failingQueue))
 		failingController := disruption.NewController(ctx, env.Clock, failingClient, prov, cloudProvider, recorder, cluster, failingQueue, clusterCost,
 			disruption.WithMethods(failingRepair))
 
@@ -923,7 +920,7 @@ var _ = Describe("Repair", func() {
 		Expect(candidates).To(HaveLen(1))
 
 		injectedErr := errors.New("injected NodePool read failure")
-		failingRepair, err := disruption.NewRepair(disruption.MakeConsolidation(
+		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(
 			env.Clock,
 			cluster,
 			&nodePoolGetErrorClient{Client: env.Client, err: injectedErr},
@@ -932,7 +929,6 @@ var _ = Describe("Repair", func() {
 			recorder,
 			queue,
 		))
-		Expect(err).NotTo(HaveOccurred())
 
 		commands, err := failingRepair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
 		Expect(commands).To(BeEmpty())
@@ -958,7 +954,7 @@ var _ = Describe("Repair", func() {
 		Expect(candidates).To(HaveLen(1))
 
 		injectedErr := errors.New("injected pod list failure")
-		failingRepair, err := disruption.NewRepair(disruption.MakeConsolidation(
+		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(
 			env.Clock,
 			cluster,
 			&podListErrorClient{Client: env.Client, err: injectedErr},
@@ -967,7 +963,6 @@ var _ = Describe("Repair", func() {
 			recorder,
 			queue,
 		))
-		Expect(err).NotTo(HaveOccurred())
 
 		commands, err := failingRepair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
 		Expect(commands).To(BeEmpty())

@@ -105,12 +105,7 @@ func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, ku
 	// Repair runs first: fixing a fault outranks any discretionary rebalance. Do not register the method while the
 	// feature gate is disabled, since candidate construction performs cluster-wide API and scheduling work.
 	if options.FromContext(ctx).FeatureGates.NodeRepair {
-		repair, err := NewRepair(c)
-		if err != nil {
-			log.Log.Error(err, "disabling node repair due to invalid repair policies")
-		} else {
-			methods = append(methods, repair)
-		}
+		methods = append(methods, NewRepair(c))
 	}
 	return append(methods, []Method{
 		// Delete empty nodes across all consolidation policies (WhenEmpty, WhenEmptyOrUnderutilized, Balanced).

@@ -62,7 +62,7 @@ var _ = Describe("Repair Method Registration", func() {
 		}).To(PanicWith("node repair requires the cloud provider to define RepairPolicies, but it defines none"))
 	})
 
-	It("disables only repair when the complete policy set is invalid", func() {
+	It("panics when the complete policy set is invalid", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{
 				ConditionType:   "BadNode",
@@ -77,12 +77,9 @@ var _ = Describe("Repair Method Registration", func() {
 			},
 		}
 
-		methods := disruption.NewMethods(enabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-		disabledCtx := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
-		methodsWithoutRepair := disruption.NewMethods(disabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-
-		Expect(repairMethodCount(methods)).To(BeZero())
-		Expect(methods).To(HaveLen(len(methodsWithoutRepair)))
+		Expect(func() {
+			disruption.NewMethods(enabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		}).To(PanicWith(ContainSubstring("node repair requires valid RepairPolicies")))
 	})
 
 	It("does not register repair when the feature gate is disabled", func() {
