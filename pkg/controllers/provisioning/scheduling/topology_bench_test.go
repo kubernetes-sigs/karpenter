@@ -24,6 +24,7 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	corescheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -67,55 +69,125 @@ func BenchmarkNewTopology(b *testing.B) {
 		})
 	}
 
-	// Domain-filtering sweep (#2227): every pod carries a zone topology spread constraint with Honor inclusion
+	// Domain-filtering sweeps (#2227): every pod carries a zone topology spread constraint with Honor inclusion
 	// policies and selects a subset of the NodePools by label and toleration, so building each pod's topology group
 	// evaluates NodePool requirement/taint compatibility instead of skipping the filters. NewTopology is the unit
 	// that runs once per scheduling loop: it builds the domain groups from every NodePool and instance type and then
 	// constructs each pod's topology group, so domain tracking and per-pod domain filtering are measured together.
 	// The reverted attempts at domain filtering regressed along the NodePool axis (#2779 memory, #2954 CPU) and the
-	// single-NodePool suites didn't catch it, which is why this sweep extends to 100.
-	for _, np := range []int{1, 10, 50, 100} {
-		b.Run(fmt.Sprintf("vector=filteringnodepools/np=%d", np), func(b *testing.B) {
-			ctx := benchCtx()
-			pods := benchFilteringSpreadPods(1000)
-
-			cp := fake.NewCloudProvider()
-			instanceTypes := fake.InstanceTypes(400)
-			cp.InstanceTypes = instanceTypes
-
-			client := fakecr.NewFakeClient()
-			clk := &clock.RealClock{}
-			cl := state.NewCluster(clk, client, cp)
-
-			nodePools := benchFilteringNodePools(np)
-			itsByNP := map[string][]*cloudprovider.InstanceType{}
-			for _, pool := range nodePools {
-				itsByNP[pool.Name] = instanceTypes
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				if _, err := scheduling.NewTopology(ctx, client, cl, nil, nodePools, itsByNP, pods); err != nil {
-					b.Fatalf("creating topology: %s", err)
-				}
-			}
-		})
+	// single-NodePool suites didn't catch it; each sweep below scales one axis of that blind spot while holding the
+	// baseline scenario fixed.
+	base := filteringScenario{nodePools: 50, taintGroups: 5, instanceTypes: 400, zones: 3, pods: 1000}
+	for _, np := range []int{1, 10, 50, 100, 200} {
+		s := base
+		s.nodePools = np
+		b.Run(fmt.Sprintf("vector=filteringnodepools/np=%d", np), func(b *testing.B) { benchmarkFilteringTopology(b, s) })
+	}
+	for _, it := range []int{100, 400, 1000} {
+		s := base
+		s.instanceTypes = it
+		b.Run(fmt.Sprintf("vector=filteringinstancetypes/it=%d", it), func(b *testing.B) { benchmarkFilteringTopology(b, s) })
+	}
+	for _, z := range []int{3, 10, 50} {
+		s := base
+		s.zones = z
+		b.Run(fmt.Sprintf("vector=filteringzones/z=%d", z), func(b *testing.B) { benchmarkFilteringTopology(b, s) })
+	}
+	for _, tg := range []int{1, 5, 20} {
+		s := base
+		s.taintGroups = tg
+		b.Run(fmt.Sprintf("vector=filteringtaintgroups/tg=%d", tg), func(b *testing.B) { benchmarkFilteringTopology(b, s) })
 	}
 }
 
-// benchFilteringNodePools builds NodePools dedicated to one of five teams: a team label, a matching dedicated taint,
-// and a team-dependent zone subset, so a pod selecting its team's NodePools is compatible with a fifth of them and
-// the counted domains differ per team.
-func benchFilteringNodePools(count int) []*v1.NodePool {
-	zoneSets := [][]string{
-		{"test-zone-1"},
-		{"test-zone-2", "test-zone-3"},
-		{"test-zone-1", "test-zone-2", "test-zone-3"},
+// filteringScenario is one knob per scaling vector of the domain-filtering benchmarks; a sweep scales one field and
+// holds the rest fixed. taintGroups is the number of distinct team identities: each NodePool carries its team's
+// label and dedicated taint, and each pod selects and tolerates exactly one team.
+type filteringScenario struct {
+	nodePools     int
+	taintGroups   int
+	instanceTypes int
+	zones         int
+	pods          int
+}
+
+func benchmarkFilteringTopology(b *testing.B, s filteringScenario) {
+	ctx := benchCtx()
+	pods := benchFilteringSpreadPods(s)
+
+	cp := fake.NewCloudProvider()
+	instanceTypes := benchZonedInstanceTypes(s)
+	cp.InstanceTypes = instanceTypes
+
+	client := fakecr.NewFakeClient()
+	clk := &clock.RealClock{}
+	cl := state.NewCluster(clk, client, cp)
+
+	nodePools := benchFilteringNodePools(s)
+	itsByNP := map[string][]*cloudprovider.InstanceType{}
+	for _, pool := range nodePools {
+		itsByNP[pool.Name] = instanceTypes
 	}
-	nps := make([]*v1.NodePool, count)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := scheduling.NewTopology(ctx, client, cl, nil, nodePools, itsByNP, pods); err != nil {
+			b.Fatalf("creating topology: %s", err)
+		}
+	}
+}
+
+func benchZone(z int) string {
+	return fmt.Sprintf("test-zone-%d", z)
+}
+
+// benchZonedInstanceTypes builds instance types whose offerings span every zone in the scenario, so the domain
+// universe scales with the zones vector.
+func benchZonedInstanceTypes(s filteringScenario) []*cloudprovider.InstanceType {
+	its := make([]*cloudprovider.InstanceType, s.instanceTypes)
+	for i := range its {
+		resources := corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", i%64+1)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", (i%64+1)*2)),
+			corev1.ResourcePods:   resource.MustParse(fmt.Sprintf("%d", (i%64+1)*10)),
+		}
+		offerings := make([]cloudprovider.Offering, 0, s.zones)
+		for z := range s.zones {
+			offerings = append(offerings, cloudprovider.Offering{
+				Available: true,
+				Requirements: corescheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+					corev1.LabelTopologyZone: benchZone(z),
+				}),
+				Price: fake.PriceFromResources(resources),
+			})
+		}
+		its[i] = fake.NewInstanceType(fmt.Sprintf("fake-it-%d", i), fake.WithResources(resources), fake.WithOfferings(offerings...))
+	}
+	return its
+}
+
+// benchFilteringNodePools builds NodePools dedicated to one of the scenario's teams: a team label, a matching
+// dedicated taint, and a rotating zone subset (one zone, the trailing two thirds, or all zones), so a pod selecting
+// its team's NodePools is compatible with 1/taintGroups of them and the counted domains differ per team.
+func benchFilteringNodePools(s filteringScenario) []*v1.NodePool {
+	nps := make([]*v1.NodePool, s.nodePools)
 	for i := range nps {
-		team := fmt.Sprintf("team-%d", i%5)
+		var zones []string
+		switch i % 3 {
+		case 0:
+			zones = []string{benchZone(i % s.zones)}
+		case 1:
+			for z := s.zones / 3; z < s.zones; z++ {
+				zones = append(zones, benchZone(z))
+			}
+		case 2:
+			for z := range s.zones {
+				zones = append(zones, benchZone(z))
+			}
+		}
+		team := fmt.Sprintf("team-%d", i%s.taintGroups)
 		nps[i] = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
@@ -131,7 +203,7 @@ func benchFilteringNodePools(count int) []*v1.NodePool {
 						Requirements: []v1.NodeSelectorRequirementWithMinValues{{
 							Key:      corev1.LabelTopologyZone,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   zoneSets[i%len(zoneSets)],
+							Values:   zones,
 						}},
 					},
 				},
@@ -143,10 +215,10 @@ func benchFilteringNodePools(count int) []*v1.NodePool {
 
 // benchFilteringSpreadPods builds pods which select their team's NodePools by label and toleration, each with a zone
 // topology spread constraint whose Honor policies make domain filtering evaluate NodePool compatibility.
-func benchFilteringSpreadPods(count int) []*corev1.Pod {
-	pods := make([]*corev1.Pod, count)
+func benchFilteringSpreadPods(s filteringScenario) []*corev1.Pod {
+	pods := make([]*corev1.Pod, s.pods)
 	for i := range pods {
-		team := fmt.Sprintf("team-%d", i%5)
+		team := fmt.Sprintf("team-%d", i%s.taintGroups)
 		pods[i] = test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{"app": team},
