@@ -16,12 +16,19 @@ on:
         type: string
         required: false
         description: "Human-readable test name for job identification"
+      iteration:
+        type: number
+        required: false
+        default: 1
+        description: >-
+          Index of the sample this job produces. A caller wanting a batch fans
+          out over this input, one job per sample.
 jobs:
   e2e:
     permissions:
       issues: write
     runs-on: ubuntu-latest
-    name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}
+    name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}${{ inputs.iteration > 1 && format(' iter {0}', inputs.iteration) || '' }}
     steps:
     - name: Debug workflow_run trigger
       run: |
@@ -77,11 +84,13 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         TEST_SUITE="$SUITE" make e2etests
+    # The name carries the sample index because upload-artifact requires names to
+    # be unique within a run, so without it the samples of a batch would collide.
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
+        name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-iter-${{ inputs.iteration }}-${{ github.run_id }}
         path: |
           ${{ env.OUTPUT_DIR }}/*_performance_report.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz

@@ -109,6 +109,9 @@ test: ## Run tests
 		--ginkgo.randomize-all \
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
+	@# Named explicitly because Go's `./...` skips dot-directories, so neither
+	@# ./pkg/... above nor `go vet ./...` in verify reaches anything under .github.
+	go test ./.github/scripts/perf-aggregate/... -race -timeout 5m
 
 test-memory: ## Run memory usage tests for node overlay store
 	go test -v ./pkg/controllers/nodeoverlay/... -run TestMemoryUsage
