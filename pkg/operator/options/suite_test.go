@@ -124,12 +124,13 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:                 lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        new(true),
-					NodeRepair:              new(false),
-					SpotToSpotConsolidation: new(false),
-					NodeOverlay:             new(false),
-					StaticCapacity:          new(false),
-					CapacityBuffer:          new(false),
+					ReservedCapacity:          new(true),
+					NodeRepair:                new(false),
+					SpotToSpotConsolidation:   new(false),
+					NodeOverlay:               new(false),
+					StaticCapacity:            new(false),
+					CapacityBuffer:            new(false),
+					DisruptionSimulationReuse: new(false),
 				},
 				IgnoreDRARequests: new(true),
 				SchedulerConfig:   nil,
@@ -366,6 +367,7 @@ var _ = Describe("Options", func() {
 			Entry("when CapacityBuffer is overridden", "CapacityBuffer"),
 			Entry("when TerminateFirstDrift is overridden", "TerminateFirstDrift"),
 			Entry("when TerminateFirstRepair is overridden", "TerminateFirstRepair"),
+			Entry("when DisruptionSimulationReuse is overridden", "DisruptionSimulationReuse"),
 		)
 	})
 
@@ -602,6 +604,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
 	Expect(optsA.FeatureGates.TerminateFirstDrift).To(Equal(optsB.FeatureGates.TerminateFirstDrift))
 	Expect(optsA.FeatureGates.TerminateFirstRepair).To(Equal(optsB.FeatureGates.TerminateFirstRepair))
+	Expect(optsA.FeatureGates.DisruptionSimulationReuse).To(Equal(optsB.FeatureGates.DisruptionSimulationReuse))
 	Expect(optsA.IgnoreDRARequests).To(Equal(optsB.IgnoreDRARequests))
 	Expect(optsA.LegacyNodeRepair).To(Equal(optsB.LegacyNodeRepair))
 	Expect(optsA.SchedulerConfig).To(Equal(optsB.SchedulerConfig))
