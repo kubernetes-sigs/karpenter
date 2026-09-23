@@ -13,6 +13,16 @@ Fixes #N/A <!-- issue number -->
 
 **Description**
 
+**Does this PR introduce a user-facing change?**
+<!--
+If no, just write "NONE" in the release-note block below.
+If yes, add release note in the block below detailing user-facing change. If this may require actions for users switching to new release, include string "action required".
+If this change will lead to a karpenter-provider breaking change (e.g. an interface change that downstream providers must react to), call that out here as well.
+-->
+```release-note
+
+```
+
 **How was this change tested?**
 
 By submitting this pull request, I confirm that my contribution is made under the terms of the Apache 2.0 license.
