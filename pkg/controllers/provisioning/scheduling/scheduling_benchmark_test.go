@@ -108,6 +108,69 @@ func BenchmarkIgnorePreferences(b *testing.B) {
 	benchmarkScheduler(b, makePreferencePods(4000), scheduling.IgnorePreferences)
 }
 
+func BenchmarkPreparedSchedulerConstruction(b *testing.B) {
+	ctx := options.ToContext(injection.WithControllerName(context.Background(), "prepared-scheduler-benchmark"), test.Options())
+	nodePool := test.NodePool(v1.NodePool{
+		Spec: v1.NodePoolSpec{
+			Limits: v1.Limits{
+				corev1.ResourceCPU:    resource.MustParse("10000000"),
+				corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+			},
+		},
+	})
+	instanceTypes := fake.InstanceTypes(400)
+	instanceTypesByPool := map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}
+	client := fakecr.NewFakeClient()
+	clk := &clock.RealClock{}
+	provider := fake.NewCloudProvider()
+	provider.InstanceTypes = instanceTypes
+	cl := state.NewCluster(clk, client, provider)
+	recorder := events.NewRecorder(&record.FakeRecorder{})
+	pods := makeDiversePods(500)
+	prepared, err := scheduling.NewPreparedSchedulerInputs(
+		ctx,
+		[]*v1.NodePool{nodePool},
+		nil,
+		instanceTypesByPool,
+		nil,
+		recorder,
+		clk,
+	)
+	if err != nil {
+		b.Fatalf("preparing scheduler inputs, %v", err)
+	}
+
+	build := func(b *testing.B, opts ...scheduling.Options) {
+		for b.Loop() {
+			topology, err := scheduling.NewTopology(ctx, client, cl, nil, []*v1.NodePool{nodePool}, instanceTypesByPool, pods, opts...)
+			if err != nil {
+				b.Fatalf("creating topology, %v", err)
+			}
+			_ = scheduling.NewScheduler(
+				ctx,
+				client,
+				[]*v1.NodePool{nodePool},
+				cl,
+				nil,
+				topology,
+				instanceTypesByPool,
+				nil,
+				recorder,
+				clk,
+				nil,
+				nil,
+				opts...,
+			)
+		}
+	}
+	b.Run("legacy", func(b *testing.B) {
+		build(b)
+	})
+	b.Run("prepared", func(b *testing.B) {
+		build(b, scheduling.WithPreparedSchedulerInputs(prepared))
+	})
+}
+
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions
 // go test -tags=test_performance -run=SchedulingProfile

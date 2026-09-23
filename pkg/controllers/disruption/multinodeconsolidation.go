@@ -52,6 +52,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	if m.IsConsolidated() {
 		return []Command{}, nil
 	}
+	defer m.beginSimulationSession(ctx, m.ConsolidationType())()
 	candidates = m.sortCandidates(ctx, candidates)
 
 	// In order, filter out all candidates that would violate the budget.
