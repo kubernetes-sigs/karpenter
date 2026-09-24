@@ -42,7 +42,6 @@ import (
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
-	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	nodehydration "sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
@@ -118,7 +117,7 @@ func NewControllers(
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue, clusterCost),
+		disruption.NewController(ctx, clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue, clusterCost),
 		provisioning.NewPodController(kubeClient, p, cluster),
 		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient, cloudProvider),
@@ -172,11 +171,6 @@ func NewControllers(
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey, v1.NodeInitializedLabelKey)...)),
 		)
-	}
-
-	// The cloud provider must define status conditions for the node repair controller to use to detect unhealthy nodes
-	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
-		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock, recorder))
 	}
 
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {

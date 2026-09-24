@@ -65,8 +65,19 @@ type RepairPolicy struct {
 	// ConditionStatus condition when a node is unhealthy
 	ConditionStatus corev1.ConditionStatus
 	// TolerationDuration is the duration the controller will wait
-	// before force terminating nodes that are unhealthy.
+	// before repairing nodes that are unhealthy. It is a confidence delay: eligibility (and repair
+	// ordering age) is counted only after it elapses.
 	TolerationDuration time.Duration
+	// TerminationGracePeriod is the Axis-2 drain bound for repair of this condition:
+	//   nil      -> inherit the NodePool/NodeClaim TerminationGracePeriod
+	//   non-zero -> min(this, nodeclaim.TerminationGracePeriod) — bound the drain even on a pool that set none,
+	//               so repair is never the unbounded 19-day hang.
+	//   0        -> forceful: skip the drain for conditions the kubelet can't evict through (wedged kernel,
+	//               lost heartbeat).
+	TerminationGracePeriod *time.Duration
+	// Priority is an ordering weight (0-100) for repair. Higher repairs first. Collisions are expected and
+	// unresolved; only the ordering matters, not the magnitude (it is compressed to a dense rank).
+	Priority int
 }
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.

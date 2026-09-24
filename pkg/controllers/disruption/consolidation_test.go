@@ -3104,7 +3104,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			// Reset the disruption controller so consolidation methods are not cached as consolidated
 			*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
-			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+			disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 				disruption.WithMethods(NewMethodsWithNopValidator()...))
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -3546,7 +3546,7 @@ var _ = Describe("Consolidation", func() {
 		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
+			disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -4165,7 +4165,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should wait for the node TTL for non-empty nodes before consolidating (multi-node)",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -4237,7 +4237,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should consolidate multiple empty nodes via multi-nodeclaim consolidation",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -4300,7 +4300,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should continue to single nodeclaim consolidation when multi-nodeclaim consolidation fails validation after the node ttl",
 			func(spotToSpot bool) {
-				disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
+				disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it

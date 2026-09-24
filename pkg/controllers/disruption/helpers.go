@@ -285,10 +285,16 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		nodePool := node.Labels()[v1.NodePoolLabelKey]
 		numNodes[nodePool]++
 
-		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
-		// 1. Has a NotReady conditiion
-		// 2. Is marked as disrupting
-		if cond := nodeutils.GetCondition(node.Node, corev1.NodeReady); cond.Status != corev1.ConditionTrue || node.MarkedForDeletion() {
+		// A node is subtracted from the allowed disruptions when it is:
+		//   1. Marked for deletion (a disruption is already in flight), or
+		//   2. NotReady — EXCEPT for the Unhealthy (repair) budget.
+		// Repair must not count merely-unhealthy nodes: NotReady is precisely repair's trigger, so counting those
+		// nodes against the repair budget would let a wave of unhealthy nodes starve the very budget that repairs them
+		// (a node.health cohort could zero the budget and freeze repair). An in-flight repair still counts once its
+		// candidate is MarkedForDeletion. Other reasons keep the reason-agnostic "unhealthy nodes consume budget"
+		// semantics introduced for consolidation/drift (kubernetes-sigs/karpenter#981).
+		notReady := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status != corev1.ConditionTrue
+		if node.MarkedForDeletion() || (notReady && reason != v1.DisruptionReasonUnhealthy) {
 			disrupting[nodePool]++
 		}
 	}
