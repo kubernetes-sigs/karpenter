@@ -68,8 +68,9 @@ type Repair struct {
 }
 
 type repairNodeEvaluation struct {
-	score  float64
-	result *health.RepairPolicyResult
+	score         float64
+	result        *health.RepairPolicyResult
+	policyResults []*health.RepairPolicyResult
 }
 
 // NewRepair validates and compiles the provider's complete repair policy set before constructing the method. It panics
@@ -108,8 +109,8 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 		return false
 	}
 	now := r.clock.Now()
-	r.logRepairPolicyDecisions(ctx, c.Node, now)
 	evaluation := r.evaluateNode(c.Node, now)
+	r.logRepairPolicyDecisions(ctx, c.Node, evaluation.policyResults)
 	if evaluation.result == nil {
 		return false
 	}
@@ -381,28 +382,30 @@ func (r *Repair) staticReplacement(candidate *Candidate) (pscheduling.Results, b
 // TODO: re-introduce a per-NodePool backoff term (subtracted here) once the NodePool backoff implementation lands
 // (kubernetes-sigs/karpenter#3178) — it was ripped out to avoid duplicating that mechanism.
 func (r *Repair) evaluateNode(node *corev1.Node, now time.Time) repairNodeEvaluation {
-	evaluation := repairNodeEvaluation{}
-	var governingPolicy cloudprovider.RepairPolicy
+	evaluation := repairNodeEvaluation{
+		policyResults: make([]*health.RepairPolicyResult, 0, len(node.Status.Conditions)),
+	}
+	governingPriority := 0
 	hasGoverningPolicy := false
-	var governingCondition *corev1.NodeCondition
 	governingDeadline := time.Time{}
 	for i := range node.Status.Conditions {
 		condition := &node.Status.Conditions[i]
-		for _, policy := range r.policyMatcher.EligiblePolicies(*condition, now) {
-			age := now.Sub(condition.LastTransitionTime.Add(policy.TolerationDuration))
+		result := r.policyMatcher.Evaluate(*condition, now)
+		if result == nil {
+			continue
+		}
+		evaluation.policyResults = append(evaluation.policyResults, result)
+		for _, policy := range result.EligiblePolicies {
+			age := now.Sub(policy.EligibleAt)
 			evaluation.score = max(evaluation.score, float64(r.ranks[policy.Priority])+age.Minutes()/agingConstant.Minutes())
-			deadline := condition.LastTransitionTime.Add(policy.TolerationDuration)
-			if !hasGoverningPolicy || policy.Priority > governingPolicy.Priority ||
-				(policy.Priority == governingPolicy.Priority && deadline.Before(governingDeadline)) {
-				governingPolicy = policy
+			if !hasGoverningPolicy || policy.Priority > governingPriority ||
+				(policy.Priority == governingPriority && policy.EligibleAt.Before(governingDeadline)) {
+				governingPriority = policy.Priority
 				hasGoverningPolicy = true
-				governingCondition = condition
-				governingDeadline = deadline
+				governingDeadline = policy.EligibleAt
+				evaluation.result = result
 			}
 		}
-	}
-	if governingCondition != nil {
-		evaluation.result = r.policyMatcher.Evaluate(*governingCondition, now)
 	}
 	return evaluation
 }
@@ -420,18 +423,14 @@ func denseRanks(policies []cloudprovider.RepairPolicy) map[int]int {
 	return ranks
 }
 
-func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node, now time.Time) {
+func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node, evaluations []*health.RepairPolicyResult) {
 	logger := log.FromContext(ctx).V(1)
 	if !logger.Enabled() {
 		return
 	}
-	decisions := make([][]any, 0, len(node.Status.Conditions))
-	for _, condition := range node.Status.Conditions {
-		values := r.policyMatcher.DecisionLogValues(condition, now)
-		if len(values) == 0 {
-			continue
-		}
-		decisions = append(decisions, values)
+	decisions := make([][]any, 0, len(evaluations))
+	for _, evaluation := range evaluations {
+		decisions = append(decisions, repairPolicyLogValues(evaluation))
 	}
 	key := string(node.UID)
 	if key == "" {
@@ -449,6 +448,24 @@ func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node
 			"Node", klog.KObj(node),
 		}, values...)...).Info("evaluated repair policy")
 	}
+}
+
+func repairPolicyLogValues(result *health.RepairPolicyResult) []any {
+	values := []any{
+		"condition", result.ConditionType,
+		"status", result.ConditionStatus,
+		"reason", result.Reason,
+		"fallback", result.Fallback,
+		"matching-policies", result.MatchingPolicies,
+		"eligible-policies", len(result.EligiblePolicies),
+		"action", result.Action,
+		"eligible", len(result.EligiblePolicies) != 0,
+		"eligible-at", result.EligibleAt,
+	}
+	if result.TerminationGracePeriod != nil {
+		values = append(values, "termination-grace-period", *result.TerminationGracePeriod)
+	}
+	return values
 }
 
 // effectiveDrainBound returns the drain bound for the candidate, carried on the Command and applied by the queue

@@ -17,6 +17,7 @@ limitations under the License.
 package disruption
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -27,6 +28,37 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 )
+
+func TestRepairPolicyLogValues(t *testing.T) {
+	eligibleAt := time.Date(2026, time.September, 22, 12, 30, 0, 0, time.UTC)
+	terminationGracePeriod := 5 * time.Minute
+	result := &health.RepairPolicyResult{
+		ConditionType:          "AcceleratorReady",
+		ConditionStatus:        corev1.ConditionFalse,
+		Reason:                 "NvidiaXID48Error",
+		Action:                 cloudprovider.ReplaceNode,
+		EligibleAt:             eligibleAt,
+		TerminationGracePeriod: &terminationGracePeriod,
+		Fallback:               false,
+		MatchingPolicies:       2,
+		EligiblePolicies:       make([]health.EligibleRepairPolicy, 1),
+	}
+	expected := []any{
+		"condition", corev1.NodeConditionType("AcceleratorReady"),
+		"status", corev1.ConditionFalse,
+		"reason", "NvidiaXID48Error",
+		"fallback", false,
+		"matching-policies", 2,
+		"eligible-policies", 1,
+		"action", cloudprovider.ReplaceNode,
+		"eligible", true,
+		"eligible-at", eligibleAt,
+		"termination-grace-period", terminationGracePeriod,
+	}
+	if actual := repairPolicyLogValues(result); !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("expected log values %#v, got %#v", expected, actual)
+	}
+}
 
 func TestEvaluateNodeUsesMaximumEligiblePolicyScore(t *testing.T) {
 	now := time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC)

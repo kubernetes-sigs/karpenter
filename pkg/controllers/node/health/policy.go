@@ -19,6 +19,7 @@ package health
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -54,7 +55,13 @@ type RepairPolicyMatcher struct {
 	fallbackPolicy compiledPolicy
 }
 
-// RepairPolicyResult is the eligible repair behavior for one current NodeCondition.
+// EligibleRepairPolicy is the scoring input for one eligible policy.
+type EligibleRepairPolicy struct {
+	Priority   int
+	EligibleAt time.Time
+}
+
+// RepairPolicyResult is the complete policy evaluation for one current NodeCondition.
 type RepairPolicyResult struct {
 	ConditionType          corev1.NodeConditionType
 	ConditionStatus        corev1.ConditionStatus
@@ -62,17 +69,9 @@ type RepairPolicyResult struct {
 	Action                 cloudprovider.RepairAction
 	EligibleAt             time.Time
 	TerminationGracePeriod *time.Duration
-}
-
-type repairDecision struct {
-	condition              corev1.NodeCondition
-	action                 cloudprovider.RepairAction
-	eligibleAt             time.Time
-	terminationGracePeriod *time.Duration
-	eligible               bool
-	fallback               bool
-	matchingPolicies       int
-	eligiblePolicies       int
+	Fallback               bool
+	MatchingPolicies       int
+	EligiblePolicies       []EligibleRepairPolicy
 }
 
 // NewRepairPolicyMatcher validates and compiles a complete provider repair policy set.
@@ -124,7 +123,6 @@ func NewRepairPolicyMatcher(policies []cloudprovider.RepairPolicy, supportedActi
 }
 
 func compileRepairPolicy(index int, policy cloudprovider.RepairPolicy, supportedActions sets.Set[cloudprovider.RepairAction]) (compiledPolicy, error) {
-	policy.TerminationGracePeriod = cloneDuration(policy.TerminationGracePeriod)
 	compiled := compiledPolicy{RepairPolicy: policy}
 	key := policyKey{conditionType: policy.ConditionType, conditionStatus: policy.ConditionStatus}
 	errs := validateRepairPolicy(index, policy, supportedActions)
@@ -183,14 +181,6 @@ func compileRepairPolicyReasonRegex(index int, policy cloudprovider.RepairPolicy
 	return reasonRegex, nil
 }
 
-func cloneDuration(duration *time.Duration) *time.Duration {
-	if duration == nil {
-		return nil
-	}
-	cloned := *duration
-	return &cloned
-}
-
 func repairPolicyError(key policyKey, err error) error {
 	return serrors.Wrap(
 		fmt.Errorf("validating repair policy for condition status %q, %w", key.conditionStatus, err),
@@ -202,39 +192,39 @@ func validConditionStatus(status corev1.ConditionStatus) bool {
 	return status == corev1.ConditionTrue || status == corev1.ConditionFalse || status == corev1.ConditionUnknown
 }
 
-// Evaluate returns the eligible repair result for one current NodeCondition.
-// It returns nil when the condition does not match or its toleration has not elapsed.
+// Evaluate returns the complete repair-policy evaluation for one current NodeCondition. It returns nil when the
+// condition is not covered by the provider policy set. Provider policies are immutable after construction, so returned
+// duration pointers must be treated as read-only.
 func (p *RepairPolicyMatcher) Evaluate(condition corev1.NodeCondition, now time.Time) *RepairPolicyResult {
-	decision, ok := p.evaluateDecision(condition, now)
-	if !ok || !decision.eligible {
-		return nil
-	}
-	return &RepairPolicyResult{
-		ConditionType:          decision.condition.Type,
-		ConditionStatus:        decision.condition.Status,
-		Reason:                 decision.condition.Reason,
-		Action:                 decision.action,
-		EligibleAt:             decision.eligibleAt,
-		TerminationGracePeriod: cloneDuration(decision.terminationGracePeriod),
-	}
-}
-
-// EligiblePolicies returns the matching policies whose toleration has elapsed.
-func (p *RepairPolicyMatcher) EligiblePolicies(condition corev1.NodeCondition, now time.Time) []cloudprovider.RepairPolicy {
-	policies, ok := p.matchingPolicies(condition)
+	group, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]
 	if !ok {
 		return nil
 	}
-	eligible := make([]cloudprovider.RepairPolicy, 0, len(policies))
-	for _, policy := range policies {
-		if now.Before(condition.LastTransitionTime.Add(policy.TolerationDuration)) {
+
+	result := &RepairPolicyResult{
+		ConditionType:    condition.Type,
+		ConditionStatus:  condition.Status,
+		Reason:           condition.Reason,
+		EligiblePolicies: make([]EligibleRepairPolicy, 0, len(group.specificPolicies)),
+	}
+	for i := range group.specificPolicies {
+		policy := group.specificPolicies[i]
+		if !policy.reasonRegex.MatchString(condition.Reason) {
 			continue
 		}
-		match := policy.RepairPolicy
-		match.TerminationGracePeriod = cloneDuration(match.TerminationGracePeriod)
-		eligible = append(eligible, match)
+		result.considerPolicy(policy, condition.LastTransitionTime.Time, now)
 	}
-	return eligible
+	if result.MatchingPolicies == 0 {
+		result.Fallback = true
+		result.considerPolicy(p.fallbackPolicy, condition.LastTransitionTime.Time, now)
+	}
+	slices.SortFunc(result.EligiblePolicies, func(a, b EligibleRepairPolicy) int {
+		if a.Priority != b.Priority {
+			return b.Priority - a.Priority
+		}
+		return a.EligibleAt.Compare(b.EligibleAt)
+	})
+	return result
 }
 
 // Matches returns true when the condition is covered by the provider policy set, regardless of toleration.
@@ -243,114 +233,41 @@ func (p *RepairPolicyMatcher) Matches(condition corev1.NodeCondition) bool {
 	return ok
 }
 
-// DecisionLogValues returns structured diagnostic values for a supported condition, including waiting decisions.
-func (p *RepairPolicyMatcher) DecisionLogValues(condition corev1.NodeCondition, now time.Time) []any {
-	decision, ok := p.evaluateDecision(condition, now)
-	if !ok {
-		return nil
-	}
-	return decision.logValues()
-}
-
-func (p *RepairPolicyMatcher) evaluateDecision(condition corev1.NodeCondition, now time.Time) (repairDecision, bool) {
-	group, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]
-	if !ok {
-		return repairDecision{}, false
-	}
-
-	decision := repairDecision{
-		condition: condition,
-	}
-	for i := range group.specificPolicies {
-		policy := group.specificPolicies[i]
-		if !policy.reasonRegex.MatchString(condition.Reason) {
-			continue
-		}
-		decision.considerPolicy(policy, condition.LastTransitionTime.Time, now)
-	}
-	if decision.matchingPolicies == 0 {
-		decision.fallback = true
-		decision.considerPolicy(p.fallbackFor(condition), condition.LastTransitionTime.Time, now)
-	}
-	return decision, true
-}
-
-func (p *RepairPolicyMatcher) matchingPolicies(condition corev1.NodeCondition) ([]compiledPolicy, bool) {
-	group, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]
-	if !ok {
-		return nil, false
-	}
-
-	matches := make([]compiledPolicy, 0, len(group.specificPolicies))
-	for _, policy := range group.specificPolicies {
-		if policy.reasonRegex.MatchString(condition.Reason) {
-			matches = append(matches, policy)
-		}
-	}
-	if len(matches) != 0 {
-		return matches, true
-	}
-	return []compiledPolicy{p.fallbackFor(condition)}, true
-}
-
-func (p *RepairPolicyMatcher) fallbackFor(condition corev1.NodeCondition) compiledPolicy {
-	fallback := p.fallbackPolicy
-	fallback.ConditionType = condition.Type
-	fallback.ConditionStatus = condition.Status
-	return fallback
-}
-
-func (d *repairDecision) considerPolicy(policy compiledPolicy, transitionTime, now time.Time) {
-	d.matchingPolicies++
+func (r *RepairPolicyResult) considerPolicy(policy compiledPolicy, transitionTime, now time.Time) {
+	r.MatchingPolicies++
 	eligibleAt := transitionTime.Add(policy.TolerationDuration)
 	if now.Before(eligibleAt) {
-		if !d.eligible && (d.eligibleAt.IsZero() ||
-			eligibleAt.Before(d.eligibleAt) ||
-			(eligibleAt.Equal(d.eligibleAt) && repairActionRank(policy.Action) > repairActionRank(d.action))) {
-			d.action = policy.Action
-			d.eligibleAt = eligibleAt
+		if len(r.EligiblePolicies) == 0 && (r.EligibleAt.IsZero() ||
+			eligibleAt.Before(r.EligibleAt) ||
+			(eligibleAt.Equal(r.EligibleAt) && repairActionRank(policy.Action) > repairActionRank(r.Action))) {
+			r.Action = policy.Action
+			r.EligibleAt = eligibleAt
 		}
 		return
 	}
 
-	d.eligiblePolicies++
-	d.considerTerminationGracePeriod(policy.TerminationGracePeriod)
-	if !d.eligible || repairActionRank(policy.Action) > repairActionRank(d.action) {
-		d.action = policy.Action
-		d.eligibleAt = eligibleAt
-		d.eligible = true
+	r.EligiblePolicies = append(r.EligiblePolicies, EligibleRepairPolicy{
+		Priority:   policy.Priority,
+		EligibleAt: eligibleAt,
+	})
+	r.considerTerminationGracePeriod(policy.TerminationGracePeriod)
+	if len(r.EligiblePolicies) == 1 || repairActionRank(policy.Action) > repairActionRank(r.Action) {
+		r.Action = policy.Action
+		r.EligibleAt = eligibleAt
 		return
 	}
-	if policy.Action == d.action && eligibleAt.Before(d.eligibleAt) {
-		d.eligibleAt = eligibleAt
+	if policy.Action == r.Action && eligibleAt.Before(r.EligibleAt) {
+		r.EligibleAt = eligibleAt
 	}
 }
 
-func (d *repairDecision) considerTerminationGracePeriod(terminationGracePeriod *time.Duration) {
+func (r *RepairPolicyResult) considerTerminationGracePeriod(terminationGracePeriod *time.Duration) {
 	if terminationGracePeriod == nil {
 		return
 	}
-	if d.terminationGracePeriod == nil || *terminationGracePeriod < *d.terminationGracePeriod {
-		d.terminationGracePeriod = cloneDuration(terminationGracePeriod)
+	if r.TerminationGracePeriod == nil || *terminationGracePeriod < *r.TerminationGracePeriod {
+		r.TerminationGracePeriod = terminationGracePeriod
 	}
-}
-
-func (d *repairDecision) logValues() []any {
-	values := []any{
-		"condition", d.condition.Type,
-		"status", d.condition.Status,
-		"reason", d.condition.Reason,
-		"fallback", d.fallback,
-		"matching-policies", d.matchingPolicies,
-		"eligible-policies", d.eligiblePolicies,
-		"action", d.action,
-		"eligible", d.eligible,
-		"eligible-at", d.eligibleAt,
-	}
-	if d.terminationGracePeriod != nil {
-		values = append(values, "termination-grace-period", *d.terminationGracePeriod)
-	}
-	return values
 }
 
 func repairActionRank(action cloudprovider.RepairAction) int {
