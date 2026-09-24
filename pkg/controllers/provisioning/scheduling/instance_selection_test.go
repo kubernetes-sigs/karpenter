@@ -23,9 +23,11 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -616,6 +618,145 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
 		Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("test-instance1"))
+	})
+	Context("PriceAwareBinPacking", func() {
+		var small, large *cloudprovider.InstanceType
+		offering := func(capacityType string, price float64, available bool) cloudprovider.Offering {
+			return cloudprovider.Offering{
+				Available:    available,
+				Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: capacityType, corev1.LabelTopologyZone: "test-zone-1"}),
+				Price:        price,
+			}
+		}
+		nodeClaimCapacityTypes := func(nc *scheduling.NodeClaim) []string {
+			return lo.Uniq(lo.FlatMap(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) []string {
+				return lo.Map(it.Offerings.Available().Compatible(nc.Requirements), func(o *cloudprovider.Offering, _ int) string { return o.CapacityType() })
+			}))
+		}
+		BeforeEach(func() {
+			// small fits up to three 1-CPU pods and is available as spot or on-demand. large fits many more pods, but
+			// its spot offering is unavailable (e.g. an insufficient capacity error), so it can only launch as on-demand.
+			small = fake.NewInstanceType("small",
+				fake.WithResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("16Gi"), corev1.ResourcePods: resource.MustParse("100")}),
+				fake.WithOfferings(offering(v1.CapacityTypeSpot, 0.1, true), offering(v1.CapacityTypeOnDemand, 0.4, true)),
+			)
+			large = fake.NewInstanceType("large",
+				fake.WithResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("16"), corev1.ResourceMemory: resource.MustParse("64Gi"), corev1.ResourcePods: resource.MustParse("100")}),
+				fake.WithOfferings(offering(v1.CapacityTypeSpot, 0.4, false), offering(v1.CapacityTypeOnDemand, 1.6, true)),
+			)
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{small, large}
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand},
+			}}
+		})
+		It("should not bin-pack pods onto an in-flight NodeClaim if that would remove all spot instance type options", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := test.UnschedulablePods(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+			}, 4)
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			// Without price-awareness, all four pods would be packed onto a single NodeClaim which only fits "large"
+			// and could therefore only launch as on-demand. Instead, the fourth pod gets its own NodeClaim so that
+			// both NodeClaims keep "small" as an option and remain eligible to launch as spot.
+			Expect(results.NewNodeClaims).To(HaveLen(2))
+			Expect(lo.Map(results.NewNodeClaims, func(nc *scheduling.NodeClaim, _ int) int { return len(nc.Pods) })).To(ConsistOf(3, 1))
+			for _, nc := range results.NewNodeClaims {
+				Expect(nc.InstanceTypeOptions).To(ContainElement(small))
+				Expect(nodeClaimCapacityTypes(nc)).To(ContainElement(v1.CapacityTypeSpot))
+			}
+			// The NodeClaims handed to the cloudprovider must allow spot
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(cloudProvider.CreateCalls).To(HaveLen(2))
+			for _, nc := range cloudProvider.CreateCalls {
+				Expect(scheduler.NewNodeSelectorRequirementsWithMinValues(nc.Spec.Requirements...).Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeSpot)).To(BeTrue())
+			}
+			for _, p := range pods {
+				ExpectScheduled(ctx, env.Client, p)
+			}
+		})
+		It("should bin-pack pods onto an in-flight NodeClaim which retains spot instance type options", func() {
+			// Make spot available for the large instance type as well, so packing everything onto one NodeClaim
+			// doesn't sacrifice spot.
+			large.Offerings[0].Available = true
+			large.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeSpot)
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := test.UnschedulablePods(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+			}, 4)
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Pods).To(HaveLen(4))
+			Expect(results.NewNodeClaims[0].InstanceTypeOptions).To(ConsistOf(large))
+			Expect(nodeClaimCapacityTypes(results.NewNodeClaims[0])).To(ContainElement(v1.CapacityTypeSpot))
+		})
+		It("should bin-pack pods onto an in-flight NodeClaim which already has no spot instance type options", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			// The 10-CPU pod is scheduled first (pods are sorted by resource requests) and only fits "large", so the
+			// NodeClaim can only launch as on-demand from the start. The smaller pods should still be packed onto it.
+			pods := append(test.UnschedulablePods(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+			}, 3), test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10")}},
+			}))
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Pods).To(HaveLen(4))
+			Expect(results.NewNodeClaims[0].InstanceTypeOptions).To(ConsistOf(large))
+			Expect(nodeClaimCapacityTypes(results.NewNodeClaims[0])).To(ConsistOf(v1.CapacityTypeOnDemand))
+		})
+		It("should schedule a pod which only fits instance types without spot offerings to a new NodeClaim", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := append(test.UnschedulablePods(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+			}, 2), test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")}},
+				NodeRequirements:     []corev1.NodeSelectorRequirement{{Key: fake.LabelInstanceSize, Operator: corev1.NodeSelectorOpIn, Values: []string{"large"}}},
+			}))
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			// The 1-CPU pods are scheduled first onto a NodeClaim which can launch as spot. The pod which requires the
+			// large instance type would force that NodeClaim to on-demand, so it gets its own NodeClaim, which is
+			// on-demand since that's the only option for it.
+			Expect(results.NewNodeClaims).To(HaveLen(2))
+			Expect(lo.Map(results.NewNodeClaims, func(nc *scheduling.NodeClaim, _ int) int { return len(nc.Pods) })).To(ConsistOf(2, 1))
+			for _, nc := range results.NewNodeClaims {
+				if len(nc.Pods) == 2 {
+					Expect(nodeClaimCapacityTypes(nc)).To(ContainElement(v1.CapacityTypeSpot))
+				} else {
+					Expect(nc.InstanceTypeOptions).To(ConsistOf(large))
+					Expect(nodeClaimCapacityTypes(nc)).To(ConsistOf(v1.CapacityTypeOnDemand))
+				}
+			}
+			for _, p := range pods {
+				Expect(results.PodErrors).ToNot(HaveKey(p))
+			}
+		})
+		It("should bin-pack pods onto a single NodeClaim when the NodePool only allows on-demand", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeOnDemand},
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := test.UnschedulablePods(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
+			}, 4)
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Pods).To(HaveLen(4))
+			Expect(results.NewNodeClaims[0].InstanceTypeOptions).To(ConsistOf(large))
+		})
 	})
 	Context("MinValues", func() {
 		It("should schedule respecting the minValues from instance-type requirements", func() {
