@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Pallinder/go-randomdata"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -121,6 +123,33 @@ var _ = Describe("Counter", func() {
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsUnknown()).To(BeTrue())
 	})
 	It("should set the NodePoolValidationSucceeded status condition to true if nodePool healthy checks succeed", func() {
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
+		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
+	})
+	It("should set the NodePoolValidationSucceeded status condition to false if a budget has an invalid timeZone", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+			Nodes:    "10",
+			Schedule: new("0 2 * * *"),
+			TimeZone: new("Foo/Bar"),
+			Duration: &metav1.Duration{Duration: time.Hour},
+		}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
+		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
+	})
+	It("should set the NodePoolValidationSucceeded status condition to true if a budget has a valid timeZone", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+			Nodes:    "10",
+			Schedule: new("0 2 * * *"),
+			TimeZone: new("America/New_York"),
+			Duration: &metav1.Duration{Duration: time.Hour},
+		}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
