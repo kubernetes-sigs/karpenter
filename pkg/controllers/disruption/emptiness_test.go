@@ -462,6 +462,48 @@ var _ = Describe("Emptiness", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
+		It("should delete nodes whose only pods are ignored during disruption simulation", func() {
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{v1.IgnoreDisruptionSimulationAnnotationKey: "true"},
+				},
+				NodeSelector: map[string]string{corev1.LabelHostname: node.Name},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// the pod doesn't need to be rescheduled, so the node is treated as empty
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("should ignore nodes with pods that set the ignore-during-disruption-simulation annotation to false", func() {
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{v1.IgnoreDisruptionSimulationAnnotationKey: "false"},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Expect to not create or delete more nodeclaims
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
 		It("should ignore nodes with the consolidatable status condition set to false", func() {
 			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeConsolidatable, "NotEmpty", "NotEmpty")
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
