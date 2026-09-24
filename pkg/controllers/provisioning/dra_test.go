@@ -136,7 +136,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 		// allocated-device tracking state. The controller must be reconciled (hydrated) before a provisioning round
 		// that relies on the in-cluster allocated-device set — see provisionDRA.
 		draController = deviceallocation.NewController(env.Client)
-		draProvisioner = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
+		draProvisioner = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), nil)
 	})
 
 	// provisionDRA reconciles the deviceallocation controller (so the allocator sees the current in-cluster allocated
