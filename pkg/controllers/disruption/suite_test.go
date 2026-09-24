@@ -905,6 +905,59 @@ var _ = Describe("Pod Eviction Cost", func() {
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
+	It("should prefer disruption-cost over pod-deletion-cost", func() {
+		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost:         "100",
+				v1.DisruptionCostAnnotationKey: "2000000000",
+			}},
+		})
+		costWithOnlyDeletionCost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost: "100",
+			}},
+		})
+		Expect(cost).To(BeNumerically(">", costWithOnlyDeletionCost))
+	})
+	It("should prefer disruption-cost over pod-deletion-cost when the gate is on", func() {
+		// Gate=ON twin of the previous test. DisruptionCost short-circuits
+		// the fallback branch before the gate check, so precedence must hold
+		// regardless of gate value. Prevents a future refactor from reordering
+		// the branches and silently losing precedence under gate=ON.
+		gateOnOpts := test.Options()
+		gateOnOpts.FeatureGates.PodDeletionCostManagement = true
+		gateOnCtx := options.ToContext(ctx, gateOnOpts)
+
+		cost := disruptionutils.EvictionCost(gateOnCtx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost:         "100",
+				v1.DisruptionCostAnnotationKey: "2000000000",
+			}},
+		})
+		Expect(cost).To(BeNumerically(">", standardPodCost),
+			"DisruptionCost annotation must win over PodDeletionCost even when gate=ON")
+	})
+	It("should ignore pod-deletion-cost for consolidation scoring when the gate is on", func() {
+		gateOnOpts := test.Options()
+		gateOnOpts.FeatureGates.PodDeletionCostManagement = true
+		gateOnCtx := options.ToContext(ctx, gateOnOpts)
+
+		cost := disruptionutils.EvictionCost(gateOnCtx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost: "2000000000",
+			}},
+		})
+		Expect(cost).To(BeNumerically("==", standardPodCost))
+	})
+	It("should fall back to pod-deletion-cost for consolidation scoring when the gate is off", func() {
+		// The default gate is off; ctx already has the default options.
+		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost: "100",
+			}},
+		})
+		Expect(cost).To(BeNumerically(">", standardPodCost))
+	})
 })
 
 var _ = Describe("Candidate Filtering", func() {
