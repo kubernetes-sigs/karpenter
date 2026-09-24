@@ -49,9 +49,6 @@ import (
 )
 
 const (
-	// agingConstant (τ) is the time a node must wait past its toleration to earn one rank tier of standing. It sets the
-	// starvation bound: a node overtakes a steadily-refreshed rival Δrank tiers up after Δrank·τ. See resiliency §3.1.2.
-	agingConstant = 30 * time.Minute
 	// repairUnhealthyThreshold stops repair for a NodePool when a correlated failure makes more than this fraction of
 	// its nodes unhealthy. Disruption budgets continue to pace concurrent repairs below this safety threshold.
 	repairUnhealthyThreshold = "20%"
@@ -62,15 +59,8 @@ const (
 // terminating workload-bearing nodes, orders candidates by rank + age/τ, and is vetoed by do-not-repair.
 type Repair struct {
 	consolidation
-	ranks              map[int]int // configured priority -> dense rank
 	policyMatcher      *health.RepairPolicyMatcher
 	decisionLogMonitor *pretty.ChangeMonitor
-}
-
-type repairNodeEvaluation struct {
-	score         float64
-	result        *health.RepairPolicyResult
-	policyResults []*health.RepairPolicyResult
 }
 
 // NewRepair validates and compiles the provider's complete repair policy set before constructing the method. It panics
@@ -86,7 +76,6 @@ func NewRepair(c consolidation) *Repair {
 	}
 	return &Repair{
 		consolidation:      c,
-		ranks:              denseRanks(policies),
 		policyMatcher:      policyMatcher,
 		decisionLogMonitor: pretty.NewChangeMonitor(),
 	}
@@ -109,12 +98,12 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 		return false
 	}
 	now := r.clock.Now()
-	evaluation := r.evaluateNode(c.Node, now)
-	r.logRepairPolicyDecisions(ctx, c.Node, evaluation.policyResults)
-	if evaluation.result == nil {
+	evaluation := r.policyMatcher.Evaluate(c.Node, now)
+	r.logRepairPolicyDecisions(ctx, c.Node, evaluation.Evaluations)
+	if evaluation.Decision == nil {
 		return false
 	}
-	if c.hasPodBlockers && evaluation.result.TerminationGracePeriod == nil && c.NodeClaim.Spec.TerminationGracePeriod == nil {
+	if c.hasPodBlockers && evaluation.Decision.TerminationGracePeriod == nil && c.NodeClaim.Spec.TerminationGracePeriod == nil {
 		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
 			"repair requires a termination grace period to bypass blocking pods")...)
 		return false
@@ -164,15 +153,15 @@ func (r *Repair) commandForCandidate(
 	if !ok {
 		return Command{}, false, nil
 	}
-	evaluation := r.evaluateNode(candidate.Node, r.clock.Now())
-	if evaluation.result == nil {
+	evaluation := r.policyMatcher.Evaluate(candidate.Node, r.clock.Now())
+	if evaluation.Decision == nil {
 		return Command{}, false, nil
 	}
 	// Set the candidate's drain bound; after any required replacements are ready, the queue stamps the absolute deadline
 	// immediately before requesting deletion. A forceful (0) policy skips the drain for conditions the kubelet can't
 	// evict through, without replacement-launch latency eroding the window.
-	candidate.TerminationGracePeriod = effectiveDrainBound(candidate, evaluation.result)
-	candidate.RepairCondition = evaluation.result.ConditionType
+	candidate.TerminationGracePeriod = effectiveDrainBound(candidate, evaluation.Decision)
+	candidate.RepairCondition = evaluation.Decision.ConditionType
 	return Command{
 		Candidates:          []*Candidate{candidate},
 		Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
@@ -184,7 +173,7 @@ func (r *Repair) commandForCandidate(
 func (r *Repair) sortCandidates(candidates []*Candidate, now time.Time) {
 	scores := make(map[*Candidate]float64, len(candidates))
 	for _, candidate := range candidates {
-		scores[candidate] = r.evaluateNode(candidate.Node, now).score
+		scores[candidate] = r.policyMatcher.Evaluate(candidate.Node, now).Score
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		si, sj := scores[candidates[i]], scores[candidates[j]]
@@ -376,61 +365,14 @@ func (r *Repair) staticReplacement(candidate *Candidate) (pscheduling.Results, b
 	}, true
 }
 
-// evaluateNode centrally computes the repair score and the action-driving condition from one Node snapshot. The score
-// is the argmax of rank + age/τ across all eligible matching policies. The action-driving condition remains the
-// highest-priority eligible policy, with earlier eligibility breaking ties, until candidate resolution lands.
-// TODO: re-introduce a per-NodePool backoff term (subtracted here) once the NodePool backoff implementation lands
-// (kubernetes-sigs/karpenter#3178) — it was ripped out to avoid duplicating that mechanism.
-func (r *Repair) evaluateNode(node *corev1.Node, now time.Time) repairNodeEvaluation {
-	evaluation := repairNodeEvaluation{
-		policyResults: make([]*health.RepairPolicyResult, 0, len(node.Status.Conditions)),
-	}
-	governingPriority := 0
-	hasGoverningPolicy := false
-	governingDeadline := time.Time{}
-	for i := range node.Status.Conditions {
-		condition := &node.Status.Conditions[i]
-		result := r.policyMatcher.Evaluate(*condition, now)
-		if result == nil {
-			continue
-		}
-		evaluation.policyResults = append(evaluation.policyResults, result)
-		for _, policy := range result.EligiblePolicies {
-			age := now.Sub(policy.EligibleAt)
-			evaluation.score = max(evaluation.score, float64(r.ranks[policy.Priority])+age.Minutes()/agingConstant.Minutes())
-			if !hasGoverningPolicy || policy.Priority > governingPriority ||
-				(policy.Priority == governingPriority && policy.EligibleAt.Before(governingDeadline)) {
-				governingPriority = policy.Priority
-				hasGoverningPolicy = true
-				governingDeadline = policy.EligibleAt
-				evaluation.result = result
-			}
-		}
-	}
-	return evaluation
-}
-
-// denseRanks compresses the set of configured policy priorities into contiguous tiers (adjacent tiers one apart),
-// so arbitrary priority magnitudes can't change what τ means — only the ordering of priorities matters. Computed once
-// at construction (the policy set is static) and cached on the Repair as ranks.
-func denseRanks(policies []cloudprovider.RepairPolicy) map[int]int {
-	priorities := lo.Uniq(lo.Map(policies, func(p cloudprovider.RepairPolicy, _ int) int { return p.Priority }))
-	sort.Ints(priorities)
-	ranks := make(map[int]int, len(priorities))
-	for i, p := range priorities {
-		ranks[p] = i // lowest priority -> rank 0, ascending
-	}
-	return ranks
-}
-
-func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node, evaluations []*health.RepairPolicyResult) {
+func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node, evaluations []health.RepairPolicyEvaluation) {
 	logger := log.FromContext(ctx).V(1)
 	if !logger.Enabled() {
 		return
 	}
 	decisions := make([][]any, 0, len(evaluations))
-	for _, evaluation := range evaluations {
-		decisions = append(decisions, repairPolicyLogValues(evaluation))
+	for i := range evaluations {
+		decisions = append(decisions, repairPolicyLogValues(&evaluations[i]))
 	}
 	key := string(node.UID)
 	if key == "" {
@@ -450,16 +392,16 @@ func (r *Repair) logRepairPolicyDecisions(ctx context.Context, node *corev1.Node
 	}
 }
 
-func repairPolicyLogValues(result *health.RepairPolicyResult) []any {
+func repairPolicyLogValues(result *health.RepairPolicyEvaluation) []any {
 	values := []any{
 		"condition", result.ConditionType,
 		"status", result.ConditionStatus,
 		"reason", result.Reason,
 		"fallback", result.Fallback,
 		"matching-policies", result.MatchingPolicies,
-		"eligible-policies", len(result.EligiblePolicies),
+		"eligible-policies", result.EligiblePolicies,
 		"action", result.Action,
-		"eligible", len(result.EligiblePolicies) != 0,
+		"eligible", result.EligiblePolicies != 0,
 		"eligible-at", result.EligibleAt,
 	}
 	if result.TerminationGracePeriod != nil {
@@ -474,7 +416,7 @@ func repairPolicyLogValues(result *health.RepairPolicyResult) []any {
 // behavior).
 // TODO: the termination-timestamp deadline is a stopgap — replace once the termination flow has a formal contract
 // (kubernetes-sigs/karpenter#3029, Formalize Node Termination Contract).
-func effectiveDrainBound(c *Candidate, result *health.RepairPolicyResult) *time.Duration {
+func effectiveDrainBound(c *Candidate, result *health.RepairPolicyEvaluation) *time.Duration {
 	if result.TerminationGracePeriod == nil {
 		return nil // inherit the NodeClaim's own TerminationGracePeriod
 	}

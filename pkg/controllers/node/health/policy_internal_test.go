@@ -209,8 +209,12 @@ var _ = Describe("Repair Policies", func() {
 		var condition corev1.NodeCondition
 		var policies []cloudprovider.RepairPolicy
 		var matcher *RepairPolicyMatcher
-		evaluate := func(matcher *RepairPolicyMatcher, condition corev1.NodeCondition, now time.Time) *RepairPolicyResult {
-			return matcher.Evaluate(condition, now)
+		evaluate := func(matcher *RepairPolicyMatcher, condition corev1.NodeCondition, now time.Time) *RepairPolicyEvaluation {
+			evaluation, ok := matcher.evaluateCondition(condition, now)
+			if !ok {
+				return nil
+			}
+			return &evaluation
 		}
 
 		BeforeEach(func() {
@@ -252,7 +256,7 @@ var _ = Describe("Repair Policies", func() {
 			Expect(decision).NotTo(BeNil())
 			Expect(decision.Fallback).To(BeFalse())
 			Expect(decision.MatchingPolicies).To(Equal(2))
-			Expect(decision.EligiblePolicies).To(BeEmpty())
+			Expect(decision.EligiblePolicies).To(BeZero())
 			Expect(decision.Action).To(Equal(cloudprovider.RebootNode))
 			Expect(decision.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
 		})
@@ -261,39 +265,40 @@ var _ = Describe("Repair Policies", func() {
 			decision := evaluate(matcher, condition, now.Add(15*time.Minute))
 			Expect(decision).NotTo(BeNil())
 			Expect(decision.Action).To(Equal(cloudprovider.RebootNode))
-			Expect(decision.EligiblePolicies).To(HaveLen(1))
+			Expect(decision.EligiblePolicies).To(Equal(1))
 			Expect(decision.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
 
 			decision = evaluate(matcher, condition, now.Add(35*time.Minute))
 			Expect(decision.Action).To(Equal(cloudprovider.ReplaceNode))
-			Expect(decision.EligiblePolicies).To(HaveLen(2))
+			Expect(decision.EligiblePolicies).To(Equal(2))
 			Expect(decision.EligibleAt).To(Equal(now.Add(30 * time.Minute)))
 		})
 
 		It("returns scoring inputs only for reason-matching policies whose toleration has elapsed", func() {
-			result := matcher.Evaluate(condition, now.Add(15*time.Minute))
-			Expect(result.EligiblePolicies).To(Equal([]EligibleRepairPolicy{{
+			result := evaluate(matcher, condition, now.Add(15*time.Minute))
+			Expect(result.eligiblePolicies).To(Equal([]eligibleRepairPolicy{{
 				Priority:   0,
 				EligibleAt: now.Add(10 * time.Minute),
 			}}))
 
-			result = matcher.Evaluate(condition, now.Add(35*time.Minute))
-			Expect(result.EligiblePolicies).To(HaveLen(2))
+			result = evaluate(matcher, condition, now.Add(35*time.Minute))
+			Expect(result.EligiblePolicies).To(Equal(2))
 		})
 
 		It("exposes complete per-condition evaluations", func() {
-			waiting := matcher.Evaluate(condition, now.Add(5*time.Minute))
+			waiting := evaluate(matcher, condition, now.Add(5*time.Minute))
 			Expect(waiting).NotTo(BeNil())
-			Expect(waiting.EligiblePolicies).To(BeEmpty())
+			Expect(waiting.EligiblePolicies).To(BeZero())
 			Expect(waiting.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
-			Expect(matcher.Evaluate(condition, now.Add(15*time.Minute))).To(Equal(&RepairPolicyResult{
+			Expect(evaluate(matcher, condition, now.Add(15*time.Minute))).To(Equal(&RepairPolicyEvaluation{
 				ConditionType:    condition.Type,
 				ConditionStatus:  condition.Status,
 				Reason:           condition.Reason,
 				Action:           cloudprovider.RebootNode,
 				EligibleAt:       now.Add(10 * time.Minute),
 				MatchingPolicies: 2,
-				EligiblePolicies: []EligibleRepairPolicy{{
+				EligiblePolicies: 1,
+				eligiblePolicies: []eligibleRepairPolicy{{
 					Priority:   0,
 					EligibleAt: now.Add(10 * time.Minute),
 				}},
@@ -330,7 +335,7 @@ var _ = Describe("Repair Policies", func() {
 
 				decision := evaluate(sameActionMatcher, condition, now.Add(25*time.Minute))
 				Expect(decision).NotTo(BeNil())
-				Expect(decision.EligiblePolicies).To(HaveLen(2))
+				Expect(decision.EligiblePolicies).To(Equal(2))
 				Expect(decision.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
 			}
 		})
@@ -361,7 +366,7 @@ var _ = Describe("Repair Policies", func() {
 			}, supportedActions)
 			Expect(err).NotTo(HaveOccurred())
 
-			result := gracePeriodMatcher.Evaluate(condition, now)
+			result := evaluate(gracePeriodMatcher, condition, now)
 			Expect(result).NotTo(BeNil())
 			Expect(result.TerminationGracePeriod).NotTo(BeNil())
 			Expect(*result.TerminationGracePeriod).To(Equal(shortGracePeriod))
@@ -397,7 +402,7 @@ var _ = Describe("Repair Policies", func() {
 				gracePeriodMatcher, err := NewRepairPolicyMatcher(orderedPolicies, supportedActions)
 				Expect(err).NotTo(HaveOccurred())
 
-				result := gracePeriodMatcher.Evaluate(condition, now)
+				result := evaluate(gracePeriodMatcher, condition, now)
 				Expect(result).NotTo(BeNil())
 				Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 				Expect(result.TerminationGracePeriod).NotTo(BeNil())
@@ -409,7 +414,7 @@ var _ = Describe("Repair Policies", func() {
 			condition.Reason = "NewFailureCode"
 			decision := evaluate(matcher, condition, now)
 			Expect(decision).NotTo(BeNil())
-			Expect(decision.EligiblePolicies).To(HaveLen(1))
+			Expect(decision.EligiblePolicies).To(Equal(1))
 			Expect(decision.Fallback).To(BeTrue())
 			Expect(decision.Action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(decision.MatchingPolicies).To(Equal(1))
@@ -437,7 +442,7 @@ var _ = Describe("Repair Policies", func() {
 			Expect(decision.Action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(decision.ConditionType).To(Equal(corev1.NodeConditionType("StorageReady")))
 			Expect(decision.ConditionStatus).To(Equal(storageCondition.Status))
-			Expect(decision.EligiblePolicies).To(HaveLen(1))
+			Expect(decision.EligiblePolicies).To(Equal(1))
 		})
 
 		It("treats a non-empty match-all expression as a specific policy", func() {
@@ -518,6 +523,57 @@ var _ = Describe("Repair Policies", func() {
 			Expect(evaluate(reversedMatcher, condition, now.Add(5*time.Minute))).To(Equal(forwardDecision))
 		})
 
+		It("scores a node using its most urgent eligible policy", func() {
+			nodeMatcher, err := NewRepairPolicyMatcher([]cloudprovider.RepairPolicy{
+				{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "HighPriority", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 30 * time.Minute, Priority: 90, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+			}, supportedActions)
+			Expect(err).NotTo(HaveOccurred())
+			node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
+				{
+					Type:               "LowPriority",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.NewTime(now.Add(-180 * time.Minute)),
+				},
+				{
+					Type:               "HighPriority",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.NewTime(now.Add(-45 * time.Minute)),
+				},
+			}}}
+
+			result := nodeMatcher.Evaluate(node, now)
+			Expect(result.Score).To(Equal(float64(6)))
+			Expect(result.Decision).NotTo(BeNil())
+			Expect(result.Decision.ConditionType).To(Equal(corev1.NodeConditionType("HighPriority")))
+		})
+
+		It("uses earliest eligibility to break equal-priority condition ties", func() {
+			nodeMatcher, err := NewRepairPolicyMatcher([]cloudprovider.RepairPolicy{
+				{ConditionType: "Earlier", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 20 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "Later", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 10 * time.Minute, Priority: 50, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+			}, supportedActions)
+			Expect(err).NotTo(HaveOccurred())
+			earlier := corev1.NodeCondition{
+				Type:               "Earlier",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.NewTime(now.Add(-40 * time.Minute)),
+			}
+			later := corev1.NodeCondition{
+				Type:               "Later",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.NewTime(now.Add(-15 * time.Minute)),
+			}
+
+			for _, conditions := range [][]corev1.NodeCondition{{earlier, later}, {later, earlier}} {
+				result := nodeMatcher.Evaluate(&corev1.Node{Status: corev1.NodeStatus{Conditions: conditions}}, now)
+				Expect(result.Decision).NotTo(BeNil())
+				Expect(result.Decision.ConditionType).To(Equal(corev1.NodeConditionType("Earlier")))
+			}
+		})
+
 		It("reconstructs eligibility from the current condition after restart", func() {
 			reasonPolicies := []cloudprovider.RepairPolicy{
 				{
@@ -538,16 +594,16 @@ var _ = Describe("Repair Policies", func() {
 			condition.Reason = "UnknownReason"
 			initialMatcher, err := NewRepairPolicyMatcher(reasonPolicies, supportedActions)
 			Expect(err).NotTo(HaveOccurred())
-			initial := initialMatcher.Evaluate(condition, now)
+			initial := evaluate(initialMatcher, condition, now)
 			Expect(initial).NotTo(BeNil())
-			Expect(initial.EligiblePolicies).To(BeEmpty())
+			Expect(initial.EligiblePolicies).To(BeZero())
 
 			condition.Reason = "ImmediateReason"
 			restartedMatcher, err := NewRepairPolicyMatcher(reasonPolicies, supportedActions)
 			Expect(err).NotTo(HaveOccurred())
-			result := restartedMatcher.Evaluate(condition, now)
+			result := evaluate(restartedMatcher, condition, now)
 			Expect(result).NotTo(BeNil())
-			Expect(result.EligiblePolicies).To(HaveLen(1))
+			Expect(result.EligiblePolicies).To(Equal(1))
 			Expect(result.EligibleAt).To(Equal(now.Add(-30 * time.Minute)))
 		})
 	})

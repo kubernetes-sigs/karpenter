@@ -65,11 +65,12 @@ func BenchmarkRepairPolicyMatcherEvaluate(b *testing.B) {
 					Reason:             "failure",
 					LastTransitionTime: metav1.NewTime(now.Add(-time.Hour)),
 				}
+				node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{condition}}}
 
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					benchmarkRepairPolicyResult = matcher.Evaluate(condition, now)
+					benchmarkRepairPolicyResult = matcher.Evaluate(node, now)
 				}
 			})
 		}

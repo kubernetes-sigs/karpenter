@@ -57,15 +57,16 @@ func TestRepairPolicyMatcherHotPathsDoNotAllocatePerPolicy(t *testing.T) {
 		Reason:             "failure",
 		LastTransitionTime: metav1.NewTime(now.Add(-time.Hour)),
 	}
+	node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{condition}}}
 
 	allocations := testing.AllocsPerRun(1000, func() {
-		benchmarkRepairPolicyResult = matcher.Evaluate(condition, now)
+		benchmarkRepairPolicyResult = matcher.Evaluate(node, now)
 	})
-	if benchmarkRepairPolicyResult == nil {
+	if benchmarkRepairPolicyResult.Decision == nil {
 		t.Fatal("expected an eligible repair policy result")
 	}
-	if allocations > 2 {
-		t.Fatalf("expected fixed result and scoring-slice allocations, got %.2f allocations", allocations)
+	if allocations > 3 {
+		t.Fatalf("expected fixed result, evaluation, and scoring-slice allocations, got %.2f allocations", allocations)
 	}
 
 	allocations = testing.AllocsPerRun(1000, func() {
