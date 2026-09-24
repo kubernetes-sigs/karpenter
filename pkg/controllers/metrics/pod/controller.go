@@ -54,6 +54,7 @@ const (
 	podScheduled        = "scheduled"
 	podReady            = "ready"
 	managed             = "managed"
+	podDynamicResources = "dynamic_resources"
 )
 
 // Pod metric dimensions. zone, nodepool, and capacity_type reuse the shared
@@ -68,6 +69,7 @@ var (
 	podScheduledLabel        = opmetrics.Label{Name: podScheduled, Help: "Whether the pod has been scheduled to a node.", Values: metrics.BoolValues}
 	podReadyLabel            = opmetrics.Label{Name: podReady, Help: "Whether the pod is ready.", Values: metrics.BoolValues}
 	managedLabel             = opmetrics.Label{Name: managed, Help: "Whether the pod is bound to a Karpenter-managed node.", Values: metrics.BoolValues}
+	podDynamicResourcesLabel = opmetrics.Label{Name: podDynamicResources, Help: "Whether the pod has DRA (dynamic resource allocation) requirements.", Values: metrics.BoolValues}
 	podPhaseLabel            = opmetrics.Label{
 		Name: podPhase,
 		Help: "The pod's lifecycle phase.",
@@ -91,6 +93,7 @@ var (
 			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, whether the pod is scheduled, nodepool name, zone, architecture, capacity type, instance type, pod phase, pod readiness, and whether the node is Karpenter-managed.",
 		},
 		labelNames(),
+		opmetrics.Beta,
 	)
 	PodStartupDurationSeconds = opmetrics.NewPrometheusSummary(
 		crmetrics.Registry,
@@ -102,6 +105,7 @@ var (
 			Objectives: metrics.SummaryObjectives(),
 		},
 		[]opmetrics.Label{},
+		opmetrics.GA,
 	)
 	PodUnstartedTimeSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -112,6 +116,7 @@ var (
 			Help:      "The time from pod creation until the pod is running.",
 		},
 		[]opmetrics.Label{podNameLabel, podNamespaceLabel},
+		opmetrics.Alpha,
 	)
 	PodBoundDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
@@ -122,7 +127,8 @@ var (
 			Help:      "The time from pod creation until the pod is bound.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]opmetrics.Label{},
+		[]opmetrics.Label{podDynamicResourcesLabel},
+		opmetrics.Alpha,
 	)
 	PodUnboundTimeSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -132,7 +138,8 @@ var (
 			Name:      "unbound_time_seconds",
 			Help:      "The time from pod creation until the pod is bound.",
 		},
-		[]opmetrics.Label{podNameLabel, podNamespaceLabel},
+		[]opmetrics.Label{podNameLabel, podNamespaceLabel, podDynamicResourcesLabel},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodProvisioningBoundDurationSeconds = opmetrics.NewPrometheusHistogram(
@@ -144,7 +151,8 @@ var (
 			Help:      "The time from when Karpenter first thinks the pod can schedule until it binds. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]opmetrics.Label{},
+		[]opmetrics.Label{podDynamicResourcesLabel},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodProvisioningUnboundTimeSeconds = opmetrics.NewPrometheusGauge(
@@ -155,7 +163,8 @@ var (
 			Name:      "provisioning_unbound_time_seconds",
 			Help:      "The time from when Karpenter first thinks the pod can schedule until it binds. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
-		[]opmetrics.Label{podNameLabel, podNamespaceLabel},
+		[]opmetrics.Label{podNameLabel, podNamespaceLabel, podDynamicResourcesLabel},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodProvisioningStartupDurationSeconds = opmetrics.NewPrometheusHistogram(
@@ -168,6 +177,7 @@ var (
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]opmetrics.Label{},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodProvisioningUnstartedTimeSeconds = opmetrics.NewPrometheusGauge(
@@ -179,6 +189,7 @@ var (
 			Help:      "The time from when Karpenter first thinks the pod can schedule until the pod is running. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]opmetrics.Label{podNameLabel, podNamespaceLabel},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodSchedulingUndecidedTimeSeconds = opmetrics.NewPrometheusGauge(
@@ -190,6 +201,7 @@ var (
 			Help:      "The time from when Karpenter has seen a pod without making a scheduling decision for the pod. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]opmetrics.Label{podNameLabel, podNamespaceLabel},
+		opmetrics.Alpha,
 	)
 )
 
@@ -251,11 +263,11 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			})
 			c.unscheduledPods.Delete(req.String())
 			// Delete the unbound metric since the pod is deleted
-			PodUnboundTimeSeconds.Delete(map[string]string{
+			PodUnboundTimeSeconds.DeletePartialMatch(map[string]string{
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
-			PodProvisioningUnboundTimeSeconds.Delete(map[string]string{
+			PodProvisioningUnboundTimeSeconds.DeletePartialMatch(map[string]string{
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
@@ -391,6 +403,7 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 }
 func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.Time) {
 	key := client.ObjectKeyFromObject(pod).String()
+	dynamicResources := strconv.FormatBool(podutils.HasDRARequirements(pod))
 	cond, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
 		return c.Type == corev1.PodScheduled
 	})
@@ -398,17 +411,19 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 		if !ok || cond.Status != corev1.ConditionTrue {
 			// If the podScheduled condition does not exist, or it exists and is not set to true, we emit pod_current_unbound_time_seconds metric.
 			PodUnboundTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
-				podName:      pod.Name,
-				podNamespace: pod.Namespace,
+				podName:             pod.Name,
+				podNamespace:        pod.Namespace,
+				podDynamicResources: dynamicResources,
 			})
 			if !schedulableTime.IsZero() {
 				PodProvisioningUnboundTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
-					podName:      pod.Name,
-					podNamespace: pod.Namespace,
+					podName:             pod.Name,
+					podNamespace:        pod.Namespace,
+					podDynamicResources: dynamicResources,
 				})
 			} else {
 				// Idempotently delete the unbound_time_seconds metric if the schedulable time is zero
-				PodProvisioningUnboundTimeSeconds.Delete(map[string]string{
+				PodProvisioningUnboundTimeSeconds.DeletePartialMatch(map[string]string{
 					podName:      pod.Name,
 					podNamespace: pod.Namespace,
 				})
@@ -419,18 +434,22 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 	}
 	if c.unscheduledPods.Has(key) && ok && cond.Status == corev1.ConditionTrue {
 		// Delete the unbound metric since the pod is now bound
-		PodUnboundTimeSeconds.Delete(map[string]string{
+		PodUnboundTimeSeconds.DeletePartialMatch(map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
-		PodProvisioningUnboundTimeSeconds.Delete(map[string]string{
+		PodProvisioningUnboundTimeSeconds.DeletePartialMatch(map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
 
-		PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+		PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), map[string]string{
+			podDynamicResources: dynamicResources,
+		})
 		if !schedulableTime.IsZero() {
-			PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+			PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), map[string]string{
+				podDynamicResources: dynamicResources,
+			})
 		}
 		c.unscheduledPods.Delete(key)
 	}
