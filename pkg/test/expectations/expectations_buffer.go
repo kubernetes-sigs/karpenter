@@ -100,6 +100,42 @@ func EventuallyExpectCapacityBufferGenerationUpdated(ctx context.Context, c clie
 	}).WithContext(ctx).WithTimeout(60 * time.Second).Should(Succeed())
 }
 
+// EventuallyExpectCapacityBufferConditionTrue waits for the named condition to be True with the given reason.
+// Used for the terminal conditions of one-shot buffers (Fulfilled / Expired), which can take a few
+// provisioning cycles to latch after the matching workload binds or the deadline elapses.
+func EventuallyExpectCapacityBufferConditionTrue(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, condType, reason string, timeout time.Duration) {
+	Eventually(func(g Gomega) {
+		cb := &autoscalingv1beta1.CapacityBuffer{}
+		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+		cond := findCapacityBufferCondition(cb.Status.Conditions, condType)
+		g.Expect(cond).ToNot(BeNil())
+		g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		g.Expect(cond.Reason).To(Equal(reason))
+	}).WithContext(ctx).WithTimeout(timeout).Should(Succeed())
+}
+
+// ConsistentlyExpectCapacityBufferConditionAbsent asserts the named condition never becomes True for the duration.
+func ConsistentlyExpectCapacityBufferConditionAbsent(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, condType string, duration time.Duration) {
+	Consistently(func(g Gomega) {
+		cb := &autoscalingv1beta1.CapacityBuffer{}
+		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+		cond := findCapacityBufferCondition(cb.Status.Conditions, condType)
+		if cond != nil {
+			g.Expect(cond.Status).ToNot(Equal(metav1.ConditionTrue))
+		}
+	}).WithContext(ctx).WithTimeout(duration).Should(Succeed())
+}
+
+// EventuallyExpectCapacityBufferConsumedReplicas waits for a one-shot buffer's consumed high-water mark.
+func EventuallyExpectCapacityBufferConsumedReplicas(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, consumed int32) {
+	Eventually(func(g Gomega) {
+		cb := &autoscalingv1beta1.CapacityBuffer{}
+		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
+		g.Expect(cb.Status.ConsumedReplicas).ToNot(BeNil())
+		g.Expect(*cb.Status.ConsumedReplicas).To(Equal(consumed))
+	}).WithContext(ctx).WithTimeout(2 * time.Minute).Should(Succeed())
+}
+
 func findCapacityBufferCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
 	for i := range conditions {
 		if conditions[i].Type == condType {

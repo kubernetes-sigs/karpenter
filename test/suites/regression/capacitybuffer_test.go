@@ -323,6 +323,125 @@ var _ = Describe("CapacityBuffer", func() {
 		})
 	})
 
+	Context("Ephemeral (refillStrategy=none)", func() {
+		// consumerLabels identify the workload the one-shot buffer is provisioned for; the buffer's
+		// match-selector annotation counts bound pods with these labels toward its fill.
+		consumerLabels := map[string]string{"app": "ephemeral-consumer"}
+		const matchSelector = "app=ephemeral-consumer"
+
+		ephemeralBuffer := func(replicas int32, mutate ...func(*autoscalingv1beta1.CapacityBuffer)) *autoscalingv1beta1.CapacityBuffer {
+			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{autoscalingv1beta1.BufferMatchSelectorAnnotation: matchSelector}},
+				Spec: autoscalingv1beta1.CapacityBufferSpec{
+					PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "buffer-template"},
+					Replicas:       lo.ToPtr(replicas),
+					RefillStrategy: lo.ToPtr(autoscalingv1beta1.RefillStrategyNone),
+				},
+			})
+			for _, m := range mutate {
+				m(buffer)
+			}
+			return buffer
+		}
+		// consumer builds a Deployment whose pods match the buffer's template shape and selector.
+		consumer := func(replicas int32) *appsv1.Deployment {
+			return test.Deployment(test.DeploymentOptions{
+				Replicas: replicas,
+				PodOptions: test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Labels: consumerLabels},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			})
+		}
+		nodeClaimCount := func(g Gomega) int {
+			nodeClaims := &v1.NodeClaimList{}
+			g.Expect(env.Client.List(env, nodeClaims)).To(Succeed())
+			return len(nodeClaims.Items)
+		}
+		// consistentlyExpectNoRefill asserts the NodeClaim count never exceeds max for the duration, i.e. the
+		// buffer does not recreate consumed capacity. With ConsolidateAfter 0s a refill would show up within seconds.
+		consistentlyExpectNoRefill := func(maxCount int, duration time.Duration) {
+			Consistently(func(g Gomega) {
+				g.Expect(nodeClaimCount(g)).To(BeNumerically("<=", maxCount))
+			}).WithTimeout(duration).Should(Succeed())
+		}
+
+		It("should provision once, latch Fulfilled when the matching workload consumes it, and not refill", func() {
+			buffer := ephemeralBuffer(2)
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			env.EventuallyExpectInitializedNodeCount(">=", 2)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
+			nodeClaimsBefore := env.EventuallyExpectCreatedNodeClaimCount(">=", 2)
+			countBefore := len(nodeClaimsBefore)
+
+			// The workload the buffer was pre-warmed for arrives and lands on the buffer's nodes.
+			dep := consumer(2)
+			env.ExpectCreated(dep)
+			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, labels.SelectorFromSet(consumerLabels), 2)
+
+			// Both chunks are consumed: the buffer latches Fulfilled and, unlike a recreate buffer,
+			// does NOT provision replacement capacity.
+			EventuallyExpectCapacityBufferConditionTrue(env, env.Client, buffer, autoscalingv1beta1.FulfilledCondition, autoscalingv1beta1.FulfilledReasonBufferFilled, 2*time.Minute)
+			EventuallyExpectCapacityBufferConsumedReplicas(env, env.Client, buffer, 2)
+			consistentlyExpectNoRefill(countBefore, 60*time.Second)
+
+			// When the workload finishes, the buffer stays terminal and its now-empty nodes are no
+			// longer protected: normal empty consolidation reclaims them instead of a refill.
+			env.ExpectDeleted(dep)
+			env.EventuallyExpectNotFound(lo.Map(nodeClaimsBefore, func(nc *v1.NodeClaim, _ int) client.Object { return nc })...)
+			consistentlyExpectNoRefill(0, 30*time.Second)
+		})
+
+		It("should shrink as it fills: a partial fill provisions only the remainder and does not refill", func() {
+			buffer := ephemeralBuffer(2)
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			env.EventuallyExpectInitializedNodeCount(">=", 2)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
+			countBefore := len(env.EventuallyExpectCreatedNodeClaimCount(">=", 2))
+
+			// Half the workload arrives: one chunk consumed, buffer not yet Fulfilled, no refill.
+			dep := consumer(1)
+			env.ExpectCreated(dep)
+			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, labels.SelectorFromSet(consumerLabels), 1)
+			EventuallyExpectCapacityBufferConsumedReplicas(env, env.Client, buffer, 1)
+			ConsistentlyExpectCapacityBufferConditionAbsent(env, env.Client, buffer, autoscalingv1beta1.FulfilledCondition, 30*time.Second)
+			consistentlyExpectNoRefill(countBefore, 60*time.Second)
+
+			// The rest arrives: the buffer fills and latches.
+			Expect(env.Client.Get(env, client.ObjectKeyFromObject(dep), dep)).To(Succeed())
+			dep.Spec.Replicas = lo.ToPtr(int32(2))
+			env.ExpectUpdated(dep)
+			env.EventuallyExpectHealthyPodCountWithTimeout(2*time.Minute, labels.SelectorFromSet(consumerLabels), 2)
+			EventuallyExpectCapacityBufferConditionTrue(env, env.Client, buffer, autoscalingv1beta1.FulfilledCondition, autoscalingv1beta1.FulfilledReasonBufferFilled, 2*time.Minute)
+			consistentlyExpectNoRefill(countBefore, 30*time.Second)
+		})
+
+		It("should latch Expired (not Fulfilled) when fillDeadlineSeconds elapses unfilled and release its nodes", func() {
+			buffer := ephemeralBuffer(2, func(cb *autoscalingv1beta1.CapacityBuffer) {
+				cb.Spec.FillDeadlineSeconds = lo.ToPtr(int32(90))
+			})
+			env.ExpectCreated(bufferTemplate, buffer)
+
+			env.EventuallyExpectInitializedNodeCount(">=", 2)
+			EventuallyExpectCapacityBufferProvisioned(env, env.Client, buffer)
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 2)
+
+			// Nothing ever matches. Once the deadline passes the buffer gives up: Expired, never Fulfilled.
+			EventuallyExpectCapacityBufferConditionTrue(env, env.Client, buffer, autoscalingv1beta1.ExpiredCondition, autoscalingv1beta1.ExpiredReasonDeadlineExceeded, 3*time.Minute)
+			ConsistentlyExpectCapacityBufferConditionAbsent(env, env.Client, buffer, autoscalingv1beta1.FulfilledCondition, 10*time.Second)
+
+			// A terminal buffer emits no virtual pods, so its empty nodes are consolidated away.
+			env.EventuallyExpectNotFound(lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) client.Object { return nc })...)
+		})
+	})
+
 	Context("Disruption", func() {
 		It("should not empty-consolidate nodes hosting buffer pods", func() {
 			buffer := test.CapacityBuffer(autoscalingv1beta1.CapacityBuffer{
