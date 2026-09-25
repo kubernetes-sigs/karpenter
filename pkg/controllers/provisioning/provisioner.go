@@ -36,6 +36,7 @@ import (
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
@@ -51,6 +52,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -379,6 +381,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if err != nil {
 		return scheduler.Results{}, err
 	}
+	pendingPods = p.filterClaimedPods(ctx, pendingPods)
 
 	// Get pods from nodes that are preparing for deletion
 	// We do this after getting the pending pods so that we undershoot if pods are
@@ -658,4 +661,97 @@ func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm)
 		}
 	}
 	return errs
+}
+
+// filterClaimedPods drops pending pods whose in-flight NodeClaim is still live and healthy.
+// The provisioner already provisioned capacity for them; without this guard the next reconciliation
+// loop re-simulates the still-pending pods and creates duplicate NodeClaims before the first node registers/binds.
+func (p *Provisioner) filterClaimedPods(ctx context.Context, pods []*corev1.Pod) []*corev1.Pod {
+	unclaimed := make([]*corev1.Pod, 0, len(pods))
+	claimed := 0
+	for _, po := range pods {
+		if p.isPodClaimedByInFlightNodeClaim(ctx, po) {
+			claimed++
+		} else {
+			unclaimed = append(unclaimed, po)
+		}
+	}
+	if claimed > 0 {
+		log.FromContext(ctx).V(1).WithValues("count", claimed).Info("skipping pending pod(s) already claimed by in-flight nodeclaim(s)")
+	}
+	return unclaimed
+}
+
+// isPodClaimedByInFlightNodeClaim returns true while the pod has a mapping to a live in-flight
+// NodeClaim that is still healthy. The release conditions mirror the nodeclaim liveness controller's
+// deletion bounds (LaunchTimeout, RegistrationTimeout) plus the API-level deletion signals and
+// cluster-state mark used by disruption. Once the NodeClaim is Initialized, the node's real
+// capacity is modeled in cluster state and simulation is accurate again, so the pod is released
+// and the scheduler decides whether a corrective NodeClaim is needed.
+// Fail-open on API errors and on a missing mapping, preferring to re-simulate rather than starve a pod.
+func (p *Provisioner) isPodClaimedByInFlightNodeClaim(ctx context.Context, pod *corev1.Pod) bool {
+	podKey := client.ObjectKeyFromObject(pod)
+	nodeClaimName := p.cluster.PodNodeClaimMapping(podKey)
+	if nodeClaimName == "" {
+		return false
+	}
+
+	nodeClaim := &v1.NodeClaim{}
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim); err != nil {
+		if kerrors.IsNotFound(err) {
+			// The API object is gone. Drop only the mapping; keep the pod's metric state intact so
+			// scheduling-latency observations for this still-pending pod aren't reset.
+			p.cluster.DeletePodNodeClaimMapping(podKey)
+		}
+		return false
+	}
+
+	// API-level signals that the NodeClaim is going away.
+	if !nodeClaim.DeletionTimestamp.IsZero() {
+		return false
+	}
+	if nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+		return false
+	}
+
+	// Cluster-state signal: the backing node is marked for deletion by disruption/termination.
+	// This covers test helpers that simulate node deletion at the state level only, and
+	// API-cache lag between a nodeClaim deletion and informer visibility.
+	if p.cluster.NodeClaimMarkedForDeletion(nodeClaimName) {
+		return false
+	}
+
+	// Launch failure: the nodeClaim can't launch and has been stuck beyond the liveness controller's
+	// own launch-timeout bound — release the pod without waiting for the controller to actually delete the object.
+	if p.nodeClaimLaunchFailed(nodeClaim) {
+		return false
+	}
+
+	// Never registered: bound by the registration timeout the liveness controller uses.
+	if p.nodeClaimRegistrationExpired(nodeClaim) {
+		return false
+	}
+
+	// Once initialized the node is real, the simulation is accurate, and the pod should bind
+	// within seconds — release so a truly-misfit pod can get a corrective NodeClaim instead of waiting indefinitely.
+	if nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue() {
+		return false
+	}
+
+	return true
+}
+
+// nodeClaimLaunchFailed reports whether the NodeClaim can't launch and has been stuck beyond the
+// liveness controller's launch-timeout bound, without waiting for the controller to delete the object.
+func (p *Provisioner) nodeClaimLaunchFailed(nodeClaim *v1.NodeClaim) bool {
+	launched := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched)
+	return launched != nil && !launched.IsTrue() &&
+		p.clock.Since(launched.LastTransitionTime.Time) > nodeclaimlifecycle.LaunchTimeout
+}
+
+// nodeClaimRegistrationExpired reports whether the NodeClaim never registered before the
+// registration timeout the liveness controller uses.
+func (p *Provisioner) nodeClaimRegistrationExpired(nodeClaim *v1.NodeClaim) bool {
+	return !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() &&
+		p.clock.Since(nodeClaim.CreationTimestamp.Time) > nodeclaimlifecycle.RegistrationTimeout
 }

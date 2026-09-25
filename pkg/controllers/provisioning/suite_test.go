@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -3471,6 +3472,190 @@ var _ = Describe("Provisioning", func() {
 					})
 				})
 			})
+		})
+	})
+	Context("In-flight NodeClaim Claiming", func() {
+		It("should not create duplicate NodeClaims when a pod's in-flight NodeClaim does not fit the pod", func() {
+			pod := test.UnschedulablePod()
+			ExpectApplied(ctx, env.Client, test.NodePool(), pod)
+
+			// Loop 1: creates a NodeClaim for the pod.
+			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(1))
+
+			// Make the in-flight node unusable for the pod (add an untolerated taint) so a re-simulation
+			// without the claiming guard would provision a second NodeClaim.
+			node := nodes[0].DeepCopy()
+			node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
+				Key: "no-go", Value: "true", Effect: corev1.TaintEffectNoSchedule,
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			// Re-trigger the scheduler the way the kube-scheduler does at Node registration.
+			pod.Status.Conditions = []corev1.PodCondition{{
+				Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse,
+			}}
+			ExpectApplied(ctx, env.Client, pod)
+
+			// Loop 2: the claiming guard suppresses the pod; no second NodeClaim.
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(BeEmpty())
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		})
+
+		It("should re-provision when the claimed NodeClaim is deleted", func() {
+			pod := test.UnschedulablePod()
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool, pod)
+
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			cluster.UpdatePodToNodeClaimMapping(map[string][]*corev1.Pod{nodeClaim.Name: {pod}})
+
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(BeEmpty())
+
+			ExpectDeleted(ctx, env.Client, nodeClaim)
+			results, err = prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			// Mapping is cleared on the NotFound path so the pod can be re-simulated.
+			Expect(cluster.PodNodeClaimMapping(client.ObjectKeyFromObject(pod))).To(BeEmpty())
+		})
+
+		It("should re-provision when the claimed NodeClaim has a deletionTimestamp", func() {
+			pod := test.UnschedulablePod()
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool, pod)
+
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:     map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+					Finalizers: []string{"karpenter.sh/termination"},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			cluster.UpdatePodToNodeClaimMapping(map[string][]*corev1.Pod{nodeClaim.Name: {pod}})
+
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(BeEmpty())
+
+			Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+			results, err = prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+		})
+
+		It("should re-provision when the claimed NodeClaim's node is marked for deletion in cluster state", func() {
+			pod := test.UnschedulablePod()
+			ExpectApplied(ctx, env.Client, test.NodePool(), pod)
+
+			// ExpectProvisionedNoBinding creates a NodeClaim + Node and registers them in cluster state,
+			// but leaves the pod pending (unbound).
+			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(1))
+
+			cluster.MarkForDeletion(nodes[0].Spec.ProviderID)
+
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+		})
+
+		It("should re-provision when the claimed NodeClaim is in a terminating state", func() {
+			pod := test.UnschedulablePod()
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool, pod)
+
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			})
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			cluster.UpdatePodToNodeClaimMapping(map[string][]*corev1.Pod{nodeClaim.Name: {pod}})
+
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+		})
+
+		It("should re-provision when the claimed NodeClaim fails to launch within the launch timeout", func() {
+			pod := test.UnschedulablePod()
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool, pod)
+
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			})
+			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", "instance launch failed")
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			cluster.UpdatePodToNodeClaimMapping(map[string][]*corev1.Pod{nodeClaim.Name: {pod}})
+
+			// Within LaunchTimeout: pod stays suppressed.
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(BeEmpty())
+
+			// Past LaunchTimeout: pod is released and a new NodeClaim is created.
+			env.Clock.Step(nodeclaimlifecycle.LaunchTimeout + time.Minute)
+			results, err = prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+		})
+
+		It("should re-provision when the claimed NodeClaim fails to register within the registration timeout", func() {
+			pod := test.UnschedulablePod()
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool, pod)
+
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			})
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			cluster.UpdatePodToNodeClaimMapping(map[string][]*corev1.Pod{nodeClaim.Name: {pod}})
+
+			// Within RegistrationTimeout: pod stays suppressed.
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(BeEmpty())
+
+			// Past RegistrationTimeout: pod is released.
+			env.Clock.Step(nodeclaimlifecycle.RegistrationTimeout + time.Minute)
+			results, err = prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+		})
+
+		It("should re-provision once the claimed NodeClaim is Initialized", func() {
+			pod := test.UnschedulablePod()
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool, pod)
+
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			})
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			cluster.UpdatePodToNodeClaimMapping(map[string][]*corev1.Pod{nodeClaim.Name: {pod}})
+
+			// Initialized releases the pod immediately — the node's real capacity is modeled in cluster
+			// state and simulation is accurate again.
+			results, err := prov.Schedule(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results.NewNodeClaims).To(HaveLen(1))
 		})
 	})
 })

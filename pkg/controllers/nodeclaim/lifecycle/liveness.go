@@ -47,11 +47,11 @@ type Liveness struct {
 	npState    *nodepoolhealth.State
 }
 
-// registrationTimeout is a heuristic time that we expect the node to register within
+// RegistrationTimeout is a heuristic time that we expect the node to register within
 // If we don't see the node within this time, then we should delete the NodeClaim and try again
+var RegistrationTimeout = time.Minute * 15
 
 const (
-	registrationTimeout = time.Minute * 15
 	// Sourced from pkg/metrics so the documented reason values stay in one place.
 	registrationTimeoutReason = metrics.RegistrationTimeoutReason
 	launchTimeoutReason       = metrics.LaunchTimeoutReason
@@ -94,7 +94,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	}
 	// If the Registered statusCondition hasn't gone True during the timeout since we first updated it, we should terminate the NodeClaim
 	// NOTE: Timeout has to be stored and checked in the same place since l.clock can advance after the check causing a race
-	if timeUntilTimeout := registrationTimeout - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
+	if timeUntilTimeout := RegistrationTimeout - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
 		return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 	}
 	if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
@@ -104,7 +104,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{}, err
 	}
 	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
-	if err := l.deleteNodeClaimForTimeout(ctx, registrationTimeout, registrationTimeoutReason, nodeClaim); err != nil {
+	if err := l.deleteNodeClaimForTimeout(ctx, RegistrationTimeout, registrationTimeoutReason, nodeClaim); err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return reconcile.Result{}, err
 		}
