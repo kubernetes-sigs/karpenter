@@ -78,7 +78,7 @@ func driftedNodeClaimAndNode(nodePoolName string, driftAge time.Duration, rs *ap
 		Status:             metav1.ConditionTrue,
 		Reason:             v1.ConditionTypeDrifted,
 		Message:            v1.ConditionTypeDrifted,
-		LastTransitionTime: metav1.Time{Time: time.Now().Add(driftAge)},
+		LastTransitionTime: metav1.Time{Time: env.Clock.Now().Add(driftAge)},
 	})
 	var pod *corev1.Pod
 	if rs != nil {
@@ -103,6 +103,9 @@ func driftedNodeClaimAndNode(nodePoolName string, driftAge time.Duration, rs *ap
 }
 
 var _ = Describe("Drift back-off", func() {
+	BeforeEach(func() {
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(true)}}))
+	})
 	Context("Selection", func() {
 		It("skips a backed-off NodePool's candidates and services a healthy NodePool instead", func() {
 			backedOff := backoffNodePool()
@@ -115,8 +118,8 @@ var _ = Describe("Drift back-off", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{bNode, hNode}, []*v1.NodeClaim{bNC, hNC})
 
 			// Back off the older pool.
-			queue.NodePoolBackoff().Fail(backedOff, env.Clock.Now())
-			Expect(queue.NodePoolBackoff().IsBackedOff(backedOff)).To(BeTrue())
+			nodePoolBackoff.Fail(backedOff, env.Clock.Now())
+			Expect(nodePoolBackoff.IsBackedOff(backedOff)).To(BeTrue())
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -136,8 +139,8 @@ var _ = Describe("Drift back-off", func() {
 			ExpectApplied(ctx, env.Client, backedOff, healthy, bNC, bNode, hNC, hNode)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{bNode, hNode}, []*v1.NodeClaim{bNC, hNC})
 
-			queue.NodePoolBackoff().Fail(backedOff, env.Clock.Now())
-			Expect(queue.NodePoolBackoff().IsBackedOff(backedOff)).To(BeTrue())
+			nodePoolBackoff.Fail(backedOff, env.Clock.Now())
+			Expect(nodePoolBackoff.IsBackedOff(backedOff)).To(BeTrue())
 
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)}}))
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -162,8 +165,8 @@ var _ = Describe("Drift back-off", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nc, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nc})
 
-			queue.NodePoolBackoff().Fail(nodePool, env.Clock.Now())
-			Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeTrue())
+			nodePoolBackoff.Fail(nodePool, env.Clock.Now())
+			Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(BeTrue())
 
 			// While backed off, drift produces no command for the pool.
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -171,7 +174,7 @@ var _ = Describe("Drift back-off", func() {
 
 			// The default back-off window is <= 1m; step past it and the pool is serviceable again.
 			env.Clock.Step(2 * time.Minute)
-			Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeFalse())
+			Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(BeFalse())
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 			cmds := queue.GetCommands()
@@ -212,7 +215,7 @@ var _ = Describe("Drift back-off", func() {
 			cluster.DeleteNodeClaim(replacementName)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
-			Expect(queue.NodePoolBackoff().IsBackedOff(stuck)).To(BeTrue())
+			Expect(nodePoolBackoff.IsBackedOff(stuck)).To(BeTrue())
 			ExpectExists(ctx, env.Client, stuckNC)
 
 			// Pass 2: the stuck pool is skipped, so the younger healthy pool finally makes progress.

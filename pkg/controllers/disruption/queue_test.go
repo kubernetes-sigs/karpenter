@@ -104,7 +104,7 @@ var _ = Describe("Queue", func() {
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -138,7 +138,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -163,7 +163,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -194,7 +194,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -264,7 +264,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -317,7 +317,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -361,7 +361,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -398,7 +398,7 @@ var _ = Describe("Queue", func() {
 			}}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -407,7 +407,7 @@ var _ = Describe("Queue", func() {
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 			cmd2 := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()),
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff),
 				CreationTimestamp: env.Clock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -461,8 +461,11 @@ var _ = Describe("Queue", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
 		})
 		Context("Drift back-off", func() {
+			BeforeEach(func() {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(true)}}))
+			})
 			driftMethod := func() disruption.Method {
-				return disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff())
+				return disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff)
 			}
 			emptinessMethod := func() disruption.Method {
 				return disruption.NewEmptiness(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue))
@@ -515,10 +518,10 @@ var _ = Describe("Queue", func() {
 
 					if preArm {
 						// Pre-arm back-off so we can observe whether the command's outcome resets it.
-						queue.NodePoolBackoff().Fail(nodePool, env.Clock.Now())
-						Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeTrue())
+						nodePoolBackoff.Fail(nodePool, env.Clock.Now())
+						Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(BeTrue())
 					} else {
-						Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeFalse())
+						Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(BeFalse())
 					}
 
 					var repl []*disruption.Replacement
@@ -535,7 +538,7 @@ var _ = Describe("Queue", func() {
 					}
 					complete(cmd)
 
-					Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(Equal(wantBackedOff))
+					Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(Equal(wantBackedOff))
 				},
 				Entry("arms back-off when a drift replacement fails unrecoverably (timeout)",
 					driftMethod, withReplacement, false, completeViaTimeout, true),
@@ -564,7 +567,7 @@ var _ = Describe("Queue", func() {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(false)}}))
 				completeViaTimeout(cmd)
 
-				Expect(queue.NodePoolBackoff().IsBackedOff(nodePool)).To(BeFalse())
+				Expect(nodePoolBackoff.IsBackedOff(nodePool)).To(BeFalse())
 			})
 		})
 		Context("CalculateRetryDuration", func() {

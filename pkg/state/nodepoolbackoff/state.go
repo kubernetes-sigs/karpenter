@@ -128,24 +128,20 @@ func (s *State) Reset(nodePool *v1.NodePool) {
 // IsBackedOff reports whether a NodePool is currently backed off and should be skipped during
 // drift candidate selection.
 func (s *State) IsBackedOff(nodePool *v1.NodePool) bool {
+	_, _, backedOff := s.GetBackoff(nodePool)
+	return backedOff
+}
+
+// GetBackoff returns the current back-off level, window expiry, and whether the NodePool is
+// currently backed off, all read atomically. level == 0 means the pool is healthy.
+func (s *State) GetBackoff(nodePool *v1.NodePool) (level int, until time.Time, backedOff bool) {
 	s.Lock()
 	defer s.Unlock()
 	e, ok := s.state[nodePool.UID]
 	if !ok {
-		return false
+		return 0, time.Time{}, false
 	}
-	return e.level > 0 && s.clock.Now().Before(e.until)
-}
-
-// Snapshot returns the current back-off level and window expiry for a NodePool. level == 0 means
-// the pool is healthy. Used for observability and tests.
-func (s *State) Snapshot(nodePool *v1.NodePool) (level int, until time.Time) {
-	s.Lock()
-	defer s.Unlock()
-	if e, ok := s.state[nodePool.UID]; ok {
-		return e.level, e.until
-	}
-	return 0, time.Time{}
+	return e.level, e.until, e.level > 0 && s.clock.Now().Before(e.until)
 }
 
 // Remaining returns the time remaining in the current back-off window, or zero when the NodePool

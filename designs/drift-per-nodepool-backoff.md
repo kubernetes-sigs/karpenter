@@ -12,7 +12,7 @@ NodePools from making any progress and burns a continuous stream of wasted
 `CreateFleet`/launch attempts against the cloud provider.
 
 This RFC proposes a **per-NodePool exponential back-off** on unrecoverable drift
-replacement failures, gated by the `NodePoolDriftBackoff` feature gate (enabled by
+replacement failures, gated by the `NodePoolDriftBackoff` feature gate (disabled by
 default). While a NodePool is backed off, its candidates are skipped
 during drift candidate selection. Once the back-off window elapses the pool becomes
 eligible again: a successful replacement resets the back-off, and a failure grows it
@@ -21,9 +21,9 @@ last effective failure do not compound, even if they complete after its back-off
 expires, so escalation tracks retry cycles rather than individual launch attempts. The change is entirely
 in-memory, requires no API/CRD changes, and preserves the existing selection contract:
 `Drift.ComputeCommands` still returns at most one command per pass and still stops at
-the first schedulable candidate. Operators can disable the behavior with
-`--feature-gates NodePoolDriftBackoff=false` (or `FEATURE_GATES=NodePoolDriftBackoff=false`)
-to restore pre-RFC drift selection.
+the first schedulable candidate. Operators can enable the behavior with
+`--feature-gates NodePoolDriftBackoff=true` (or `FEATURE_GATES=NodePoolDriftBackoff=true`);
+leaving it disabled preserves pre-RFC drift selection.
 
 ## Background
 
@@ -54,7 +54,7 @@ per-pass command forever, and younger NodePools are never serviced.
   at the first schedulable candidate.
 - No API/CRD changes; no persisted state.
 - Make the behavior optional via a `NodePoolDriftBackoff` feature gate so operators
-  can disable it without a rebuild.
+  can opt in (or back out) without a rebuild.
 
 ## Invariants
 
@@ -104,13 +104,12 @@ All three interaction points are no-ops when `NodePoolDriftBackoff=false`.
 
 ### Feature gate
 
-`NodePoolDriftBackoff` is **enabled by default** so existing drift selection for
-clusters that never hit unrecoverable replacement failures is unchanged, and so
-operators who want the starvation fix get it without extra configuration. Disable:
+`NodePoolDriftBackoff` is **disabled by default** so existing drift selection for
+clusters is unchanged. Enable with:
 
 ```
---feature-gates NodePoolDriftBackoff=false
-FEATURE_GATES=NodePoolDriftBackoff=false
+--feature-gates NodePoolDriftBackoff=true
+FEATURE_GATES=NodePoolDriftBackoff=true
 ```
 
 When the gate is off:
@@ -226,9 +225,12 @@ if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 }
 // NEW back-off gate: skip candidates whose NodePool is currently backed off. Healthy
 // pools and pools whose window has elapsed fall through to the unchanged logic below.
-// No-op when NodePoolDriftBackoff is disabled.
-if options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff && d.backoff.IsBackedOff(candidate.NodePool) {
-	continue
+// backoffEnabled is false when NodePoolDriftBackoff is disabled.
+if backoffEnabled {
+	if level, until, backedOff := d.backoff.GetBackoff(candidate.NodePool); backedOff {
+		d.recorder.Publish(disruptionevents.NodePoolDriftBackoff(candidate.NodePool, until, level))
+		continue
+	}
 }
 // ... existing SimulateScheduling + schedulability checks, unchanged ...
 ```
@@ -238,8 +240,9 @@ disruption-budget check and before reserving node counts or generating replaceme
 commands. A backed-off static NodePool produces no commands during the window, while
 other static NodePools remain eligible.
 
-`IsBackedOff(nodePool)` returns `true` iff `level > 0` and `now < until`; otherwise
-`false` (healthy, or the window has elapsed). It is purely a read — selection never
+`GetBackoff(nodePool)` returns `level`, `until`, and whether the pool is backed off
+(`level > 0` and `now < until`) from a single locked read, so the skip decision and the
+event's contents cannot disagree. It is purely a read — selection never
 mutates back-off state, so there is no cleanup obligation on the abandon paths
 (`errCandidateDeleting`, unschedulable pods, simulation errors). The
 number of attempts a just-eligible pool makes before its next failure re-arms the
@@ -260,12 +263,13 @@ defined in [Back-off state](#back-off-state).
   overflow.
 - **`Reset(nodePool)`** — on a successful drift command that created replacement
   capacity: delete the entry, returning the pool to healthy (`level == 0`, no window).
-- **`IsBackedOff(nodePool) → bool`** — read-only, called during selection: `true` iff
-  `level > 0` and `now < until`.
+- **`GetBackoff(nodePool) → (level, until, backedOff)`** — read-only, called during
+  selection: `backedOff` is `true` iff `level > 0` and `now < until`.
+- **`IsBackedOff(nodePool) → bool`** — read-only convenience over `GetBackoff`.
 - **`Remaining(nodePool) → duration`** — read-only, called by the NodePool metrics
   controller to publish the current back-off duration.
 
-`Fail` and `Reset` are the only state transitions; `IsBackedOff` never mutates.
+`Fail` and `Reset` are the only state transitions; `GetBackoff` and `IsBackedOff` never mutate.
 
 Sequence for a persistently failing pool (`spark`) alongside a healthy younger pool
 (`ingress`), with defaults `baseDelay = 1m`:
@@ -322,8 +326,8 @@ from "every pass" to "at most one disruption-budget's worth per back-off window.
 
 - **No API/CRD changes.** Behavior for clusters that never hit unrecoverable drift
   failures is unchanged (`level` stays `0`, `IsBackedOff` always returns `false`).
-  The `NodePoolDriftBackoff` feature gate (default `true`) is an opt-out: setting
-  it to `false` restores pre-RFC drift selection exactly.
+  The `NodePoolDriftBackoff` feature gate (default `false`) is an opt-in: leaving
+  it disabled preserves pre-RFC drift selection exactly.
 - **Controller restart.** State is in-memory; a restart clears it. Worst case, the
   loop briefly re-attempts a failing pool once before backing off again — a
   transient blip, identical to how `PreviouslyUnseenNodePools` resets on
