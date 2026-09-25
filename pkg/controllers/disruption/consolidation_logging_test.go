@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"errors"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -94,6 +95,71 @@ var _ = Describe("getValidationFailureReason", func() {
 			result := getValidationFailureReason(tt.err)
 			Expect(result).To(Equal(tt.expected), tt.name)
 		}
+	})
+})
+
+var _ = Describe("validationFailureReason", func() {
+	It("extracts the tagged failure reason from validation errors", func() {
+		tests := []struct {
+			name     string
+			err      error
+			expected string
+		}{
+			{
+				name:     "nil error",
+				err:      nil,
+				expected: "",
+			},
+			{
+				name:     "non-validation error",
+				err:      errors.New("some other error"),
+				expected: "",
+			},
+			{
+				name:     "untagged validation error",
+				err:      NewSchedulingValidationError(errors.New("scheduling simulation produced new results")),
+				expected: "",
+			},
+			{
+				name:     "tagged churn error",
+				err:      withFailureReason(NewChurnValidationError(errors.New("candidates are no longer valid")), ValidationFailureReasonChurn),
+				expected: ValidationFailureReasonChurn,
+			},
+			{
+				name:     "tagged budget error",
+				err:      withFailureReason(NewBudgetValidationError(errors.New("a candidate was nominated during validation")), ValidationFailureReasonNominated),
+				expected: ValidationFailureReasonNominated,
+			},
+			{
+				name:     "tagged generic validation error",
+				err:      withFailureReason(NewValidationError(errors.New("no candidates")), ValidationFailureReasonChurn),
+				expected: ValidationFailureReasonChurn,
+			},
+			{
+				name: "wrapped tagged scheduling error",
+				err: fmt.Errorf("validating command, %w", withFailureReason(
+					NewSchedulingValidationError(errors.New("scheduling simulation produced new results")),
+					ValidationFailureReasonInstanceTypesNotSubset,
+				)),
+				expected: ValidationFailureReasonInstanceTypesNotSubset,
+			},
+		}
+
+		for _, tt := range tests {
+			By(tt.name)
+			Expect(validationFailureReason(tt.err)).To(Equal(tt.expected), tt.name)
+		}
+	})
+})
+
+var _ = Describe("withFailureReason", func() {
+	It("preserves the validation error category", func() {
+		err := fmt.Errorf("validating command, %w", withFailureReason(
+			NewSchedulingValidationError(errors.New("scheduling simulation produced new results")),
+			ValidationFailureReasonMultipleNodeClaims,
+		))
+		Expect(IsValidationError(err)).To(BeTrue())
+		Expect(getValidationFailureReason(err)).To(Equal("scheduling"))
 	})
 })
 
