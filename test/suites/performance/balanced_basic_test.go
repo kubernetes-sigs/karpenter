@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -39,9 +40,10 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 
 			scaleOutReport, err := ReportScaleOutWithOutput(env, "Balanced Basic Scale Out", 1000, 15*time.Minute, "balanced_basic_scale_out")
 			Expect(err).ToNot(HaveOccurred())
+			Expect(scaleOutReport.TotalPods).To(Equal(1000))
 
-			smallDeployment.Spec.Replicas = new(int32(350))
-			largeDeployment.Spec.Replicas = new(int32(350))
+			smallDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+			largeDeployment.Spec.Replicas = lo.ToPtr(int32(350))
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			h, err := common.StartLatencyHarness(env)

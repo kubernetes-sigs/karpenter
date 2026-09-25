@@ -35,27 +35,11 @@ import (
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
-// balancedPolicies enumerates the paired baseline vs Balanced iteration used
-// by both spec groups. Baseline first, then Balanced; per-spec AfterEach
-// makes the ordering independent of correctness.
-var balancedPolicies = []v1.ConsolidationPolicy{
-	v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-	v1.ConsolidationPolicyBalanced,
-}
-
-// policyPrefix maps a ConsolidationPolicy to the short filePrefix segment
-// used in artifact filenames. WhenEmptyOrUnderutilized is the reference
-// baseline; Balanced is the arm under test.
-func policyPrefix(p v1.ConsolidationPolicy) string {
-	if p == v1.ConsolidationPolicyBalanced {
-		return "balanced"
-	}
-	return "baseline"
-}
-
 // buildFamilyRestrictedNodePool copies the suite NodePool and restricts it to a
-// single KWOK instance family.
-func buildFamilyRestrictedNodePool(base *v1.NodePool, family string, policy v1.ConsolidationPolicy) *v1.NodePool {
+// single KWOK instance family. The copy inherits the suite BeforeEach settings,
+// including ConsolidationPolicy, so the caller pins the policy on the base
+// NodePool before calling.
+func buildFamilyRestrictedNodePool(base *v1.NodePool, family string) *v1.NodePool {
 	np := base.DeepCopy()
 	np.Name = fmt.Sprintf("%s-%s", family, base.Name)
 	test.ReplaceRequirements(np, v1.NodeSelectorRequirementWithMinValues{
@@ -63,7 +47,6 @@ func buildFamilyRestrictedNodePool(base *v1.NodePool, family string, policy v1.C
 		Operator: corev1.NodeSelectorOpIn,
 		Values:   []string{family},
 	})
-	np.Spec.Disruption.ConsolidationPolicy = policy
 	return np
 }
 
@@ -116,6 +99,23 @@ const scoreBucketBelowThreshold = 0.33
 // if any recorded decision disagrees with the 1/k threshold: approved scores
 // (>= 0.5) must land above the 0.33 bucket and rejected scores (< 0.5) at or
 // below the 0.5 bucket.
+//
+// Resolution limit, approved arm. Min and Max come from histogram bucket
+// bounds, not raw observations, and the score buckets are
+// {0.1, 0.25, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0}. A correctly approved score
+// (>= 0.5) lands in the le=0.5 bucket, whose lower bound is 0.33, so Min is
+// 0.33. A wrongly approved score anywhere in (0.33, 0.5) lands in that same
+// bucket and reports the same Min. The approved arm therefore catches a
+// threshold slip of more than one bucket, not a smaller one. Closing that gap
+// needs the exact score, which only the ConsolidationApproved event carries.
+//
+// The rejected arm is tight: any rejected score above 0.5 lands in le=1.0 or
+// higher and fails. That is the arm that catches a K versus 1/K inversion.
+//
+// Neither arm requires a rejection to occur, so a regression that approves
+// every move still passes as long as the approved scores are genuinely
+// >= 0.33. Asserting a non-zero rejection count would close that, but these
+// fixtures do not guarantee one, so it would trade a blind spot for a flake.
 func expectBalancedDecisionsMatchThreshold(result *common.LatencyResult) {
 	threshold := 1.0 / float64(v1.BalancedK)
 	scored := uint64(0)
@@ -136,135 +136,134 @@ func expectBalancedDecisionsMatchThreshold(result *common.LatencyResult) {
 
 var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Balanced Churn Chain", func() {
-		// Each It runs one policy over a 400-pod / ~40-node scale-out then
-		// three scale-in / scale-out churn rounds. The RFC's 4-step
-		// max-churn ceiling at k=2 predicts Balanced's counter deltas
-		// diverge from baseline's by round 3. Comparison is offline: the
-		// paired PerformanceReport plus latency sidecar JSONs carry
-		// consolidation_moves_total, nodeclaims_created_total, and
+		// A 400-pod / ~40-node scale-out followed by three scale-in /
+		// scale-out churn rounds, under Balanced. The RFC's 4-step max-churn
+		// ceiling at k=2 predicts the counter deltas diverge from an
+		// unconstrained policy by round 3. LatencyHarness spans the full churn
+		// window and the sidecar JSON carries consolidation_moves_total,
+		// nodeclaims_created_total, and
 		// karpenter_voluntary_disruption_decision_evaluation_duration_seconds
-		// deltas per policy. LatencyHarness spans the full churn window.
-		for _, policy := range balancedPolicies {
-			prefix := policyPrefix(policy)
-			It(fmt.Sprintf("should measure churn under %s across three scale-in / scale-out rounds", policy), func() {
-				By("Pinning ConsolidationPolicy for this run")
-				nodePool.Spec.Disruption.ConsolidationPolicy = policy
-				env.ExpectCreated(nodePool, nodeClass)
+		// deltas for offline inspection.
+		//
+		// There is no paired WhenEmptyOrUnderutilized arm. One was written, but
+		// nothing in the tree reads the sidecars, so the second arm doubled
+		// runtime to produce an artifact no comparison consumed. The
+		// regression coverage is expectBalancedDecisionsMatchThreshold, which
+		// needs only the Balanced arm. Reinstate a baseline arm when a
+		// comparison exists to consume it.
+		It("should measure churn under Balanced across three scale-in / scale-out rounds", func() {
+			By("Pinning ConsolidationPolicy for this run")
+			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyBalanced
+			env.ExpectCreated(nodePool, nodeClass)
 
-				By("Scaling out to the churn-chain fixture (400 pods)")
-				opts := test.CreateDeploymentOptions("churn-chain-app", 400, "900m", "3100Mi")
-				dep := test.Deployment(opts)
-				env.ExpectCreated(dep)
+			By("Scaling out to the churn-chain fixture (400 pods)")
+			opts := test.CreateDeploymentOptions("churn-chain-app", 400, "900m", "3100Mi")
+			dep := test.Deployment(opts)
+			env.ExpectCreated(dep)
 
-				scaleOutReport, err := ReportScaleOutWithOutput(env,
-					fmt.Sprintf("Balanced Churn Chain %s Scale Out", policy),
-					400, 15*time.Minute,
-					fmt.Sprintf("balanced_churn_%s_scale_out", prefix))
-				Expect(err).ToNot(HaveOccurred())
-				Expect(scaleOutReport.TotalPods).To(Equal(400))
-				initialNodes := scaleOutReport.TotalNodes
+			scaleOutReport, err := ReportScaleOutWithOutput(env,
+				"Balanced Churn Chain Scale Out",
+				400, 15*time.Minute,
+				"balanced_churn_scale_out")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(scaleOutReport.TotalPods).To(Equal(400))
+			initialNodes := scaleOutReport.TotalNodes
 
-				By("Starting LatencyHarness for the churn window")
-				h, err := common.StartLatencyHarness(env)
-				Expect(err).ToNot(HaveOccurred())
+			By("Starting LatencyHarness for the churn window")
+			h, err := common.StartLatencyHarness(env)
+			Expect(err).ToNot(HaveOccurred())
 
-				By("Round 1: scale in to 200 pods")
-				scaleAndSettle(env, dep, 200, 10*time.Minute)
-				By("Round 2: scale back out to 400 pods")
-				scaleAndSettle(env, dep, 400, 10*time.Minute)
-				By("Round 3: scale in to 200 pods")
-				scaleAndSettle(env, dep, 200, 10*time.Minute)
+			By("Round 1: scale in to 200 pods")
+			scaleAndSettle(env, dep, 200, 10*time.Minute)
+			By("Round 2: scale back out to 400 pods")
+			scaleAndSettle(env, dep, 400, 10*time.Minute)
+			By("Round 3: scale in to 200 pods")
+			scaleAndSettle(env, dep, 200, 10*time.Minute)
 
-				By("Waiting for consolidation to settle after the last round")
-				consolidationReport, err := ReportConsolidation(env,
-					fmt.Sprintf("Balanced Churn Chain %s", policy),
-					400, 200, initialNodes, 20*time.Minute)
-				Expect(err).ToNot(HaveOccurred())
-				result, err := h.Stop()
-				Expect(err).ToNot(HaveOccurred())
-				emitPolicyRun(consolidationReport,
-					fmt.Sprintf("balanced_churn_%s_consolidation", prefix),
-					policy, result)
-				if policy == v1.ConsolidationPolicyBalanced {
-					expectBalancedDecisionsMatchThreshold(result)
-				}
+			By("Waiting for consolidation to settle after the last round")
+			consolidationReport, err := ReportConsolidation(env,
+				"Balanced Churn Chain",
+				400, 200, initialNodes, 20*time.Minute)
+			Expect(err).ToNot(HaveOccurred())
+			result, err := h.Stop()
+			Expect(err).ToNot(HaveOccurred())
+			emitPolicyRun(consolidationReport,
+				"balanced_churn_consolidation",
+				v1.ConsolidationPolicyBalanced, result)
 
-			})
-		}
+			expectBalancedDecisionsMatchThreshold(result)
+		})
 	})
 
 	Context("Balanced Heterogeneous NodePools", func() {
 		// Two family-restricted NodePools ('c' and 'm' KWOK families) each
 		// carry a workload at a distinct pod density profile: a dense
 		// 500m/1Gi deployment on the c-pool, a sparse 2500m/8Gi deployment
-		// on the m-pool. Scaling both down triggers Balanced to make
-		// per-pool decisions (per RFC "source pool's policy governs") vs
-		// baseline which accepts any positive-savings move. Comparison is
-		// offline: paired PerformanceReport plus latency sidecar JSONs
-		// carry karpenter_consolidation_moves_total{nodepool}, per-pool
-		// disruption timing, and karpenter_nodeclaims_created_total per
-		// policy.
+		// on the m-pool. Scaling both down makes Balanced take per-pool
+		// decisions (per RFC "source pool's policy governs"). The sidecar
+		// carries karpenter_consolidation_moves_total{nodepool}, per-pool
+		// disruption timing, and karpenter_nodeclaims_created_total.
+		//
+		// Pods select their pool with karpenter.sh/nodepool, which
+		// nodeclaimtemplate.go already stamps on provisioned nodes. An earlier
+		// revision used a custom perf.karpenter.sh/pool label; the NodePool
+		// CRD's CEL rule rejects any label under a karpenter.sh subdomain, so
+		// the NodePools failed admission and this context never ran.
 		BeforeEach(func() {
 			if !env.IsDefaultNodeClassKWOK() {
 				Skip("heterogeneous NodePool fixture uses KWOK-only instance-family labels")
 			}
 		})
-		for _, policy := range balancedPolicies {
-			prefix := policyPrefix(policy)
-			It(fmt.Sprintf("should split load across two heterogeneous NodePools under %s", policy), func() {
-				By("Building two family-restricted NodePools")
-				poolC := buildFamilyRestrictedNodePool(nodePool, "c", policy)
-				poolM := buildFamilyRestrictedNodePool(nodePool, "m", policy)
-				env.ExpectCreated(nodeClass, poolC, poolM)
+		It("should split load across two heterogeneous NodePools under Balanced", func() {
+			By("Building two family-restricted NodePools")
+			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyBalanced
+			poolC := buildFamilyRestrictedNodePool(nodePool, "c")
+			poolM := buildFamilyRestrictedNodePool(nodePool, "m")
+			env.ExpectCreated(nodeClass, poolC, poolM)
 
-				By("Deploying dense workload targeting the c-family pool")
-				denseOpts := test.CreateDeploymentOptions("het-dense-app", 300, "500m", "1Gi",
-					test.WithNodeSelector(map[string]string{v1.NodePoolLabelKey: poolC.Name}))
-				denseDep := test.Deployment(denseOpts)
+			By("Deploying dense workload targeting the c-family pool")
+			denseOpts := test.CreateDeploymentOptions("het-dense-app", 300, "500m", "1Gi",
+				test.WithNodeSelector(map[string]string{v1.NodePoolLabelKey: poolC.Name}))
+			denseDep := test.Deployment(denseOpts)
 
-				By("Deploying sparse workload targeting the m-family pool")
-				sparseOpts := test.CreateDeploymentOptions("het-sparse-app", 100, "2500m", "8Gi",
-					test.WithNodeSelector(map[string]string{v1.NodePoolLabelKey: poolM.Name}))
-				sparseDep := test.Deployment(sparseOpts)
+			By("Deploying sparse workload targeting the m-family pool")
+			sparseOpts := test.CreateDeploymentOptions("het-sparse-app", 100, "2500m", "8Gi",
+				test.WithNodeSelector(map[string]string{v1.NodePoolLabelKey: poolM.Name}))
+			sparseDep := test.Deployment(sparseOpts)
 
-				env.ExpectCreated(denseDep, sparseDep)
+			env.ExpectCreated(denseDep, sparseDep)
 
-				scaleOutReport, err := ReportScaleOutWithOutput(env,
-					fmt.Sprintf("Balanced Heterogeneous %s Scale Out", policy),
-					400, 15*time.Minute,
-					fmt.Sprintf("balanced_heterogeneous_%s_scale_out", prefix))
-				Expect(err).ToNot(HaveOccurred())
-				Expect(scaleOutReport.TotalPods).To(Equal(400))
-				initialNodes := scaleOutReport.TotalNodes
+			scaleOutReport, err := ReportScaleOutWithOutput(env,
+				"Balanced Heterogeneous Scale Out",
+				400, 15*time.Minute,
+				"balanced_heterogeneous_scale_out")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(scaleOutReport.TotalPods).To(Equal(400))
+			initialNodes := scaleOutReport.TotalNodes
 
-				By("Starting LatencyHarness for the consolidation window")
-				h, err := common.StartLatencyHarness(env)
-				Expect(err).ToNot(HaveOccurred())
+			By("Starting LatencyHarness for the consolidation window")
+			h, err := common.StartLatencyHarness(env)
+			Expect(err).ToNot(HaveOccurred())
 
-				By("Scaling both deployments down to trigger cross-pool consolidation")
-				denseReplicas := int32(180)
-				sparseReplicas := int32(60)
-				denseDep.Spec.Replicas = &denseReplicas
-				sparseDep.Spec.Replicas = &sparseReplicas
-				env.ExpectUpdated(denseDep, sparseDep)
+			By("Scaling both deployments down to trigger cross-pool consolidation")
+			denseDep.Spec.Replicas = lo.ToPtr(int32(180))
+			sparseDep.Spec.Replicas = lo.ToPtr(int32(60))
+			env.ExpectUpdated(denseDep, sparseDep)
 
-				By("Recording the consolidation phase")
-				consolidationReport, err := ReportConsolidation(env,
-					fmt.Sprintf("Balanced Heterogeneous %s", policy),
-					400, 240, initialNodes, 25*time.Minute)
-				Expect(err).ToNot(HaveOccurred())
+			By("Recording the consolidation phase")
+			consolidationReport, err := ReportConsolidation(env,
+				"Balanced Heterogeneous",
+				400, 240, initialNodes, 25*time.Minute)
+			Expect(err).ToNot(HaveOccurred())
 
-				By("Capturing LatencyHarness result at end of consolidation")
-				result, err := h.Stop()
-				Expect(err).ToNot(HaveOccurred())
-				emitPolicyRun(consolidationReport,
-					fmt.Sprintf("balanced_heterogeneous_%s_consolidation", prefix),
-					policy, result)
+			By("Capturing LatencyHarness result at end of consolidation")
+			result, err := h.Stop()
+			Expect(err).ToNot(HaveOccurred())
+			emitPolicyRun(consolidationReport,
+				"balanced_heterogeneous_consolidation",
+				v1.ConsolidationPolicyBalanced, result)
 
-				if policy == v1.ConsolidationPolicyBalanced {
-					expectBalancedDecisionsMatchThreshold(result)
-				}
-			})
-		}
+			expectBalancedDecisionsMatchThreshold(result)
+		})
 	})
 })
