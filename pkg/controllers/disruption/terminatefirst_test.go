@@ -104,7 +104,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			staticDriftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
-				disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder, queue.NodePoolBackoff())))
+				disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder, nodePoolBackoff)))
 		})
 
 		It("issues a delete-only command for a static NodePool at its node limit when TerminateFirstDrift is enabled", func() {
@@ -203,7 +203,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			driftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
-				disruption.WithMethods(disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff())))
+				disruption.WithMethods(disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff)))
 		}
 
 		It("issues a delete-only command when the reservation is full and there is no fallback", func() {

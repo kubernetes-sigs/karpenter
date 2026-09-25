@@ -151,7 +151,7 @@ var (
 	}
 	NodePoolDriftBackoffFeatureGate = FeatureGate{
 		Name:    "NodePoolDriftBackoff",
-		Default: true,
+		Default: false,
 		Stage:   docs.Alpha,
 		Help: "Karpenter backs off drift disruption for a NodePool after its drift replacements fail, so a NodePool " +
 			"that can't launch replacements doesn't keep cycling drifted nodes.",
@@ -307,35 +307,21 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	if err := cliflag.NewMapStringBool(&gateMap).Set(gateStr); err != nil {
 		return gates, err
 	}
-	if val, ok := gateMap[NodeRepairFeatureGate.Name]; ok {
-		gates.NodeRepair = val
-	}
-	if val, ok := gateMap[SpotToSpotConsolidationFeatureGate.Name]; ok {
-		gates.SpotToSpotConsolidation = val
-	}
-	if val, ok := gateMap[ReservedCapacityFeatureGate.Name]; ok {
-		gates.ReservedCapacity = val
-	}
-	if val, ok := gateMap[NodeOverlayFeatureGate.Name]; ok {
-		gates.NodeOverlay = val
-	}
-	if val, ok := gateMap[StaticCapacityFeatureGate.Name]; ok {
-		gates.StaticCapacity = val
-	}
-	if val, ok := gateMap[CapacityBufferFeatureGate.Name]; ok {
-		gates.CapacityBuffer = val
-	}
-	if val, ok := gateMap[TerminateFirstDriftFeatureGate.Name]; ok {
-		gates.TerminateFirstDrift = val
-	}
-	if val, ok := gateMap[TerminateFirstRepairFeatureGate.Name]; ok {
-		gates.TerminateFirstRepair = val
-	}
-	if val, ok := gateMap[PodDeletionCostManagementFeatureGate.Name]; ok {
-		gates.PodDeletionCostManagement = val
-	}
-	if val, ok := gateMap[NodePoolDriftBackoffFeatureGate.Name]; ok {
-		gates.NodePoolDriftBackoff = val
+	for name, gate := range map[string]*bool{
+		NodeRepairFeatureGate.Name:                &gates.NodeRepair,
+		SpotToSpotConsolidationFeatureGate.Name:   &gates.SpotToSpotConsolidation,
+		ReservedCapacityFeatureGate.Name:          &gates.ReservedCapacity,
+		NodeOverlayFeatureGate.Name:               &gates.NodeOverlay,
+		StaticCapacityFeatureGate.Name:            &gates.StaticCapacity,
+		CapacityBufferFeatureGate.Name:            &gates.CapacityBuffer,
+		TerminateFirstDriftFeatureGate.Name:       &gates.TerminateFirstDrift,
+		TerminateFirstRepairFeatureGate.Name:      &gates.TerminateFirstRepair,
+		PodDeletionCostManagementFeatureGate.Name: &gates.PodDeletionCostManagement,
+		NodePoolDriftBackoffFeatureGate.Name:      &gates.NodePoolDriftBackoff,
+	} {
+		if val, ok := gateMap[name]; ok {
+			*gate = val
+		}
 	}
 
 	return gates, nil

@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 
@@ -65,19 +64,15 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 	candidatesByNodePool := lo.GroupBy(candidates, func(candidate *Candidate) string {
 		return candidate.NodePool.Name
 	})
-
-	backoffEnabled := options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff
+	initDriftBackoffMetrics(ctx, d.backoff, lo.Keys(candidatesByNodePool)...)
 	var cmds []Command
 	for npName, npCandidates := range candidatesByNodePool {
 		np := npCandidates[0].NodePool
 
-		if backoffEnabled {
-			DriftBackoffsTotal.Add(0, map[string]string{metrics.NodePoolLabel: npName})
-		}
 		if disruptionBudgetMapping[npName] == 0 {
 			continue
 		}
-		if backoffEnabled && d.backoff != nil && d.backoff.IsBackedOff(np) {
+		if isDriftBackedOff(ctx, d.backoff, d.recorder, np) {
 			continue
 		}
 
