@@ -101,8 +101,12 @@ apply: verify build ## Deploy the kwok controller from the current state of your
 delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 
+# ./test/pkg/... holds the unit-testable helpers behind the e2e suites (metric
+# delta reduction, percentile derivation). They are ordinary testing.T tests and
+# need no cluster, so they belong here rather than in e2etests. Without this
+# pattern `go test ./pkg/...` never reaches them and their assertions never run.
 test: ## Run tests
-	go test ./pkg/... \
+	go test ./pkg/... ./test/pkg/... \
 		-race \
 		-timeout 20m \
 		--ginkgo.focus="${FOCUS}" \
