@@ -59,14 +59,40 @@ var (
 
 type DriftReason string
 
+// RepairAction identifies the operation requested by a repair policy.
+type RepairAction string
+
+const (
+	// RebootNode requests recovery of the existing Node through the provider reboot lifecycle.
+	RebootNode RepairAction = "RebootNode"
+	// ReplaceNode requests replacement of the unhealthy Node.
+	ReplaceNode RepairAction = "ReplaceNode"
+)
+
+// RepairPolicy defines when and how Karpenter repairs a provider-supported unhealthy condition.
 type RepairPolicy struct {
-	// ConditionType of unhealthy state that is found on the node
+	// ConditionType identifies the NodeCondition to evaluate.
 	ConditionType corev1.NodeConditionType
-	// ConditionStatus condition when a node is unhealthy
+	// ConditionStatus identifies the unhealthy condition state.
 	ConditionStatus corev1.ConditionStatus
-	// TolerationDuration is the duration the controller will wait
-	// before force terminating nodes that are unhealthy.
+	// ReasonRegex is a Go regular expression matched against the current NodeCondition reason using regexp.MatchString.
+	// An empty value defines the policy set's default fallback. Exactly one default fallback is required; it applies to
+	// any supported condition type and status when no reason-specific policy for that pair matches the current reason.
+	ReasonRegex string
+	// TolerationDuration is added to the NodeCondition LastTransitionTime to determine when this policy becomes eligible.
 	TolerationDuration time.Duration
+	// TerminationGracePeriod is the Axis-2 drain bound for repair of this condition:
+	//   nil      -> inherit the NodePool/NodeClaim TerminationGracePeriod
+	//   non-zero -> min(this, nodeclaim.TerminationGracePeriod) — bound the drain even on a pool that set none,
+	//               so repair cannot wait indefinitely on eviction.
+	//   0        -> forceful: skip the drain for conditions the kubelet can't evict through (wedged kernel,
+	//               lost heartbeat).
+	TerminationGracePeriod *time.Duration
+	// Priority is an ordering weight (0-100) for repair. Higher repairs first. Only relative ordering matters; values
+	// are compressed to dense ranks, with earlier eligibility breaking equal-priority ties across conditions.
+	Priority int
+	// Action is the repair operation requested by this policy.
+	Action RepairAction
 }
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
@@ -90,8 +116,7 @@ type CloudProvider interface {
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
-	// RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter
-	// to monitor on the node.
+	// RepairPolicies returns the complete static set of provider-supported unhealthy-condition repair policies.
 	RepairPolicies() []RepairPolicy
 	// Name returns the CloudProvider implementation name.
 	Name() string

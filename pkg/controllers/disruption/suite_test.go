@@ -127,7 +127,7 @@ var _ = BeforeEach(func() {
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
 
 	// Ensure that we reset the disruption controller's methods after each test run
-	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
+	disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	env.Clock.SetTime(time.Now())
 	cluster.Reset()
 	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
@@ -177,6 +177,7 @@ var _ = AfterEach(func() {
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
 	disruption.NodepoolDecisionsPerformed.Reset()
+	disruption.NodeClaimsUnhealthyDisruptedTotal.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -252,7 +253,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(Succeed())
 
-		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, nil, candidate)
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder,
+			nil, disruption.SimulationOptions{}, candidate)
 		Expect(err).To(Succeed())
 		Expect(results.PodErrors[pod]).To(BeNil())
 	})
@@ -474,7 +476,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(hangCreateClient), virtualpods.NewVirtualPodCache(hangCreateClient))
 		q := disruption.NewQueue(hangCreateClient, recorder, cluster, env.Clock, p)
-		dc := disruption.NewController(env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q, clusterCost)
+		dc := disruption.NewController(ctx, env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q, clusterCost)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -849,6 +851,48 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			Expect(err).To(Succeed())
 			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
+	})
+	It("should not consider not ready nodes for the Unhealthy repair budget", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, nodes[0], nodes[1])
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		// NotReady is repair's own trigger, so the Unhealthy budget must not count these nodes against itself —
+		// otherwise a wave of unhealthy nodes would starve the budget that repairs them.
+		budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonUnhealthy)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(10))
+		// A discretionary reason still counts NotReady nodes (kubernetes-sigs/karpenter#981 semantics preserved).
+		budgets, err = disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonDrifted)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
+	})
+	It("should still consider marked-for-deletion nodes for the Unhealthy repair budget", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// An in-flight repair marks its candidate for deletion; those must still count so repair paces itself.
+		Expect(env.Client.Delete(ctx, nodeClaims[0])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodes[0])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodeClaims[1])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodes[1])).To(Succeed())
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonUnhealthy)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
 	})
 })
 

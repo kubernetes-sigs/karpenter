@@ -71,7 +71,8 @@ var _ = Describe("Consolidation/DRA", func() {
 			Expect(err).To(Succeed())
 			return candidate
 		})
-		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, candidates...)
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder,
+			[]pscheduling.Options{pscheduling.IsConsolidationSimulation}, disruption.SimulationOptions{}, candidates...)
 		Expect(err).To(Succeed())
 		return results
 	}

@@ -120,7 +120,7 @@ type Disruption struct {
 type Budget struct {
 	// reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
-	// allowed reasons are Underutilized, Empty, and Drifted.
+	// allowed reasons are Underutilized, Empty, Drifted, and Unhealthy.
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	// +listType=set
@@ -177,13 +177,16 @@ func (p ConsolidationPolicy) IsBalanced() bool {
 }
 
 // DisruptionReason defines valid reasons for disruption budgets.
-// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
+// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted,Unhealthy}
 type DisruptionReason string
 
 const (
 	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
 	DisruptionReasonEmpty         DisruptionReason = "Empty"
 	DisruptionReasonDrifted       DisruptionReason = "Drifted"
+	// DisruptionReasonUnhealthy paces voluntary node repair through the shared disruption budget. Repair is ordered and
+	// pre-spins replacement capacity.
+	DisruptionReasonUnhealthy DisruptionReason = "Unhealthy"
 )
 
 type Limits v1.ResourceList

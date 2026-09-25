@@ -33,7 +33,7 @@ const (
 	NoCompatibleInstanceTypes = "NoCompatibleInstanceTypes"
 	Nominated                 = "Nominated"
 
-	// node/health
+	// node repair
 	NodeRepairBlocked = "NodeRepairBlocked"
 
 	// node/termination/terminator

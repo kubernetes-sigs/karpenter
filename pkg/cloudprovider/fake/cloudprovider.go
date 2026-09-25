@@ -103,9 +103,11 @@ func (c *CloudProvider) Reset() {
 	}
 	c.RepairPolicy = []cloudprovider.RepairPolicy{
 		{
-			ConditionType:      "BadNode",
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 30 * time.Minute,
+			ConditionType:          "BadNode",
+			ConditionStatus:        corev1.ConditionFalse,
+			TolerationDuration:     30 * time.Minute,
+			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
+			Action:                 cloudprovider.ReplaceNode,
 		},
 	}
 }

@@ -49,9 +49,17 @@ import (
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
+// SimulationOptions configures disruption-specific scheduling behavior.
+type SimulationOptions struct {
+	// IncludeBlockedCandidatePods includes candidate pods even when they cannot currently be evicted.
+	IncludeBlockedCandidatePods bool
+}
+
+// SimulateScheduling determines whether candidate workloads can be rescheduled after disruption.
+//
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
-	schedulerOpts []scheduling.Options, candidates ...*Candidate,
+	schedulerOpts []scheduling.Options, simulationOpts SimulationOptions, candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.DeepCopyNodes()
@@ -69,32 +77,31 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return scheduling.Results{}, errCandidateDeleting
 	}
 
-	// start by getting all pending pods
 	pods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
 
-	// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
-	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
-	// these pods are evicted is wasteful.
-	pdbs, err := pdb.NewLimits(ctx, kubeClient)
-	if err != nil {
-		return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
-	}
-	// candidatePods are the pods on consolidation candidate nodes that we will reschedule. Their UIDs feed
-	// deletingPodUIDs below so the DRA allocator frees the devices they hold and re-allocates their claims onto the
-	// replacement capacity, mirroring how pods on already-deleting nodes are treated.
 	var candidatePods []*corev1.Pod
-	for _, n := range candidates {
-		currentlyReschedulablePods := lo.Filter(n.reschedulablePods, func(p *corev1.Pod, _ int) bool {
-			return pdbs.IsCurrentlyReschedulable(p, clk, recorder)
+	if simulationOpts.IncludeBlockedCandidatePods {
+		candidatePods = lo.FlatMap(candidates, func(candidate *Candidate, _ int) []*corev1.Pod {
+			return candidate.reschedulablePods
 		})
-		candidatePods = append(candidatePods, currentlyReschedulablePods...)
+	} else {
+		// Generic disruption does not provision for pods that cannot currently be evicted. Repair opts out because its
+		// bounded drain owns when those pods leave, while replacement planning must still account for their demand.
+		pdbs, err := pdb.NewLimits(ctx, kubeClient)
+		if err != nil {
+			return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+		}
+		candidatePods = lo.FlatMap(candidates, func(candidate *Candidate, _ int) []*corev1.Pod {
+			return lo.Filter(candidate.reschedulablePods, func(p *corev1.Pod, _ int) bool {
+				return pdbs.IsCurrentlyReschedulable(p, clk, recorder)
+			})
+		})
 	}
 	pods = append(pods, candidatePods...)
 
-	// We get the pods that are on nodes that are deleting
 	deletingNodePods, err := deletingNodes.CurrentlyReschedulablePods(ctx, kubeClient, clk, recorder)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
@@ -121,15 +128,14 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return scheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *corev1.Pod) (client.ObjectKey, any) {
-		return client.ObjectKeyFromObject(p), nil
-	})
-
 	results, err := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("scheduling pods, %w", err)
 	}
 	results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
+	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *corev1.Pod) (client.ObjectKey, any) {
+		return client.ObjectKeyFromObject(p), nil
+	})
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
@@ -211,14 +217,9 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	})
 	// Compute totals using ALL nodes for disruption cost denominator (RFC requirement:
 	// "Non-candidate nodes still contribute to the denominators").
-	nodePoolTotals := computeNodePoolTotals(ctx, allCandidates, stateNodesToSlice(allNodes), clusterCost)
+	nodePoolTotals := computeNodePoolTotals(ctx, allCandidates, []*state.StateNode(allNodes), clusterCost)
 	filtered := lo.Filter(allCandidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) })
 	return filtered, nodePoolTotals, nil
-}
-
-// stateNodesToSlice converts StateNodes to []*StateNode for computeNodePoolTotals.
-func stateNodesToSlice(nodes state.StateNodes) []*state.StateNode {
-	return []*state.StateNode(nodes)
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
@@ -285,10 +286,16 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		nodePool := node.Labels()[v1.NodePoolLabelKey]
 		numNodes[nodePool]++
 
-		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
-		// 1. Has a NotReady conditiion
-		// 2. Is marked as disrupting
-		if cond := nodeutils.GetCondition(node.Node, corev1.NodeReady); cond.Status != corev1.ConditionTrue || node.MarkedForDeletion() {
+		// A node is subtracted from the allowed disruptions when it is:
+		//   1. Marked for deletion (a disruption is already in flight), or
+		//   2. NotReady — EXCEPT for the Unhealthy (repair) budget.
+		// Repair must not count merely-unhealthy nodes: NotReady is precisely repair's trigger, so counting those
+		// nodes against the repair budget would let a wave of unhealthy nodes starve the very budget that repairs them
+		// (a node.health cohort could zero the budget and freeze repair). An in-flight repair still counts once its
+		// candidate is MarkedForDeletion. Other reasons keep the reason-agnostic "unhealthy nodes consume budget"
+		// semantics introduced for consolidation/drift (kubernetes-sigs/karpenter#981).
+		notReady := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status != corev1.ConditionTrue
+		if node.MarkedForDeletion() || (notReady && reason != v1.DisruptionReasonUnhealthy) {
 			disrupting[nodePool]++
 		}
 	}
