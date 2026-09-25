@@ -46,6 +46,7 @@ type HistogramStats struct {
 	P90                  float64           `json:"p90"`
 	P95                  float64           `json:"p95"`
 	P99                  float64           `json:"p99"`
+	Min                  float64           `json:"min"`
 	Max                  float64           `json:"max"`
 	BucketTruncationRate float64           `json:"bucket_truncation_rate"`
 }
@@ -333,6 +334,7 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 		P90:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.90),
 		P95:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.95),
 		P99:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.99),
+		Min:                  inferMinBound(finiteBuckets, finiteCum),
 		Max:                  inferMaxBound(finiteBuckets, finiteCum),
 		BucketTruncationRate: trunc,
 	}
@@ -383,6 +385,20 @@ func inferMaxBound(endBuckets []*dto.Bucket, deltaCum []uint64) float64 {
 		return endBuckets[len(endBuckets)-1].GetUpperBound()
 	}
 	return endBuckets[maxIdx].GetUpperBound()
+}
+
+// inferMinBound returns the lower bound of the lowest finite bucket that
+// received a non-zero per-bucket delta (0 for the first bucket), i.e. every
+// observation in the phase was > the returned value.
+func inferMinBound(endBuckets []*dto.Bucket, deltaCum []uint64) float64 {
+	prevUpper := 0.0
+	for i, c := range deltaCum {
+		if c > 0 {
+			return prevUpper
+		}
+		prevUpper = endBuckets[i].GetUpperBound()
+	}
+	return prevUpper
 }
 
 // interpolatePercentile returns the linearly-interpolated percentile from a

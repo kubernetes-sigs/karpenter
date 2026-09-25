@@ -174,6 +174,18 @@ func TestReduceHistogramDelta_ConcentratedDistributionMaxBound(t *testing.T) {
 	}
 }
 
+// inferMinBound returns the lower bound of the lowest bucket with samples.
+func TestReduceHistogramDelta_MinBound(t *testing.T) {
+	start := mkHistogram(10, 1.0, []*dto.Bucket{mkBucket(0.1, 10), mkBucket(0.5, 10), mkBucket(1.0, 10)})
+	end := mkHistogram(15, 4.0, []*dto.Bucket{mkBucket(0.1, 10), mkBucket(0.5, 12), mkBucket(1.0, 15)})
+	if stats := reduceHistogramDelta(end, start); math.Abs(stats.Min-0.1) > 1e-9 {
+		t.Errorf("Min: got %v, want 0.1 (start-of-phase samples in the 0.1 bucket must not count)", stats.Min)
+	}
+	if stats := reduceHistogramDelta(start, nil); stats.Min != 0 {
+		t.Errorf("Min: got %v, want 0 (samples in the first bucket)", stats.Min)
+	}
+}
+
 // Test 4. Zero-observation phase yields zero-valued stats.
 func TestReduceHistogramDelta_NoNewObservations(t *testing.T) {
 	same := mkHistogram(50, 5.0, []*dto.Bucket{

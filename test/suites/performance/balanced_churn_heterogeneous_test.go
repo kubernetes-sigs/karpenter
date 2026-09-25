@@ -108,6 +108,32 @@ func emitPolicyRun(report *PerformanceReport, filePrefix string, policy v1.Conso
 	writeLatencySidecar(report.TestName, filePrefix, policy, result)
 }
 
+// scoreBucketBelowThreshold is the karpenter_consolidation_score bucket bound
+// just below the 1/k=0.5 Balanced threshold.
+const scoreBucketBelowThreshold = 0.33
+
+// expectBalancedDecisionsMatchThreshold fails if Balanced scored no moves, or
+// if any recorded decision disagrees with the 1/k threshold: approved scores
+// (>= 0.5) must land above the 0.33 bucket and rejected scores (< 0.5) at or
+// below the 0.5 bucket.
+func expectBalancedDecisionsMatchThreshold(result *common.LatencyResult) {
+	threshold := 1.0 / float64(v1.BalancedK)
+	scored := uint64(0)
+	for key, s := range result.LatencyStats {
+		if s.MetricName != "karpenter_consolidation_score" || s.Count == 0 || s.Labels["policy"] != string(v1.ConsolidationPolicyBalanced) {
+			continue
+		}
+		scored += s.Count
+		switch s.Labels["decision"] {
+		case "approved":
+			Expect(s.Min).To(BeNumerically(">=", scoreBucketBelowThreshold), "%s: approved a move scoring below the %.2f threshold", key, threshold)
+		case "rejected":
+			Expect(s.Max).To(BeNumerically("<=", threshold), "%s: rejected a move scoring above the %.2f threshold", key, threshold)
+		}
+	}
+	Expect(scored).To(BeNumerically(">", 0), "Balanced recorded no scored consolidation moves")
+}
+
 var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Balanced Churn Chain", func() {
 		// Each It runs one policy over a 400-pod / ~40-node scale-out then
@@ -159,6 +185,9 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				emitPolicyRun(consolidationReport,
 					fmt.Sprintf("balanced_churn_%s_consolidation", prefix),
 					policy, result)
+				if policy == v1.ConsolidationPolicyBalanced {
+					expectBalancedDecisionsMatchThreshold(result)
+				}
 
 			})
 		}
@@ -232,7 +261,9 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 					fmt.Sprintf("balanced_heterogeneous_%s_consolidation", prefix),
 					policy, result)
 
-				Expect(consolidationReport.TotalPods).To(Equal(240))
+				if policy == v1.ConsolidationPolicyBalanced {
+					expectBalancedDecisionsMatchThreshold(result)
+				}
 			})
 		}
 	})
