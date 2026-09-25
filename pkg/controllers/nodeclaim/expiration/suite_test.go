@@ -209,6 +209,27 @@ var _ = Describe("Expiration", func() {
 
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
+	It("should set the DisruptionReason condition to Expired before deleting the NodeClaim", func() {
+		// A finalizer keeps the NodeClaim around after the delete so the condition it was deleted with is
+		// still readable, the way the termination controller would see it.
+		nodeClaim.Finalizers = append(nodeClaim.Finalizers, v1.TerminationFinalizer)
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+
+		env.Clock.Step(60 * time.Second)
+		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeFalse())
+		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.IsTrue()).To(BeTrue())
+		Expect(cond.Reason).To(Equal(expiration.DisruptionReasonExpired))
+		Expect(cond.Message).To(ContainSubstring("expireAfter is 30s"))
+		Expect(cond.Message).To(ContainSubstring(nodeClaim.CreationTimestamp.Format(time.RFC3339)))
+
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
 	It("should return the requeue interval for the time between now and when the nodeClaim expires", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
