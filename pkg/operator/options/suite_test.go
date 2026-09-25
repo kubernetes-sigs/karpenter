@@ -129,6 +129,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             new(false),
 					StaticCapacity:          new(false),
 					CapacityBuffer:          new(false),
+					NodePoolDriftBackoff:    new(false),
 				},
 				IgnoreDRARequests: new(true),
 				SchedulerConfig:   nil,
@@ -159,7 +160,7 @@ var _ = Describe("Options", func() {
 				"--batch-idle-duration", "5s",
 				"--preference-policy", "Ignore",
 				"--min-values-policy", "BestEffort",
-				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true",
+				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true,NodePoolDriftBackoff=true",
 				"--scheduler-config", `{"podTopologySpread":{"defaultConstraints":[{"maxSkew":1,"topologyKey":"topology.kubernetes.io/zone","whenUnsatisfiable":"ScheduleAnyway"}]}}`,
 			)
 			Expect(err).To(BeNil())
@@ -190,6 +191,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             new(true),
 					StaticCapacity:          new(true),
 					CapacityBuffer:          new(true),
+					NodePoolDriftBackoff:    new(true),
 				},
 				IgnoreDRARequests: new(true),
 				SchedulerConfig: &options.SchedulerConfiguration{
@@ -224,7 +226,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true,NodePoolDriftBackoff=true")
 			os.Setenv("SCHEDULER_CONFIG", `{"podTopologySpread":{"defaultConstraints":[{"maxSkew":1,"topologyKey":"topology.kubernetes.io/zone","whenUnsatisfiable":"ScheduleAnyway"}]}}`)
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
@@ -259,6 +261,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             new(true),
 					StaticCapacity:          new(true),
 					CapacityBuffer:          new(true),
+					NodePoolDriftBackoff:    new(true),
 				},
 				IgnoreDRARequests: new(true),
 				SchedulerConfig: &options.SchedulerConfiguration{
@@ -288,7 +291,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true,CapacityBuffer=true,NodePoolDriftBackoff=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -329,6 +332,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             new(true),
 					StaticCapacity:          new(true),
 					CapacityBuffer:          new(true),
+					NodePoolDriftBackoff:    new(true),
 				},
 				IgnoreDRARequests: new(true),
 			}))
@@ -363,6 +367,7 @@ var _ = Describe("Options", func() {
 			Entry("when NodeOverlay is overridden", "NodeOverlay"),
 			Entry("when StaticCapacity is overridden", "StaticCapacity"),
 			Entry("when CapacityBuffer is overridden", "CapacityBuffer"),
+			Entry("when NodePoolDriftBackoff is overridden", "NodePoolDriftBackoff"),
 		)
 	})
 
@@ -578,6 +583,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.StaticCapacity).To(Equal(optsB.FeatureGates.StaticCapacity))
 	Expect(optsA.FeatureGates.CapacityBuffer).To(Equal(optsB.FeatureGates.CapacityBuffer))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.FeatureGates.NodePoolDriftBackoff).To(Equal(optsB.FeatureGates.NodePoolDriftBackoff))
 	Expect(optsA.IgnoreDRARequests).To(Equal(optsB.IgnoreDRARequests))
 	Expect(optsA.SchedulerConfig).To(Equal(optsB.SchedulerConfig))
 }
