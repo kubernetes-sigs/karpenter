@@ -153,6 +153,66 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	return results, nil
 }
 
+// SimulateSchedulingWithReservedFallback runs the candidate-gone scheduling simulation for a single voluntary-disruption
+// candidate and reports whether the candidate must be terminated before a replacement can be provisioned
+// (Terminate-First Disruption, RFC kubernetes-sigs/karpenter#3203). When terminateFirst is true the caller should issue
+// a delete-only command and let reactive provisioning refill the freed reservation slot instead of staging a
+// replacement; the returned Results are the credit-back (pass 2) simulation so it can nominate the existing nodes that
+// absorb the freed pods. When terminateFirst is false the Results are the pass-1 (replace-first / Blocked) simulation.
+//
+// It simulates up to twice:
+//
+//  1. The normal fallback simulation. In fallback mode a full reservation (Available=true, ReservationCapacity=0) does
+//     not satisfy a pod, so the scheduler falls through to a lower-weight NodePool (e.g. on-demand) or a different
+//     reservation that still has capacity. If every reschedulable pod places, terminateFirst is false and the caller
+//     replaces-first with these Results (as it always has).
+//
+//  2. Only if pass 1 leaves pods pending AND the TerminateFirstDrift gate is on AND the candidate itself holds a
+//     reservation: re-simulate in strict mode with the candidate's reservation slot credited back (modeling the slot it
+//     will free on termination). If every pod then places, terminateFirst is true — deleting the candidate is exactly
+//     what unblocks the reschedule. Strict mode makes surplus pods that wouldn't fit the freed slot fail rather than
+//     fall back, and a reservation that is unavailable for another reason stays unschedulable, so we don't terminate
+//     uselessly.
+//
+// A false terminateFirst with pods still pending in the returned Results is the caller's Blocked signal, unchanged.
+func SimulateSchedulingWithReservedFallback(
+	ctx context.Context,
+	kubeClient client.Client,
+	cluster *state.Cluster,
+	provisioner *provisioning.Provisioner,
+	clk clock.Clock,
+	recorder events.Recorder,
+	candidate *Candidate,
+) (results scheduling.Results, terminateFirst bool, err error) {
+	// Pass 1: replace-first feasibility.
+	results, err = SimulateScheduling(ctx, kubeClient, cluster, provisioner, clk, recorder, nil, candidate)
+	if err != nil || results.AllNonPendingPodsScheduled() {
+		return results, false, err
+	}
+
+	// Terminate-first only applies when enabled and the candidate holds a reservation whose freed slot could unblock
+	// the reschedule. Otherwise the pending pods in results are a Blocked signal for the caller.
+	reservationID := candidate.Labels()[cloudprovider.ReservationIDLabel]
+	if !options.FromContext(ctx).FeatureGates.TerminateFirstDrift || candidate.capacityType != v1.CapacityTypeReserved || reservationID == "" {
+		return results, false, nil
+	}
+
+	// Pass 2: terminate-first feasibility — credit the candidate's reservation slot back and require every pod to place
+	// under strict mode.
+	tfResults, err := SimulateScheduling(ctx, kubeClient, cluster, provisioner, clk, recorder,
+		[]scheduling.Options{scheduling.DisableReservedCapacityFallback, scheduling.CreditReservationCapacity(reservationID, 1)}, candidate)
+	if err != nil {
+		return results, false, err
+	}
+	if tfResults.AllNonPendingPodsScheduled() {
+		// Return the credit-back Results, not pass 1's: this is the accurate post-termination picture (reactive
+		// provisioning runs strict with the freed slot available), so the caller nominates the existing nodes that
+		// absorb the freed pods without spuriously reporting the reserved-bound pods as unschedulable.
+		return tfResults, true, nil
+	}
+	return results, false, nil
+}
+
 // UninitializedNodeError tracks a special pod error for disruption where pods schedule to a node
 // that hasn't been initialized yet, meaning that we can't be confident to make a disruption decision based off of it
 type UninitializedNodeError struct {

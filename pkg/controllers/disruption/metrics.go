@@ -81,6 +81,10 @@ var (
 		Help: "Whether a scored balanced-consolidation move was approved or rejected.",
 		Values: []opmetrics.Value{
 			{
+				Name: string(TerminateFirstDecision),
+				Help: "The candidate(s) were deleted without staging a replacement first; reactive provisioning refills afterward.",
+			},
+			{
 				Name: string(ApprovedDecision),
 				Help: "The move's cost savings justified the pod disruption; it was approved.",
 			},
