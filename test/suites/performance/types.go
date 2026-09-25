@@ -39,6 +39,7 @@ type PerformanceReport struct {
 	TotalTime               time.Duration `json:"total_time"`
 	PodsNetChange           int           `json:"change_in_pod_count"`
 	NodesNetChange          int           `json:"change_in_node_count"`
+	PodsDisrupted           int           `json:"pods_disrupted"`
 	TotalReservedCPUUtil    float64       `json:"total_reserved_cpu_utilization"`
 	TotalReservedMemoryUtil float64       `json:"total_reserved_memory_utilization"`
 	ResourceEfficiencyScore float64       `json:"resource_efficiency_score"`
