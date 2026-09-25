@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -31,9 +32,11 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // agingConstant (τ) is the time a node must wait past its toleration to earn one rank tier of standing. It sets the
@@ -90,6 +93,8 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 
 // ComputeCommands orders eligible candidates by the repair score and returns one replace-then-terminate command for the
 // highest-scoring candidate whose NodePool has budget. Only one command per pass, mirroring drift.
+//
+//nolint:gocyclo
 func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	ranks := r.ranks
 	sort.SliceStable(candidates, func(i, j int) bool {
@@ -109,8 +114,6 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 		return []Command{}, err
 	}
 	for _, candidate := range candidates {
-		// Circuit breaker: if too much of the NodePool is unhealthy, stop repairing it — the fault is likely
-		// correlated (bad AMI, AZ outage) and replacing more nodes would amplify the outage, not fix it.
 		if trippedPools[candidate.NodePool.Name] {
 			r.recorder.Publish(disruptionevents.NodeRepairBlocked(candidate.Node, candidate.NodeClaim, candidate.NodePool,
 				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", repairUnhealthyThreshold.String(), candidate.NodePool.Name))...)
@@ -119,26 +122,71 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 			continue
 		}
-		// Pre-spin the replacement; the queue terminates the original only once the replacement is healthy.
-		results, err := SimulateScheduling(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, nil, candidate)
+		// Repair admits nodes with blocking (PDB / do-not-disrupt) pods only on the promise of this drain bound, so it
+		// must be stamped before either branch returns a command.
+		candidate.TerminationGracePeriod = r.effectiveDrainBound(candidate)
+		if _, cond := r.matchRepairPolicy(candidate.Node); cond != nil {
+			candidate.RepairCondition = cond.Type
+		}
+		terminateFirstEnabled := options.FromContext(ctx).FeatureGates.TerminateFirstRepair
+
+		// Static NodePools aren't reactively scheduled, so repair can't simulate a replacement — it mirrors StaticDrift.
+		if candidate.OwnedByStaticNodePool() {
+			np := candidate.NodePool
+			active, _, pendingDisruption := r.cluster.NodePoolState.GetNodeCount(np.Name)
+
+			// Skip until scale-down completes: a replacement would just be surplus the deprovisioner deletes.
+			if int64(active+pendingDisruption) > lo.FromPtr(np.Spec.Replicas) {
+				continue
+			}
+
+			limit, ok := np.Spec.Limits[resources.Node]
+			nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
+			// Atomic accounting, not a naive count: deleting/already-reserved nodes would otherwise let repair burst
+			// past limits.nodes when commands race. A zero result reserves nothing, so the delete-only path leaks no
+			// reservation; a non-zero result's slot is consumed by the replacement staged below.
+			if r.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, 1) == 0 {
+				// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand
+				// the workload with no replacement.
+				refillable := np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
+				if !terminateFirstEnabled || !refillable {
+					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool is at its node limit and cannot stage a replacement")...)
+					continue
+				}
+				return []Command{{
+					Candidates:          []*Candidate{candidate},
+					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
+					TerminateFirst:      true,
+				}}, nil
+			}
+			nct := scheduling.NewNodeClaimTemplate(np)
+			result := scheduling.Results{NewNodeClaims: []*scheduling.NodeClaim{{NodeClaimTemplate: *nct}}}
+			return []Command{{
+				Candidates:          []*Candidate{candidate},
+				Replacements:        replacementsFromNodeClaims(result.NewNodeClaims...),
+				Results:             result,
+				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
+			}}, nil
+		}
+		results, terminateFirst, err := SimulateSchedulingWithReservedFallback(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, candidate, terminateFirstEnabled)
 		if err != nil {
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
 			return []Command{}, err
 		}
+		if terminateFirst {
+			// Carry the Results (no Replacements) so nodes that can absorb the freed pods get nominated.
+			return []Command{{
+				Candidates:          []*Candidate{candidate},
+				Results:             results,
+				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
+				TerminateFirst:      true,
+			}}, nil
+		}
 		if !results.AllNonPendingPodsScheduled() {
 			r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
 			continue
-		}
-		// Set the candidate's drain bound; the queue stamps the absolute deadline at actual deletion time (after the
-		// replacement is healthy), so repair is never an unbounded hang and a forceful (0) policy skips the drain for
-		// conditions the kubelet can't evict through — without pre-spin latency eroding the window.
-		candidate.TerminationGracePeriod = r.effectiveDrainBound(candidate)
-		// Record the eligible condition driving this repair; the queue emits the per-condition disruption metric when
-		// the candidate is actually terminated, so an abandoned command (replacement never healthy) doesn't over-count.
-		if _, cond := r.matchRepairPolicy(candidate.Node); cond != nil {
-			candidate.RepairCondition = cond.Type
 		}
 		return []Command{{
 			Candidates:          []*Candidate{candidate},
