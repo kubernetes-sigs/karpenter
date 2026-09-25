@@ -117,6 +117,12 @@ func (p *Provisioner) Trigger(uid types.UID) {
 	p.batcher.Trigger(uid)
 }
 
+// TriggerReconcile wakes the provisioner without associating the trigger with a
+// specific object.
+func (p *Provisioner) TriggerReconcile() {
+	p.batcher.TriggerNow()
+}
+
 func (p *Provisioner) Name() string {
 	return "provisioner"
 }
