@@ -51,7 +51,7 @@ var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 // SimulationOptions configures disruption-specific scheduling behavior.
 type SimulationOptions struct {
-	// IncludeBlockedCandidatePods includes candidate pods even when PodDisruptionBudgets currently prevent eviction.
+	// IncludeBlockedCandidatePods includes candidate pods even when they cannot currently be evicted.
 	IncludeBlockedCandidatePods bool
 }
 

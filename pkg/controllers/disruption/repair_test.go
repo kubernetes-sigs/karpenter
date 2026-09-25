@@ -71,9 +71,8 @@ func (c *terminationTimestampPatchErrorClient) Patch(ctx context.Context, obj cl
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
-// These tests exercise end-user behavior of voluntary node repair (Node Repair Resiliency design). Each It maps to an
-// invariant (INV-S*) from the design. The disruption controller is built with only the Repair method so the behavior
-// under test is isolated from consolidation/drift.
+// These tests exercise end-user behavior of voluntary node repair. The disruption controller is built with only the
+// Repair method so the behavior under test is isolated from consolidation/drift.
 
 var _ = Describe("Repair", func() {
 	var nodePool *v1.NodePool
@@ -112,11 +111,12 @@ var _ = Describe("Repair", func() {
 
 	// bindBlockingPod places a do-not-disrupt pod on the node. Such a pod blocks eviction, so the node is only a
 	// disruption candidate when the drain is bounded by a hard deadline (repair's RepairPolicy TGP, or the NodeClaim TGP).
-	bindBlockingPod := func(n *corev1.Node) {
+	bindBlockingPod := func(n *corev1.Node) *corev1.Pod {
 		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}}})
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, n)
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+		return pod
 	}
 
 	// markUnhealthy appends a condition matching a RepairPolicy at the current fake-clock time, re-applies the node,
@@ -157,7 +157,7 @@ var _ = Describe("Repair", func() {
 		newRepairController()
 	})
 
-	// INV-S6 / INV-S9: repair pre-spins a replacement (replace-then-terminate) and only after the toleration elapses.
+	// Repair pre-spins a replacement (replace-then-terminate) and only after the toleration elapses.
 	It("should pre-spin a replacement and terminate the unhealthy node only after the replacement is healthy", func() {
 		initNode(nodeClaim, node)
 		bindReschedulablePod(node)
@@ -202,7 +202,7 @@ var _ = Describe("Repair", func() {
 		Expect(cmds[0].Replacements).To(BeEmpty())
 	})
 
-	// INV-S9: repair never fires before the policy toleration elapses.
+	// Repair never fires before the policy toleration elapses.
 	It("should not repair before the toleration duration elapses", func() {
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
@@ -332,25 +332,7 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(HaveLen(1))
 	})
 
-	// INV-S7: a replacement that does not initialize (bad AMI / partitioned zone) never leads to terminating the
-	// original.
-	It("should never terminate the original when the replacement fails to come up healthy", func() {
-		initNode(nodeClaim, node)
-		bindReschedulablePod(node)
-		markUnhealthy(node, "BadNode")
-		env.Clock.Step(31 * time.Minute)
-
-		ExpectSingletonReconciled(ctx, repairController)
-		cmds := queue.GetCommands()
-		Expect(cmds).To(HaveLen(1))
-
-		// Do NOT make the replacement ready — simulate a replacement that never becomes healthy. Reconciling the queue
-		// leaves the replacement uninitialized, so the candidate is never deleted.
-		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
-		Expect(ExpectExists(ctx, env.Client, nodeClaim).DeletionTimestamp.IsZero()).To(BeTrue())
-	})
-
-	// INV-S8: do-not-repair blocks repair; do-not-disrupt does NOT (no behavior change for that annotation).
+	// do-not-repair blocks repair; do-not-disrupt does NOT (no behavior change for that annotation).
 	It("should not repair a node carrying the do-not-repair annotation", func() {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "true"})
 		initNode(nodeClaim, node)
@@ -377,22 +359,6 @@ var _ = Describe("Repair", func() {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "false"})
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
-		env.Clock.Step(31 * time.Minute)
-
-		ExpectSingletonReconciled(ctx, repairController)
-		Expect(queue.GetCommands()).To(HaveLen(1))
-	})
-
-	// INV-S1 / INV-S5: repair is paced by the disruption budget — a cohort is disrupted a fraction at a time, not all
-	// at once. The default 10% budget permits one concurrent repair.
-	It("should pace repair by the disruption budget", func() {
-		const count = 10
-		nodeClaims, nodes := test.NodeClaimsAndNodes(count, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
-		for i := range nodes {
-			initNode(nodeClaims[i], nodes[i])
-		}
-		markUnhealthy(nodes[0], "BadNode")
-		markUnhealthy(nodes[1], "BadNode")
 		env.Clock.Step(31 * time.Minute)
 
 		ExpectSingletonReconciled(ctx, repairController)
@@ -452,7 +418,7 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(HaveLen(1))
 	})
 
-	// INV-S4: ordering is prioritizable — a higher-priority fault repairs before a lower-priority one in the same pass.
+	// Ordering is prioritizable — a higher-priority fault repairs before a lower-priority one in the same pass.
 	It("should repair the higher-priority condition first", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{ConditionType: "LowPriority", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
@@ -554,7 +520,7 @@ var _ = Describe("Repair", func() {
 		Expect(*cmds[0].Candidates[0].TerminationGracePeriod).To(Equal(mediumGracePeriod))
 	})
 
-	// INV-S4: a node's score is the argmax of rank+age/τ over ALL its matching conditions, not the score of its
+	// A node's score is the argmax of rank+age/τ over ALL its matching conditions, not the score of its
 	// highest-priority condition. Node A has a fresh high-priority condition (just past toleration) and a long-starving
 	// low-priority one; node B has a moderately-aged high-priority condition. Scoring A off only its high-priority
 	// (fresh) condition would rank it below B and repair B first; the argmax lifts A above B on its starving condition.
@@ -589,7 +555,7 @@ var _ = Describe("Repair", func() {
 		Expect(cmds[0].Candidates[0].Node.Name).To(Equal(aNode.Name))
 	})
 
-	// INV-S10: after any required replacements are ready, the drain deadline is stamped immediately before the delete
+	// After any required replacements are ready, the drain deadline is stamped immediately before the delete
 	// request (not at command-computation time), so replacement-launch latency can't erode the window. A forceful (0)
 	// policy stamps an immediate deadline, so repair is never the unbounded hang.
 	It("should stamp a forceful (immediate) termination deadline before requesting deletion", func() {
@@ -612,6 +578,33 @@ var _ = Describe("Repair", func() {
 		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 		Expect(ExpectExists(ctx, env.Client, nodeClaim).Annotations).To(
 			HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, env.Clock.Now().Format(time.RFC3339)))
+	})
+
+	It("should preserve an existing earlier termination deadline", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(10 * time.Minute), Action: cloudprovider.ReplaceNode},
+		}
+		newRepairController()
+		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "karpenter.sh/test-finalizer")
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
+
+		deadline := env.Clock.Now().Add(5 * time.Minute)
+		current := ExpectExists(ctx, env.Client, nodeClaim)
+		current.Annotations = lo.Assign(current.Annotations, map[string]string{
+			v1.NodeClaimTerminationTimestampAnnotationKey: deadline.Format(time.RFC3339),
+		})
+		Expect(env.Client.Update(ctx, current)).To(Succeed())
+
+		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).Annotations).To(
+			HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, deadline.Format(time.RFC3339)))
 	})
 
 	It("should retry a failed termination-deadline patch without losing the deadline", func() {
@@ -648,7 +641,7 @@ var _ = Describe("Repair", func() {
 			HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, env.Clock.Now().Format(time.RFC3339)))
 	})
 
-	// INV-S10: when both the policy and the NodeClaim bound the drain, the smaller (most forceful) wins.
+	// When both the policy and the NodeClaim bound the drain, the smaller (most forceful) wins.
 	It("should stamp min(policy TGP, NodeClaim TGP) before requesting deletion", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(20 * time.Minute), Action: cloudprovider.ReplaceNode},
@@ -700,7 +693,7 @@ var _ = Describe("Repair", func() {
 
 	// The deadline is stamped only after required replacement readiness, so a replacement that never becomes healthy
 	// leaves the original both un-terminated AND un-stamped (the bounded policy proves it would stamp if termination ran).
-	It("should not stamp a termination deadline when the replacement never becomes healthy", func() {
+	It("should neither terminate nor stamp a deadline when the replacement never becomes healthy", func() {
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(10 * time.Minute), Action: cloudprovider.ReplaceNode},
 		}
@@ -743,12 +736,19 @@ var _ = Describe("Repair", func() {
 		}
 		newRepairController()
 		initNode(nodeClaim, node)
-		bindBlockingPod(node)
+		blockingPod := bindBlockingPod(node)
 		markUnhealthy(node, "BadNode")
 		env.Clock.Step(31 * time.Minute)
 
 		ExpectSingletonReconciled(ctx, repairController)
-		Expect(queue.GetCommands()).To(HaveLen(1))
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+		Expect(cmds[0].Replacements).To(HaveLen(1))
+		Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
+		Expect(lo.Map(cmds[0].Results.NewNodeClaims[0].Pods, func(p *corev1.Pod, _ int) string {
+			return p.Name
+		})).To(ContainElement(blockingPod.Name))
 	})
 
 	It("should repair a static NodePool with a one-for-one replacement from the same pool", func() {

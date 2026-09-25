@@ -92,8 +92,7 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 		return false
 	}
 	now := r.clock.Now()
-	c.RepairPolicyResult = r.policyMatcher.Evaluate(c.Node, now)
-	r.logRepairPolicyDecision(ctx, c.Node, c.RepairPolicyResult)
+	c.RepairPolicyResult = r.evaluate(ctx, c.Node, now)
 	if c.RepairPolicyResult.Action == "" {
 		return false
 	}
@@ -105,9 +104,41 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	return true
 }
 
+func (r *Repair) evaluate(ctx context.Context, node *corev1.Node, now time.Time) health.RepairResult {
+	result := r.policyMatcher.Evaluate(node, now)
+	logger := log.FromContext(ctx).V(1)
+	if !logger.Enabled() {
+		return result
+	}
+	key := string(node.UID)
+	if key == "" {
+		key = node.Name
+	}
+	var values []any
+	if result.Action != "" {
+		values = []any{
+			"condition", result.Condition,
+			"action", result.Action,
+			"earliest-eligible-at", result.EligibleAt,
+		}
+		if result.TerminationGracePeriod != nil {
+			values = append(values, "termination-grace-period", *result.TerminationGracePeriod)
+		}
+	}
+	if !r.decisionLogMonitor.HasChanged(key, values) || len(values) == 0 {
+		return result
+	}
+	logger.WithValues(append([]any{
+		"Node", klog.KObj(node),
+	}, values...)...).Info("evaluated repair policy")
+	return result
+}
+
 // ComputeCommands orders eligible candidates by the repair score and returns one command for the highest-scoring
 // candidate whose NodePool has budget. Workload-bearing candidates verify rescheduling capacity and pre-spin any
 // required replacement; empty candidates may produce a delete-only command. Only one command per pass, mirroring drift.
+//
+//nolint:gocyclo // Static and dynamic replacement flows are intentionally kept inline.
 func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		si, sj := candidates[i].RepairPolicyResult.Score, candidates[j].RepairPolicyResult.Score
@@ -134,19 +165,49 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 			continue
 		}
 
-		results, ok, err := r.replacementForCandidate(ctx, candidate)
-		if err != nil {
-			return []Command{}, err
-		}
-		if !ok {
-			continue
+		var results pscheduling.Results
+		if candidate.OwnedByStaticNodePool() {
+			nodeLimit := int64(math.MaxInt64)
+			if limit, ok := candidate.NodePool.Spec.Limits[resources.Node]; ok {
+				nodeLimit = limit.Value()
+			}
+			runningNodes, _, pendingDisruption := r.cluster.NodePoolState.GetNodeCount(candidate.NodePool.Name)
+			if int64(runningNodes+pendingDisruption) > lo.FromPtr(candidate.NodePool.Spec.Replicas) {
+				r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim,
+					fmt.Sprintf("static NodePool %q is still scaling down", candidate.NodePool.Name))...)
+				continue
+			}
+			if r.cluster.NodePoolState.ReserveNodeCount(candidate.NodePool.Name, nodeLimit, 1) == 0 {
+				r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim,
+					fmt.Sprintf("static NodePool %q has no node limit available for a replacement", candidate.NodePool.Name))...)
+				continue
+			}
+			template := pscheduling.NewNodeClaimTemplate(candidate.NodePool)
+			results = pscheduling.Results{
+				NewNodeClaims: []*pscheduling.NodeClaim{{NodeClaimTemplate: *template}},
+			}
+		} else {
+			// Repair pre-spins for all reschedulable workload, including pods whose eviction is currently blocked.
+			results, err = SimulateScheduling(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, nil,
+				SimulationOptions{IncludeBlockedCandidatePods: true},
+				candidate,
+			)
+			if err != nil {
+				if errors.Is(err, errCandidateDeleting) {
+					continue
+				}
+				return []Command{}, err
+			}
+			if !results.AllNonPendingPodsScheduled() {
+				r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
+				continue
+			}
 		}
 
 		// Set the candidate's drain bound; after any required replacements are ready, the queue stamps the absolute
 		// deadline immediately before requesting deletion. A forceful (0) policy skips the drain for conditions the
 		// kubelet can't evict through, without replacement-launch latency eroding the window.
 		candidate.TerminationGracePeriod = effectiveDrainBound(candidate, candidate.RepairPolicyResult)
-		candidate.RepairCondition = candidate.RepairPolicyResult.Condition
 		return []Command{{
 			Candidates:          []*Candidate{candidate},
 			Replacements:        replacementsFromNodeClaims(results.NewNodeClaims...),
@@ -155,54 +216,6 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 		}}, nil
 	}
 	return []Command{}, nil
-}
-
-func (r *Repair) replacementForCandidate(ctx context.Context, candidate *Candidate) (pscheduling.Results, bool, error) {
-	if candidate.OwnedByStaticNodePool() {
-		return r.staticReplacement(candidate)
-	}
-	return r.dynamicReplacement(ctx, candidate)
-}
-
-func (r *Repair) staticReplacement(candidate *Candidate) (pscheduling.Results, bool, error) {
-	nodeLimit := int64(math.MaxInt64)
-	if limit, ok := candidate.NodePool.Spec.Limits[resources.Node]; ok {
-		nodeLimit = limit.Value()
-	}
-	runningNodes, _, pendingDisruption := r.cluster.NodePoolState.GetNodeCount(candidate.NodePool.Name)
-	if int64(runningNodes+pendingDisruption) > lo.FromPtr(candidate.NodePool.Spec.Replicas) {
-		r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim,
-			fmt.Sprintf("static NodePool %q is still scaling down", candidate.NodePool.Name))...)
-		return pscheduling.Results{}, false, nil
-	}
-	if r.cluster.NodePoolState.ReserveNodeCount(candidate.NodePool.Name, nodeLimit, 1) == 0 {
-		r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim,
-			fmt.Sprintf("static NodePool %q has no node limit available for a replacement", candidate.NodePool.Name))...)
-		return pscheduling.Results{}, false, nil
-	}
-	template := pscheduling.NewNodeClaimTemplate(candidate.NodePool)
-	return pscheduling.Results{
-		NewNodeClaims: []*pscheduling.NodeClaim{{NodeClaimTemplate: *template}},
-	}, true, nil
-}
-
-func (r *Repair) dynamicReplacement(ctx context.Context, candidate *Candidate) (pscheduling.Results, bool, error) {
-	// Repair pre-spins for all reschedulable workload, including pods whose eviction is currently blocked.
-	results, err := SimulateScheduling(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, nil,
-		SimulationOptions{IncludeBlockedCandidatePods: true},
-		candidate,
-	)
-	if err != nil {
-		if errors.Is(err, errCandidateDeleting) {
-			return pscheduling.Results{}, false, nil
-		}
-		return pscheduling.Results{}, false, err
-	}
-	if !results.AllNonPendingPodsScheduled() {
-		r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
-		return pscheduling.Results{}, false, nil
-	}
-	return results, true, nil
 }
 
 // breakerTrippedPools returns the NodePools whose unhealthy-node fraction exceeds repairUnhealthyThreshold. A node
@@ -236,39 +249,6 @@ func (r *Repair) breakerTrippedPools(ctx context.Context) (map[string]bool, erro
 		}
 	}
 	return tripped, nil
-}
-
-func (r *Repair) logRepairPolicyDecision(ctx context.Context, node *corev1.Node, result health.RepairResult) {
-	logger := log.FromContext(ctx).V(1)
-	if !logger.Enabled() {
-		return
-	}
-	key := string(node.UID)
-	if key == "" {
-		key = node.Name
-	}
-	var values []any
-	if result.Action != "" {
-		values = repairPolicyLogValues(result)
-	}
-	if !r.decisionLogMonitor.HasChanged(key, values) || len(values) == 0 {
-		return
-	}
-	logger.WithValues(append([]any{
-		"Node", klog.KObj(node),
-	}, values...)...).Info("evaluated repair policy")
-}
-
-func repairPolicyLogValues(result health.RepairResult) []any {
-	values := []any{
-		"condition", result.Condition,
-		"action", result.Action,
-		"eligible-at", result.EligibleAt,
-	}
-	if result.TerminationGracePeriod != nil {
-		values = append(values, "termination-grace-period", *result.TerminationGracePeriod)
-	}
-	return values
 }
 
 // effectiveDrainBound returns the drain bound for the candidate, carried on the Command and applied by the queue
