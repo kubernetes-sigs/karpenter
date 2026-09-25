@@ -580,12 +580,45 @@ var KarpenterManagedLabelDoesNotExistError = serrors.Wrap(fmt.Errorf("configured
 // validateKarpenterManagedLabelCanExist provides a more clear error message in the event of scheduling a pod that specifically doesn't
 // want to run on a Karpenter node (e.g. a Karpenter controller replica).
 func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
-	for _, req := range scheduling.NewPodRequirements(p) {
-		if req.Key == v1.NodePoolLabelKey && req.Operator() == corev1.NodeSelectorOpDoesNotExist {
-			return KarpenterManagedLabelDoesNotExistError
-		}
+	if requiresNonKarpenterNode(p) {
+		return KarpenterManagedLabelDoesNotExistError
 	}
 	return nil
+}
+
+func requiresNonKarpenterNode(p *corev1.Pod) bool {
+	if p.Spec.Affinity == nil ||
+		p.Spec.Affinity.NodeAffinity == nil ||
+		p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return false
+	}
+
+	hasUsableTerm := false
+	for _, term := range p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		// Unsupported matchFields terms are handled by validateAffinity.
+		if term.MatchFields != nil {
+			return false
+		}
+		// Empty terms match no nodes.
+		if len(term.MatchExpressions) == 0 {
+			continue
+		}
+		hasUsableTerm = true
+
+		requiresLabelAbsent := false
+		for _, requirement := range term.MatchExpressions {
+			if requirement.Key == v1.NodePoolLabelKey && requirement.Operator == corev1.NodeSelectorOpDoesNotExist {
+				requiresLabelAbsent = true
+				break
+			}
+		}
+		// Required node affinity terms are ORed, so any term that permits the
+		// nodepool label makes the pod potentially schedulable by Karpenter.
+		if !requiresLabelAbsent {
+			return false
+		}
+	}
+	return hasUsableTerm
 }
 
 // getVolumeTopologyRequirements collects volume topology requirements for each pod

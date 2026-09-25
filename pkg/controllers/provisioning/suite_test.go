@@ -2386,6 +2386,43 @@ var _ = Describe("Provisioning", func() {
 	})
 	Context("Preferential Fallback", func() {
 		Context("Required", func() {
+			DescribeTable("should schedule when any required node affinity term allows Karpenter", func(terms []corev1.NodeSelectorTerm) {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: terms,
+				}}}
+
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectScheduled(ctx, env.Client, pod)
+			},
+				Entry("with the Karpenter exclusion first", []corev1.NodeSelectorTerm{
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist}}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}},
+				}),
+				Entry("with the Karpenter exclusion last", []corev1.NodeSelectorTerm{
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist}}},
+				}),
+			)
+			It("should ignore pods when every required node affinity term excludes Karpenter", func() {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist}}},
+						{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist},
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+						}},
+					},
+				}}}
+
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				Expect(results.NewNodeClaims).To(BeEmpty())
+				ExpectMetricGaugeValue(pscheduling.IgnoredPodCount, 1, nil)
+				ExpectNotScheduled(ctx, env.Client, pod)
+			})
 			It("should not relax the final term", func() {
 				pod := test.UnschedulablePod()
 				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
@@ -2431,6 +2468,40 @@ var _ = Describe("Provisioning", func() {
 			})
 		})
 		Context("Preferences", func() {
+			It("should relax a Karpenter exclusion preference when nodeSelector targets a NodePool", func() {
+				nodePool := test.NodePool()
+				pod := test.UnschedulablePod(test.PodOptions{
+					NodeSelector: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				})
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+					{
+						Weight: 50,
+						Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist,
+						}}},
+					},
+				}}}
+
+				ExpectApplied(ctx, env.Client, nodePool)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKeyWithValue(v1.NodePoolLabelKey, nodePool.Name))
+			})
+			It("should relax a preference for non-Karpenter capacity", func() {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+					{
+						Weight: 50,
+						Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist},
+						}},
+					},
+				}}}
+
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectScheduled(ctx, env.Client, pod)
+			})
 			It("should relax all node affinity terms", func() {
 				pod := test.UnschedulablePod()
 				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
@@ -2562,6 +2633,21 @@ var _ = Describe("Provisioning", func() {
 		Context("Ignore Preferences", func() {
 			BeforeEach(func() {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{PreferencePolicy: lo.ToPtr(options.PreferencePolicyIgnore)}))
+			})
+			It("should ignore a preference for non-Karpenter capacity", func() {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+					{
+						Weight: 50,
+						Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist},
+						}},
+					},
+				}}}
+
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectScheduled(ctx, env.Client, pod)
 			})
 			It("should ignore node affinity preferences", func() {
 				zone1Pod := test.UnschedulablePod(test.PodOptions{
