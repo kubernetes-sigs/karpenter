@@ -69,10 +69,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	// From here there are three scenarios to handle:
 	// 1. If ExpireAfter is not configured, exit expiration loop
-	if nodeClaim.Spec.ExpireAfter.Duration == nil {
+	expirationTime, ok := nodeclaimutils.ExpirationTime(nodeClaim)
+	if !ok {
 		return reconcile.Result{}, nil
 	}
-	expirationTime := nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration)
 	// 2. If the NodeClaim isn't expired leave the reconcile loop.
 	if c.clock.Now().Before(expirationTime) {
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
