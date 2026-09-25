@@ -18,12 +18,14 @@ package scheduling
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/component-helpers/storage/volume"
@@ -143,6 +145,9 @@ func mergeVolumeRequirements(existing, volReq scheduling.Requirements) schedulin
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]scheduling.Requirements, error) {
 	pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, volume)
 	if err != nil {
+		if apierrors.IsNotFound(errors.Unwrap(err)) && isVirtualPod(pod) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
 	}
 	// Not all volume types have PVCs, e.g. emptyDir, hostPath, etc.
@@ -228,6 +233,9 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 	for _, vol := range pod.Spec.Volumes {
 		pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, vol)
 		if err != nil {
+			if apierrors.IsNotFound(errors.Unwrap(err)) && isVirtualPod(pod) {
+				continue
+			}
 			return err
 		}
 		// Not all volume types have PVCs, e.g. emptyDir, hostPath, etc.

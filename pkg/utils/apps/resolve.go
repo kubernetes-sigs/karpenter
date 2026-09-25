@@ -122,7 +122,20 @@ func ResolveScalableRef(ctx context.Context, c client.Client, ref *autoscalingv1
 		if err := c.Get(ctx, key, obj); err != nil {
 			return nil, err
 		}
-		return &ScalableRefResult{PodTemplateSpec: obj.Spec.Template, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
+		template := obj.Spec.Template
+		for _, vct := range obj.Spec.VolumeClaimTemplates {
+			if !lo.ContainsBy(template.Spec.Volumes, func(v corev1.Volume) bool { return v.Name == vct.Name }) {
+				template.Spec.Volumes = append(template.Spec.Volumes, corev1.Volume{
+					Name: vct.Name,
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: vct.Name,
+						},
+					},
+				})
+			}
+		}
+		return &ScalableRefResult{PodTemplateSpec: template, ScalableReplicas: lo.FromPtrOr(obj.Spec.Replicas, 1)}, nil
 	case autoscalingv1beta1.KindReplicaSet:
 		obj := &appsv1.ReplicaSet{}
 		if err := c.Get(ctx, key, obj); err != nil {

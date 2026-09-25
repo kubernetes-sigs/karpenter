@@ -25,9 +25,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -163,12 +165,21 @@ func (s *Scheduler) draDriversForNodeClaim(nc *NodeClaim) []string {
 
 // resolvePodClaims resolves the ResourceClaim objects referenced by a pod into concrete *resourcev1.ResourceClaim
 // objects, memoizing lookups for the duration of the scheduling loop. Claims that don't need to be generated (a
-// ResourceClaimTemplate whose status entry has a nil ResourceClaimName) are skipped. Returns an error if a referenced
-// claim has not yet been created, so the pod is deferred to a subsequent loop.
+// ResourceClaimTemplate whose status entry has a nil ResourceClaimName) are skipped. Virtual pods instead resolve
+// their templates directly because they never receive a status entry. Returns an error if a referenced claim has not
+// yet been created, so the pod is deferred to a subsequent loop.
 func (s *Scheduler) resolvePodClaims(ctx context.Context, pod *corev1.Pod) ([]*resourcev1.ResourceClaim, error) {
 	claims := make([]*resourcev1.ResourceClaim, 0, len(pod.Spec.ResourceClaims))
 	for i := range pod.Spec.ResourceClaims {
 		pc := &pod.Spec.ResourceClaims[i]
+		if isVirtualPod(pod) && pc.ResourceClaimTemplateName != nil {
+			claim, err := s.resolveVirtualPodClaimTemplate(ctx, pod, pc)
+			if err != nil {
+				return nil, err
+			}
+			claims = append(claims, claim)
+			continue
+		}
 		claimName, ok := resourceClaimName(pod, pc)
 		if !ok {
 			// The claim was not generated (e.g. a template whose status name is nil); nothing to allocate for it.
@@ -189,6 +200,32 @@ func (s *Scheduler) resolvePodClaims(ctx context.Context, pod *corev1.Pod) ([]*r
 		claims = append(claims, claim)
 	}
 	return claims, nil
+}
+
+// resolveVirtualPodClaimTemplate builds the ResourceClaim represented by a virtual pod's
+// ResourceClaimTemplate. Virtual pods only exist during the scheduling simulation, so the
+// ResourceClaim controller never creates the claim or records its name in pod status.
+func (s *Scheduler) resolveVirtualPodClaimTemplate(ctx context.Context, pod *corev1.Pod, pc *corev1.PodResourceClaim) (*resourcev1.ResourceClaim, error) {
+	key := types.NamespacedName{Namespace: pod.Namespace, Name: *pc.ResourceClaimTemplateName}
+	template, ok := s.cachedResourceClaimTemplates[key]
+	if !ok {
+		template = &resourcev1.ResourceClaimTemplate{}
+		if err := s.kubeClient.Get(ctx, key, template); err != nil {
+			return nil, fmt.Errorf("getting resourceclaimtemplate %q, %w", key, err)
+		}
+		s.cachedResourceClaimTemplates[key] = template
+	}
+	return &resourcev1.ResourceClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: pod.Namespace,
+			Name:      fmt.Sprintf("virtual-%s-%s", pod.UID, pc.Name),
+		},
+		Spec: template.Spec.Spec,
+	}, nil
+}
+
+func isVirtualPod(pod *corev1.Pod) bool {
+	return pod != nil && pod.Annotations[autoscalingv1beta1.FakePodAnnotationKey] == autoscalingv1beta1.FakePodAnnotationValue
 }
 
 // resourceClaimName resolves the name of the ResourceClaim backing a pod's claim reference. A direct
