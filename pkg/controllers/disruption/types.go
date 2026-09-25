@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -38,6 +37,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -94,11 +94,6 @@ func (e *candidateValidationError) Unwrap() error {
 	return e.err
 }
 
-func isCandidateValidationError(err error) bool {
-	var validationErr *candidateValidationError
-	return errors.As(err, &validationErr)
-}
-
 // Candidate is a state.StateNode that we are considering for disruption along with extra information to be used in
 // making that determination
 type Candidate struct {
@@ -125,6 +120,9 @@ type Candidate struct {
 	// RepairCondition, when non-empty, is the node condition that made this candidate eligible for repair. Repair sets
 	// it in ComputeCommands; the queue emits the per-condition unhealthy-disrupted metric off it at actual termination.
 	RepairCondition corev1.NodeConditionType
+	// RepairPolicyResult is the policy decision for this candidate's current node snapshot. ShouldDisrupt populates it,
+	// so a repair pass evaluates each candidate once before sorting and constructing a command.
+	RepairPolicyResult health.RepairResult
 }
 
 // ScoreResult holds the three values needed to decide whether a move passes.

@@ -62,11 +62,11 @@ func TestRepairPolicyMatcherHotPathsDoNotAllocatePerPolicy(t *testing.T) {
 	allocations := testing.AllocsPerRun(1000, func() {
 		benchmarkRepairPolicyResult = matcher.Evaluate(node, now)
 	})
-	if benchmarkRepairPolicyResult.Decision == nil {
+	if benchmarkRepairPolicyResult.Action == "" {
 		t.Fatal("expected an eligible repair policy result")
 	}
-	if allocations > 3 {
-		t.Fatalf("expected fixed result, evaluation, and scoring-slice allocations, got %.2f allocations", allocations)
+	if allocations != 0 {
+		t.Fatalf("expected evaluating policies not to allocate, got %.2f allocations", allocations)
 	}
 
 	allocations = testing.AllocsPerRun(1000, func() {

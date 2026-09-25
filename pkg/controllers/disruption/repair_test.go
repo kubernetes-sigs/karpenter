@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,24 +32,21 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	karpenterevents "sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-type nodePoolGetErrorClient struct {
+type terminationTimestampPatchErrorClient struct {
 	client.Client
-	err error
-}
-
-func (c *nodePoolGetErrorClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	if _, ok := obj.(*v1.NodePool); ok {
-		return c.err
-	}
-	return c.Client.Get(ctx, key, obj, opts...)
+	err      error
+	failNext bool
 }
 
 type podListErrorClient struct {
@@ -63,12 +59,6 @@ func (c *podListErrorClient) List(ctx context.Context, list client.ObjectList, o
 		return c.err
 	}
 	return c.Client.List(ctx, list, opts...)
-}
-
-type terminationTimestampPatchErrorClient struct {
-	client.Client
-	err      error
-	failNext bool
 }
 
 func (c *terminationTimestampPatchErrorClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
@@ -847,7 +837,7 @@ var _ = Describe("Repair", func() {
 		cluster.NodePoolState.ReleaseNodeCount(nodePool.Name, 1)
 	})
 
-	It("should reject a stale candidate that recovered before command admission", func() {
+	It("should propagate replacement simulation errors", func() {
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
 		env.Clock.Step(31 * time.Minute)
@@ -855,111 +845,22 @@ var _ = Describe("Repair", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(candidates).To(HaveLen(1))
 
-		current := ExpectExists(ctx, env.Client, node)
-		current.Status.Conditions = lo.Reject(current.Status.Conditions, func(condition corev1.NodeCondition, _ int) bool {
-			return condition.Type == "BadNode"
-		})
-		ExpectApplied(ctx, env.Client, current)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(current))
-
-		commands, err := repair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(commands).To(BeEmpty())
-	})
-
-	It("should reject a stale candidate when a PDB becomes blocking before command admission", func() {
-		initNode(nodeClaim, node)
-		bindReschedulablePod(node)
-		markUnhealthy(node, "BadNode")
-		env.Clock.Step(31 * time.Minute)
-		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, repair.ShouldDisrupt, disruption.RepairDisruptionClass, queue)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(candidates).To(HaveLen(1))
-
-		budget := test.PodDisruptionBudget(test.PDBOptions{
-			Labels:         map[string]string{"repair-test": "true"},
-			MaxUnavailable: fromInt(0),
-			Status: &policyv1.PodDisruptionBudgetStatus{
-				ObservedGeneration: 1,
-				DisruptionsAllowed: 0,
-				CurrentHealthy:     1,
-				DesiredHealthy:     1,
-				ExpectedPods:       1,
-			},
-		})
-		ExpectApplied(ctx, env.Client, budget)
-
-		commands, err := repair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(commands).To(BeEmpty())
-	})
-
-	It("should reject stale scheduling results when a candidate pod changes before command admission", func() {
-		initNode(nodeClaim, node)
-		bindReschedulablePod(node)
-		markUnhealthy(node, "BadNode")
-		env.Clock.Step(31 * time.Minute)
-		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, repair.ShouldDisrupt, disruption.RepairDisruptionClass, queue)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(candidates).To(HaveLen(1))
-
-		// This pod was not part of the original scheduling result and must force a fresh pass.
-		bindReschedulablePod(node)
-
-		commands, err := repair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(commands).To(BeEmpty())
-	})
-
-	It("should propagate errors from command admission", func() {
-		initNode(nodeClaim, node)
-		bindReschedulablePod(node)
-		markUnhealthy(node, "BadNode")
-		env.Clock.Step(31 * time.Minute)
-		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, repair.ShouldDisrupt, disruption.RepairDisruptionClass, queue)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(candidates).To(HaveLen(1))
-
-		injectedErr := errors.New("injected NodePool read failure")
-		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(
-			env.Clock,
-			cluster,
-			&nodePoolGetErrorClient{Client: env.Client, err: injectedErr},
-			prov,
-			cloudProvider,
+		injectedErr := errors.New("injected pending pod list failure")
+		failingClient := &podListErrorClient{Client: env.Client, err: injectedErr}
+		failingProvisioner := provisioning.NewProvisioner(
+			failingClient,
 			recorder,
-			queue,
-		))
-
-		commands, err := failingRepair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates...)
-		Expect(commands).To(BeEmpty())
-		Expect(err).To(MatchError(ContainSubstring(injectedErr.Error())))
-	})
-
-	It("should propagate pod list errors from command admission revalidation", func() {
-		nodePool = test.StaticNodePool(v1.NodePool{
-			Spec: v1.NodePoolSpec{
-				Replicas: lo.ToPtr[int64](1),
-				Disruption: v1.Disruption{
-					Budgets: []v1.Budget{{Nodes: "100%"}},
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool)
-		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
-		initNode(nodeClaim, node)
-		markUnhealthy(node, "BadNode")
-		env.Clock.Step(31 * time.Minute)
-		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, repair.ShouldDisrupt, disruption.RepairDisruptionClass, queue)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(candidates).To(HaveLen(1))
-
-		injectedErr := errors.New("injected pod list failure")
+			cloudProvider,
+			cluster,
+			env.Clock,
+			deviceallocation.NewController(failingClient),
+			virtualpods.NewVirtualPodCache(failingClient),
+		)
 		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(
 			env.Clock,
 			cluster,
-			&podListErrorClient{Client: env.Client, err: injectedErr},
-			prov,
+			failingClient,
+			failingProvisioner,
 			cloudProvider,
 			recorder,
 			queue,

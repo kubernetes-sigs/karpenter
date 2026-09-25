@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
-var benchmarkRepairPolicyResult *RepairPolicyResult
+var benchmarkRepairPolicyResult RepairResult
 
 func BenchmarkRepairPolicyMatcherEvaluate(b *testing.B) {
 	for _, policyCount := range []int{1, 10, 100} {

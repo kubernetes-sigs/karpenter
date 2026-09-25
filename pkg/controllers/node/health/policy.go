@@ -59,30 +59,20 @@ type RepairPolicyMatcher struct {
 	ranks          map[int]int
 }
 
-type eligibleRepairPolicy struct {
-	Priority   int
-	EligibleAt time.Time
-}
-
-// RepairPolicyEvaluation is the complete policy evaluation for one current NodeCondition.
-type RepairPolicyEvaluation struct {
-	ConditionType          corev1.NodeConditionType
-	ConditionStatus        corev1.ConditionStatus
-	Reason                 string
+// RepairResult merges all eligible policies for one Node: Score is the maximum urgency, Action is the most disruptive,
+// EligibleAt is the earliest eligibility, and TerminationGracePeriod is the shortest bound. Action is empty when no
+// policy is eligible; Condition identifies the deterministic source of the selected action.
+type RepairResult struct {
+	Score                  float64
 	Action                 cloudprovider.RepairAction
+	Condition              corev1.NodeConditionType
 	EligibleAt             time.Time
 	TerminationGracePeriod *time.Duration
-	Fallback               bool
-	MatchingPolicies       int
-	EligiblePolicies       int
-	eligiblePolicies       []eligibleRepairPolicy
 }
 
-// RepairPolicyResult is the complete policy evaluation for one Node.
-type RepairPolicyResult struct {
-	Score       float64
-	Decision    *RepairPolicyEvaluation
-	Evaluations []RepairPolicyEvaluation
+type repairSelection struct {
+	priority   int
+	eligibleAt time.Time
 }
 
 // NewRepairPolicyMatcher validates and compiles a complete provider repair policy set.
@@ -204,70 +194,36 @@ func validConditionStatus(status corev1.ConditionStatus) bool {
 	return status == corev1.ConditionTrue || status == corev1.ConditionFalse || status == corev1.ConditionUnknown
 }
 
-// Evaluate returns the score, governing repair decision, and per-condition diagnostics for one Node. Provider policies
-// are immutable after construction, so returned duration pointers must be treated as read-only.
-func (p *RepairPolicyMatcher) Evaluate(node *corev1.Node, now time.Time) *RepairPolicyResult {
-	result := &RepairPolicyResult{
-		Evaluations: make([]RepairPolicyEvaluation, 0, len(node.Status.Conditions)),
-	}
-	governingPriority := 0
-	governingDeadline := time.Time{}
-	governingIndex := -1
+// Evaluate returns the merged repair policy decision for one Node. Provider policies are immutable after construction,
+// so returned duration pointers must be treated as read-only.
+func (p *RepairPolicyMatcher) Evaluate(node *corev1.Node, now time.Time) RepairResult {
+	result := RepairResult{}
+	selected := repairSelection{}
 	for i := range node.Status.Conditions {
-		evaluation, ok := p.evaluateCondition(node.Status.Conditions[i], now)
+		condition := node.Status.Conditions[i]
+		group, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]
 		if !ok {
 			continue
 		}
-		result.Evaluations = append(result.Evaluations, evaluation)
-		evaluationIndex := len(result.Evaluations) - 1
-		for _, policy := range evaluation.eligiblePolicies {
-			age := now.Sub(policy.EligibleAt)
-			result.Score = max(result.Score, float64(p.ranks[policy.Priority])+age.Minutes()/agingConstant.Minutes())
-			if governingIndex == -1 || policy.Priority > governingPriority ||
-				(policy.Priority == governingPriority && policy.EligibleAt.Before(governingDeadline)) {
-				governingPriority = policy.Priority
-				governingDeadline = policy.EligibleAt
-				governingIndex = evaluationIndex
+		matched := false
+		for j := range group.specificPolicies {
+			policy := group.specificPolicies[j]
+			if policy.reasonRegex.MatchString(condition.Reason) {
+				matched = true
+				selected = result.considerPolicy(condition, policy, p.ranks[policy.Priority], now, selected)
 			}
 		}
-	}
-	if governingIndex != -1 {
-		result.Decision = &result.Evaluations[governingIndex]
+		if !matched {
+			selected = result.considerPolicy(
+				condition,
+				p.fallbackPolicy,
+				p.ranks[p.fallbackPolicy.Priority],
+				now,
+				selected,
+			)
+		}
 	}
 	return result
-}
-
-func (p *RepairPolicyMatcher) evaluateCondition(condition corev1.NodeCondition, now time.Time) (RepairPolicyEvaluation, bool) {
-	group, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]
-	if !ok {
-		return RepairPolicyEvaluation{}, false
-	}
-
-	result := RepairPolicyEvaluation{
-		ConditionType:    condition.Type,
-		ConditionStatus:  condition.Status,
-		Reason:           condition.Reason,
-		eligiblePolicies: make([]eligibleRepairPolicy, 0, len(group.specificPolicies)),
-	}
-	for i := range group.specificPolicies {
-		policy := group.specificPolicies[i]
-		if !policy.reasonRegex.MatchString(condition.Reason) {
-			continue
-		}
-		result.considerPolicy(policy, condition.LastTransitionTime.Time, now)
-	}
-	if result.MatchingPolicies == 0 {
-		result.Fallback = true
-		result.considerPolicy(p.fallbackPolicy, condition.LastTransitionTime.Time, now)
-	}
-	result.EligiblePolicies = len(result.eligiblePolicies)
-	slices.SortFunc(result.eligiblePolicies, func(a, b eligibleRepairPolicy) int {
-		if a.Priority != b.Priority {
-			return b.Priority - a.Priority
-		}
-		return a.EligibleAt.Compare(b.EligibleAt)
-	})
-	return result, true
 }
 
 // Matches returns true when the condition is covered by the provider policy set, regardless of toleration.
@@ -276,41 +232,43 @@ func (p *RepairPolicyMatcher) Matches(condition corev1.NodeCondition) bool {
 	return ok
 }
 
-func (r *RepairPolicyEvaluation) considerPolicy(policy compiledPolicy, transitionTime, now time.Time) {
-	r.MatchingPolicies++
-	eligibleAt := transitionTime.Add(policy.TolerationDuration)
-	if now.Before(eligibleAt) {
-		if len(r.eligiblePolicies) == 0 && (r.EligibleAt.IsZero() ||
-			eligibleAt.Before(r.EligibleAt) ||
-			(eligibleAt.Equal(r.EligibleAt) && repairActionRank(policy.Action) > repairActionRank(r.Action))) {
-			r.Action = policy.Action
-			r.EligibleAt = eligibleAt
-		}
-		return
+func (r *RepairResult) considerPolicy(
+	condition corev1.NodeCondition,
+	policy compiledPolicy,
+	rank int,
+	now time.Time,
+	selected repairSelection,
+) repairSelection {
+	eligibleAt := condition.LastTransitionTime.Add(policy.TolerationDuration)
+	if eligibleAt.After(now) {
+		return selected
 	}
-
-	r.eligiblePolicies = append(r.eligiblePolicies, eligibleRepairPolicy{
-		Priority:   policy.Priority,
-		EligibleAt: eligibleAt,
-	})
-	r.considerTerminationGracePeriod(policy.TerminationGracePeriod)
-	if len(r.eligiblePolicies) == 1 || repairActionRank(policy.Action) > repairActionRank(r.Action) {
+	age := now.Sub(eligibleAt)
+	r.Score = max(r.Score, float64(rank)+age.Minutes()/agingConstant.Minutes())
+	if r.EligibleAt.IsZero() || eligibleAt.Before(r.EligibleAt) {
+		r.EligibleAt = eligibleAt
+	}
+	if policy.TerminationGracePeriod != nil &&
+		(r.TerminationGracePeriod == nil || *policy.TerminationGracePeriod < *r.TerminationGracePeriod) {
+		r.TerminationGracePeriod = policy.TerminationGracePeriod
+	}
+	if repairActionRank(policy.Action) > repairActionRank(r.Action) ||
+		(policy.Action == r.Action && conditionPrecedes(policy.Priority, eligibleAt, condition.Type, selected, r.Condition)) {
 		r.Action = policy.Action
-		r.EligibleAt = eligibleAt
-		return
+		r.Condition = condition.Type
+		return repairSelection{priority: policy.Priority, eligibleAt: eligibleAt}
 	}
-	if policy.Action == r.Action && eligibleAt.Before(r.EligibleAt) {
-		r.EligibleAt = eligibleAt
-	}
+	return selected
 }
 
-func (r *RepairPolicyEvaluation) considerTerminationGracePeriod(terminationGracePeriod *time.Duration) {
-	if terminationGracePeriod == nil {
-		return
+func conditionPrecedes(priority int, eligibleAt time.Time, condition corev1.NodeConditionType, selected repairSelection, selectedCondition corev1.NodeConditionType) bool {
+	if priority != selected.priority {
+		return priority > selected.priority
 	}
-	if r.TerminationGracePeriod == nil || *terminationGracePeriod < *r.TerminationGracePeriod {
-		r.TerminationGracePeriod = terminationGracePeriod
+	if !eligibleAt.Equal(selected.eligibleAt) {
+		return eligibleAt.Before(selected.eligibleAt)
 	}
+	return condition < selectedCondition
 }
 
 func denseRanks(policies []cloudprovider.RepairPolicy) map[int]int {
