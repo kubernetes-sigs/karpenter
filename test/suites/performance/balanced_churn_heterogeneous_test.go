@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
@@ -61,31 +60,17 @@ func policyPrefix(p v1.ConsolidationPolicy) string {
 	return "baseline"
 }
 
-// buildFamilyRestrictedNodePool constructs a NodePool restricted to a single
-// KWOK instance family, carrying the standard suite requirements (linux
-// pinned via defaultNodePool, on-demand pinned via defaultNodePool, instance
-// size clamped < 32 to match the suite-wide default). The nodePool is built
-// from env.DefaultNodePool with the family requirement layered on.
-func buildFamilyRestrictedNodePool(env *common.Environment, nodeClass *unstructured.Unstructured, family string, policy v1.ConsolidationPolicy) *v1.NodePool {
-	np := env.DefaultNodePool(nodeClass)
-	np.Name = fmt.Sprintf("%s-%s", family, np.Name)
-	np.Spec.Template.Labels["perf.karpenter.sh/pool"] = fmt.Sprintf("%s-pool", family)
-	test.ReplaceRequirements(np,
-		v1.NodeSelectorRequirementWithMinValues{
-			Key:      v1alpha1.InstanceFamilyLabelKey,
-			Operator: corev1.NodeSelectorOpIn,
-			Values:   []string{family},
-		},
-		v1.NodeSelectorRequirementWithMinValues{
-			Key:      v1alpha1.InstanceSizeLabelKey,
-			Operator: corev1.NodeSelectorOpLt,
-			Values:   []string{"32"},
-		},
-	)
-	np.Spec.Limits = v1.Limits{}
+// buildFamilyRestrictedNodePool copies the suite NodePool and restricts it to a
+// single KWOK instance family.
+func buildFamilyRestrictedNodePool(base *v1.NodePool, family string, policy v1.ConsolidationPolicy) *v1.NodePool {
+	np := base.DeepCopy()
+	np.Name = fmt.Sprintf("%s-%s", family, base.Name)
+	test.ReplaceRequirements(np, v1.NodeSelectorRequirementWithMinValues{
+		Key:      v1alpha1.InstanceFamilyLabelKey,
+		Operator: corev1.NodeSelectorOpIn,
+		Values:   []string{family},
+	})
 	np.Spec.Disruption.ConsolidationPolicy = policy
-	np.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
-	np.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 	return np
 }
 
@@ -209,18 +194,18 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			prefix := policyPrefix(policy)
 			It(fmt.Sprintf("should split load across two heterogeneous NodePools under %s", policy), func() {
 				By("Building two family-restricted NodePools")
-				poolC := buildFamilyRestrictedNodePool(env, nodeClass, "c", policy)
-				poolM := buildFamilyRestrictedNodePool(env, nodeClass, "m", policy)
+				poolC := buildFamilyRestrictedNodePool(nodePool, "c", policy)
+				poolM := buildFamilyRestrictedNodePool(nodePool, "m", policy)
 				env.ExpectCreated(nodeClass, poolC, poolM)
 
 				By("Deploying dense workload targeting the c-family pool")
 				denseOpts := test.CreateDeploymentOptions("het-dense-app", 300, "500m", "1Gi",
-					test.WithNodeSelector(map[string]string{"perf.karpenter.sh/pool": "c-pool"}))
+					test.WithNodeSelector(map[string]string{v1.NodePoolLabelKey: poolC.Name}))
 				denseDep := test.Deployment(denseOpts)
 
 				By("Deploying sparse workload targeting the m-family pool")
 				sparseOpts := test.CreateDeploymentOptions("het-sparse-app", 100, "2500m", "8Gi",
-					test.WithNodeSelector(map[string]string{"perf.karpenter.sh/pool": "m-pool"}))
+					test.WithNodeSelector(map[string]string{v1.NodePoolLabelKey: poolM.Name}))
 				sparseDep := test.Deployment(sparseOpts)
 
 				env.ExpectCreated(denseDep, sparseDep)
