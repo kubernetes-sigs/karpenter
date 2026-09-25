@@ -23,35 +23,55 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // HistogramStats is the derived percentile summary of one labeled histogram
 // series over the observations added between LatencyHarness.Start and
 // LatencyHarness.Stop.
 type HistogramStats struct {
-	MetricName           string            `json:"metric_name"`
-	Labels               map[string]string `json:"labels,omitempty"`
-	Count                uint64            `json:"count"`
-	Sum                  float64           `json:"sum"`
-	Mean                 float64           `json:"mean"`
-	P50                  float64           `json:"p50"`
-	P90                  float64           `json:"p90"`
-	P95                  float64           `json:"p95"`
-	P99                  float64           `json:"p99"`
-	Min                  float64           `json:"min"`
-	Max                  float64           `json:"max"`
-	BucketTruncationRate float64           `json:"bucket_truncation_rate"`
+	MetricName string            `json:"metric_name"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	Count      uint64            `json:"count"`
+	Sum        float64           `json:"sum"`
+	Mean       float64           `json:"mean"`
+	P50        float64           `json:"p50"`
+	P90        float64           `json:"p90"`
+	P95        float64           `json:"p95"`
+	P99        float64           `json:"p99"`
+	Min        float64           `json:"min"`
+	Max        float64           `json:"max"`
+	// PercentilesUnreliable marks a series whose delta carried fewer than
+	// minPercentileSamples observations. Count, Sum, Mean, Min and Max stay
+	// meaningful; P50..P99 do not, and offline analysis must not plot them.
+	// See minPercentileSamples for why.
+	PercentilesUnreliable bool    `json:"percentiles_unreliable,omitempty"`
+	BucketTruncationRate  float64 `json:"bucket_truncation_rate"`
 }
 
+// minPercentileSamples is the delta sample count below which the derived
+// percentiles are reported but flagged.
+//
+// The estimator is not the problem: with 5 observations a p50 target of 2.5
+// falling between cumulative 2 at the 15s bound and 3 at the 20s bound
+// interpolates to 15 + 5*(0.5/1) = 17.5s, which is exactly what Prometheus
+// histogram_quantile specifies. A p50 over 5 samples is meaningless whatever
+// estimator produces it, and dropping interpolation would report the bucket
+// bound 20s instead, no more informative and only less precise. The sample
+// count is the thing worth surfacing, so it is.
+const minPercentileSamples = 20
+
 // TargetHistograms is the Karpenter histogram set the harness scrapes.
+//
+// karpenter_cloudprovider_duration_seconds and
+// karpenter_nodeclaims_instance_termination_duration_seconds are deliberately
+// absent: under KWOK they time the fake provider, so they measure the test
+// harness rather than Karpenter. A provider running this harness against real
+// infrastructure should add them back.
 var TargetHistograms = []string{
 	"karpenter_pods_scheduling_decision_duration_seconds",
 	"karpenter_pods_bound_duration_seconds",
@@ -59,8 +79,6 @@ var TargetHistograms = []string{
 	"karpenter_pods_provisioning_startup_duration_seconds",
 	"karpenter_scheduler_scheduling_duration_seconds",
 	"karpenter_voluntary_disruption_decision_evaluation_duration_seconds",
-	"karpenter_cloudprovider_duration_seconds",
-	"karpenter_nodeclaims_instance_termination_duration_seconds",
 	"karpenter_nodeclaims_termination_duration_seconds",
 	"karpenter_consolidation_score",
 }
@@ -98,13 +116,10 @@ type LatencyHarness struct {
 // reduction. Symmetric with StartKarpenterMetricsPoller.
 func StartLatencyHarness(env *Environment) (*LatencyHarness, error) {
 	// The leader lease can briefly name a pod that no longer exists (e.g. just
-	// after a rollout), so retry until it resolves to a live pod.
-	var pod *corev1.Pod
-	err := wait.PollUntilContextTimeout(env.Context, 5*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-		p, findErr := env.FindActiveKarpenterPod(ctx)
-		pod = p
-		return findErr == nil && p != nil, nil
-	})
+	// after a rollout), so retry until it resolves to a live pod. The retry lives
+	// in EventuallyFindActiveKarpenterPod so the metrics poller and the profiler
+	// get it too; all three discover the pod once and then reuse the name.
+	pod, err := env.EventuallyFindActiveKarpenterPod(env.Context)
 	if err != nil {
 		return nil, fmt.Errorf("finding karpenter pod: %w", err)
 	}
@@ -327,16 +342,17 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 		deltaSum = endSum
 	}
 	return HistogramStats{
-		Count:                deltaCount,
-		Sum:                  deltaSum,
-		Mean:                 deltaSum / float64(deltaCount),
-		P50:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.50),
-		P90:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.90),
-		P95:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.95),
-		P99:                  interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.99),
-		Min:                  inferMinBound(finiteBuckets, finiteCum),
-		Max:                  inferMaxBound(finiteBuckets, finiteCum),
-		BucketTruncationRate: trunc,
+		Count:                 deltaCount,
+		Sum:                   deltaSum,
+		Mean:                  deltaSum / float64(deltaCount),
+		P50:                   interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.50),
+		P90:                   interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.90),
+		P95:                   interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.95),
+		P99:                   interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.99),
+		Min:                   inferMinBound(finiteBuckets, finiteCum),
+		Max:                   inferMaxBound(finiteBuckets, finiteCum),
+		PercentilesUnreliable: deltaCount < minPercentileSamples,
+		BucketTruncationRate:  trunc,
 	}
 }
 

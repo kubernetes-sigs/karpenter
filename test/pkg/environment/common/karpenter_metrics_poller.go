@@ -99,7 +99,9 @@ func (mp *KarpenterMetricsPoller) run(ctx context.Context) {
 
 	state := &pollerState{firstSample: true}
 
-	pod, err := mp.env.FindActiveKarpenterPod(ctx)
+	// Retry the lease lookup: a single failure here aborts the poller for the
+	// whole spec and yields 0 samples, which surfaces only as a WARNING in Stop.
+	pod, err := mp.env.EventuallyFindActiveKarpenterPod(ctx)
 	if err != nil || pod == nil {
 		mp.recordError(fmt.Errorf("finding karpenter pod: %w", err))
 		return
