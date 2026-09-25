@@ -1081,7 +1081,7 @@ func (env *Environment) ExpectNoCrashes() {
 	GinkgoHelper()
 	for k, v := range env.Monitor.RestartCount("kube-system") {
 		if strings.Contains(k, "karpenter") && v > 0 {
-			Fail("expected karpenter containers to not crash")
+			Fail(fmt.Sprintf("expected karpenter containers to not crash, but %q restarted %d time(s)", k, v))
 		}
 	}
 }
