@@ -77,11 +77,14 @@ var _ = Describe("StaticDrift", func() {
 
 	Context("Backoff", func() {
 		BeforeEach(func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+				FeatureGates: test.FeatureGates{NodePoolDriftBackoff: lo.ToPtr(true)},
+			}))
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
 				[]*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			Expect(queue.NodePoolBackoff().Fail(nodePool, env.Clock.Now())).To(BeTrue())
+			Expect(nodePoolBackoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
 		})
 
 		It("should skip a backed-off static NodePool until its window expires", func() {

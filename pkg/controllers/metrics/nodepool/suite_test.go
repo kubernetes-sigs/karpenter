@@ -199,7 +199,7 @@ var _ = Describe("Metrics", func() {
 			Expect(backoff.Fail(nodePool, env.Clock.Now())).To(BeTrue())
 			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
-			_, until := backoff.Snapshot(nodePool)
+			_, until, _ := backoff.GetBackoff(nodePool)
 			env.Clock.SetTime(until.Add(time.Second))
 			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 			_, found := FindMetricWithLabelValues(metricName, map[string]string{metrics.NodePoolLabel: nodePool.Name})

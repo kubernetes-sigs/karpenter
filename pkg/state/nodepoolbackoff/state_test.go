@@ -53,25 +53,27 @@ var _ = Describe("State", func() {
 	})
 
 	expireWindow := func(nodePool *v1.NodePool) {
-		_, until := backoff.Snapshot(nodePool)
+		_, until, _ := backoff.GetBackoff(nodePool)
 		fakeClock.SetTime(until.Add(time.Second))
 	}
 
 	It("treats a never-failed NodePool as healthy", func() {
 		Expect(backoff.IsBackedOff(spark)).To(BeFalse())
 		Expect(backoff.Remaining(spark)).To(BeZero())
-		level, _ := backoff.Snapshot(spark)
+		level, _, backedOff := backoff.GetBackoff(spark)
 		Expect(level).To(Equal(0))
+		Expect(backedOff).To(BeFalse())
 	})
 
 	It("arms an exponentially-growing, jittered window on consecutive failures", func() {
 		for _, expected := range []time.Duration{base, 2 * base, 4 * base, 8 * base} {
 			expireWindow(spark)
 			Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
-			_, until := backoff.Snapshot(spark)
+			_, until, backedOff := backoff.GetBackoff(spark)
 			window := until.Sub(fakeClock.Now())
 			Expect(window).To(BeNumerically(">=", expected/2))
 			Expect(window).To(BeNumerically("<", expected))
+			Expect(backedOff).To(BeTrue())
 			Expect(backoff.IsBackedOff(spark)).To(BeTrue())
 			Expect(backoff.Remaining(spark)).To(Equal(window))
 		}
@@ -82,10 +84,10 @@ var _ = Describe("State", func() {
 		for range 12 {
 			expireWindow(spark)
 			Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
-			lastLevel, _ = backoff.Snapshot(spark)
+			lastLevel, _, _ = backoff.GetBackoff(spark)
 		}
 		Expect(lastLevel).To(Equal(5))
-		_, until := backoff.Snapshot(spark)
+		_, until, _ := backoff.GetBackoff(spark)
 		window := until.Sub(fakeClock.Now())
 		Expect(window).To(BeNumerically(">=", max/2))
 		Expect(window).To(BeNumerically("<", max))
@@ -93,12 +95,12 @@ var _ = Describe("State", func() {
 
 	It("is a no-op while the pool is already backed off", func() {
 		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
-		level1, until1 := backoff.Snapshot(spark)
+		level1, until1, _ := backoff.GetBackoff(spark)
 		Expect(level1).To(Equal(1))
 
 		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeFalse())
 		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeFalse())
-		level2, until2 := backoff.Snapshot(spark)
+		level2, until2, _ := backoff.GetBackoff(spark)
 		Expect(level2).To(Equal(1))
 		Expect(until2).To(Equal(until1))
 	})
@@ -109,23 +111,24 @@ var _ = Describe("State", func() {
 
 		fakeClock.Step(time.Second)
 		Expect(backoff.Fail(spark, firstAttemptStartedAt)).To(BeTrue())
-		_, until1 := backoff.Snapshot(spark)
+		_, until1, _ := backoff.GetBackoff(spark)
 
 		fakeClock.SetTime(until1.Add(time.Second))
 		Expect(backoff.Fail(spark, delayedAttemptStartedAt)).To(BeFalse())
-		level, until2 := backoff.Snapshot(spark)
+		level, until2, backedOff := backoff.GetBackoff(spark)
 		Expect(level).To(Equal(1))
 		Expect(until2).To(Equal(until1))
+		Expect(backedOff).To(BeFalse())
 
 		// An attempt started after the prior effective failure belongs to the next retry cycle.
 		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
-		level, _ = backoff.Snapshot(spark)
+		level, _, _ = backoff.GetBackoff(spark)
 		Expect(level).To(Equal(2))
 	})
 
 	It("escalates again once the window has elapsed", func() {
 		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
-		level1, _ := backoff.Snapshot(spark)
+		level1, _, _ := backoff.GetBackoff(spark)
 		Expect(level1).To(Equal(1))
 
 		expireWindow(spark)
@@ -133,7 +136,7 @@ var _ = Describe("State", func() {
 		Expect(backoff.Remaining(spark)).To(BeZero())
 
 		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
-		level2, _ := backoff.Snapshot(spark)
+		level2, _, _ := backoff.GetBackoff(spark)
 		Expect(level2).To(Equal(2))
 	})
 
@@ -144,15 +147,15 @@ var _ = Describe("State", func() {
 		backoff.Reset(spark)
 		Expect(backoff.IsBackedOff(spark)).To(BeFalse())
 		Expect(backoff.Remaining(spark)).To(BeZero())
-		level, _ := backoff.Snapshot(spark)
+		level, _, _ := backoff.GetBackoff(spark)
 		Expect(level).To(Equal(0))
 	})
 
 	It("de-synchronizes pools that fail at the same instant", func() {
 		Expect(backoff.Fail(spark, fakeClock.Now())).To(BeTrue())
 		Expect(backoff.Fail(ingress, fakeClock.Now())).To(BeTrue())
-		_, sparkUntil := backoff.Snapshot(spark)
-		_, ingressUntil := backoff.Snapshot(ingress)
+		_, sparkUntil, _ := backoff.GetBackoff(spark)
+		_, ingressUntil, _ := backoff.GetBackoff(ingress)
 		Expect(sparkUntil).ToNot(Equal(ingressUntil))
 	})
 

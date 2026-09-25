@@ -45,7 +45,7 @@ podDisruptionBudget:
   name: karpenter
   maxUnavailable: 1
 # -- SecurityContext for the pod.
-podSecurityContext: 
+podSecurityContext:
   fsGroup: 65536
 # -- PriorityClass name for the pod.
 priorityClassName: system-cluster-critical
@@ -91,7 +91,7 @@ controller:
     # -- Repository path to the controller image.
     repository: ""
     # -- Tag of the controller image.
-    tag: "" 
+    tag: ""
     # -- SHA256 digest of the controller image.
     digest: ""
   # -- Additional environment variables for the controller pod.
@@ -166,7 +166,7 @@ settings:
     # on pods it schedules, influencing which pod(s) the replica set controller prefers
     # to stop during a replica scale down.
     podDeletionCostManagement: false
-    # -- nodePoolDriftBackoff is enabled by default.
-    # Setting this to false disables per-NodePool exponential back-off on unrecoverable drift replacement failures.
-    nodePoolDriftBackoff: true
+    # -- nodePoolDriftBackoff is disabled by default.
+    # Setting this to true enables per-NodePool exponential back-off on unrecoverable drift replacement failures.
+    nodePoolDriftBackoff: false
 

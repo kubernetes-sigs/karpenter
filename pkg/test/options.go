@@ -105,7 +105,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			TerminateFirstDrift:       lo.FromPtrOr(opts.FeatureGates.TerminateFirstDrift, false),
 			TerminateFirstRepair:      lo.FromPtrOr(opts.FeatureGates.TerminateFirstRepair, false),
 			PodDeletionCostManagement: lo.FromPtrOr(opts.FeatureGates.PodDeletionCostManagement, false),
-			NodePoolDriftBackoff:      lo.FromPtrOr(opts.FeatureGates.NodePoolDriftBackoff, true),
+			NodePoolDriftBackoff:      lo.FromPtrOr(opts.FeatureGates.NodePoolDriftBackoff, false),
 		},
 	}
 }
