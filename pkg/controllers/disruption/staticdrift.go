@@ -24,9 +24,11 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
@@ -40,14 +42,16 @@ type StaticDrift struct {
 	provisioner   *provisioning.Provisioner
 	cloudprovider cloudprovider.CloudProvider
 	backoff       *nodepoolbackoff.State
+	recorder      events.Recorder
 }
 
-func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider, backoff *nodepoolbackoff.State) *StaticDrift {
+func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider, backoff *nodepoolbackoff.State, recorder events.Recorder) *StaticDrift {
 	return &StaticDrift{
 		cluster:       cluster,
 		provisioner:   provisioner,
 		cloudprovider: cloudprovider,
 		backoff:       backoff,
+		recorder:      recorder,
 	}
 }
 
@@ -61,8 +65,7 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 	candidatesByNodePool := lo.GroupBy(candidates, func(candidate *Candidate) string {
 		return candidate.NodePool.Name
 	})
-
-	backoffEnabled := options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff
+	backoffEnabled := options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff && d.backoff != nil
 	var cmds []Command
 	for npName, npCandidates := range candidatesByNodePool {
 		np := npCandidates[0].NodePool
@@ -73,8 +76,13 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		if disruptionBudgetMapping[npName] == 0 {
 			continue
 		}
-		if backoffEnabled && d.backoff != nil && d.backoff.IsBackedOff(np) {
-			continue
+		// Skip candidates whose NodePool is currently backed off after repeated unrecoverable
+		// drift replacement failures.
+		if backoffEnabled {
+			if level, until, backedOff := d.backoff.GetBackoff(np); backedOff {
+				d.recorder.Publish(disruptionevents.NodePoolDriftBackoff(np, until, level))
+				continue
+			}
 		}
 
 		limit, ok := np.Spec.Limits[resources.Node]

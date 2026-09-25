@@ -236,5 +236,6 @@ var (
 			Help:      "The number of times a NodePool entered or escalated drift replacement back-off after an unrecoverable failure. Labeled by NodePool.",
 		},
 		[]opmetrics.Label{metrics.NodePool},
+		opmetrics.Alpha,
 	)
 )

@@ -126,12 +126,6 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
-// NodePoolBackoff returns the shared per-NodePool drift back-off tracker. The Drift method reads
-// it during candidate selection while the Queue is the authoritative writer (on command outcome).
-func (q *Queue) NodePoolBackoff() *nodepoolbackoff.State {
-	return q.backoff
-}
-
 func (q *Queue) Name() string {
 	return "disruption.queue"
 }
@@ -200,16 +194,13 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 // command. Per the single-NodePool-per-command invariant, the key is the command's candidate
 // NodePool.
 func (q *Queue) observeDriftOutcome(ctx context.Context, cmd *Command, succeeded bool) {
-	if !options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff {
+	if !options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff || q.backoff == nil {
 		return
 	}
-	if q.backoff == nil {
-		return
+	if len(cmd.Candidates) == 0 || cmd.Candidates[0].NodePool == nil {
+		panic(fmt.Sprintf("drift command %s has no candidate NodePool", cmd.ID))
 	}
-	nodePool, ok := driftNodePool(cmd)
-	if !ok {
-		return
-	}
+	nodePool := cmd.Candidates[0].NodePool
 	if succeeded {
 		// A delete-only drift command can succeed by placing pods on existing capacity, which
 		// doesn't demonstrate that replacement capacity has recovered.
@@ -222,20 +213,8 @@ func (q *Queue) observeDriftOutcome(ctx context.Context, cmd *Command, succeeded
 		return
 	}
 	DriftBackoffsTotal.Inc(map[string]string{metrics.NodePoolLabel: nodePool.Name})
-	level, until := q.backoff.Snapshot(nodePool)
+	level, until, _ := q.backoff.GetBackoff(nodePool)
 	log.FromContext(ctx).V(1).Info("backing off drift disruption for nodepool", "NodePool", klog.KObj(nodePool), "level", level, "until", until)
-}
-
-// driftNodePool returns the NodePool a drift command targets, or false when the command has no
-// identifiable NodePool.
-func driftNodePool(cmd *Command) (*v1.NodePool, bool) {
-	if cmd == nil || len(cmd.Candidates) == 0 {
-		return nil, false
-	}
-	if cmd.Candidates[0].NodePool == nil {
-		return nil, false
-	}
-	return cmd.Candidates[0].NodePool, true
 }
 
 // waitOrTerminate will wait until launched nodeclaims are ready.

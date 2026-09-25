@@ -79,6 +79,7 @@ var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var recorder *test.EventRecorder
 var queue *disruption.Queue
+var nodePoolBackoff *nodepoolbackoff.State
 var allKnownDisruptionReasons []v1.DisruptionReason
 
 var onDemandInstances []*cloudprovider.InstanceType
@@ -106,7 +107,8 @@ var _ = BeforeSuite(func() {
 	recorder = test.NewEventRecorder()
 	draController = deviceallocation.NewController(env.Client)
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
-	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, nodepoolbackoff.NewState(env.Clock))
+	nodePoolBackoff = nodepoolbackoff.NewState(env.Clock)
+	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, nodePoolBackoff)
 })
 
 var _ = AfterSuite(func() {
@@ -132,7 +134,8 @@ var _ = BeforeEach(func() {
 	// the Drift method and the Queue share the same freshly-constructed tracker.
 	env.Clock.SetTime(time.Now())
 	cluster.Reset()
-	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, nodepoolbackoff.NewState(env.Clock)))
+	nodePoolBackoff = nodepoolbackoff.NewState(env.Clock)
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov, nodePoolBackoff))
 	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	cluster.MarkUnconsolidated()
 
@@ -1893,7 +1896,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
-		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, queue.NodePoolBackoff()), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.DeepCopyNodes()[0], NodePool: nodePool}}, Replacements: nil}
+		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock, nodePoolBackoff), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.DeepCopyNodes()[0], NodePool: nodePool}}, Replacements: nil}
 		Expect(queue.StartCommand(ctx, cmd))
 
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)

@@ -99,7 +99,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
 			StaticCapacity:          lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
 			CapacityBuffer:          lo.FromPtrOr(opts.FeatureGates.CapacityBuffer, false),
-			NodePoolDriftBackoff:    lo.FromPtrOr(opts.FeatureGates.NodePoolDriftBackoff, true),
+			NodePoolDriftBackoff:    lo.FromPtrOr(opts.FeatureGates.NodePoolDriftBackoff, false),
 		},
 	}
 }
