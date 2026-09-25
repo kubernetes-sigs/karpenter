@@ -206,7 +206,7 @@ var _ = Describe("Consolidation", func() {
 				metrics.ReasonLabel: "underutilized",
 			})
 		})
-		DescribeTable("should correctly report invalidated commands for emptiness disruption", func(validatorOpt TestEmptinessValidatorOption) {
+		DescribeTable("should correctly report invalidated commands for emptiness disruption", func(validatorOpt TestEmptinessValidatorOption, failureReason string) {
 			nodes := []*corev1.Node{node}
 			nodeClaims := []*v1.NodeClaim{nodeClaim}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -225,13 +225,17 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
-			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType()})
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
+				disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType(),
+				disruption.FailureReasonLabel:     failureReason,
+			})
 		},
-			Entry("when a candidate is blocked by budgets", WithEmptinessBlockingBudget()),
-			Entry("when candidates are filtered out due to pod churn", WithEmptinessChurn()),
-			Entry("when candidates are filtered out due to candidate being nominated", WithEmptinessNodeNomination()),
+			Entry("when a candidate is blocked by budgets", WithEmptinessBlockingBudget(), disruption.ValidationFailureReasonBudget),
+			Entry("when candidates are filtered out due to pod churn", WithEmptinessChurn(), disruption.ValidationFailureReasonChurn),
+			// Candidate discovery already filters out nominated nodes, so a nomination that lands before the re-check is churn
+			Entry("when candidates are filtered out due to candidate being nominated", WithEmptinessNodeNomination(), disruption.ValidationFailureReasonChurn),
 		)
-		DescribeTable("should correctly report invalidated commands for multi node disruption", func(validatorOpt TestConsolidationValidatorOption) {
+		DescribeTable("should correctly report invalidated commands for multi node disruption", func(validatorOpt TestConsolidationValidatorOption, failureReason string) {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -283,13 +287,19 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(multiNodeConsolidation.IsConsolidated()).To(BeFalse())
-			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType()})
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{
+				disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType(),
+				disruption.FailureReasonLabel:     failureReason,
+			})
+			// Each rejected candidate emits an event for both its Node and its NodeClaim
+			Expect(recorder.Calls(events.ConsolidationRejected)).To(Equal(4))
 		},
-			Entry("when candidates are blocked by budgets", WithUnderutilizedBlockingBudget()),
-			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
-			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination()),
+			Entry("when candidates are blocked by budgets", WithUnderutilizedBlockingBudget(), disruption.ValidationFailureReasonBudget),
+			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn(), disruption.ValidationFailureReasonChurn),
+			// Candidate discovery already filters out nominated nodes, so a nomination that lands before the re-check is churn
+			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination(), disruption.ValidationFailureReasonChurn),
 		)
-		DescribeTable("should correctly report invalidated commands for single node disruption", func(validatorOpt TestConsolidationValidatorOption) {
+		DescribeTable("should correctly report invalidated commands for single node disruption", func(validatorOpt TestConsolidationValidatorOption, failureReason string) {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -326,12 +336,79 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(singleNodeConsolidation.IsConsolidated()).To(BeFalse())
-			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType()})
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
+				disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType(),
+				disruption.FailureReasonLabel:     failureReason,
+			})
+			Expect(recorder.Calls(events.ConsolidationRejected)).To(Equal(2))
 		},
-			Entry("when a candidate is blocked by budgets", WithUnderutilizedBlockingBudget()),
-			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
-			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination()),
+			Entry("when a candidate is blocked by budgets", WithUnderutilizedBlockingBudget(), disruption.ValidationFailureReasonBudget),
+			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn(), disruption.ValidationFailureReasonChurn),
+			// Candidate discovery already filters out nominated nodes, so a nomination that lands before the re-check is churn
+			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination(), disruption.ValidationFailureReasonChurn),
 		)
+		It("should report when the validation simulation no longer needs the command's replacement", func() {
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					}}})
+			ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// Capacity that can fit the candidate's pod appears after the replace command is computed, so the
+			// validation simulation places the pod on existing capacity instead of the command's replacement.
+			spareNodeClaim, spareNode := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			addSpareCapacity := WithClusterChangeBeforeValidation(func() {
+				ExpectApplied(ctx, env.Client, spareNodeClaim, spareNode)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{spareNode}, []*v1.NodeClaim{spareNodeClaim})
+			})
+
+			c := disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NewTestSingleConsolidationValidator(nodePool, addSpareCapacity)))
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, singleNodeConsolidation.Reason())
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
+			Expect(err).To(Succeed())
+
+			cmds, err := singleNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(cmds).To(Equal([]disruption.Command{}))
+
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
+				disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType(),
+				disruption.FailureReasonLabel:     disruption.ValidationFailureReasonNoNewNodeClaim,
+			})
+			Expect(recorder.Calls(events.ConsolidationRejected)).To(Equal(2))
+		})
 	})
 	Context("Budgets", func() {
 		var numNodes = 10
