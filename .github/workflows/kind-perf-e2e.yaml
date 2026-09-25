@@ -8,9 +8,52 @@ on:
     types:
       - completed
   workflow_dispatch:
+    inputs:
+      iterations:
+        type: string
+        required: false
+        description: "Samples per test. Overrides PERF_ITERATIONS for one run."
+env:
+  # Samples per test, and so also the matrix multiplier: one sample job per test
+  # per iteration. Left at 1 so this workflow's default cost does not change;
+  # dispatch with the iterations input to take a batch.
+  PERF_ITERATIONS: "1"
 jobs:
-  kind-perf-e2e:
+  # A matrix cannot count, so the index list has to come from a job. Keeps the
+  # sample count one number rather than a hand-maintained array, and lets
+  # workflow_dispatch override it without editing the file.
+  plan:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      iterations: ${{ steps.plan.outputs.iterations }}
+      indices: ${{ steps.plan.outputs.indices }}
+    steps:
+    - name: plan the sample matrix
+      id: plan
+      env:
+        REQUESTED: ${{ inputs.iterations }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        n="${REQUESTED:-$PERF_ITERATIONS}"
+        if ! [[ "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]]; then
+          echo "iterations must be a positive integer, got '$n'" >&2
+          exit 1
+        fi
+        # jq rather than seq piped through paste and sed, so the output is valid
+        # JSON by construction and fromJSON below cannot receive a near-miss.
+        {
+          echo "iterations=$n"
+          echo "indices=$(jq -nc --argjson n "$n" '[range(1; $n + 1)]')"
+        } >> "$GITHUB_OUTPUT"
+  # One job per (test, sample), so each sample draws a fresh runner, kind cluster
+  # and Karpenter pod. Looping inside one job would be cheaper but the samples
+  # would not be independent: karpenter_p95_memory_mb reads a resident-set gauge
+  # on a pod nothing restarts, and every sample would share one draw of the
+  # hosted runner pool.
+  kind-perf-e2e:
+    needs: plan
     permissions:
       issues: write
     strategy:
@@ -31,8 +74,49 @@ jobs:
             focus: "Do Not Disrupt Performance Test"
           - name: "Self Anti-Affinity Deployment Interference"
             focus: "Self Anti-Affinity Deployment Interference"
+        iteration: ${{ fromJSON(needs.plan.outputs.indices) }}
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performance
       focus: ${{ matrix.test.focus }}
       test_name: ${{ matrix.test.name }}
+      iteration: ${{ matrix.iteration }}
+  # Artifacts are the handoff because they are the only channel from a matrix leg
+  # to a later job that does not require the legs to agree on an order. always(),
+  # so a batch that lost a sample is still summarized at the n it has.
+  perf-aggregate:
+    needs: [plan, kind-perf-e2e]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    name: aggregate ${{ needs.plan.outputs.iterations }} sample(s) per test
+    env:
+      OUTPUT_DIR: ${{ github.workspace }}/perf-batch
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      with:
+        go-version-file: go.mod
+        check-latest: true
+        cache-dependency-path: "**/go.sum"
+    # continue-on-error because download-artifact fails when its pattern matches
+    # nothing, which is what a run whose every sample job failed looks like. The
+    # aggregator names that case with a legible message.
+    - name: Download this run's samples
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      continue-on-error: true
+      with:
+        pattern: performance-results-*-${{ github.run_id }}
+        path: ${{ env.OUTPUT_DIR }}
+    - name: Aggregate the batch
+      env:
+        ITERATIONS: ${{ needs.plan.outputs.iterations }}
+      shell: bash
+      run: go run ./.github/scripts/perf-aggregate
+    - name: Upload the batch summary
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: performance-batch-summary-${{ github.run_id }}
+        path: ${{ env.OUTPUT_DIR }}/aggregated_summary.json
+        retention-days: 30
+        if-no-files-found: ignore
