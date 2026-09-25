@@ -312,6 +312,84 @@ func TestReduceHistogramDelta_PercentilesUnreliable(t *testing.T) {
 	}
 }
 
+// Test 5e. A counter that overtakes its pre-restart value carries no intrinsic
+// evidence of the reset, so deltaCounter's own end < start check cannot fire and
+// a stale baseline is subtracted. A bare counter has no structure to check
+// monotonicity across, so no per-series detector exists for this case.
+//
+// Resets are process-wide, which is the way out: a histogram in the same scrape
+// does carry the evidence, and a Karpenter restart zeroes every metric the
+// process exports, so one series going backwards invalidates the baseline for
+// all of them.
+func TestSnapshotWentBackwards_CounterOvertookAfterRestart(t *testing.T) {
+	counterName := "karpenter_consolidation_moves_total"
+	histName := "karpenter_consolidation_score"
+
+	start := map[string]*dto.MetricFamily{
+		counterName: mkFamily(counterName, dto.MetricType_COUNTER, mkCounterMetric(100, nil)),
+		histName: mkFamily(histName, dto.MetricType_HISTOGRAM,
+			mkMetric(mkHistogram(100, 90.0, scoreBuckets(0, 0, 0, 0, 100, 100, 100, 100)), nil)),
+	}
+	end := map[string]*dto.MetricFamily{
+		// 130 >= 100, so on its own this counter looks like a clean +30.
+		counterName: mkFamily(counterName, dto.MetricType_COUNTER, mkCounterMetric(130, nil)),
+		// Post-restart: 130 observations at 0.3 plus 20 at 9.0. sample_count and
+		// sample_sum both rose, so only the bucket monotonicity check can see it.
+		histName: mkFamily(histName, dto.MetricType_HISTOGRAM,
+			mkMetric(mkHistogram(150, 219.0, scoreBuckets(0, 0, 130, 130, 130, 130, 130, 150)), nil)),
+	}
+
+	// Pin the information limit: the counter alone reports the wrong delta and
+	// has no way to know. This is the behavior that makes snapshot-wide
+	// detection necessary, not the behavior we want to keep.
+	if got := deltaCounter(counterName, start[counterName], end[counterName])[counterName]; got != 30 {
+		t.Errorf("deltaCounter against a stale baseline: got %d, want 30; if this changed, a per-series counter detector now exists and this test needs rewriting", got)
+	}
+
+	series, backwards := snapshotWentBackwards(start, end)
+	if !backwards {
+		t.Fatal("snapshotWentBackwards: got false, want true; the score histogram went backwards, so the whole baseline is invalid")
+	}
+	if series != histName {
+		t.Errorf("offending series: got %q, want %q", series, histName)
+	}
+
+	// With the baseline dropped, the counter reports the post-restart total.
+	if got := deltaCounter(counterName, nil, end[counterName])[counterName]; got != 130 {
+		t.Errorf("deltaCounter after dropping the baseline: got %d, want 130", got)
+	}
+}
+
+// Test 5f. snapshotWentBackwards must not fire on a valid pair of scrapes, or
+// every delta would silently become an absolute total.
+func TestSnapshotWentBackwards_ValidProgressIsNotAReset(t *testing.T) {
+	counterName := "karpenter_consolidation_moves_total"
+	histName := "karpenter_consolidation_score"
+
+	start := map[string]*dto.MetricFamily{
+		counterName: mkFamily(counterName, dto.MetricType_COUNTER, mkCounterMetric(100, nil)),
+		histName: mkFamily(histName, dto.MetricType_HISTOGRAM,
+			mkMetric(mkHistogram(100, 60.0, scoreBuckets(0, 0, 0, 40, 100, 100, 100, 100)), nil)),
+	}
+	end := map[string]*dto.MetricFamily{
+		counterName: mkFamily(counterName, dto.MetricType_COUNTER, mkCounterMetric(175, nil)),
+		histName: mkFamily(histName, dto.MetricType_HISTOGRAM,
+			mkMetric(mkHistogram(175, 130.0, scoreBuckets(0, 0, 0, 55, 175, 175, 175, 175)), nil)),
+	}
+	if series, backwards := snapshotWentBackwards(start, end); backwards {
+		t.Errorf("snapshotWentBackwards on valid progress: got true for %q, want false", series)
+	}
+	// A series present only at end must not count as backwards movement either.
+	end["karpenter_nodes_created_total"] = mkFamily("karpenter_nodes_created_total", dto.MetricType_COUNTER, mkCounterMetric(12, nil))
+	if series, backwards := snapshotWentBackwards(start, end); backwards {
+		t.Errorf("snapshotWentBackwards with a new series at end: got true for %q, want false", series)
+	}
+	// A nil start snapshot is the already-reset case, not a reset to detect.
+	if _, backwards := snapshotWentBackwards(nil, end); backwards {
+		t.Error("snapshotWentBackwards with nil start: got true, want false")
+	}
+}
+
 // Test 6. Multi-series histogram: same metric name, different label sets.
 // deltaHistogram should emit one HistogramStats per (name, label-fingerprint).
 func TestDeltaHistogram_MultiSeries(t *testing.T) {
