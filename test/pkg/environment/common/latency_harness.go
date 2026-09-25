@@ -23,11 +23,14 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // HistogramStats is the derived percentile summary of one labeled histogram
@@ -93,8 +96,15 @@ type LatencyHarness struct {
 // once, and stores a compacted snapshot (target series only) for later delta
 // reduction. Symmetric with StartKarpenterMetricsPoller.
 func StartLatencyHarness(env *Environment) (*LatencyHarness, error) {
-	pod, err := env.FindActiveKarpenterPod(env.Context)
-	if err != nil || pod == nil {
+	// The leader lease can briefly name a pod that no longer exists (e.g. just
+	// after a rollout), so retry until it resolves to a live pod.
+	var pod *corev1.Pod
+	err := wait.PollUntilContextTimeout(env.Context, 5*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		p, findErr := env.FindActiveKarpenterPod(ctx)
+		pod = p
+		return findErr == nil && p != nil, nil
+	})
+	if err != nil {
 		return nil, fmt.Errorf("finding karpenter pod: %w", err)
 	}
 	h := &LatencyHarness{env: env, podName: pod.Name}

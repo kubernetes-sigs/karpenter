@@ -23,6 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -41,14 +42,6 @@ var balancedPolicies = []v1.ConsolidationPolicy{
 	v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 	v1.ConsolidationPolicyBalanced,
 }
-
-// suiteConsolidateAfter mirrors the value pinned in suite_test.go BeforeEach.
-// Update in lockstep if the suite-wide default changes.
-const suiteConsolidateAfter = 30 * time.Second
-
-// scaleAndSettleWaitFactor sets the sleep after scale-out at 2× ConsolidateAfter
-// to give the consolidation controller two full evaluation cycles before we sample metrics.
-const scaleAndSettleWaitFactor = 2
 
 // policyPrefix maps a ConsolidationPolicy to the short filePrefix segment
 // used in artifact filenames. WhenEmptyOrUnderutilized is the reference
@@ -76,14 +69,13 @@ func buildFamilyRestrictedNodePool(base *v1.NodePool, family string, policy v1.C
 
 // scaleAndSettle updates the deployment to targetReplicas, waits for pods to
 // reach that count, then sleeps two consolidateAfter cycles so the
-// disruption controller has time to act before the round-end capture.
+// disruption controller has time to act before the next round.
 func scaleAndSettle(env *common.Environment, dep *appsv1.Deployment, targetReplicas int32, timeout time.Duration) {
-	replicas := targetReplicas
-	dep.Spec.Replicas = &replicas
+	dep.Spec.Replicas = lo.ToPtr(targetReplicas)
 	env.ExpectUpdated(dep)
 	sel := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 	env.EventuallyExpectHealthyPodCountWithTimeout(timeout, sel, int(targetReplicas))
-	time.Sleep(scaleAndSettleWaitFactor * suiteConsolidateAfter)
+	time.Sleep(2 * lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration))
 }
 
 // writeLatencySidecar emits result to OUTPUT_DIR/<filePrefix>_latency.json via
@@ -157,14 +149,12 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				By("Round 3: scale in to 200 pods")
 				scaleAndSettle(env, dep, 200, 10*time.Minute)
 
-				By("Capturing LatencyHarness result at end of churn window")
-				result, err := h.Stop()
-				Expect(err).ToNot(HaveOccurred())
-
-				By("Emitting the consolidation report and latency sidecar")
+				By("Waiting for consolidation to settle after the last round")
 				consolidationReport, err := ReportConsolidation(env,
 					fmt.Sprintf("Balanced Churn Chain %s", policy),
 					400, 200, initialNodes, 20*time.Minute)
+				Expect(err).ToNot(HaveOccurred())
+				result, err := h.Stop()
 				Expect(err).ToNot(HaveOccurred())
 				emitPolicyRun(consolidationReport,
 					fmt.Sprintf("balanced_churn_%s_consolidation", prefix),
