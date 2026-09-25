@@ -277,18 +277,13 @@ func (env *Environment) EventuallyFindActiveKarpenterPod(ctx context.Context) (*
 	var lastErr error
 	if err := wait.PollUntilContextTimeout(ctx, leaderPodPollInterval, leaderPodPollTimeout, true,
 		func(ctx context.Context) (bool, error) {
-			p, findErr := env.FindActiveKarpenterPod(ctx)
-			switch {
-			case findErr != nil:
-				lastErr = findErr
-				return false, nil
-			case p == nil:
+			// Never returns an error: a failed lookup means keep polling, and
+			// the cause is kept in lastErr for the timeout message below.
+			pod, lastErr = env.FindActiveKarpenterPod(ctx)
+			if lastErr == nil && pod == nil {
 				lastErr = fmt.Errorf("leader lease resolved to a nil pod")
-				return false, nil
-			default:
-				pod = p
-				return true, nil
 			}
+			return lastErr == nil, nil
 		}); err != nil {
 		if lastErr != nil {
 			return nil, fmt.Errorf("%w (last lookup error: %w)", err, lastErr)

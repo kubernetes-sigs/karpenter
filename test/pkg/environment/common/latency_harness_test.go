@@ -223,6 +223,95 @@ func TestReduceHistogramDelta_CounterReset(t *testing.T) {
 	}
 }
 
+// scoreBuckets builds the production karpenter_consolidation_score bucket
+// layout from cumulative counts, so the tests below exercise the same bounds
+// the Balanced threshold assertion reads.
+func scoreBuckets(cum ...uint64) []*dto.Bucket {
+	bounds := []float64{0.1, 0.25, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0}
+	if len(cum) != len(bounds) {
+		panic("scoreBuckets: cum length must match the production bucket count")
+	}
+	out := make([]*dto.Bucket, len(bounds))
+	for i, b := range bounds {
+		out[i] = mkBucket(b, cum[i])
+	}
+	return out
+}
+
+// Test 5b. Restart where the post-restart histogram overtakes the pre-restart
+// one on BOTH sample_count and sample_sum, so neither scalar reveals the reset.
+// Only a per-bucket comparison does. Subtracting the stale baseline here
+// under-reports Count and, because the resulting cumulative delta is no longer
+// monotonic, hides the highest occupied bucket from inferMaxBound. That turns a
+// rejected score of 9.0 into a reported Max of 0.33, which silently satisfies
+// the rejected arm's Max <= 0.5.
+func TestReduceHistogramDelta_ResetWithHigherEndCountAndSum(t *testing.T) {
+	// Pre-restart: 100 observations at 0.9, so le=1.0 and above.
+	start := mkHistogram(100, 90.0, scoreBuckets(0, 0, 0, 0, 100, 100, 100, 100))
+	// Post-restart: 130 at 0.3 (le=0.33) plus 20 at 9.0 (le=10.0).
+	// count 150 > 100 and sum 219 > 90, so both scalar checks pass.
+	end := mkHistogram(150, 219.0, scoreBuckets(0, 0, 130, 130, 130, 130, 130, 150))
+
+	if end.GetSampleCount() <= start.GetSampleCount() || end.GetSampleSum() <= start.GetSampleSum() {
+		t.Fatal("fixture no longer exercises the scalar-checks-pass path")
+	}
+	stats := reduceHistogramDelta(end, start)
+	if stats.Count != 150 {
+		t.Errorf("Count: got %d, want 150 (a reset must discard the stale baseline)", stats.Count)
+	}
+	if math.Abs(stats.Max-10.0) > 1e-9 {
+		t.Errorf("Max: got %v, want 10.0 (the 9.0 observations must stay visible)", stats.Max)
+	}
+	if math.Abs(stats.Min-0.25) > 1e-9 {
+		t.Errorf("Min: got %v, want 0.25", stats.Min)
+	}
+}
+
+// Test 5c. Min and Max over the production score layout. Pins the bounds the
+// Balanced threshold assertion compares against, which no other test covers,
+// and pins the approved arm's blind interval so a later tightening has a
+// failing test to work against.
+func TestReduceHistogramDelta_ScoreBucketBounds(t *testing.T) {
+	// A score of exactly 0.5 is approved (>= threshold) and lands in le=0.5,
+	// whose lower bound is 0.33. This is the case that forces the assertion's
+	// bound down to 0.33 rather than 0.5.
+	atThreshold := reduceHistogramDelta(mkHistogram(40, 20.0, scoreBuckets(0, 0, 0, 40, 40, 40, 40, 40)), nil)
+	if math.Abs(atThreshold.Min-0.33) > 1e-9 {
+		t.Errorf("Min at score 0.5: got %v, want 0.33", atThreshold.Min)
+	}
+	// A score of 0.4 must be rejected, but it lands in that same le=0.5 bucket,
+	// so a run that wrongly approves it is bucket-identical to the run above and
+	// reports the same Min of 0.33. Min >= 0.33 cannot separate the two. That is
+	// the (0.33, 0.5) blind interval, stated here as an equality on purpose.
+	wronglyApproved := reduceHistogramDelta(mkHistogram(40, 16.0, scoreBuckets(0, 0, 0, 40, 40, 40, 40, 40)), nil)
+	if wronglyApproved.Min != atThreshold.Min {
+		t.Errorf("blind interval closed unexpectedly: Min %v vs %v; the approved arm can now distinguish 0.4 from 0.5, so tighten the assertion",
+			wronglyApproved.Min, atThreshold.Min)
+	}
+	// A comfortably approved score of 0.6 skips le=0.5 entirely, so Min rises.
+	approved := reduceHistogramDelta(mkHistogram(40, 24.0, scoreBuckets(0, 0, 0, 0, 40, 40, 40, 40)), nil)
+	if math.Abs(approved.Min-0.5) > 1e-9 {
+		t.Errorf("Min at score 0.6: got %v, want 0.5", approved.Min)
+	}
+	// Rejected: 40 observations at 0.2, so le=0.25 is the only occupied bucket.
+	rejected := reduceHistogramDelta(mkHistogram(40, 8.0, scoreBuckets(0, 40, 40, 40, 40, 40, 40, 40)), nil)
+	if math.Abs(rejected.Max-0.25) > 1e-9 {
+		t.Errorf("rejected Max at score 0.2: got %v, want 0.25", rejected.Max)
+	}
+}
+
+// Test 5d. PercentilesUnreliable tracks the minimum sample count.
+func TestReduceHistogramDelta_PercentilesUnreliable(t *testing.T) {
+	low := reduceHistogramDelta(mkHistogram(5, 1.0, scoreBuckets(5, 5, 5, 5, 5, 5, 5, 5)), nil)
+	if !low.PercentilesUnreliable {
+		t.Errorf("PercentilesUnreliable: got false at Count=5, want true")
+	}
+	high := reduceHistogramDelta(mkHistogram(40, 8.0, scoreBuckets(0, 40, 40, 40, 40, 40, 40, 40)), nil)
+	if high.PercentilesUnreliable {
+		t.Errorf("PercentilesUnreliable: got true at Count=40, want false")
+	}
+}
+
 // Test 6. Multi-series histogram: same metric name, different label sets.
 // deltaHistogram should emit one HistogramStats per (name, label-fingerprint).
 func TestDeltaHistogram_MultiSeries(t *testing.T) {

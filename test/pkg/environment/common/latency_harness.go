@@ -101,6 +101,11 @@ type LatencyResult struct {
 	Counters     map[string]uint64
 }
 
+// processStartTimeMetric is the standard Prometheus process-collector gauge.
+// It changes value only when the exporting process restarts, which is the one
+// reliable signal that every counter and histogram behind it reset to zero.
+const processStartTimeMetric = "process_start_time_seconds"
+
 // LatencyHarness captures a start-of-phase snapshot of Karpenter's /metrics
 // endpoint and produces per-histogram percentile summaries by bucket-count
 // delta at Stop. It reuses the pod-proxy scrape pattern from
@@ -109,6 +114,9 @@ type LatencyHarness struct {
 	env     *Environment
 	podName string
 	start   map[string]*dto.MetricFamily
+	// startProcessTime is process_start_time_seconds at Start. Stop compares
+	// it to decide whether the start snapshot is still a valid baseline.
+	startProcessTime float64
 }
 
 // StartLatencyHarness discovers the active Karpenter pod, scrapes /metrics
@@ -129,6 +137,7 @@ func StartLatencyHarness(env *Environment) (*LatencyHarness, error) {
 		return nil, fmt.Errorf("initial scrape: %w", err)
 	}
 	h.start = compactFamilies(families)
+	h.startProcessTime = getGaugeValue(families, processStartTimeMetric)
 	GinkgoWriter.Printf("LatencyHarness: started, scraping pod kube-system/%s\n", pod.Name)
 	return h, nil
 }
@@ -151,23 +160,48 @@ func (h *LatencyHarness) Stop() (*LatencyResult, error) {
 			return nil, fmt.Errorf("end scrape: %w", err)
 		}
 	}
+	start := h.startSnapshot(end)
 	res := &LatencyResult{
 		LatencyStats: map[string]HistogramStats{},
 		Counters:     map[string]uint64{},
 	}
 	for _, name := range TargetHistograms {
-		for key, stats := range deltaHistogram(name, h.start[name], end[name]) {
+		for key, stats := range deltaHistogram(name, start[name], end[name]) {
 			res.LatencyStats[key] = stats
 		}
 	}
 	for _, name := range TargetCounters {
-		for key, delta := range deltaCounter(name, h.start[name], end[name]) {
+		for key, delta := range deltaCounter(name, start[name], end[name]) {
 			res.Counters[key] = delta
 		}
 	}
 	GinkgoWriter.Printf("LatencyHarness: stopped, %d histogram series, %d counter series\n",
 		len(res.LatencyStats), len(res.Counters))
 	return res, nil
+}
+
+// startSnapshot returns the baseline to diff end against, or nil when the
+// baseline is not valid for it.
+//
+// If Karpenter restarted, or Stop ended up scraping a different pod after a
+// leader handover, every counter and histogram behind end restarted from zero
+// and the start snapshot is not a baseline for it. Subtracting it anyway
+// under-reports Count and leaves the cumulative bucket delta non-monotonic,
+// which hides the highest occupied bucket from inferMaxBound and silently turns
+// a rejected score above the threshold into a passing Max.
+//
+// process_start_time_seconds changes only when the exporting process restarts,
+// so a change in it covers both cases. reduceHistogramDelta catches what this
+// misses (a scrape with no process collector) by rejecting a non-monotonic
+// delta per series.
+func (h *LatencyHarness) startSnapshot(end map[string]*dto.MetricFamily) map[string]*dto.MetricFamily {
+	endProcessTime := getGaugeValue(end, processStartTimeMetric)
+	if h.startProcessTime == 0 || endProcessTime == 0 || endProcessTime == h.startProcessTime {
+		return h.start
+	}
+	GinkgoWriter.Printf("LatencyHarness: karpenter process restarted mid-window (process_start_time_seconds %.0f -> %.0f); discarding the start snapshot, deltas cover the post-restart window only\n",
+		h.startProcessTime, endProcessTime)
+	return nil
 }
 
 // scrapeKarpenterMetricFamilies fetches and parses /metrics from a Karpenter
@@ -191,7 +225,7 @@ func scrapeKarpenterMetricFamilies(ctx context.Context, env *Environment, podNam
 // response contains hundreds of families; retaining only the target set
 // keeps memory bounded across long test phases.
 func compactFamilies(families map[string]*dto.MetricFamily) map[string]*dto.MetricFamily {
-	keep := make(map[string]*dto.MetricFamily, len(TargetHistograms)+len(TargetCounters))
+	keep := make(map[string]*dto.MetricFamily, len(TargetHistograms)+len(TargetCounters)+1)
 	for _, n := range TargetHistograms {
 		if f, ok := families[n]; ok {
 			keep[n] = f
@@ -201,6 +235,9 @@ func compactFamilies(families map[string]*dto.MetricFamily) map[string]*dto.Metr
 		if f, ok := families[n]; ok {
 			keep[n] = f
 		}
+	}
+	if f, ok := families[processStartTimeMetric]; ok {
+		keep[processStartTimeMetric] = f
 	}
 	return keep
 }
@@ -306,20 +343,29 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 	}
 	endCount := end.GetSampleCount()
 	endSum := end.GetSampleSum()
-	startCount, startSum, startCumBy := resolveDeltaBaseline(startHistogram, endCount)
+	endBuckets := end.GetBucket()
+	startCount, startSum, startCumBy := resolveDeltaBaseline(startHistogram, end)
+	deltaCum, ok := cumulativeDelta(endBuckets, startCumBy)
+	if !ok {
+		// The subtraction produced a distribution that is not monotonically
+		// non-decreasing, which a genuine before/after pair of the same
+		// accumulating histogram can never be: every observation at or below a
+		// bucket bound is also at or below every higher bound. So the baseline
+		// does not belong to this series, typically because the process
+		// restarted and re-accumulated past the old sample_count. Discard it
+		// and treat end as the whole delta.
+		//
+		// This matters because a stale baseline leaves deltaCum non-monotonic,
+		// and inferMaxBound's per-bucket scan then stops at the first large
+		// bucket and never reaches the highest occupied one. A rejected score
+		// of 9.0 gets reported as a Max of 0.33, which silently satisfies the
+		// rejected arm's Max <= threshold.
+		startCount, startSum = 0, 0
+		deltaCum, _ = cumulativeDelta(endBuckets, nil)
+	}
 	deltaCount := endCount - startCount
 	if deltaCount == 0 {
 		return HistogramStats{Count: 0, Sum: endSum - startSum}
-	}
-	endBuckets := end.GetBucket()
-	deltaCum := make([]uint64, len(endBuckets))
-	for i, b := range endBuckets {
-		endCum := b.GetCumulativeCount()
-		startCum := startCumBy[b.GetUpperBound()]
-		if endCum < startCum {
-			startCum = 0
-		}
-		deltaCum[i] = endCum - startCum
 	}
 	// Prometheus's text parser retains the +Inf bucket in end.GetBucket().
 	// Percentile / Max derivation must run against the finite tail only;
@@ -338,9 +384,6 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 		trunc = float64(deltaCount-lastFiniteCum) / float64(deltaCount)
 	}
 	deltaSum := endSum - startSum
-	if deltaSum < 0 {
-		deltaSum = endSum
-	}
 	return HistogramStats{
 		Count:                 deltaCount,
 		Sum:                   deltaSum,
@@ -357,16 +400,20 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 }
 
 // resolveDeltaBaseline returns the baseline sample count, sum, and cumulative
-// bucket counts (keyed by upper bound) that the delta reduction subtracts
-// from end. A nil startHistogram or a counter-reset (endCount < startCount,
-// typically from a pod restart) yields a zero baseline so end is treated as
-// the whole delta.
-func resolveDeltaBaseline(startHistogram *dto.Histogram, endCount uint64) (uint64, float64, map[float64]uint64) {
+// bucket counts (keyed by upper bound) that the delta reduction subtracts from
+// end. A nil startHistogram, or a sample_count or sample_sum that went
+// backwards (the visible half of a counter reset), yields a zero baseline so
+// end is treated as the whole delta. Bucket-level validation belongs to
+// cumulativeDelta.
+//
+// LatencyHarness.Stop additionally discards the whole start snapshot when
+// process_start_time_seconds moved, which is the direct restart signal. These
+// checks are the per-series fallback for scrapes with no process collector.
+func resolveDeltaBaseline(startHistogram, end *dto.Histogram) (uint64, float64, map[float64]uint64) {
 	if startHistogram == nil {
 		return 0, 0, nil
 	}
-	startCount := startHistogram.GetSampleCount()
-	if endCount < startCount {
+	if end.GetSampleCount() < startHistogram.GetSampleCount() || end.GetSampleSum() < startHistogram.GetSampleSum() {
 		return 0, 0, nil
 	}
 	buckets := startHistogram.GetBucket()
@@ -374,7 +421,33 @@ func resolveDeltaBaseline(startHistogram *dto.Histogram, endCount uint64) (uint6
 	for _, b := range buckets {
 		cumBy[b.GetUpperBound()] = b.GetCumulativeCount()
 	}
-	return startCount, startHistogram.GetSampleSum(), cumBy
+	return startHistogram.GetSampleCount(), startHistogram.GetSampleSum(), cumBy
+}
+
+// cumulativeDelta subtracts the baseline cumulative counts from end's buckets,
+// matching on upper bound. A nil startCumBy yields end unchanged.
+//
+// It returns false when the subtraction underflows, or when the result is not
+// monotonically non-decreasing. Either means startCumBy is not a valid baseline
+// for these buckets, because a real delta of one accumulating histogram is
+// always monotonic: an observation at or below one bound is at or below every
+// higher bound, so a lower bucket cannot gain more than a higher one.
+func cumulativeDelta(endBuckets []*dto.Bucket, startCumBy map[float64]uint64) ([]uint64, bool) {
+	out := make([]uint64, len(endBuckets))
+	prev := uint64(0)
+	for i, b := range endBuckets {
+		endCum := b.GetCumulativeCount()
+		startCum := startCumBy[b.GetUpperBound()]
+		if endCum < startCum {
+			return out, false
+		}
+		out[i] = endCum - startCum
+		if out[i] < prev {
+			return out, false
+		}
+		prev = out[i]
+	}
+	return out, true
 }
 
 // inferMaxBound returns the upper bound of the highest finite bucket that
