@@ -27,6 +27,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -78,9 +79,11 @@ func writeLatencySidecar(testName, filePrefix string, policy v1.ConsolidationPol
 		LatencyStats:        result.LatencyStats,
 		Counters:            result.Counters,
 	}
-	if err := common.WriteLatencySidecar(os.Getenv("OUTPUT_DIR"), filePrefix, sc); err != nil {
-		GinkgoWriter.Printf("LatencyHarness: %v\n", err)
-	}
+	// The sidecar is the artifact this harness exists to produce and e2e.yaml
+	// uploads it, so a write failure is a spec failure rather than a log line.
+	// WriteLatencySidecar is a no-op when OUTPUT_DIR is unset, which is how the
+	// suite runs locally.
+	Expect(common.WriteLatencySidecar(os.Getenv("OUTPUT_DIR"), filePrefix, sc)).To(Succeed())
 }
 
 // emitPolicyRun writes both the PerformanceReport JSON and the latency
@@ -98,40 +101,69 @@ const scoreBucketBelowThreshold = 0.33
 // expectBalancedDecisionsMatchThreshold fails if Balanced scored no moves, or
 // if any recorded decision disagrees with the 1/k threshold: approved scores
 // (>= 0.5) must land above the 0.33 bucket and rejected scores (< 0.5) at or
-// below the 0.5 bucket.
+// below the 0.5 bucket. It returns the set of NodePools that scored a move.
 //
-// Resolution limit, approved arm. Min and Max come from histogram bucket
+// Read the limits before trusting this.
+//
+// 1. It is partly self-referential. The decision label is written from the
+// same predicate it checks: ApproveCommand labels a move "approved" exactly
+// when result.Score() >= result.Threshold(), for whatever K is in effect. So
+// consistency between the label and the score holds by construction, and what
+// the assertion really pins is the bucket the score landed in.
+//
+// 2. Resolution limit on the approved arm. Min and Max come from bucket
 // bounds, not raw observations, and the score buckets are
 // {0.1, 0.25, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0}. A correctly approved score
-// (>= 0.5) lands in the le=0.5 bucket, whose lower bound is 0.33, so Min is
-// 0.33. A wrongly approved score anywhere in (0.33, 0.5) lands in that same
-// bucket and reports the same Min. The approved arm therefore catches a
-// threshold slip of more than one bucket, not a smaller one. Closing that gap
-// needs the exact score, which only the ConsolidationApproved event carries.
+// (>= 0.5) lands in the le=0.5 bucket whose lower bound is 0.33, so Min is
+// 0.33. A wrongly approved score anywhere in (0.33, 0.5) lands in the same
+// bucket and reports the same Min. Combined with point 1, a BalancedK of 3
+// (threshold 0.3334) passes both arms: approved scores still sit above 0.33
+// and rejected scores still sit at or below 0.33. The blind interval on the
+// threshold is (0.33, 0.5], so k in [2, 3.03).
 //
-// The rejected arm is tight: any rejected score above 0.5 lands in le=1.0 or
-// higher and fails. That is the arm that catches a K versus 1/K inversion.
+// 3. Neither arm requires a rejection to occur, so a regression that approves
+// every move passes as long as the approved scores are genuinely >= 0.33.
+// Requiring a non-zero rejection count would close that, but these fixtures
+// do not force scores near the boundary, so it would trade a blind spot for a
+// flake.
 //
-// Neither arm requires a rejection to occur, so a regression that approves
-// every move still passes as long as the approved scores are genuinely
-// >= 0.33. Asserting a non-zero rejection count would close that, but these
-// fixtures do not guarantee one, so it would trade a blind spot for a flake.
-func expectBalancedDecisionsMatchThreshold(result *common.LatencyResult) {
+// What it does catch, unambiguously: Balanced not taking effect at all. The
+// score histogram is observed only inside balancedEvaluator, gated on the
+// NodePool's policy being Balanced, and the policy label is read back from the
+// NodePool the controller reconciled. If Balanced silently fell back, no
+// series carries policy="Balanced", scored stays 0 and this fails. That
+// read-back is the only thing in the suite proving the Balanced code path ran.
+// It also catches a K of 1, 4 or 10, and a metric or label rename.
+//
+// Closing point 2 needs the exact score rather than a bucket. Only the
+// ConsolidationApproved event carries it.
+func expectBalancedDecisionsMatchThreshold(result *common.LatencyResult) sets.Set[string] {
 	threshold := 1.0 / float64(v1.BalancedK)
 	scored := uint64(0)
+	pools := sets.New[string]()
 	for key, s := range result.LatencyStats {
 		if s.MetricName != "karpenter_consolidation_score" || s.Count == 0 || s.Labels["policy"] != string(v1.ConsolidationPolicyBalanced) {
 			continue
 		}
-		scored += s.Count
-		switch s.Labels["decision"] {
+		// DecisionDim also declares no-op, replace and delete. Balanced only
+		// ever emits approved or rejected here, so anything else means the
+		// emission side changed and this assertion stopped covering it.
+		switch decision := s.Labels["decision"]; decision {
 		case "approved":
 			Expect(s.Min).To(BeNumerically(">=", scoreBucketBelowThreshold), "%s: approved a move scoring below the %.2f threshold", key, threshold)
 		case "rejected":
 			Expect(s.Max).To(BeNumerically("<=", threshold), "%s: rejected a move scoring above the %.2f threshold", key, threshold)
+		default:
+			Fail(fmt.Sprintf("%s: unexpected decision label %q on a Balanced consolidation score; this assertion no longer covers it", key, decision))
 		}
+		// Counted after the switch so an unrecognized decision cannot satisfy
+		// the scored > 0 check below.
+		scored += s.Count
+		pools.Insert(s.Labels["nodepool"])
 	}
 	Expect(scored).To(BeNumerically(">", 0), "Balanced recorded no scored consolidation moves")
+	GinkgoWriter.Printf("Balanced scored %d consolidation moves across nodepools %v\n", scored, sets.List(pools))
+	return pools
 }
 
 var _ = Describe("Performance", Label(debug.NoWatch), func() {
@@ -166,8 +198,13 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				400, 15*time.Minute,
 				"balanced_churn_scale_out")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(scaleOutReport.TotalPods).To(Equal(400))
+			// TotalPods is the argument passed above, echoed back by
+			// ReportScaleOut, so asserting it proves nothing;
+			// EventuallyExpectHealthyPodCount inside the helper is the real pod
+			// check. TotalNodes is measured, and a zero would make the
+			// consolidation report below meaningless.
 			initialNodes := scaleOutReport.TotalNodes
+			Expect(initialNodes).To(BeNumerically(">", 0))
 
 			By("Starting LatencyHarness for the churn window")
 			h, err := common.StartLatencyHarness(env)
@@ -238,8 +275,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				400, 15*time.Minute,
 				"balanced_heterogeneous_scale_out")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(scaleOutReport.TotalPods).To(Equal(400))
 			initialNodes := scaleOutReport.TotalNodes
+			Expect(initialNodes).To(BeNumerically(">", 0))
 
 			By("Starting LatencyHarness for the consolidation window")
 			h, err := common.StartLatencyHarness(env)
@@ -263,7 +300,17 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"balanced_heterogeneous_consolidation",
 				v1.ConsolidationPolicyBalanced, result)
 
-			expectBalancedDecisionsMatchThreshold(result)
+			By("Checking the scored moves belong to the two fixture NodePools")
+			// This context exists to exercise per-pool decisions, so the
+			// nodepool label is the point. Asserting the observed pools are a
+			// subset of the two created catches scoring attributed to a pool
+			// the fixture never made. It deliberately does not require both
+			// pools to have scored: whether the m-pool consolidates at all
+			// depends on how KWOK packs 60 sparse pods, and requiring it would
+			// make a 25-minute spec flaky.
+			scoredPools := expectBalancedDecisionsMatchThreshold(result)
+			Expect(scoredPools.Difference(sets.New(poolC.Name, poolM.Name)).UnsortedList()).To(BeEmpty(),
+				"Balanced scored a move against a NodePool this fixture did not create")
 		})
 	})
 })

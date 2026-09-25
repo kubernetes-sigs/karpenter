@@ -40,14 +40,19 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 
 			scaleOutReport, err := ReportScaleOutWithOutput(env, "Balanced Basic Scale Out", 1000, 15*time.Minute, "balanced_basic_scale_out")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(scaleOutReport.TotalPods).To(Equal(1000))
+			// TotalPods just echoes the argument above; TotalNodes is measured.
+			Expect(scaleOutReport.TotalNodes).To(BeNumerically(">", 0))
+
+			// Start the harness before submitting the scale-in. Any scoring
+			// between the update and the start scrape lands in the baseline and
+			// is subtracted out, which shows up as scored == 0.
+			h, err := common.StartLatencyHarness(env)
+			Expect(err).ToNot(HaveOccurred())
 
 			smallDeployment.Spec.Replicas = lo.ToPtr(int32(350))
 			largeDeployment.Spec.Replicas = lo.ToPtr(int32(350))
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
-			h, err := common.StartLatencyHarness(env)
-			Expect(err).ToNot(HaveOccurred())
 			consolidationReport, err := ReportConsolidation(env, "Balanced Basic Consolidation", 1000, 700, scaleOutReport.TotalNodes, 20*time.Minute)
 			Expect(err).ToNot(HaveOccurred())
 			result, err := h.Stop()
