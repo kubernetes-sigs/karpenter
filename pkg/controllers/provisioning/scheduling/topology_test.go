@@ -108,6 +108,24 @@ var _ = Describe("Topology", func() {
 	})
 
 	Context("Zonal", func() {
+		It("should balance pods across zones declared with a normalized topology key alias", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelFailureDomainBetaZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			// NewRequirement normalizes the beta key onto its stable equivalent, so the pods must
+			// spread over the zones the nodes are actually labelled with.
+			ExpectSkew(ctx, env.Client, "default", &corev1.TopologySpreadConstraint{
+				TopologyKey:   corev1.LabelTopologyZone,
+				LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+			}).To(ConsistOf(1, 1, 2))
+		})
 		It("should balance pods across zones (match labels)", func() {
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
