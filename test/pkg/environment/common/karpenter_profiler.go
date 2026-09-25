@@ -31,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 )
@@ -112,10 +113,10 @@ func (kp *KarpenterProfiler) run(ctx context.Context) {
 }
 
 func (kp *KarpenterProfiler) establishPortForward(ctx context.Context, localPort int) error {
-	findCtx, findCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer findCancel()
-
-	pod, err := kp.env.FindActiveKarpenterPod(findCtx)
+	// EventuallyFindActiveKarpenterPod carries its own poll deadline
+	// (leaderPodPollTimeout), so no sub-context timeout is needed here. A 10s
+	// bound used to abort during a leader handover.
+	pod, err := kp.env.EventuallyFindActiveKarpenterPod(ctx)
 	if err != nil || pod == nil {
 		return fmt.Errorf("finding karpenter pod: %w", err)
 	}
@@ -248,6 +249,45 @@ func (env *Environment) FindActiveKarpenterPod(ctx context.Context) (*corev1.Pod
 
 	pod := &corev1.Pod{}
 	if err := env.Client.Get(ctx, types.NamespacedName{Name: holderArr[0], Namespace: "kube-system"}, pod); err != nil {
+		return nil, err
+	}
+	return pod, nil
+}
+
+const (
+	leaderPodPollInterval = 5 * time.Second
+	leaderPodPollTimeout  = 2 * time.Minute
+)
+
+// EventuallyFindActiveKarpenterPod polls FindActiveKarpenterPod until the
+// leader lease resolves to a pod that exists.
+//
+// Immediately after a Karpenter rollout the karpenter-leader-election Lease
+// still names the outgoing pod, so a single lookup returns NotFound and the
+// caller fails with "Pod not found" on a cluster that is merely mid-handover.
+// Every caller that discovers the pod once and then keeps using the name needs
+// this; the ones that re-discover on each scrape (KarpenterMetricsPoller's
+// per-poll recovery, LatencyHarness.Stop) self-heal and call the plain lookup.
+//
+// The last underlying lookup error is wrapped into the returned error, so a
+// timeout reports why the lease never resolved instead of only reporting the
+// deadline.
+func (env *Environment) EventuallyFindActiveKarpenterPod(ctx context.Context) (*corev1.Pod, error) {
+	var pod *corev1.Pod
+	var lastErr error
+	if err := wait.PollUntilContextTimeout(ctx, leaderPodPollInterval, leaderPodPollTimeout, true,
+		func(ctx context.Context) (bool, error) {
+			// Never returns an error: a failed lookup means keep polling, and
+			// the cause is kept in lastErr for the timeout message below.
+			pod, lastErr = env.FindActiveKarpenterPod(ctx)
+			if lastErr == nil && pod == nil {
+				lastErr = fmt.Errorf("leader lease resolved to a nil pod")
+			}
+			return lastErr == nil, nil
+		}); err != nil {
+		if lastErr != nil {
+			return nil, fmt.Errorf("%w (last lookup error: %w)", err, lastErr)
+		}
 		return nil, err
 	}
 	return pod, nil

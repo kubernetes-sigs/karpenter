@@ -84,6 +84,7 @@ jobs:
         name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
         path: |
           ${{ env.OUTPUT_DIR }}/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/*_latency.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
         retention-days: 30

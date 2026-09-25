@@ -31,6 +31,12 @@ jobs:
             focus: "Do Not Disrupt Performance Test"
           - name: "Self Anti-Affinity Deployment Interference"
             focus: "Self Anti-Affinity Deployment Interference"
+          - name: "Balanced Basic Fixture"
+            focus: "Balanced Basic Fixture"
+          - name: "Balanced Churn Chain"
+            focus: "Balanced Churn Chain"
+          - name: "Balanced Heterogeneous NodePools"
+            focus: "Balanced Heterogeneous NodePools"
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performance
