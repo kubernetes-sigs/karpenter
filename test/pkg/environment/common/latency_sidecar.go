@@ -38,11 +38,28 @@ type LatencySidecar struct {
 	Counters            map[string]uint64         `json:"counters,omitempty"`
 }
 
+// WriteArtifactUnder writes data to <dir>/<name> at mode 0600 and returns the
+// path written. name is reduced to its base element and the resolved path is
+// checked to stay under dir, so a caller-supplied prefix cannot escape the
+// output directory.
+//
+// Shared by WriteLatencySidecar and the performance suite's report writer;
+// previously each had its own copy of the clean / base / Rel escape check.
+func WriteArtifactUnder(dir, name string, data []byte) (string, error) {
+	safeDir := filepath.Clean(dir)
+	path := filepath.Join(safeDir, filepath.Base(filepath.Clean(name)))
+	if rel, err := filepath.Rel(safeDir, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("refusing to write outside %q", safeDir)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
+}
+
 // WriteLatencySidecar writes sc to <dir>/<filePrefix>_latency.json. Returns
 // nil (no-op) when dir is empty, matching the report.go artifact posture so
-// suites can run without OUTPUT_DIR configured. filePrefix is sanitized via
-// filepath.Base + filepath.Clean and the resolved path is checked to stay
-// under dir before writing.
+// suites can run without OUTPUT_DIR configured.
 func WriteLatencySidecar(dir, filePrefix string, sc LatencySidecar) error {
 	if dir == "" {
 		return nil
@@ -51,14 +68,9 @@ func WriteLatencySidecar(dir, filePrefix string, sc LatencySidecar) error {
 	if err != nil {
 		return fmt.Errorf("marshal latency sidecar: %w", err)
 	}
-	safeDir := filepath.Clean(dir)
 	safePrefix := filepath.Base(filepath.Clean(filePrefix))
-	path := filepath.Join(safeDir, fmt.Sprintf("%s_latency.json", safePrefix))
-	if rel, relErr := filepath.Rel(safeDir, path); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("latency sidecar path escapes %q", safeDir)
-	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("write latency sidecar %s: %w", path, err)
+	if _, err := WriteArtifactUnder(dir, fmt.Sprintf("%s_latency.json", safePrefix), data); err != nil {
+		return fmt.Errorf("latency sidecar: %w", err)
 	}
 	return nil
 }
