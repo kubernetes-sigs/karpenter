@@ -36,6 +36,10 @@ const (
 	// node/health
 	NodeRepairBlocked = "NodeRepairBlocked"
 
+	// nodeclaim/reboot
+	RebootObserved = "RebootObserved"
+	RebootFailed   = "RebootFailed"
+
 	// node/termination/terminator
 	Disrupted                      = "Disrupted"
 	Evicted                        = "Evicted"

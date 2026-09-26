@@ -101,6 +101,13 @@ type CloudProvider interface {
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
+	// Reboot restarts the instance backing the NodeClaim in place, without terminating it.
+	// The operationID identifies one logical reboot operation; providers with native request
+	// idempotency should map it to their deduplication mechanism so repeated calls for the same
+	// operation are replay-safe. Reboot returns once the provider accepts the request; node
+	// recovery is observed by the reboot controller, not awaited here. Providers that do not
+	// support in-place reboot must return a *NodeRebootNotImplementedError.
+	Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) error
 	// RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter
 	// to monitor on the node.
 	RepairPolicies() []RepairPolicy
@@ -682,6 +689,27 @@ func IgnoreNodeClaimNotFoundError(err error) error {
 		return nil
 	}
 	return err
+}
+
+// NodeRebootNotImplementedError is returned by CloudProviders that do not support in-place reboot.
+// The reboot controller treats it as a terminal, non-retryable signal that reboot is unavailable
+// for this provider (so a reboot policy that requires it is rejected at startup validation).
+type NodeRebootNotImplementedError struct{}
+
+func NewNodeRebootNotImplementedError() *NodeRebootNotImplementedError {
+	return &NodeRebootNotImplementedError{}
+}
+
+func (e *NodeRebootNotImplementedError) Error() string {
+	return "reboot is not implemented by this cloud provider"
+}
+
+func IsNodeRebootNotImplementedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rebootErr *NodeRebootNotImplementedError
+	return errors.As(err, &rebootErr)
 }
 
 // InsufficientCapacityError is an error type returned by CloudProviders when a launch fails due to a lack of capacity from NodeClaim requirements

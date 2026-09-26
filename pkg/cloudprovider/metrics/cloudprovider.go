@@ -153,6 +153,16 @@ func (d *decorator) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	return err
 }
 
+func (d *decorator) Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) error {
+	method := "Reboot"
+	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
+	err := d.CloudProvider.Reboot(ctx, nodeClaim, operationID)
+	if err != nil {
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+	}
+	return err
+}
+
 func (d *decorator) Get(ctx context.Context, id string) (*v1.NodeClaim, error) {
 	method := "Get"
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
