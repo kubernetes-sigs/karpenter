@@ -103,7 +103,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				},
 			})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-			staticDriftController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+			staticDriftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 				disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, cloudProvider)))
 		})
 
@@ -202,7 +202,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				},
 			})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-			driftController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+			driftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 				disruption.WithMethods(disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock)))
 		}
 
