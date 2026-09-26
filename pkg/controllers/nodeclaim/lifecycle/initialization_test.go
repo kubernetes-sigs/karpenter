@@ -206,6 +206,54 @@ var _ = Describe("Initialization", func() {
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeInitializedLabelKey, "true"))
 	})
+	It("should not initialize a node while its NodeClaim is rebooting", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
+					},
+				},
+			},
+		})
+		// Commit a reboot before the node would otherwise initialize.
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "reboot requested")
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{
+			ProviderID: nodeClaim.Status.ProviderID,
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
+			},
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
+			},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node) // Remove the not-ready taint
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		// The reboot guard blocks initialization even though the node is ready and registered.
+		node = ExpectExists(ctx, env.Client, node)
+		Expect(node.Labels).ToNot(HaveKeyWithValue(v1.NodeInitializedLabelKey, "true"))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeFalse())
+	})
 	It("should not consider the Node to be initialized when the status of the Node is NotReady", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

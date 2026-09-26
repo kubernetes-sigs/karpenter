@@ -26,6 +26,7 @@ import (
 const (
 	DisruptedTaintKey    = apis.Group + "/disrupted"
 	UnregisteredTaintKey = apis.Group + "/unregistered"
+	RebootingTaintKey    = apis.Group + "/rebooting"
 )
 
 var (
@@ -38,5 +39,12 @@ var (
 	UnregisteredNoExecuteTaint = v1.Taint{
 		Key:    UnregisteredTaintKey,
 		Effect: v1.TaintEffectNoExecute,
+	}
+	// RebootingNoScheduleTaint is applied by the reboot controller to fence new scheduling onto a node
+	// while its pre-reboot boot may still be active. It is reboot-owned and removed once the node's
+	// bootID changes (or on terminal reboot cleanup).
+	RebootingNoScheduleTaint = v1.Taint{
+		Key:    RebootingTaintKey,
+		Effect: v1.TaintEffectNoSchedule,
 	}
 )

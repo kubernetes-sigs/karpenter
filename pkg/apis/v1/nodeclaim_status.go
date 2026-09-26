@@ -33,7 +33,22 @@ const (
 	ConditionTypeInstanceTerminating  = "InstanceTerminating"
 	ConditionTypeConsistentStateFound = "ConsistentStateFound"
 	ConditionTypeDisruptionReason     = "DisruptionReason"
+	ConditionTypeRebooting            = "Rebooting"
 )
+
+// Reboot lifecycle phases, carried as the reason on the Rebooting condition. RebootRequested is set
+// by a consumer (e.g. node repair) at commitment; the reboot controller advances the rest.
+const (
+	RebootReasonRequested = "RebootRequested"
+	RebootReasonIssued    = "RebootIssued"
+	RebootReasonSucceeded = "RebootSucceeded"
+	RebootReasonFailed    = "RebootFailed"
+)
+
+// RebootReasonRebooting is set as the Initialized-condition reason when the reboot controller invalidates
+// initialization at issue time (Initialized becomes Unknown because the node is rebooting). It's applied
+// after the reboot is issued, so "Rebooting" is more accurate here than the RebootRequested phase reason.
+const RebootReasonRebooting = "Rebooting"
 
 // NodeClaimStatus defines the observed state of NodeClaim
 type NodeClaimStatus struct {

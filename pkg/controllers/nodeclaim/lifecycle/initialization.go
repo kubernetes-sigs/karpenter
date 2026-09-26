@@ -59,6 +59,13 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim)
 		nodeClaim.StatusConditions(status.WithClock(i.clock)).Set(*cond)
 		return reconcile.Result{}, nil
 	}
+	// A committed reboot invalidates initialization for the current boot. While the node is rebooting,
+	// do not (re-)complete Initialized: the still-running pre-reboot node could otherwise satisfy the
+	// checks below and prematurely flip Initialized back to True. The reboot controller re-opens normal
+	// initialization once the Rebooting condition reaches a terminal outcome.
+	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting); cond != nil && cond.IsTrue() {
+		return reconcile.Result{}, nil
+	}
 	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() {
 		return reconcile.Result{}, nil
 	}
