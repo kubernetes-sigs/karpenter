@@ -95,14 +95,19 @@ const (
 	// DoNotDisruptAnnotationKey blocks voluntary disruption (consolidation and drift) by Karpenter. On a Node
 	// or NodeClaim it keeps that node from being picked as a disruption candidate. On a Pod it keeps the node
 	// the pod runs on from being voluntarily disrupted, and during a forced termination (expiration,
-	// interruption, repair) the pod is not evicted until the NodeClaim's terminationGracePeriod runs out.
-	// Terminating, terminal and DaemonSet pods are ignored.
+	// interruption) the pod is not evicted until the NodeClaim's terminationGracePeriod runs out.
+	// Terminating, terminal and DaemonSet pods are ignored. Node repair does not honor it, see
+	// karpenter.sh/do-not-repair.
 	//
 	// "true"     ; disruption is blocked for as long as the annotation is present
 	// <duration> ; on a Pod only, a Go duration such as "30m" or "1h". Disruption is blocked until the pod
 	//              has been running that long. An unparsable value is ignored and an event is emitted.
 	DoNotDisruptAnnotationKey = apis.Group + "/do-not-disrupt"
-	// DoNotRepairAnnotationKey vetoes voluntary node repair on a node, distinct from do-not-disrupt.
+	// DoNotRepairAnnotationKey blocks node repair. Repair replaces nodes that have carried an unhealthy
+	// condition matching a RepairPolicy past its toleration, and it ignores karpenter.sh/do-not-disrupt, so
+	// this is the only way to keep a specific node from being repaired.
+	//
+	// "true" ; the node is never picked as a repair candidate while the annotation is present
 	DoNotRepairAnnotationKey = apis.Group + "/do-not-repair"
 	// ProviderCompatibilityAnnotationKey is reserved for cloud providers to store provider specific data that
 	// has to survive conversion between Karpenter API versions. The core controllers do not read or write it,
@@ -125,8 +130,9 @@ const (
 	// NodeClaimTerminationTimestampAnnotationKey is the time after which Karpenter stops waiting for a graceful
 	// drain of a deleting NodeClaim. From then on pods are deleted regardless of PDBs and
 	// karpenter.sh/do-not-disrupt, and the instance is terminated. It is set to the deletion timestamp plus
-	// spec.terminationGracePeriod, or to the current time when node repair force terminates an unhealthy
-	// node.
+	// spec.terminationGracePeriod. When the matching RepairPolicy sets its own drain bound, node repair
+	// instead stamps it at deletion time, to that time plus the lower of the policy's and the NodeClaim's
+	// terminationGracePeriod (a policy bound of 0 means now).
 	//
 	// <RFC3339 timestamp> ; for example "2025-01-02T15:04:05Z"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
