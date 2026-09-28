@@ -148,6 +148,7 @@ var _ = Describe("Perf Aggregate", func() {
 			// where the variable is set and appending would land in the real job
 			// summary. Specs that want it set it themselves.
 			GinkgoT().Setenv("GITHUB_STEP_SUMMARY", "")
+			GinkgoT().Setenv("COMMIT", "")
 		})
 
 		It("writes one summary entry per phase and metric", func() {
@@ -248,6 +249,65 @@ var _ = Describe("Perf Aggregate", func() {
 			Expect(written).To(HavePrefix("## Performance batch\n```\n"))
 			Expect(written).To(HaveSuffix("```\n"))
 			Expect(written).To(ContainSubstring("scale_out / Final Nodes"))
+		})
+
+		It("names the commit in the heading and on stdout when the workflow stamped one", func() {
+			// The batch is worthless without knowing which tree it measured: a
+			// workflow_run checkout defaults to the default branch, so an
+			// unlabelled table is exactly how n samples of main get read as n
+			// samples of the pull request.
+			writeSample(root, "iter_1", "scale_out", map[string]any{"total_nodes": 4.0})
+			summaryPath := filepath.Join(root, "step-summary.md")
+			GinkgoT().Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+			GinkgoT().Setenv("COMMIT", "0123456789abcdef0123456789abcdef01234567")
+
+			var out strings.Builder
+			Expect(run(root, 1, &out)).To(Succeed())
+
+			Expect(out.String()).To(ContainSubstring("Commit under test: 0123456789abcdef0123456789abcdef01234567"))
+			b, err := os.ReadFile(summaryPath)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(string(b)).To(HavePrefix("## Performance batch at `0123456789abcdef0123456789abcdef01234567`\n```\n"))
+		})
+
+		It("keeps the plain heading when no commit was stamped, so a local run reads normally", func() {
+			writeSample(root, "iter_1", "scale_out", map[string]any{"total_nodes": 4.0})
+			summaryPath := filepath.Join(root, "step-summary.md")
+			GinkgoT().Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+
+			var out strings.Builder
+			Expect(run(root, 1, &out)).To(Succeed())
+
+			Expect(out.String()).ToNot(ContainSubstring("Commit under test:"))
+			b, err := os.ReadFile(summaryPath)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(string(b)).To(HavePrefix("## Performance batch\n```\n"))
+		})
+
+		It("reports both CPU series, so the p95-or-mean question is answerable from the table", func() {
+			// ryan-mist's CV table on #2994 was computed from a subset read out of
+			// run logs. Both series in the batch output puts the comparison on the
+			// full sample.
+			writeSample(root, "iter_1", "scale_out", map[string]any{
+				"karpenter_p95_cpu_cores": 0.9,
+				"karpenter_avg_cpu_cores": 0.3,
+			})
+			writeSample(root, "iter_2", "scale_out", map[string]any{
+				"karpenter_p95_cpu_cores": 0.5,
+				"karpenter_avg_cpu_cores": 0.3,
+			})
+
+			Expect(run(root, 2, io.Discard)).To(Succeed())
+
+			b, err := os.ReadFile(filepath.Join(root, summaryFile))
+			Expect(err).ToNot(HaveOccurred())
+			var summary map[string]map[string]stats
+			Expect(json.Unmarshal(b, &summary)).To(Succeed())
+			Expect(summary["scale_out"]["Controller CPU"].Median).To(Equal(0.7))
+			Expect(summary["scale_out"]["Controller Mean CPU"].Median).To(Equal(0.3))
+			// The point of carrying both: the CV separates them.
+			Expect(summary["scale_out"]["Controller CPU"].CVPct).To(BeNumerically(">", 0.0))
+			Expect(summary["scale_out"]["Controller Mean CPU"].CVPct).To(Equal(0.0))
 		})
 
 		It("skips the step summary when the variable is unset, so local runs write no stray file", func() {

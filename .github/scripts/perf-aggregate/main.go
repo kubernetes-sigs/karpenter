@@ -55,7 +55,16 @@ type metricSpec struct {
 var metrics = []metricSpec{
 	{"total_time", "Duration", "seconds"},
 	{"karpenter_p95_memory_mb", "Controller Peak Memory", "MB"},
+	// Both CPU series, because which one to read is an open question and this
+	// table is where it gets settled. In ryan-mist's 11-run sample the p95 CV
+	// was the worst of the three on all four sub-tests, 21.6 to 44.1 percent. The
+	// mean was the best on the noisiest one and within 0.2 points of p50 on
+	// another. karpenter_p50_cpu_cores does not exist in PerformanceReport, so
+	// the mean is the lowest-variance CPU series obtainable without changing the
+	// report schema. Reporting both puts the CVs side by side over a full batch
+	// instead of a subset read out of run logs.
 	{"karpenter_p95_cpu_cores", "Controller CPU", "cores"},
+	{"karpenter_avg_cpu_cores", "Controller Mean CPU", "cores"},
 	{"total_nodes", "Final Nodes", "nodes"},
 	{"total_reserved_cpu_utilization", "CPU Utilization", "percent"},
 	{"total_reserved_memory_utilization", "Memory Utilization", "percent"},
@@ -68,7 +77,13 @@ type stats struct {
 	Mean   float64 `json:"mean"`
 	Median float64 `json:"median"`
 	Stddev float64 `json:"stddev"`
-	StdErr float64 `json:"stderr"`
+	// StdErr is the standard error of Mean, not of Median. It shrinks as
+	// 1/sqrt(n) for the mean under the central limit theorem. A median's does
+	// not: on a bimodal series whose middle order statistics straddle the gap,
+	// a median interval stays roughly the width of the gap however many samples
+	// are added. Reading Median plus or minus a multiple of this column is
+	// wrong, which is why the column is labelled for the mean in the table.
+	StdErr float64 `json:"stderr_of_mean"`
 	CVPct  float64 `json:"cv_pct"`
 	Min    float64 `json:"min"`
 	Max    float64 `json:"max"`
@@ -108,6 +123,9 @@ func run(outputDir string, iterations int, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "Read %d sample report(s) across %d phase(s) under %s\n",
 		files, len(reportsByPhase), outputDir)
+	if commit := os.Getenv("COMMIT"); commit != "" {
+		fmt.Fprintf(out, "Commit under test: %s\n", commit)
+	}
 
 	phases := make([]string, 0, len(reportsByPhase))
 	for phase := range reportsByPhase {
@@ -141,22 +159,32 @@ func run(outputDir string, iterations int, out io.Writer) error {
 	table := formatTable(phases, summary)
 	fmt.Fprint(out, table)
 	fmt.Fprintf(out, "\nWrote %s\n", filepath.Join(outputDir, summaryFile))
-	return appendStepSummary(table)
+	return appendStepSummary(table, os.Getenv("COMMIT"))
 }
 
 // appendStepSummary fences the table, because the step summary renders as
 // markdown and would otherwise collapse the columns. Done here rather than by
 // piping the step's stdout through tee, which would swallow the exit code.
-func appendStepSummary(table string) error {
+//
+// The commit goes in the heading rather than beside it because the heading is
+// what a reader sees first, and a batch table with no commit attached is the
+// failure this whole path had: a workflow_run job checks out the default branch
+// unless told otherwise, so the numbers described main while the run sat on a
+// pull request.
+func appendStepSummary(table, commit string) error {
 	path := os.Getenv("GITHUB_STEP_SUMMARY")
 	if path == "" {
 		return nil
+	}
+	heading := "## Performance batch"
+	if commit != "" {
+		heading = fmt.Sprintf("## Performance batch at `%s`", commit)
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600) //nolint:gosec // G304: path is the Actions-provided summary file
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "## Performance batch\n```\n%s```\n", table); err != nil {
+	if _, err := fmt.Fprintf(f, "%s\n```\n%s```\n", heading, table); err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -295,8 +323,10 @@ func writeJSON(path string, v any) error {
 
 func formatTable(phases []string, summary map[string]map[string]stats) string {
 	var b strings.Builder
+	// "SE of mean" rather than "StdErr", because the column sits next to Median
+	// and the two do not go together. See the note on stats.StdErr.
 	fmt.Fprintf(&b, "\n%-58s %3s %12s %12s %12s %12s %7s\n",
-		"Phase / Metric", "n", "Median", "Mean", "Stddev", "StdErr", "CV")
+		"Phase / Metric", "n", "Median", "Mean", "Stddev", "SE of mean", "CV")
 	fmt.Fprintln(&b, strings.Repeat("-", 122))
 	for _, phase := range phases {
 		phaseSummary, ok := summary[phase]
