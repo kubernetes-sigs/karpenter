@@ -73,6 +73,33 @@ func IgnorePodBlockEvictionError(err error) error {
 	return err
 }
 
+// NodeDoNotDisruptError is returned by ValidateNodeDisruptable when a node carries the do-not-disrupt annotation.
+// It is a distinct type so the repair path can selectively ignore it: repair is not discretionary disruption, so
+// do-not-disrupt must not block it (that would be a breaking behavior change and conflate two intents). Repair
+// instead honors the separate do-not-repair annotation.
+type NodeDoNotDisruptError struct {
+	error
+}
+
+func NewNodeDoNotDisruptError(err error) *NodeDoNotDisruptError {
+	return &NodeDoNotDisruptError{error: err}
+}
+
+func IsNodeDoNotDisruptError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nodeDoNotDisruptError *NodeDoNotDisruptError
+	return stderrors.As(err, &nodeDoNotDisruptError)
+}
+
+func IgnoreNodeDoNotDisruptError(err error) error {
+	if IsNodeDoNotDisruptError(err) {
+		return nil
+	}
+	return err
+}
+
 //go:generate go tool -modfile=../../../go.tools.mod controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
 
 // StateNodes is a typed version of a list of *Node
@@ -227,7 +254,7 @@ func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 		return fmt.Errorf("node is nominated for a pending pod")
 	}
 	if in.Annotations()[v1.DoNotDisruptAnnotationKey] == "true" {
-		return fmt.Errorf("disruption is blocked through the %q annotation", v1.DoNotDisruptAnnotationKey)
+		return NewNodeDoNotDisruptError(fmt.Errorf("disruption is blocked through the %q annotation", v1.DoNotDisruptAnnotationKey))
 	}
 	// check whether the node has the NodePool label
 	if _, ok := in.Labels()[v1.NodePoolLabelKey]; !ok {

@@ -47,7 +47,9 @@ const (
 
 // Karpenter specific annotations
 const (
-	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
+	DoNotDisruptAnnotationKey = apis.Group + "/do-not-disrupt"
+	// DoNotRepairAnnotationKey vetoes voluntary node repair on a node, distinct from do-not-disrupt.
+	DoNotRepairAnnotationKey                   = apis.Group + "/do-not-repair"
 	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"

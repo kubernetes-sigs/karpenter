@@ -81,6 +81,10 @@ var (
 		Help: "Whether a scored balanced-consolidation move was approved or rejected.",
 		Values: []opmetrics.Value{
 			{
+				Name: string(TerminateFirstDecision),
+				Help: "The candidate(s) were deleted without staging a replacement first; reactive provisioning refills afterward.",
+			},
+			{
 				Name: string(ApprovedDecision),
 				Help: "The move's cost savings justified the pod disruption; it was approved.",
 			},
@@ -227,4 +231,34 @@ var (
 		[]opmetrics.Label{ApprovalDim, metrics.NodePool, Policy},
 		opmetrics.Alpha,
 	)
+	// NodeClaimsUnhealthyDisruptedTotal preserves the per-condition/per-image breakdown the retired node.health
+	// controller emitted, which the reason-labeled karpenter_nodeclaims_disrupted_total loses. Labeled by the repair
+	// condition, the owning NodePool, the capacity type, and the image ID.
+	NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeClaimSubsystem,
+			Name:      "unhealthy_disrupted_total",
+			Help:      "Number of unhealthy nodeclaims disrupted in total by node repair. Labeled by the condition the node was disrupted on, the owning nodepool, the capacity type, the image ID, and the termination mode.",
+		},
+		[]opmetrics.Label{RepairCondition, metrics.NodePool, metrics.CapacityType, ImageID, metrics.TerminationMode},
+		opmetrics.Alpha,
+	)
+)
+
+const (
+	conditionLabel = "condition"
+	imageIDLabel   = "image_id"
+)
+
+var (
+	RepairCondition = opmetrics.Label{
+		Name: conditionLabel,
+		Help: "The node status condition type that triggered node repair disruption.",
+	}
+	ImageID = opmetrics.Label{
+		Name: imageIDLabel,
+		Help: "The image ID of the node that was disrupted.",
+	}
 )

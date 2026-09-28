@@ -65,8 +65,19 @@ type RepairPolicy struct {
 	// ConditionStatus condition when a node is unhealthy
 	ConditionStatus corev1.ConditionStatus
 	// TolerationDuration is the duration the controller will wait
-	// before force terminating nodes that are unhealthy.
+	// before repairing nodes that are unhealthy. It is a confidence delay: eligibility (and repair
+	// ordering age) is counted only after it elapses.
 	TolerationDuration time.Duration
+	// TerminationGracePeriod is the Axis-2 drain bound for repair of this condition:
+	//   nil      -> inherit the NodePool/NodeClaim TerminationGracePeriod
+	//   non-zero -> min(this, nodeclaim.TerminationGracePeriod) — bound the drain even on a pool that set none,
+	//               so repair is never the unbounded 19-day hang.
+	//   0        -> forceful: skip the drain for conditions the kubelet can't evict through (wedged kernel,
+	//               lost heartbeat).
+	TerminationGracePeriod *time.Duration
+	// Priority is an ordering weight (0-100) for repair. Higher repairs first. Collisions are expected and
+	// unresolved; only the ordering matters, not the magnitude (it is compressed to a dense rank).
+	Priority int
 }
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
@@ -351,12 +362,12 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 		jPrice := math.MaxFloat64
 
 		for _, of := range its[i].Offerings {
-			if of.Available && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
+			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
 				iPrice = of.Price
 			}
 		}
 		for _, of := range its[j].Offerings {
-			if of.Available && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
+			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
 				jPrice = of.Price
 			}
 		}
@@ -563,6 +574,32 @@ type Offerings []*Offering
 func (ofs Offerings) Available() Offerings {
 	return lo.Filter(ofs, func(o *Offering, _ int) bool {
 		return o.Available
+	})
+}
+
+// Launchable reports whether a new node can actually be launched into this offering right now. It requires the offering
+// to be healthy (Available) and, for a reserved offering, to have remaining reservation capacity. Availability alone is
+// insufficient because capacity and health are independent axes: a full-but-healthy reservation is Available with a
+// ReservationCapacity of 0, and launching into it would fail. Non-reserved offerings are never reservation-constrained,
+// so for them Launchable is equivalent to Available.
+func (o *Offering) Launchable() bool {
+	if !o.Available {
+		return false
+	}
+	// Being out of reservation capacity disqualifies only reserved offerings. Index the requirement map directly and use
+	// the allocation-free Requirement.Has, avoiding Offering.CapacityType() (which calls Requirement.Any() ->
+	// UnsortedList() and allocates on every call). An offering with no capacity-type requirement isn't
+	// reservation-constrained, so it stays launchable.
+	req, ok := o.Requirements[v1.CapacityTypeLabelKey]
+	return !ok || !req.Has(v1.CapacityTypeReserved) || o.ReservationCapacity > 0
+}
+
+// Launchable returns the offerings that can currently be launched into (see Offering.Launchable). Use this rather than
+// Available anywhere availability is a proxy for "can launch/price this now" (pricing, ordering, capacity-type
+// selection); use Available only where the pure health signal is intended.
+func (ofs Offerings) Launchable() Offerings {
+	return lo.Filter(ofs, func(o *Offering, _ int) bool {
+		return o.Launchable()
 	})
 }
 

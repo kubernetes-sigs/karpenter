@@ -233,6 +233,26 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// then the termination controller will handle the eventual deletion of the nodes.
 	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
+		// A candidate may carry an explicit drain bound (repair sets one). Stamp the absolute termination deadline HERE,
+		// at actual deletion time, so replace-then-terminate latency doesn't erode the grace window. The lifecycle
+		// controller no-ops if the annotation already exists, so this candidate-level bound wins over the NodeClaim's TGP.
+		// TODO(kubernetes-sigs/karpenter#3029): self-stamping an absolute deadline separately from the deletion timestamp
+		// is an interim mechanism with two known gaps to resolve once the termination flow has a formal contract:
+		// (1) the deadline is absolute, so termination-controller processing delay eats into the drain (TGP is really a
+		// minimum drain time); and (2) it is not atomic with the delete — a crash between this patch and the delete can
+		// leave a stale timestamp. The right fix is a deletion-anchored deadline (DeletionTimestamp + TGP) owned by the
+		// termination contract.
+		if tgp := cmd.Candidates[i].TerminationGracePeriod; tgp != nil {
+			nc := cmd.Candidates[i].NodeClaim
+			stored := nc.DeepCopy()
+			nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
+				v1.NodeClaimTerminationTimestampAnnotationKey: q.clock.Now().Add(*tgp).Format(time.RFC3339),
+			})
+			if err := q.kubeClient.Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
+				errs[i] = err
+				return
+			}
+		}
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
 			return q.kubeClient.Delete(ctx, cmd.Candidates[i].NodeClaim)
 		}); err != nil {
@@ -254,6 +274,24 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 		}
 		metrics.NodeClaimsDisruptedTotal.Inc(labels)
 		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
+		// Repair records the eligible condition on the candidate; emit the per-condition/per-image unhealthy-disrupted
+		// metric here (at actual termination), not at command production, so an abandoned command doesn't over-count.
+		if cond := cmd.Candidates[i].RepairCondition; cond != "" {
+			// Termination mode reflects the drain bound repair actually applied (candidate.TerminationGracePeriod),
+			// not the NodeClaim's own Spec.TGP — a forceful (0) or bounded policy overrides it. nil means repair
+			// inherited the NodeClaim's mode.
+			mode := nodeclaimutils.DisruptionTerminationMode(cmd.Candidates[i].NodeClaim)
+			if tgp := cmd.Candidates[i].TerminationGracePeriod; tgp != nil {
+				mode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
+			}
+			NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
+				conditionLabel:               pretty.ToSnakeCase(string(cond)),
+				metrics.NodePoolLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel:    cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
+				imageIDLabel:                 cmd.Candidates[i].NodeClaim.Status.ImageID,
+				metrics.TerminationModeLabel: mode,
+			})
+		}
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
