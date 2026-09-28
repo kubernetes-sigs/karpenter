@@ -145,6 +145,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # download-artifact documents actions: read as needed only for other runs,
+      # and this one reads its own. Granted anyway, because the equivalent job in
+      # aws/karpenter-provider-aws (e2e-matrix.yaml, summary) carries it for a
+      # same-run download, and a failure here is a failure of the only job that
+      # produces the batch table.
+      actions: read
     name: aggregate ${{ needs.plan.outputs.iterations }} sample(s) per test
     env:
       OUTPUT_DIR: ${{ github.workspace }}/perf-batch
