@@ -70,10 +70,14 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	normal := groups[partitionNormal]
 	cleanupOnly := groups[partitionCleanupOnly]
 
-	// Per-NodePool budget: B/C overflow lands in D.
-	numNodes, disrupting := disruption.NodePoolStatsFromNodes(nodes)
-	driftBudget := disruption.NodePoolBudgetMap(ctx, clk, nodePoolMap, numNodes, disrupting, v1.DisruptionReasonDrifted)
-	consolidationBudget := disruption.NodePoolBudgetMap(ctx, clk, nodePoolMap, numNodes, disrupting, v1.DisruptionReasonUnderutilized)
+	// Per-NodePool budget: B/C overflow lands in D. The already-disrupting count
+	// is reason-dependent, so stats and budget are computed together per reason.
+	budgetFor := func(reason v1.DisruptionReason) map[string]int {
+		numNodes, disrupting := disruption.NodePoolStatsFromNodes(nodes, reason)
+		return disruption.NodePoolBudgetMap(ctx, clk, nodePoolMap, numNodes, disrupting, reason)
+	}
+	driftBudget := budgetFor(v1.DisruptionReasonDrifted)
+	consolidationBudget := budgetFor(v1.DisruptionReasonUnderutilized)
 	var driftOverflow, normalOverflow []*state.StateNode
 	drifted, driftOverflow = applyPerNodePoolBudget(drifted, driftBudget)
 	normal, normalOverflow = applyPerNodePoolBudget(normal, consolidationBudget)
