@@ -570,6 +570,7 @@ func (c *Cluster) PodNodeClaimMapping(podKey types.NamespacedName) string {
 // during the most recent scheduling decision for each pod
 func (c *Cluster) PodsMappedToNodeClaim(nodeClaimName string) []types.NamespacedName {
 	var podKeys []types.NamespacedName
+	// TODO: store reverse mapping for perf
 	c.podToNodeClaim.Range(func(k, v any) bool {
 		if v.(string) == nodeClaimName {
 			podKeys = append(podKeys, k.(types.NamespacedName))
