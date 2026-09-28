@@ -165,7 +165,11 @@ jobs:
       with:
         go-version-file: go.mod
         check-latest: true
-        cache-dependency-path: "**/go.sum"
+        # No module cache. A workflow_run job's cache scope is the default
+        # branch, so a cache written after checking out a pull request's tree is
+        # a write into main's scope. Nothing is lost: perf-aggregate's main.go
+        # imports stdlib only, so `go run` downloads no modules.
+        cache: false
     # continue-on-error because download-artifact fails when its pattern matches
     # nothing, which is what a run whose every sample job failed looks like. The
     # aggregator names that case with a legible message.

@@ -33,8 +33,14 @@ on:
           default branch no matter which pull request triggered the run.
 jobs:
   e2e:
+    # contents: read and nothing else. This job runs the checked-out tree, and
+    # with git_ref set by a workflow_run caller that tree is a pull request's,
+    # so every write scope here is a write scope a pull request can reach.
+    # issues: write was on this job before and nothing used it: no step and no
+    # action under .github/actions touches the issues API, gh, or GITHUB_TOKEN.
+    # kind-e2e.yaml still grants issues: write at the call site, which is now an
+    # upper bound with nothing under it.
     permissions:
-      issues: write
       contents: read
     runs-on: ubuntu-latest
     name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}${{ inputs.iteration > 1 && format(' iter {0}', inputs.iteration) || '' }}
