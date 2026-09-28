@@ -102,9 +102,10 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 
 # ./test/pkg/... holds the unit-testable helpers behind the e2e suites (metric
-# delta reduction, percentile derivation). They are ordinary testing.T tests and
-# need no cluster, so they belong here rather than in e2etests. Without this
-# pattern `go test ./pkg/...` never reaches them and their assertions never run.
+# delta reduction, percentile derivation). They are ginkgo specs like the rest of
+# the repo, but they need no cluster, so they belong here rather than in
+# e2etests. Without this pattern `go test ./pkg/...` never reaches them and
+# their assertions never run.
 test: ## Run tests
 	go test ./pkg/... ./test/pkg/... \
 		-race \
