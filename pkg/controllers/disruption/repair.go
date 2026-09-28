@@ -106,29 +106,21 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 
 func (r *Repair) evaluate(ctx context.Context, node *corev1.Node, now time.Time) health.RepairResult {
 	result := r.policyMatcher.Evaluate(node, now)
-	logger := log.FromContext(ctx).V(1)
-	if !logger.Enabled() {
+	if result.Action == "" {
 		return result
 	}
-	key := string(node.UID)
-	if key == "" {
-		key = node.Name
+	values := []any{
+		"condition", result.Condition,
+		"action", result.Action,
+		"earliest-eligible-at", result.EligibleAt,
 	}
-	var values []any
-	if result.Action != "" {
-		values = []any{
-			"condition", result.Condition,
-			"action", result.Action,
-			"earliest-eligible-at", result.EligibleAt,
-		}
-		if result.TerminationGracePeriod != nil {
-			values = append(values, "termination-grace-period", *result.TerminationGracePeriod)
-		}
+	if result.TerminationGracePeriod != nil {
+		values = append(values, "termination-grace-period", *result.TerminationGracePeriod)
 	}
-	if !r.decisionLogMonitor.HasChanged(key, values) || len(values) == 0 {
+	if !r.decisionLogMonitor.HasChanged(string(node.UID), values) {
 		return result
 	}
-	logger.WithValues(append([]any{
+	log.FromContext(ctx).V(1).WithValues(append([]any{
 		"Node", klog.KObj(node),
 	}, values...)...).Info("evaluated repair policy")
 	return result
