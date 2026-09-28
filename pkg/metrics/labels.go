@@ -81,6 +81,8 @@ const (
 	ConsolidationPolicyLabel = "consolidation_policy"
 	TerminationModeLabel     = "termination_mode"
 	ControllerLabel          = "controller"
+	RepairConditionLabel     = "condition"
+	ImageIDLabel             = "image_id"
 )
 
 // Shared core metric dimensions. Provider packages and core controllers should
@@ -182,5 +184,15 @@ var (
 	Controller = opmetrics.Label{
 		Name: ControllerLabel,
 		Help: "The name of the controller that emitted the metric.",
+	}
+	// RepairCondition is the node status condition that triggered node repair; shared by the voluntary repair
+	// disruption method and the legacy node.health controller (NodeRepair=alpha).
+	RepairCondition = opmetrics.Label{
+		Name: RepairConditionLabel,
+		Help: "The node status condition type that triggered node repair disruption.",
+	}
+	ImageID = opmetrics.Label{
+		Name: ImageIDLabel,
+		Help: "The image ID of the node that was disrupted.",
 	}
 )

@@ -102,7 +102,7 @@ var _ = Describe("Repair", func() {
 	}
 
 	BeforeEach(func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(options.NodeRepairEnabled)}}))
 		// Single default policy: BadNode/False, 30m toleration (the fake cloud provider default).
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute},
@@ -430,12 +430,12 @@ var _ = Describe("Repair", func() {
 			HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, env.Clock.Now().Add(5*time.Minute).Format(time.RFC3339)))
 		// ...and the metric is emitted once at termination, labeled by the HighPriority condition, the node's image, and
 		// the termination mode derived from the applied bound (5m > 0 -> eventual; NOT the NodeClaim's nil Spec.TGP).
-		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
-			disruption.RepairCondition.Name: "high_priority",
-			metrics.NodePoolLabel:           nodePool.Name,
-			metrics.CapacityTypeLabel:       v1.CapacityTypeOnDemand,
-			disruption.ImageID.Name:         "ami-test-1234",
-			metrics.TerminationModeLabel:    metrics.TerminationModeEventual,
+		ExpectMetricCounterValue(metrics.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+			metrics.RepairConditionLabel: "high_priority",
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.CapacityTypeLabel:    v1.CapacityTypeOnDemand,
+			metrics.ImageIDLabel:         "ami-test-1234",
+			metrics.TerminationModeLabel: metrics.TerminationModeEventual,
 		})
 	})
 
@@ -452,12 +452,12 @@ var _ = Describe("Repair", func() {
 		Expect(cmds).To(HaveLen(1))
 		// Replacement is never made healthy, so the queue reconcile does not terminate — the metric must stay unrecorded.
 		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
-		name := ExpectMetricName(disruption.NodeClaimsUnhealthyDisruptedTotal.(*opmetrics.PrometheusCounter))
+		name := ExpectMetricName(metrics.NodeClaimsUnhealthyDisruptedTotal.(*opmetrics.PrometheusCounter))
 		_, ok := FindMetricWithLabelValues(name, map[string]string{
-			disruption.RepairCondition.Name: "bad_node",
-			metrics.NodePoolLabel:           nodePool.Name,
-			metrics.CapacityTypeLabel:       v1.CapacityTypeOnDemand,
-			disruption.ImageID.Name:         "",
+			metrics.RepairConditionLabel: "bad_node",
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.CapacityTypeLabel:    v1.CapacityTypeOnDemand,
+			metrics.ImageIDLabel:         "",
 		})
 		Expect(ok).To(BeFalse())
 	})
@@ -526,7 +526,7 @@ var _ = Describe("Repair", func() {
 
 	// Feature-gate off: repair does nothing even for an unhealthy node past toleration.
 	It("should not repair when the NodeRepair feature gate is disabled", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(options.NodeRepairDisabled)}}))
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
 		env.Clock.Step(31 * time.Minute)

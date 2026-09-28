@@ -124,7 +124,7 @@ var _ = Describe("Options", func() {
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        new(true),
-					NodeRepair:              new(false),
+					NodeRepair:              new(options.NodeRepairDisabled),
 					SpotToSpotConsolidation: new(false),
 					NodeOverlay:             new(false),
 					StaticCapacity:          new(false),
@@ -185,7 +185,7 @@ var _ = Describe("Options", func() {
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        new(false),
-					NodeRepair:              new(true),
+					NodeRepair:              new(options.NodeRepairEnabled),
 					SpotToSpotConsolidation: new(true),
 					NodeOverlay:             new(true),
 					StaticCapacity:          new(true),
@@ -254,7 +254,7 @@ var _ = Describe("Options", func() {
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        new(false),
-					NodeRepair:              new(true),
+					NodeRepair:              new(options.NodeRepairEnabled),
 					SpotToSpotConsolidation: new(true),
 					NodeOverlay:             new(true),
 					StaticCapacity:          new(true),
@@ -324,7 +324,7 @@ var _ = Describe("Options", func() {
 				MinValuesPolicy:                  lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        new(false),
-					NodeRepair:              new(true),
+					NodeRepair:              new(options.NodeRepairEnabled),
 					SpotToSpotConsolidation: new(true),
 					NodeOverlay:             new(true),
 					StaticCapacity:          new(true),
@@ -358,12 +358,30 @@ var _ = Describe("Options", func() {
 				Expect(opts.FeatureGates).To(Equal(expected))
 			},
 			Entry("when ReservedCapacity is overridden", "ReservedCapacity"),
-			Entry("when NodeRepair is overridden", "NodeRepair"),
 			Entry("when SpotToSpotConsolidation is overridden", "SpotToSpotConsolidation"),
 			Entry("when NodeOverlay is overridden", "NodeOverlay"),
 			Entry("when StaticCapacity is overridden", "StaticCapacity"),
 			Entry("when CapacityBuffer is overridden", "CapacityBuffer"),
 		)
+
+		DescribeTable(
+			"should parse the tri-state NodeRepair gate",
+			func(value string, expected options.NodeRepairMode) {
+				fs = &options.FlagSet{FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError)}
+				opts.AddFlags(fs)
+				Expect(opts.Parse(fs, "--feature-gates", fmt.Sprintf("NodeRepair=%s", value))).To(Succeed())
+				Expect(opts.FeatureGates.NodeRepair).To(Equal(expected))
+			},
+			Entry("false disables repair", "false", options.NodeRepairDisabled),
+			Entry("true selects the voluntary method", "true", options.NodeRepairEnabled),
+			Entry("alpha selects the legacy node.health controller", "alpha", options.NodeRepairAlpha),
+		)
+
+		It("should reject an invalid NodeRepair value", func() {
+			fs = &options.FlagSet{FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError)}
+			opts.AddFlags(fs)
+			Expect(opts.Parse(fs, "--feature-gates", "NodeRepair=beta")).ToNot(Succeed())
+		})
 	})
 
 	DescribeTable(

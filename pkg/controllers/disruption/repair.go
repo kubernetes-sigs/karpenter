@@ -69,8 +69,9 @@ func NewRepair(c consolidation) *Repair {
 // ShouldDisrupt is a predicate that filters candidates to nodes that have an unhealthy condition matching a
 // RepairPolicy, have waited past that policy's toleration, and are not vetoed by the do-not-repair annotation.
 func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
-	// Repair is behind the NodeRepair feature gate, matching the old node.health controller's gating.
-	if !options.FromContext(ctx).FeatureGates.NodeRepair {
+	// Repair is the voluntary disruption method, gated on NodeRepair=true. NodeRepair=alpha selects the legacy
+	// node.health controller instead, so the voluntary method must not act in that mode.
+	if options.FromContext(ctx).FeatureGates.NodeRepair != options.NodeRepairEnabled {
 		return false
 	}
 	// A disruption candidate always has a registered Node; a nil here is an invariant violation, so fail loud.

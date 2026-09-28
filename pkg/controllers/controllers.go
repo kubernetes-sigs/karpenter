@@ -42,6 +42,7 @@ import (
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
+	nodehealth "sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	nodehydration "sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
@@ -141,6 +142,13 @@ func NewControllers(
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
 		nodehydration.NewController(kubeClient, cloudProvider),
+	}
+
+	// NodeRepair=alpha runs the legacy node.health controller instead of the voluntary repair disruption method
+	// (registered as a disruption Method in disruption.NewController when NodeRepair=true), retained one release as a
+	// migration escape hatch. The cloud provider must define RepairPolicies for it to detect unhealthy nodes.
+	if options.FromContext(ctx).FeatureGates.NodeRepair == options.NodeRepairAlpha && len(cloudProvider.RepairPolicies()) != 0 {
+		controllers = append(controllers, nodehealth.NewController(kubeClient, cloudProvider, clock, recorder))
 	}
 
 	if !options.FromContext(ctx).IgnoreDRARequests {
