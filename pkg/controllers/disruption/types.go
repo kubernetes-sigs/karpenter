@@ -37,6 +37,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -50,8 +51,8 @@ const (
 	GracefulDisruptionClass = metrics.TerminationModeGraceful // graceful disruption always respects blocking pod PDBs and the do-not-disrupt annotation
 	EventualDisruptionClass = metrics.TerminationModeEventual // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
 	// RepairDisruptionClass is voluntary node repair. Like graceful, it drains and honors PDBs; unlike graceful, it
-	// ignores do-not-disrupt (repair is not discretionary — it honors the separate do-not-repair veto) and its drain
-	// is bounded by the per-condition RepairPolicy TerminationGracePeriod (0 = forceful), like eventual.
+	// ignores the Node-level do-not-disrupt annotation and honors the separate do-not-repair veto. Pod-level
+	// do-not-disrupt and PDB blockers are honored until a configured repair drain bound expires; 0 skips the drain.
 	RepairDisruptionClass = "repair"
 )
 
@@ -85,6 +86,7 @@ type Candidate struct {
 	capacityType      string
 	DisruptionCost    float64
 	reschedulablePods []*corev1.Pod
+	hasPodBlockers    bool
 
 	// Price is the cheapest compatible offering price for this candidate.
 	// Precomputed at creation to avoid repeated offering lookups.
@@ -92,13 +94,14 @@ type Candidate struct {
 	// RescheduleDisruptionCost is 1.0 (base) + sum of positive pod eviction costs
 	// for reschedulable pods. Used by balanced scoring.
 	RescheduleDisruptionCost float64
-	// TerminationGracePeriod, when set, bounds this candidate's drain. The queue stamps the absolute termination
-	// deadline (now + this) at actual deletion time, so replace-then-terminate latency doesn't erode the window. nil
-	// inherits the NodeClaim's own TerminationGracePeriod. Repair sets it (min(policy, NodeClaim TGP)) in ComputeCommands.
+	// TerminationGracePeriod, when set, bounds this candidate's drain. After any required replacements are ready, the
+	// queue stamps the absolute termination deadline (now + this) immediately before requesting deletion, so
+	// replacement-launch latency doesn't erode the window. nil inherits the NodeClaim's own TerminationGracePeriod.
+	// Repair sets it (min(policy, NodeClaim TGP)) in ComputeCommands.
 	TerminationGracePeriod *time.Duration
-	// RepairCondition, when non-empty, is the node condition that made this candidate eligible for repair. Repair sets
-	// it in ComputeCommands; the queue emits the per-condition unhealthy-disrupted metric off it at actual termination.
-	RepairCondition corev1.NodeConditionType
+	// RepairPolicyResult is the policy decision for this candidate's current node snapshot. ShouldDisrupt populates it,
+	// so a repair pass evaluates each candidate once before sorting and constructing a command.
+	RepairPolicyResult health.RepairResult
 }
 
 // ScoreResult holds the three values needed to decide whether a move passes.
@@ -168,33 +171,37 @@ func (c *Candidate) IsEmpty() bool {
 	return c.RescheduleDisruptionCost <= PerNodeBaseDisruptionCost
 }
 
-//nolint:gocyclo
+//nolint:gocyclo // Candidate validation is clearer as one linear workflow.
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
 	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string,
 ) (*Candidate, error) {
-	var err error
-	var pods []*corev1.Pod
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
 	if queue.HasAny(node.ProviderID()) {
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
-	err = node.ValidateNodeDisruptable(clk)
-	// Repair is voluntary but is NOT discretionary: a node carrying do-not-disrupt must still be repairable, since
-	// do-not-disrupt was never meant to strand a broken node (repair honors do-not-repair instead). So for the repair
-	// class we ignore the do-not-disrupt block; all other block reasons still apply. (Ignoring is a no-op on a nil err.)
-	if disruptionClass == RepairDisruptionClass {
-		err = state.IgnoreNodeDoNotDisruptError(err)
+	if disruptionClass == RepairDisruptionClass && node.NodeClaim != nil && node.Labels()[v1.NodePoolLabelKey] == "" {
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim,
+			"repair requires a NodePool to construct and budget a safe replacement")...)
+		return nil, serrors.Wrap(fmt.Errorf("repair requires a nodepool"), "NodeClaim", klog.KObj(node.NodeClaim))
 	}
+
+	err := node.ValidateNodeDisruptable(clk)
 	if err != nil {
-		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
-		if node.NodeClaim != nil {
-			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
+		// Repair is voluntary but is NOT discretionary: do-not-disrupt was never intended to strand a broken node.
+		if disruptionClass == RepairDisruptionClass {
+			err = state.IgnoreNodeDoNotDisruptError(err)
 		}
-		err = fmt.Errorf("validating node for disruption, %w", err)
-		if node.Node == nil || !node.Registered() {
-			return nil, serrors.Wrap(err, "NodeClaim", klog.KObj(node.NodeClaim))
+		if err != nil {
+			// Only emit an event for Karpenter-managed nodes.
+			if node.NodeClaim != nil {
+				recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
+			}
+			err = fmt.Errorf("validating node for disruption, %w", err)
+			if node.Node == nil || !node.Registered() {
+				return nil, serrors.Wrap(err, "NodeClaim", klog.KObj(node.NodeClaim))
+			}
+			return nil, serrors.Wrap(err, "Node", klog.KObj(node.Node))
 		}
-		return nil, serrors.Wrap(err, "Node", klog.KObj(node.Node))
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
@@ -208,15 +215,20 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
-	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs, clk, recorder); err != nil {
-		// A node with a pod that blocks eviction (PDB, do-not-disrupt) is only a candidate when the drain is bounded by
-		// a hard deadline, so disruption can't hang indefinitely. Repair is not discretionary — like it ignores
-		// node-level do-not-disrupt above, a broken node is never stranded by a blocking pod (its drain bound is set on
-		// the candidate in ComputeCommands and stamped at deletion). Eventual disruption proceeds only when the
-		// NodeClaim's TerminationGracePeriod bounds the drain. Other classes never override a blocking pod.
-		drainBoundedCandidate := disruptionClass == RepairDisruptionClass ||
-			(disruptionClass == EventualDisruptionClass && node.NodeClaim.Spec.TerminationGracePeriod != nil)
-		if lo.Ternary(drainBoundedCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
+	pods, err := node.ValidatePodsDisruptable(ctx, kubeClient, pdbs, clk, recorder)
+	hasPodBlockers := false
+	if err != nil {
+		// Repair resolves its policy deadline after candidate construction, so retain whether pod blockers were ignored
+		// and let Repair reject an unbounded candidate. Eventual disruption already knows its NodeClaim drain bound.
+		validationErr := err
+		switch {
+		case disruptionClass == RepairDisruptionClass:
+			validationErr = state.IgnorePodBlockEvictionError(err)
+			hasPodBlockers = validationErr == nil
+		case disruptionClass == EventualDisruptionClass && node.NodeClaim.Spec.TerminationGracePeriod != nil:
+			validationErr = state.IgnorePodBlockEvictionError(err)
+		}
+		if validationErr != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 			return nil, serrors.Wrap(fmt.Errorf("validating pod disruption, %w", err), "Node", klog.KObj(node.Node))
 		}
@@ -229,6 +241,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
 		zone:              node.Labels()[corev1.LabelTopologyZone],
 		reschedulablePods: reschedulable,
+		hasPodBlockers:    hasPodBlockers,
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
 		DisruptionCost:           disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 		Price:                    resolveNodePrice(node, instanceType),

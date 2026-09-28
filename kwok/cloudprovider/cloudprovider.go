@@ -175,22 +175,29 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{
 		// Supported Kubelet Node Conditions
 		{
-			ConditionType:      corev1.NodeReady,
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 10 * time.Minute,
+			ConditionType:          corev1.NodeReady,
+			ConditionStatus:        corev1.ConditionFalse,
+			TolerationDuration:     10 * time.Minute,
+			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
+			Action:                 cloudprovider.ReplaceNode,
 		},
 		{
-			ConditionType:      corev1.NodeReady,
-			ConditionStatus:    corev1.ConditionUnknown,
-			TolerationDuration: 10 * time.Minute,
+			ConditionType:          corev1.NodeReady,
+			ConditionStatus:        corev1.ConditionUnknown,
+			ReasonRegex:            ".*",
+			TolerationDuration:     10 * time.Minute,
+			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
+			Action:                 cloudprovider.ReplaceNode,
 		},
 		// Simulated unhealthy condition (see KWOKUnhealthyCondition). A short toleration and an explicit termination
 		// grace period keep e2e repair tests fast and let them exercise the drain/TGP path deterministically.
 		{
 			ConditionType:          KWOKUnhealthyCondition,
 			ConditionStatus:        corev1.ConditionTrue,
+			ReasonRegex:            ".*",
 			TolerationDuration:     30 * time.Second,
 			TerminationGracePeriod: lo.ToPtr(45 * time.Second),
+			Action:                 cloudprovider.ReplaceNode,
 		},
 	}
 }
