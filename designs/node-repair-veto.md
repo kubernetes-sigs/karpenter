@@ -6,7 +6,7 @@ A mechanism for users to veto (block) Karpenter's node repair.
 
 [RFC #3192](https://github.com/kubernetes-sigs/karpenter/pull/3192) makes node repair a *voluntary* disruption method and commits to the principle that users must be able to veto it. It deliberately does not design the veto. This RFC is that design.
 
-Node repair terminates and replaces nodes Karpenter believes are unhealthy.  Today node repair is an *involuntary* disruption method meaning users have no way to veto it. That is a problem whenever the "unhealthy" signal is wrong or the operator knows better than the signal.
+Node repair terminates and replaces nodes Karpenter believes are unhealthy. Today node repair is an *involuntary* disruption method meaning users have no way to veto it. That is a problem whenever the "unhealthy" signal is wrong or the operator knows better than the signal.
 
 The community has also expressed a need to be able to control node repair:
 - [kubernetes-sigs/karpenter#2424](https://github.com/kubernetes-sigs/karpenter/issues/2424) asks to be able to veto node repair on certain NodePools
@@ -24,10 +24,13 @@ A veto for repair is useful to cluster operators in various situations.
 The veto is one lever but the following adjacent needs are served by other mechanisms:
 
 | Need | Mechanism | Why it's Out of Scope |
-| --- | --- | --- |
+| :---: | :---: | :---: |
 | **Availability**: "*Don't let repair take down too many pods at once*" | PDBs | A veto should not be used to maintain availability. |
 | **Churn**: "*Don't let repair disrupt too many nodes at once*" | Disruption budgets (with `reasons: ["Unhealthy"]`) | A veto should not be used to reduce churn. Additionally, blanket-annotating nodes to prevent churn will also disable legitimate repair. |
 | **Graceful Shutdown**: "*Let my pod checkpoint/finish before you take it*" | Graceful drain + pod `terminationGracePeriodSeconds` | This is about *how* repair acts once it starts, not *whether* it acts (which is the veto). |
+
+#### Pod Scope Veto
+This RFC focuses on vetoing repair at the node scope. A pod scope veto is deferred for now since every [current use case](#use-cases) is satisfied with a node scope veto. A pod scope veto is also less clearly valuable for repair than it is for other disruption methods. A pod scope veto is meant to protect a running pod but repair usually acts on an unhealthy node whose pods are probably not running anyway (see "*Intent conflation*" under [Option B](#option-b-reuse-karpentershdo-not-disrupt)).
 
 ## Background
 Per [RFC #3192](https://github.com/kubernetes-sigs/karpenter/pull/3192), every disruption is described by two orthogonal axes:
@@ -64,7 +67,9 @@ metadata:
 
 `do-not-repair` reuses the same machinery `do-not-disrupt` uses today. The flowcharts below show the veto mechanics that `do-not-repair` follows (it is the behavior `do-not-disrupt` already has for drift, `do-not-repair` applies it to repair).
 
-![Node scope `do-not-repair` flowchart](./images/node-repair-veto/node-veto-do-not-repair-flowchart.svg)
+<p align="center">
+  <img src="./images/node-repair-veto/node-veto-do-not-repair-flowchart.svg" alt="Node scope `do-not-repair` flowchart">
+</p>
 
 ### Interaction with Existing Features
 
@@ -82,7 +87,7 @@ Once repair is integrated into the disruption pipeline it will start emitting a 
 
 ## Options Considered
 
-Once repair is voluntary how does a user opt a specific node or workload out of it? The following shapes were considered.
+Once repair is voluntary how does a user opt a specific node out of it? The following shapes were considered.
 
 ### Option A: New `karpenter.sh/do-not-repair` (Recommended)
 
