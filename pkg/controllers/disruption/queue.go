@@ -249,14 +249,10 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 						return nil
 					}
 				}
-				updated := stored.DeepCopy()
-				updated.Annotations = lo.Assign(updated.Annotations, map[string]string{
-					v1.NodeClaimTerminationTimestampAnnotationKey: deadline.Format(time.RFC3339),
-				})
-				if err := q.kubeClient.Patch(ctx, updated, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+				if err := nodeclaimutils.PatchTerminationTimestampAnnotation(ctx, q.kubeClient, stored, deadline); err != nil {
 					return err
 				}
-				cmd.Candidates[i].NodeClaim = updated
+				cmd.Candidates[i].NodeClaim = stored
 				return nil
 			}); err != nil {
 				errs[i] = err

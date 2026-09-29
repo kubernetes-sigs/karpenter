@@ -23,7 +23,6 @@ import (
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
@@ -297,23 +296,14 @@ func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx c
 	// We use the kubernetes object TerminationGracePeriod to infer that the DeletionTimestamp is always equal to the time the NodeClaim is deleted.
 	// This should not be confused with the NodeClaim.spec.terminationGracePeriod field introduced in Karpenter Custom Resources.
 	if nodeClaim.Spec.TerminationGracePeriod != nil && !nodeClaim.DeletionTimestamp.IsZero() {
-		terminationTimeString := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339)
-		return c.annotateTerminationGracePeriodTerminationTime(ctx, nodeClaim, terminationTimeString)
+		terminationTime := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
+		if err := nodeclaimutils.PatchTerminationTimestampAnnotation(ctx, c.kubeClient, nodeClaim, terminationTime); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		terminationTimeString := terminationTime.Format(time.RFC3339)
+		log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTimeString).Info("annotated nodeclaim")
+		c.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, terminationTimeString))
 	}
-
-	return nil
-}
-
-func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.Context, nodeClaim *v1.NodeClaim, terminationTime string) error {
-	stored := nodeClaim.DeepCopy()
-	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
-
-	// Use optimistic locking so a concurrent termination-deadline update is not overwritten.
-	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
-	c.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, terminationTime))
 
 	return nil
 }
