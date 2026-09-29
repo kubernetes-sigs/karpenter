@@ -296,7 +296,7 @@ func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx c
 	// We use the kubernetes object TerminationGracePeriod to infer that the DeletionTimestamp is always equal to the time the NodeClaim is deleted.
 	// This should not be confused with the NodeClaim.spec.terminationGracePeriod field introduced in Karpenter Custom Resources.
 	if nodeClaim.Spec.TerminationGracePeriod != nil && !nodeClaim.DeletionTimestamp.IsZero() {
-		terminationTime := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
+		terminationTime := nodeClaim.DeletionTimestamp.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
 		if err := nodeclaimutils.PatchTerminationTimestampAnnotation(ctx, c.kubeClient, nodeClaim, terminationTime); err != nil {
 			return client.IgnoreNotFound(err)
 		}
