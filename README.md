@@ -60,11 +60,15 @@ Weekly meetings alternating between repositories and time slots. Please check th
 - **Calendar**: Subscribe to our [Google Calendar](https://calendar.google.com/calendar/u/0?cid=N3FmZGVvZjVoZWJkZjZpMnJrMmplZzVqYmtAZ3JvdXAuY2FsZW5kYXIuZ29vZ2xlLmNvbQ)
 - **Meeting Notes**: View our [Working Group Log](https://docs.google.com/document/d/18BT0AIMugpNpiSPJNlcAL2rv69yAE6Z06gUVj7v_clg/edit?usp=sharing)
 
+### Contributing
+
 Pull Requests and feedback on issues are very welcome!
 See the [issue tracker](https://github.com/aws/karpenter-core/issues) if you're unsure where to start, especially the [Good first issue](https://github.com/aws/karpenter-core/issues?q=is%3Aopen+is%3Aissue+label%3Agood-first-issue) and [Help wanted](https://github.com/aws/karpenter-core/issues?utf8=%E2%9C%93&q=is%3Aopen+is%3Aissue+label%3Ahelp-wanted) tags, and
 also feel free to reach out to discuss.
 
 See also our [contributor guide](CONTRIBUTING.md) and the Kubernetes [community page](https://kubernetes.io/community) for more details on how to get involved.
+
+The main branch may be unstable during active development. New features land here first and may introduce bugs. For production use, we recommend [stable releases](https://github.com/kubernetes-sigs/karpenter/releases).
 
 ### Code of conduct
 
