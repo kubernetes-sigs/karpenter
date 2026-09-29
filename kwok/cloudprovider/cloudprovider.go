@@ -157,6 +157,15 @@ func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 	return []status.Object{&v1alpha1.KWOKNodeClass{}}
 }
 
+// KWOKUnhealthyCondition is a node condition the KWOK reference provider uses to SIMULATE an unhealthy node for
+// node-repair testing. KWOK's node lifecycle only manages NodeReady + the node Lease, so an injected Ready=False/Unknown
+// is reverted by the heartbeat stage and does not hold. A custom condition like this one is NOT managed by KWOK, so once
+// injected it persists (the node-heartbeat-with-lease stage in hack/kwok/stages re-emits it on every heartbeat). This
+// lets e2e tests exercise node repair deterministically, and models the kind of out-of-band unhealthy signal a
+// node-monitoring agent surfaces while the kubelet still reports Ready=True. The literal must stay in sync with the
+// hack/kwok/stages/node-heartbeat-with-lease.yaml stage template.
+const KWOKUnhealthyCondition corev1.NodeConditionType = "KWOKUnhealthy"
+
 func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{
 		// Supported Kubelet Node Conditions
@@ -169,6 +178,14 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 			ConditionType:      corev1.NodeReady,
 			ConditionStatus:    corev1.ConditionUnknown,
 			TolerationDuration: 10 * time.Minute,
+		},
+		// Simulated unhealthy condition (see KWOKUnhealthyCondition). A short toleration and an explicit termination
+		// grace period keep e2e repair tests fast and let them exercise the drain/TGP path deterministically.
+		{
+			ConditionType:          KWOKUnhealthyCondition,
+			ConditionStatus:        corev1.ConditionTrue,
+			TolerationDuration:     30 * time.Second,
+			TerminationGracePeriod: lo.ToPtr(45 * time.Second),
 		},
 	}
 }
