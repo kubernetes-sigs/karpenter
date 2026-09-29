@@ -266,7 +266,6 @@ var _ = Describe("Repair Policies", func() {
 			Expect(result.ReasonRegex).To(Equal(`XID(48|63)`))
 			Expect(result.Fallback).To(BeFalse())
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
-			Expect(result.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
 
 			result = evaluate(matcher, now.Add(35*time.Minute), condition)
 			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
@@ -276,7 +275,6 @@ var _ = Describe("Repair Policies", func() {
 			Expect(result.ReasonRegex).To(Equal(`48Error$`))
 			Expect(result.Fallback).To(BeFalse())
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(30 * time.Minute)))
-			Expect(result.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
 			Expect(result.Score).To(BeNumerically("~", 25.0/30.0))
 		})
 
@@ -308,7 +306,7 @@ var _ = Describe("Repair Policies", func() {
 				sameActionMatcher := newMatcher(orderedPolicies)
 				result := evaluate(sameActionMatcher, now.Add(25*time.Minute), condition)
 				Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
-				Expect(result.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
+				Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 			}
 		})
 
@@ -371,7 +369,6 @@ var _ = Describe("Repair Policies", func() {
 			Expect(result.ReasonRegex).To(BeEmpty())
 			Expect(result.Fallback).To(BeTrue())
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(30 * time.Minute)))
-			Expect(result.EligibleAt).To(Equal(now.Add(30 * time.Minute)))
 		})
 
 		It("treats a non-empty match-all expression as a specific policy", func() {
@@ -459,7 +456,6 @@ var _ = Describe("Repair Policies", func() {
 				Expect(result.ReasonRegex).To(Equal(".*"))
 				Expect(result.Fallback).To(BeFalse())
 				Expect(result.SelectedEligibleAt).To(Equal(now.Add(-15 * time.Minute)))
-				Expect(result.EligibleAt).To(Equal(now.Add(-150 * time.Minute)))
 				Expect(result.TerminationGracePeriod).NotTo(BeNil())
 				Expect(*result.TerminationGracePeriod).To(Equal(rebootGracePeriod))
 			}
@@ -512,7 +508,6 @@ var _ = Describe("Repair Policies", func() {
 			Expect(matcher.Evaluate(node, now.Add(9*time.Minute)).Action).To(BeEmpty())
 			result := matcher.Evaluate(node, now.Add(10*time.Minute))
 			Expect(result.Action).To(Equal(cloudprovider.RebootNode))
-			Expect(result.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 		})
 
@@ -541,7 +536,7 @@ var _ = Describe("Repair Policies", func() {
 			restartedMatcher := newMatcher(reasonPolicies)
 			result := evaluate(restartedMatcher, now, condition)
 			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
-			Expect(result.EligibleAt).To(Equal(now.Add(-30 * time.Minute)))
+			Expect(result.SelectedEligibleAt).To(Equal(now.Add(-30 * time.Minute)))
 		})
 	})
 

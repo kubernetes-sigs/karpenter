@@ -57,8 +57,8 @@ type RepairPolicyMatcher struct {
 }
 
 // RepairResult merges all eligible policies for one Node. Condition, ConditionStatus, Reason, ReasonRegex, Fallback,
-// and SelectedEligibleAt identify the deterministic source of the selected Action. EligibleAt is the earliest
-// eligibility across all policies, while TerminationGracePeriod is the shortest bound.
+// and SelectedEligibleAt identify the deterministic source of the selected Action, while TerminationGracePeriod is
+// the shortest bound.
 type RepairResult struct {
 	Score                  float64
 	Action                 cloudprovider.RepairAction
@@ -67,7 +67,6 @@ type RepairResult struct {
 	Reason                 string
 	ReasonRegex            string
 	Fallback               bool
-	EligibleAt             time.Time
 	SelectedEligibleAt     time.Time
 	TerminationGracePeriod *time.Duration
 	selectedPriority       int
@@ -239,9 +238,6 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, transitionTi
 	}
 	age := now.Sub(eligibleAt)
 	r.Score = max(r.Score, float64(rank)+age.Minutes()/agingConstant.Minutes())
-	if r.EligibleAt.IsZero() || eligibleAt.Before(r.EligibleAt) {
-		r.EligibleAt = eligibleAt
-	}
 	if policy.TerminationGracePeriod != nil &&
 		(r.TerminationGracePeriod == nil || *policy.TerminationGracePeriod < *r.TerminationGracePeriod) {
 		r.TerminationGracePeriod = policy.TerminationGracePeriod
