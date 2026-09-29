@@ -49,6 +49,10 @@ import (
 const (
 	GracefulDisruptionClass = metrics.TerminationModeGraceful // graceful disruption always respects blocking pod PDBs and the do-not-disrupt annotation
 	EventualDisruptionClass = metrics.TerminationModeEventual // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
+	// RepairDisruptionClass is voluntary node repair. Like graceful, it drains and honors PDBs; unlike graceful, it
+	// ignores do-not-disrupt (repair is not discretionary — it honors the separate do-not-repair veto) and its drain
+	// is bounded by the per-condition RepairPolicy TerminationGracePeriod (0 = forceful), like eventual.
+	RepairDisruptionClass = "repair"
 )
 
 type MethodOptions struct {
@@ -88,6 +92,13 @@ type Candidate struct {
 	// RescheduleDisruptionCost is 1.0 (base) + sum of positive pod eviction costs
 	// for reschedulable pods. Used by balanced scoring.
 	RescheduleDisruptionCost float64
+	// TerminationGracePeriod, when set, bounds this candidate's drain. The queue stamps the absolute termination
+	// deadline (now + this) at actual deletion time, so replace-then-terminate latency doesn't erode the window. nil
+	// inherits the NodeClaim's own TerminationGracePeriod. Repair sets it (min(policy, NodeClaim TGP)) in ComputeCommands.
+	TerminationGracePeriod *time.Duration
+	// RepairCondition, when non-empty, is the node condition that made this candidate eligible for repair. Repair sets
+	// it in ComputeCommands; the queue emits the per-condition unhealthy-disrupted metric off it at actual termination.
+	RepairCondition corev1.NodeConditionType
 }
 
 // ScoreResult holds the three values needed to decide whether a move passes.
@@ -167,12 +178,23 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	if queue.HasAny(node.ProviderID()) {
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
-	if err = node.ValidateNodeDisruptable(clk); err != nil {
+	err = node.ValidateNodeDisruptable(clk)
+	// Repair is voluntary but is NOT discretionary: a node carrying do-not-disrupt must still be repairable, since
+	// do-not-disrupt was never meant to strand a broken node (repair honors do-not-repair instead). So for the repair
+	// class we ignore the do-not-disrupt block; all other block reasons still apply. (Ignoring is a no-op on a nil err.)
+	if disruptionClass == RepairDisruptionClass {
+		err = state.IgnoreNodeDoNotDisruptError(err)
+	}
+	if err != nil {
 		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 		}
-		return nil, err
+		err = fmt.Errorf("validating node for disruption, %w", err)
+		if node.Node == nil || !node.Registered() {
+			return nil, serrors.Wrap(err, "NodeClaim", klog.KObj(node.NodeClaim))
+		}
+		return nil, serrors.Wrap(err, "Node", klog.KObj(node.Node))
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
@@ -187,13 +209,16 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
 	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs, clk, recorder); err != nil {
-		// If the NodeClaim has a TerminationGracePeriod set and the disruption class is eventual, the node should be
-		// considered a candidate even if there's a pod that will block eviction. Other error types should still cause
-		// failure creating the candidate.
-		eventualDisruptionCandidate := node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass
-		if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
+		// A node with a pod that blocks eviction (PDB, do-not-disrupt) is only a candidate when the drain is bounded by
+		// a hard deadline, so disruption can't hang indefinitely. Repair is not discretionary — like it ignores
+		// node-level do-not-disrupt above, a broken node is never stranded by a blocking pod (its drain bound is set on
+		// the candidate in ComputeCommands and stamped at deletion). Eventual disruption proceeds only when the
+		// NodeClaim's TerminationGracePeriod bounds the drain. Other classes never override a blocking pod.
+		drainBoundedCandidate := disruptionClass == RepairDisruptionClass ||
+			(disruptionClass == EventualDisruptionClass && node.NodeClaim.Spec.TerminationGracePeriod != nil)
+		if lo.Ternary(drainBoundedCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
-			return nil, err
+			return nil, serrors.Wrap(fmt.Errorf("validating pod disruption, %w", err), "Node", klog.KObj(node.Node))
 		}
 	}
 	reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) })
@@ -237,6 +262,8 @@ type Command struct {
 	Candidates          []*Candidate
 	Replacements        []*Replacement
 	PoolDisruptionCosts map[string]float64
+	// TerminateFirst marks a delete-only terminate-first command (RFC #3203); Decision() surfaces it as TerminateFirstDecision.
+	TerminateFirst bool
 }
 
 // Reason returns the disruption reason for this command.
@@ -253,6 +280,13 @@ var (
 	NoOpDecision    Decision = "no-op"
 	ReplaceDecision Decision = "replace"
 	DeleteDecision  Decision = "delete"
+	// TerminateFirstDecision is a delete-only decision distinguished from DeleteDecision for terminate-first (RFC #3203).
+	TerminateFirstDecision Decision = "terminate-first"
+	// ApprovedDecision and RejectedDecision are the decision label values emitted
+	// by the Balanced consolidation move metrics (consolidation_moves_total and
+	// consolidation_score).
+	ApprovedDecision Decision = "approved"
+	RejectedDecision Decision = "rejected"
 )
 
 func (c Command) Decision() Decision {
@@ -260,6 +294,9 @@ func (c Command) Decision() Decision {
 	case len(c.Candidates) > 0 && len(c.Replacements) > 0:
 		return ReplaceDecision
 	case len(c.Candidates) > 0 && len(c.Replacements) == 0:
+		if c.TerminateFirst {
+			return TerminateFirstDecision
+		}
 		return DeleteDecision
 	default:
 		return NoOpDecision
@@ -373,11 +410,11 @@ func (c Command) EstimatedSavings() float64 {
 	destPrice := 0.0
 	for _, nodeClaim := range c.Results.NewNodeClaims {
 		if len(nodeClaim.InstanceTypeOptions) > 0 {
-			available := nodeClaim.InstanceTypeOptions[0].Offerings.
-				Available().                       // Filter to available offerings so ICE'd zones don't produce an optimistic estimate.
+			launchable := nodeClaim.InstanceTypeOptions[0].Offerings.
+				Launchable().                      // Launchable (not just Available): a full reservation is Available at ~0 price but launches at OD/spot, which would overstate savings.
 				Compatible(nodeClaim.Requirements) // Filter to only consider allowed offerings
-			if len(available) > 0 {
-				destPrice += available.Cheapest().Price
+			if len(launchable) > 0 {
+				destPrice += launchable.Cheapest().Price
 			}
 		}
 	}

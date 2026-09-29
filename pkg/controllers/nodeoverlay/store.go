@@ -130,6 +130,7 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 		Requirements:           it.Requirements,           // Shared - never modified
 		Overhead:               it.Overhead,               // Shared - never modified
 		VolumeAttachmentLimits: it.VolumeAttachmentLimits, // Shared - never modified
+		DynamicResources:       it.DynamicResources,       // Shared - never modified
 		Capacity:               it.Capacity,
 	}
 
@@ -254,11 +255,12 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 	}
 
 	for _, of := range offerings {
-		if update, foundOfferingUpdate := i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()]; foundOfferingUpdate {
+		requirementKey := of.Requirements.String()
+		if update, foundOfferingUpdate := i.updates[nodePoolName][instanceTypeName].Price[requirementKey]; foundOfferingUpdate {
 			update.lowestWeight = nodeOverlay.Spec.Weight
 			continue
 		}
-		i.updates[nodePoolName][instanceTypeName].Price[of.Requirements.String()] = &priceUpdate{
+		i.updates[nodePoolName][instanceTypeName].Price[requirementKey] = &priceUpdate{
 			OverlayUpdate: price,
 			lowestWeight:  nodeOverlay.Spec.Weight,
 		}

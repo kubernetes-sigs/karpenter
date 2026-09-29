@@ -48,11 +48,12 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodePoolSubsystem,
 			Name:      "cost_tracker_errors_total",
-			Help:      "Number of errors encountered during cost tracking operations. Labeled by nodepool and nodeclaim.",
+			Help:      "Number of errors encountered during cost tracking operations. Labeled by nodepool.",
 		},
-		[]string{
-			metrics.NodePoolLabel,
+		[]opmetrics.Label{
+			metrics.NodePool,
 		},
+		opmetrics.Alpha,
 	)
 )
 

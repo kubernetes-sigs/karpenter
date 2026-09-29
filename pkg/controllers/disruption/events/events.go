@@ -28,6 +28,40 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
+// NodeRepairBlocked warns that node repair is being withheld from a node (e.g. the circuit breaker tripped because too
+// much of the NodePool is unhealthy). It is a Warning so it surfaces during one-off debugging of "why isn't this node
+// being repaired?"
+func NodeRepairBlocked(node *corev1.Node, nodeClaim *v1.NodeClaim, nodePool *v1.NodePool, msg string) []events.Event {
+	// One event per involved object (node, NodeClaim, NodePool) so each surfaces the block on its own timeline —
+	// not three identical events on the node.
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           corev1.EventTypeWarning,
+			Reason:         events.NodeRepairBlocked,
+			Message:        msg,
+			DedupeValues:   []string{string(node.UID)},
+			DedupeTimeout:  15 * time.Minute,
+		},
+		{
+			InvolvedObject: nodeClaim,
+			Type:           corev1.EventTypeWarning,
+			Reason:         events.NodeRepairBlocked,
+			Message:        msg,
+			DedupeValues:   []string{string(nodeClaim.UID)},
+			DedupeTimeout:  15 * time.Minute,
+		},
+		{
+			InvolvedObject: nodePool,
+			Type:           corev1.EventTypeWarning,
+			Reason:         events.NodeRepairBlocked,
+			Message:        msg,
+			DedupeValues:   []string{string(nodePool.UID)},
+			DedupeTimeout:  15 * time.Minute,
+		},
+	}
+}
+
 func Launching(nodeClaim *v1.NodeClaim, reason string) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,

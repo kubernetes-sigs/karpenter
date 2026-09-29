@@ -220,6 +220,33 @@ var _ = Describe("Store Apply Correctness", func() {
 		})
 	})
 
+	Context("with DRA templates", func() {
+		It("should carry over DynamicResources when overlays are applied", func() {
+			instanceType := fake.GPUInstanceType("m5.large", 2)
+
+			store := newInternalInstanceTypeStore()
+			store.evaluatedNodePools.Insert("default")
+			store.updates = map[string]map[string]*instanceTypeUpdate{
+				"default": {
+					instanceType.Name: &instanceTypeUpdate{
+						Price: map[string]*priceUpdate{
+							instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
+						},
+						Capacity: &capacityUpdate{
+							OverlayUpdate: corev1.ResourceList{
+								"hugepages-2Mi": resource.MustParse("100Mi"),
+							},
+						},
+					},
+				},
+			}
+
+			result := store.apply("default", instanceType)
+
+			Expect(result.DynamicResources).To(Equal(instanceType.DynamicResources), "expected DynamicResources to be carried over")
+		})
+	})
+
 	Context("with capacity overlay", func() {
 		It("should correctly apply capacity overlay", func() {
 			originalMemory := resource.MustParse("8Gi")

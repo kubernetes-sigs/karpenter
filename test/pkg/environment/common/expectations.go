@@ -295,7 +295,11 @@ func (env *Environment) eventuallyExpectTerminatingWithTimeout(timeout time.Dura
 	GinkgoHelper()
 	Eventually(func(g Gomega) {
 		for _, pod := range pods {
-			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			err := env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)
+			if errors.IsNotFound(err) {
+				continue
+			}
+			g.Expect(err).To(Succeed())
 			g.Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 		}
 	}).WithTimeout(timeout).Should(Succeed())

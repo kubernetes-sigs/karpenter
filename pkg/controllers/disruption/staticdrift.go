@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -80,8 +81,27 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 			int64(len(npCandidates)),
 		})
 
-		// Acquire limits from cluster state without bursting over
+		// Acquire limits from cluster state without bursting over. maxAllowedDrifts is how many candidates we can drift
+		// while staging a replacement for each without exceeding the NodePool's node limit; 0 means the pool is at its
+		// limit and can't stage any replacement.
 		maxAllowedDrifts := d.cluster.NodePoolState.ReserveNodeCount(npName, nodeLimit, maxDrifts)
+
+		// Terminate-first (RFC #3203): when the NodePool is at its node limit it can't stage a replacement first — a
+		// pre-spun replacement would be an (N+1)th node the operator capped out. Issue budget-paced delete-only commands;
+		// once the freed slot is released the static.provisioning controller refills the pool back to Spec.Replicas. The
+		// drain still honors PDBs and is bounded by TGP. When the pool has room under its limit, fall through to the
+		// normal replace-first path below. No replacement is reserved for terminate-first, so the reservation above is a
+		// no-op in that case (it reserved nothing).
+		if options.FromContext(ctx).FeatureGates.TerminateFirstDrift && maxAllowedDrifts == 0 {
+			for _, c := range npCandidates[:maxDrifts] {
+				cmds = append(cmds, Command{
+					Candidates:          []*Candidate{c},
+					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{c}),
+					TerminateFirst:      true,
+				})
+			}
+			continue
+		}
 
 		// We will not get a negative value here
 		if maxAllowedDrifts == 0 {

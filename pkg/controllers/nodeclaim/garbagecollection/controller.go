@@ -110,7 +110,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			"provider-id", nodeClaims[i].Status.ProviderID,
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
 		labels := map[string]string{
-			metrics.ReasonLabel:              "garbage_collected",
+			metrics.ReasonLabel:              metrics.GarbageCollectedReason,
 			metrics.NodePoolLabel:            nodeClaims[i].Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel:        nodeClaims[i].Labels[v1.CapacityTypeLabelKey],
 			metrics.ConsolidationPolicyLabel: "",
