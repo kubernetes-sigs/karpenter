@@ -123,6 +123,9 @@ var _ = Describe("Repair", func() {
 	// and re-syncs cluster state. Must be called AFTER initNode.
 	markUnhealthyWithReason := func(n *corev1.Node, condType corev1.NodeConditionType, reason string) {
 		n = ExpectExists(ctx, env.Client, n)
+		if env.Clock.Now().Before(n.CreationTimestamp.Time) {
+			env.Clock.SetTime(n.CreationTimestamp.Time)
+		}
 		n.Status.Conditions = append(n.Status.Conditions, corev1.NodeCondition{
 			Type:               condType,
 			Status:             corev1.ConditionFalse,
@@ -256,13 +259,14 @@ var _ = Describe("Repair", func() {
 		}
 		newRepairController()
 		initNode(nodeClaim, node)
+		env.Clock.Step(time.Hour)
 
 		storedNode := ExpectExists(ctx, env.Client, node)
 		storedNode.Status.Conditions = append(storedNode.Status.Conditions, corev1.NodeCondition{
 			Type:               "BadNode",
 			Status:             corev1.ConditionFalse,
 			Reason:             "UnknownReason",
-			LastTransitionTime: metav1.NewTime(env.Clock.Now().Add(-time.Hour)),
+			LastTransitionTime: storedNode.CreationTimestamp,
 		})
 		ExpectApplied(ctx, env.Client, storedNode)
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(storedNode))

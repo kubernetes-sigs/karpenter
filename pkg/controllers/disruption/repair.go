@@ -111,8 +111,12 @@ func (r *Repair) evaluate(ctx context.Context, node *corev1.Node, now time.Time)
 	}
 	values := []any{
 		"condition", result.Condition,
+		"status", result.ConditionStatus,
+		"reason", result.Reason,
+		"reason-regex", result.ReasonRegex,
+		"fallback", result.Fallback,
 		"action", result.Action,
-		"earliest-eligible-at", result.EligibleAt,
+		"eligible-at", result.SelectedEligibleAt,
 	}
 	if result.TerminationGracePeriod != nil {
 		values = append(values, "termination-grace-period", *result.TerminationGracePeriod)

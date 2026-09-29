@@ -261,11 +261,21 @@ var _ = Describe("Repair Policies", func() {
 			result := evaluate(matcher, now.Add(15*time.Minute), condition)
 			Expect(result.Action).To(Equal(cloudprovider.RebootNode))
 			Expect(result.Condition).To(Equal(condition.Type))
+			Expect(result.ConditionStatus).To(Equal(condition.Status))
+			Expect(result.Reason).To(Equal(condition.Reason))
+			Expect(result.ReasonRegex).To(Equal(`XID(48|63)`))
+			Expect(result.Fallback).To(BeFalse())
+			Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 			Expect(result.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
 
 			result = evaluate(matcher, now.Add(35*time.Minute), condition)
 			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(result.Condition).To(Equal(condition.Type))
+			Expect(result.ConditionStatus).To(Equal(condition.Status))
+			Expect(result.Reason).To(Equal(condition.Reason))
+			Expect(result.ReasonRegex).To(Equal(`48Error$`))
+			Expect(result.Fallback).To(BeFalse())
+			Expect(result.SelectedEligibleAt).To(Equal(now.Add(30 * time.Minute)))
 			Expect(result.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
 			Expect(result.Score).To(BeNumerically("~", 25.0/30.0))
 		})
@@ -356,6 +366,11 @@ var _ = Describe("Repair Policies", func() {
 
 			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(result.Condition).To(Equal(corev1.NodeConditionType("StorageReady")))
+			Expect(result.ConditionStatus).To(Equal(storageCondition.Status))
+			Expect(result.Reason).To(Equal(storageCondition.Reason))
+			Expect(result.ReasonRegex).To(BeEmpty())
+			Expect(result.Fallback).To(BeTrue())
+			Expect(result.SelectedEligibleAt).To(Equal(now.Add(30 * time.Minute)))
 			Expect(result.EligibleAt).To(Equal(now.Add(30 * time.Minute)))
 		})
 
@@ -424,11 +439,13 @@ var _ = Describe("Repair Policies", func() {
 			highPriority := corev1.NodeCondition{
 				Type:               "HighPriority",
 				Status:             corev1.ConditionFalse,
+				Reason:             "HighPriorityFailure",
 				LastTransitionTime: metav1.NewTime(now.Add(-180 * time.Minute)),
 			}
 			lowPriority := corev1.NodeCondition{
 				Type:               "LowPriority",
 				Status:             corev1.ConditionFalse,
+				Reason:             "LowPriorityFailure",
 				LastTransitionTime: metav1.NewTime(now.Add(-45 * time.Minute)),
 			}
 
@@ -437,6 +454,11 @@ var _ = Describe("Repair Policies", func() {
 				Expect(result.Score).To(Equal(float64(7)))
 				Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 				Expect(result.Condition).To(Equal(corev1.NodeConditionType("LowPriority")))
+				Expect(result.ConditionStatus).To(Equal(corev1.ConditionFalse))
+				Expect(result.Reason).To(Equal("LowPriorityFailure"))
+				Expect(result.ReasonRegex).To(Equal(".*"))
+				Expect(result.Fallback).To(BeFalse())
+				Expect(result.SelectedEligibleAt).To(Equal(now.Add(-15 * time.Minute)))
 				Expect(result.EligibleAt).To(Equal(now.Add(-150 * time.Minute)))
 				Expect(result.TerminationGracePeriod).NotTo(BeNil())
 				Expect(*result.TerminationGracePeriod).To(Equal(rebootGracePeriod))
@@ -478,6 +500,20 @@ var _ = Describe("Repair Policies", func() {
 			for _, conditions := range [][]corev1.NodeCondition{{conditionA, conditionB}, {conditionB, conditionA}} {
 				Expect(evaluate(nodeMatcher, now, conditions...).Condition).To(Equal(corev1.NodeConditionType("ConditionA")))
 			}
+		})
+
+		It("does not treat a missing transition time as predating the Node", func() {
+			condition.LastTransitionTime = metav1.Time{}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(now)},
+				Status:     corev1.NodeStatus{Conditions: []corev1.NodeCondition{condition}},
+			}
+
+			Expect(matcher.Evaluate(node, now.Add(9*time.Minute)).Action).To(BeEmpty())
+			result := matcher.Evaluate(node, now.Add(10*time.Minute))
+			Expect(result.Action).To(Equal(cloudprovider.RebootNode))
+			Expect(result.EligibleAt).To(Equal(now.Add(10 * time.Minute)))
+			Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 		})
 
 		It("reconstructs eligibility from the current condition after restart", func() {

@@ -56,17 +56,21 @@ type RepairPolicyMatcher struct {
 	ranks          map[int]int
 }
 
-// RepairResult merges all eligible policies for one Node: Score is the maximum urgency, Action is the most disruptive,
-// EligibleAt is the earliest eligibility, and TerminationGracePeriod is the shortest bound. Action is empty when no
-// policy is eligible; Condition identifies the deterministic source of the selected action.
+// RepairResult merges all eligible policies for one Node. Condition, ConditionStatus, Reason, ReasonRegex, Fallback,
+// and SelectedEligibleAt identify the deterministic source of the selected Action. EligibleAt is the earliest
+// eligibility across all policies, while TerminationGracePeriod is the shortest bound.
 type RepairResult struct {
 	Score                  float64
 	Action                 cloudprovider.RepairAction
 	Condition              corev1.NodeConditionType
+	ConditionStatus        corev1.ConditionStatus
+	Reason                 string
+	ReasonRegex            string
+	Fallback               bool
 	EligibleAt             time.Time
+	SelectedEligibleAt     time.Time
 	TerminationGracePeriod *time.Duration
 	selectedPriority       int
-	selectedEligibleAt     time.Time
 }
 
 // NewRepairPolicyMatcher validates and compiles a complete provider repair policy set.
@@ -194,6 +198,11 @@ func (p *RepairPolicyMatcher) Evaluate(node *corev1.Node, now time.Time) RepairR
 	result := RepairResult{}
 	for i := range node.Status.Conditions {
 		condition := node.Status.Conditions[i]
+		// A condition cannot predate its Node; clamping also gives an omitted transition time a durable lower bound.
+		transitionTime := condition.LastTransitionTime.Time
+		if transitionTime.Before(node.CreationTimestamp.Time) {
+			transitionTime = node.CreationTimestamp.Time
+		}
 		specificPolicies, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]
 		if !ok {
 			continue
@@ -204,13 +213,13 @@ func (p *RepairPolicyMatcher) Evaluate(node *corev1.Node, now time.Time) RepairR
 			if policy.reasonRegex.MatchString(condition.Reason) {
 				matched = true
 				policy.Condition = condition
-				result.mergePolicy(policy, p.ranks[policy.Priority], now)
+				result.mergePolicy(policy, p.ranks[policy.Priority], transitionTime, now)
 			}
 		}
 		if !matched {
 			policy := p.fallbackPolicy
 			policy.Condition = condition
-			result.mergePolicy(policy, p.ranks[policy.Priority], now)
+			result.mergePolicy(policy, p.ranks[policy.Priority], transitionTime, now)
 		}
 	}
 	return result
@@ -222,9 +231,9 @@ func (p *RepairPolicyMatcher) Matches(condition corev1.NodeCondition) bool {
 	return ok
 }
 
-func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, now time.Time) {
+func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, transitionTime, now time.Time) {
 	condition := policy.Condition
-	eligibleAt := condition.LastTransitionTime.Add(policy.TolerationDuration)
+	eligibleAt := transitionTime.Add(policy.TolerationDuration)
 	if eligibleAt.After(now) {
 		return
 	}
@@ -243,8 +252,8 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, now time.Tim
 		switch {
 		case policy.Priority != r.selectedPriority:
 			selected = policy.Priority > r.selectedPriority
-		case !eligibleAt.Equal(r.selectedEligibleAt):
-			selected = eligibleAt.Before(r.selectedEligibleAt)
+		case !eligibleAt.Equal(r.SelectedEligibleAt):
+			selected = eligibleAt.Before(r.SelectedEligibleAt)
 		default:
 			selected = condition.Type < r.Condition
 		}
@@ -252,8 +261,12 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, now time.Tim
 	if selected {
 		r.Action = policy.Action
 		r.Condition = condition.Type
+		r.ConditionStatus = condition.Status
+		r.Reason = condition.Reason
+		r.ReasonRegex = policy.ReasonRegex
+		r.Fallback = policy.ReasonRegex == ""
+		r.SelectedEligibleAt = eligibleAt
 		r.selectedPriority = policy.Priority
-		r.selectedEligibleAt = eligibleAt
 	}
 }
 
