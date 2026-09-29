@@ -94,6 +94,27 @@ var (
 		},
 		opmetrics.Alpha,
 	)
+	// NodeClaimsUnhealthyDisruptedTotal preserves the per-condition/per-image breakdown the node.health controller
+	// emitted, which the reason-labeled disrupted_total loses. Emitted by both the voluntary repair disruption method
+	// (NodeRepair=true) and the legacy node.health controller (NodeRepair=alpha), so it lives here rather than in
+	// either controller's package.
+	NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: NodeClaimSubsystem,
+			Name:      "unhealthy_disrupted_total",
+			Help:      "Number of unhealthy nodeclaims disrupted in total by node repair. Labeled by the condition the node was disrupted on, the owning nodepool, the capacity type, the image ID, and the termination mode.",
+		},
+		[]opmetrics.Label{
+			RepairCondition,
+			NodePool,
+			CapacityType,
+			ImageID,
+			TerminationMode,
+		},
+		opmetrics.Alpha,
+	)
 	NodesCreatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{

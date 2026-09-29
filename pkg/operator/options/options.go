@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,10 +58,22 @@ var (
 
 type optionsKey struct{}
 
+// NodeRepairMode is the tri-state value of the NodeRepair feature gate. Unlike the other (boolean) gates, NodeRepair
+// selects between two implementations: "true" runs node repair as a voluntary disruption method, while "alpha" runs
+// the legacy node.health controller, retained for one release as a migration escape hatch for users not yet ready for
+// the voluntary behavior. "false" disables node repair entirely.
+type NodeRepairMode string
+
+const (
+	NodeRepairDisabled NodeRepairMode = "false"
+	NodeRepairEnabled  NodeRepairMode = "true"
+	NodeRepairAlpha    NodeRepairMode = "alpha"
+)
+
 type FeatureGates struct {
 	inputStr string
 
-	NodeRepair              bool
+	NodeRepair              NodeRepairMode
 	ReservedCapacity        bool
 	SpotToSpotConsolidation bool
 	NodeOverlay             bool
@@ -138,7 +151,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,CapacityBuffer=false,TerminateFirstDrift=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, StaticCapacity, CapacityBuffer, and TerminateFirstDrift.")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,CapacityBuffer=false,TerminateFirstDrift=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, StaticCapacity, CapacityBuffer, and TerminateFirstDrift. NodeRepair is tri-state: 'true' runs node repair as a voluntary disruption method, 'alpha' runs the legacy node.health controller (retained one release), and 'false' disables it; all other gates are true/false.")
 	fs.StringVar(&o.schedulerConfigRaw, "scheduler-config", env.WithDefaultString("SCHEDULER_CONFIG", ""), "A YAML/JSON document configuring the parts of the cluster's kube-scheduler behavior that Karpenter must mirror during scheduling simulation, currently only podTopologySpread.defaultConstraints. Empty means no scheduler-config overrides.")
 }
 
@@ -182,7 +195,7 @@ func (o *Options) ToContext(ctx context.Context) context.Context {
 
 func DefaultFeatureGates() FeatureGates {
 	return FeatureGates{
-		NodeRepair:              false,
+		NodeRepair:              NodeRepairDisabled,
 		ReservedCapacity:        true,
 		SpotToSpotConsolidation: false,
 		NodeOverlay:             false,
@@ -193,34 +206,40 @@ func DefaultFeatureGates() FeatureGates {
 }
 
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {
-	gateMap := map[string]bool{}
+	gateMap := map[string]string{}
 	gates := DefaultFeatureGates()
 
-	// Parses feature gates with the upstream mechanism. This is meant to be used with flag directly but this enables
+	// Parse into a string map (rather than the upstream MapStringBool) so NodeRepair can take the non-boolean value
+	// "alpha" alongside true/false. Every other gate is still boolean. Used with flag directly, this also enables
 	// simple merging with environment vars.
-	if err := cliflag.NewMapStringBool(&gateMap).Set(gateStr); err != nil {
+	if err := cliflag.NewMapStringString(&gateMap).Set(gateStr); err != nil {
 		return gates, err
 	}
+	boolGates := map[string]*bool{
+		"SpotToSpotConsolidation": &gates.SpotToSpotConsolidation,
+		"ReservedCapacity":        &gates.ReservedCapacity,
+		"NodeOverlay":             &gates.NodeOverlay,
+		"StaticCapacity":          &gates.StaticCapacity,
+		"CapacityBuffer":          &gates.CapacityBuffer,
+		"TerminateFirstDrift":     &gates.TerminateFirstDrift,
+	}
+	for name, target := range boolGates {
+		if val, ok := gateMap[name]; ok {
+			parsed, err := strconv.ParseBool(val)
+			if err != nil {
+				return gates, fmt.Errorf("invalid value %q for feature gate %s, must be true or false", val, name)
+			}
+			*target = parsed
+		}
+	}
+	// NodeRepair is tri-state: false (off), true (voluntary disruption method), or alpha (legacy node.health controller).
 	if val, ok := gateMap["NodeRepair"]; ok {
-		gates.NodeRepair = val
-	}
-	if val, ok := gateMap["SpotToSpotConsolidation"]; ok {
-		gates.SpotToSpotConsolidation = val
-	}
-	if val, ok := gateMap["ReservedCapacity"]; ok {
-		gates.ReservedCapacity = val
-	}
-	if val, ok := gateMap["NodeOverlay"]; ok {
-		gates.NodeOverlay = val
-	}
-	if val, ok := gateMap["StaticCapacity"]; ok {
-		gates.StaticCapacity = val
-	}
-	if val, ok := gateMap["CapacityBuffer"]; ok {
-		gates.CapacityBuffer = val
-	}
-	if val, ok := gateMap["TerminateFirstDrift"]; ok {
-		gates.TerminateFirstDrift = val
+		switch mode := NodeRepairMode(val); mode {
+		case NodeRepairDisabled, NodeRepairEnabled, NodeRepairAlpha:
+			gates.NodeRepair = mode
+		default:
+			return gates, fmt.Errorf("invalid value %q for feature gate NodeRepair, must be true, false, or alpha", val)
+		}
 	}
 
 	return gates, nil

@@ -284,11 +284,11 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			if tgp := cmd.Candidates[i].TerminationGracePeriod; tgp != nil {
 				mode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
 			}
-			NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
-				conditionLabel:               pretty.ToSnakeCase(string(cond)),
+			metrics.NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
+				metrics.RepairConditionLabel: pretty.ToSnakeCase(string(cond)),
 				metrics.NodePoolLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel:    cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-				imageIDLabel:                 cmd.Candidates[i].NodeClaim.Status.ImageID,
+				metrics.ImageIDLabel:         cmd.Candidates[i].NodeClaim.Status.ImageID,
 				metrics.TerminationModeLabel: mode,
 			})
 		}

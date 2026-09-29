@@ -102,9 +102,10 @@ func NewController(ctx context.Context, clk clock.Clock, kubeClient client.Clien
 func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
 	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 	methods := []Method{}
-	// Repair runs first: fixing a fault outranks any discretionary rebalance. Registered only when the NodeRepair
-	// feature gate is on; NewRepair then panics if the provider defines no RepairPolicies (repair could never act).
-	if options.FromContext(ctx).FeatureGates.NodeRepair {
+	// Repair runs first: fixing a fault outranks any discretionary rebalance. Registered only when NodeRepair=true
+	// (the voluntary method); NodeRepair=alpha instead runs the legacy node.health controller, wired in controllers.go.
+	// NewRepair then panics if the provider defines no RepairPolicies (repair could never act).
+	if options.FromContext(ctx).FeatureGates.NodeRepair == options.NodeRepairEnabled {
 		methods = append(methods, NewRepair(c))
 	}
 	return append(methods, []Method{
