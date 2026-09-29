@@ -15,6 +15,9 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 * **Provisioning** nodes that meet the requirements of the pods
 * **Removing** the nodes when the nodes are no longer needed
 
+> [!IMPORTANT]
+> The main branch may be unstable during active development. New features land here first and may introduce bugs. For production use, we recommend [official releases](https://github.com/kubernetes-sigs/karpenter/releases).
+
 ## Karpenter Implementations
 Karpenter is a multi-cloud project with implementations by the following cloud providers:
 - [AWS](https://github.com/aws/karpenter-provider-aws)
