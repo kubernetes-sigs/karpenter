@@ -71,6 +71,7 @@ var (
 		&corev1.PersistentVolumeClaim{},
 		&corev1.Pod{},
 		&corev1.PodTemplate{},
+		&corev1.Service{},
 		// karpenter.sh
 		&v1.NodeClaim{},
 		&v1.NodePool{},
