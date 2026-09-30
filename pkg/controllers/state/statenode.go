@@ -246,6 +246,11 @@ func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 	if !in.Initialized() {
 		return fmt.Errorf("node isn't initialized")
 	}
+	// A rebooting node must not be picked up by other disruption methods. This covers the drain window
+	// too, where the node is still Initialized but a reboot is already committed.
+	if in.RebootInProgress() {
+		return fmt.Errorf("node is rebooting")
+	}
 	if in.MarkedForDeletion() {
 		return fmt.Errorf("node is deleting or marked for deletion")
 	}
@@ -335,6 +340,17 @@ func (in *StateNode) Labels() map[string]string {
 	return in.Node.Labels
 }
 
+// RebootInProgress returns true if the node's NodeClaim carries an active (True) Rebooting condition,
+// i.e. a reboot has been committed and has not yet reached a terminal outcome. It is used to advertise
+// the rebooting node's capacity as returning (rather than gone) and to exclude it from other disruption.
+func (in *StateNode) RebootInProgress() bool {
+	if in.NodeClaim == nil {
+		return false
+	}
+	cond := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
+	return cond != nil && cond.IsTrue()
+}
+
 func (in *StateNode) Taints() []corev1.Taint {
 	// If we have a managed node that isn't registered, we should use its NodeClaim
 	// representation of taints. Likewise, if we don't have a Node representation for this
@@ -345,13 +361,17 @@ func (in *StateNode) Taints() []corev1.Taint {
 	} else {
 		taints = in.Node.Spec.Taints
 	}
-	if !in.Initialized() && in.Managed() {
-		// We reject any well-known ephemeral taints and startup taints attached to this node until
-		// the node is initialized. Without this, if the taint is generic and re-appears on the node for a
-		// different reason (e.g. the node is cordoned) we will assume that pods can schedule against the
-		// node in the future incorrectly.
+	if (!in.Initialized() || in.RebootInProgress()) && in.Managed() {
+		// We reject well-known ephemeral taints, startup taints, and the reboot-owned scheduling fence
+		// while the node is uninitialized or rebooting. Without this the scheduling simulation would
+		// treat these transient taints as permanent and incorrectly assume pods can't schedule onto the
+		// node in the future. Stripping the reboot taint here lets the rebooting node's capacity be
+		// modeled as returning (so we don't over-provision) even though the real scheduler is fenced.
 		return lo.Reject(taints, func(taint corev1.Taint, _ int) bool {
 			if scheduling.IsKnownEphemeralTaint(&taint) {
+				return true
+			}
+			if taint.MatchTaint(&v1.RebootingNoScheduleTaint) {
 				return true
 			}
 			if _, found := lo.Find(in.NodeClaim.Spec.StartupTaints, func(t corev1.Taint) bool {
