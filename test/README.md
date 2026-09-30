@@ -19,6 +19,21 @@ From the repo root, after deploying the controller to your cluster:
 TEST_SUITE=regression make e2etests
 ```
 
+Some specs need a cluster whose kube-scheduler carries a specific configuration - the
+`DefaultTopologySpreadConstraints` specs mirror the cluster's `podTopologySpread.defaultConstraints` into
+Karpenter, so they need a kube-scheduler that actually has them. `make setup-kind` creates a Kind cluster from
+[`hack/kind/cluster.yaml`](../hack/kind/cluster.yaml), which is what CI runs against:
+
+```bash
+make setup-kind
+hack/install-prometheus.sh # apply-with-kind enables a ServiceMonitor, which needs the Prometheus CRDs
+KWOK_REPO=kind.local make install-kwok apply-with-kind
+TEST_SUITE=regression make e2etests
+```
+
+Specs that need it skip themselves on a cluster without that configuration, so the rest of the suite runs
+against any cluster with the KWOK provider installed.
+
 Filter with Ginkgo regexes:
 
 ```bash
