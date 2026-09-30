@@ -30,48 +30,50 @@ import (
 	"github.com/prometheus/common/model"
 )
 
-// HistogramStats is the derived percentile summary of one labeled histogram
-// series over the observations added between LatencyHarness.Start and
-// LatencyHarness.Stop.
+// LatencyHarness measures Karpenter's own histograms and counters across a test
+// phase. Start scrapes /metrics from the active Karpenter pod and keeps the
+// target series; Stop scrapes again and reports the difference, so earlier
+// phases of the same suite do not leak into the numbers.
+//
+// Percentiles come from the per-bucket count delta, interpolated the way
+// Prometheus histogram_quantile does it: uniform within a bucket, linear from
+// the previous upper bound to the current one. Min and Max are bucket bounds
+// rather than observations, so they answer which buckets samples landed in, not
+// what the smallest sample was. A percentile landing past the last finite bucket
+// is reported as that bound, and BucketTruncationRate says how much of the
+// distribution the finite tail missed. Below minPercentileSamples observations
+// the percentiles are still reported but flagged PercentilesUnreliable, because
+// the sample count rather than the estimator is what makes them meaningless.
+//
+// A Karpenter restart zeroes every metric the process exports, which makes the
+// start snapshot a wrong baseline rather than a stale one. Stop reads
+// process_start_time_seconds for the direct signal and falls back to
+// snapshotWentBackwards for a scrape with no process collector. Either one
+// discards the baseline, and the reported deltas then cover the post-restart
+// window only.
+//
+// TargetHistograms omits the metrics that time the KWOK fake provider rather
+// than Karpenter. A provider running this harness against real infrastructure
+// should add them back.
+
 type HistogramStats struct {
-	MetricName string            `json:"metric_name"`
-	Labels     map[string]string `json:"labels,omitempty"`
-	Count      uint64            `json:"count"`
-	Sum        float64           `json:"sum"`
-	Mean       float64           `json:"mean"`
-	P50        float64           `json:"p50"`
-	P90        float64           `json:"p90"`
-	P95        float64           `json:"p95"`
-	P99        float64           `json:"p99"`
-	Min        float64           `json:"min"`
-	Max        float64           `json:"max"`
-	// PercentilesUnreliable marks a series whose delta carried fewer than
-	// minPercentileSamples observations. Count, Sum, Mean, Min and Max stay
-	// meaningful; P50..P99 do not, and offline analysis must not plot them.
-	// See minPercentileSamples for why.
-	PercentilesUnreliable bool    `json:"percentiles_unreliable,omitempty"`
-	BucketTruncationRate  float64 `json:"bucket_truncation_rate"`
+	MetricName            string            `json:"metric_name"`
+	Labels                map[string]string `json:"labels,omitempty"`
+	Count                 uint64            `json:"count"`
+	Sum                   float64           `json:"sum"`
+	Mean                  float64           `json:"mean"`
+	P50                   float64           `json:"p50"`
+	P90                   float64           `json:"p90"`
+	P95                   float64           `json:"p95"`
+	P99                   float64           `json:"p99"`
+	Min                   float64           `json:"min"`
+	Max                   float64           `json:"max"`
+	PercentilesUnreliable bool              `json:"percentiles_unreliable,omitempty"`
+	BucketTruncationRate  float64           `json:"bucket_truncation_rate"`
 }
 
-// minPercentileSamples is the delta sample count below which the derived
-// percentiles are reported but flagged.
-//
-// The estimator is not the problem: with 5 observations a p50 target of 2.5
-// falling between cumulative 2 at the 15s bound and 3 at the 20s bound
-// interpolates to 15 + 5*(0.5/1) = 17.5s, which is exactly what Prometheus
-// histogram_quantile specifies. A p50 over 5 samples is meaningless whatever
-// estimator produces it, and dropping interpolation would report the bucket
-// bound 20s instead, no more informative and only less precise. The sample
-// count is the thing worth surfacing, so it is.
 const minPercentileSamples = 20
 
-// TargetHistograms is the Karpenter histogram set the harness scrapes.
-//
-// karpenter_cloudprovider_duration_seconds and
-// karpenter_nodeclaims_instance_termination_duration_seconds are deliberately
-// absent: under KWOK they time the fake provider, so they measure the test
-// harness rather than Karpenter. A provider running this harness against real
-// infrastructure should add them back.
 var TargetHistograms = []string{
 	"karpenter_pods_scheduling_decision_duration_seconds",
 	"karpenter_pods_bound_duration_seconds",
@@ -83,8 +85,6 @@ var TargetHistograms = []string{
 	"karpenter_consolidation_score",
 }
 
-// TargetCounters is the Karpenter counter set the harness reports as deltas
-// between Start and Stop, keyed the same way as LatencyStats.
 var TargetCounters = []string{
 	"karpenter_voluntary_disruption_consolidation_timeouts_total",
 	"karpenter_consolidation_moves_total",
@@ -92,41 +92,21 @@ var TargetCounters = []string{
 	"karpenter_nodes_created_total",
 }
 
-// LatencyResult is what LatencyHarness.Stop returns. Keys of LatencyStats and
-// Counters are series fingerprints (see seriesKey). Process-level memory and
-// CPU are covered by KarpenterMetricsPoller; run both harnesses in tandem if
-// resource-usage stats are needed.
 type LatencyResult struct {
 	LatencyStats map[string]HistogramStats
 	Counters     map[string]uint64
 }
 
-// processStartTimeMetric is the standard Prometheus process-collector gauge.
-// It changes value only when the exporting process restarts, which is the one
-// reliable signal that every counter and histogram behind it reset to zero.
 const processStartTimeMetric = "process_start_time_seconds"
 
-// LatencyHarness captures a start-of-phase snapshot of Karpenter's /metrics
-// endpoint and produces per-histogram percentile summaries by bucket-count
-// delta at Stop. It reuses the pod-proxy scrape pattern from
-// KarpenterMetricsPoller.
 type LatencyHarness struct {
-	env     *Environment
-	podName string
-	start   map[string]*dto.MetricFamily
-	// startProcessTime is process_start_time_seconds at Start. Stop compares
-	// it to decide whether the start snapshot is still a valid baseline.
+	env              *Environment
+	podName          string
+	start            map[string]*dto.MetricFamily
 	startProcessTime float64
 }
 
-// StartLatencyHarness discovers the active Karpenter pod, scrapes /metrics
-// once, and stores a compacted snapshot (target series only) for later delta
-// reduction. Symmetric with StartKarpenterMetricsPoller.
 func StartLatencyHarness(env *Environment) (*LatencyHarness, error) {
-	// The leader lease can briefly name a pod that no longer exists (e.g. just
-	// after a rollout), so retry until it resolves to a live pod. The retry lives
-	// in EventuallyFindActiveKarpenterPod so the metrics poller and the profiler
-	// get it too; all three discover the pod once and then reuse the name.
 	pod, err := env.EventuallyFindActiveKarpenterPod(env.Context)
 	if err != nil {
 		return nil, fmt.Errorf("finding karpenter pod: %w", err)
@@ -142,11 +122,6 @@ func StartLatencyHarness(env *Environment) (*LatencyHarness, error) {
 	return h, nil
 }
 
-// Stop scrapes the end snapshot and reduces the histogram / counter deltas
-// into a LatencyResult. On scrape failure the harness rediscovers the active
-// pod; if a new pod is observed (leader-election handover) it retries the
-// scrape once. Any failure after that (or a failure with no pod change)
-// surfaces the scrape error to the caller.
 func (h *LatencyHarness) Stop() (*LatencyResult, error) {
 	ctx := h.env.Context
 	end, err := scrapeKarpenterMetricFamilies(ctx, h.env, h.podName)
@@ -180,19 +155,6 @@ func (h *LatencyHarness) Stop() (*LatencyResult, error) {
 	return res, nil
 }
 
-// startSnapshot returns the baseline to diff end against, or nil when the
-// baseline is not valid for it.
-//
-// If Karpenter restarted, or Stop ended up scraping a different pod after a
-// leader handover, every counter and histogram behind end restarted from zero
-// and the start snapshot is not a baseline for it. Subtracting it anyway
-// under-reports Count and leaves the cumulative bucket delta non-monotonic,
-// which hides the highest occupied bucket from inferMaxBound and silently turns
-// a rejected score above the threshold into a passing Max.
-//
-// process_start_time_seconds changes only when the exporting process restarts,
-// so a change in it covers both cases. snapshotWentBackwards is the fallback for
-// a scrape with no process collector.
 func (h *LatencyHarness) startSnapshot(end map[string]*dto.MetricFamily) map[string]*dto.MetricFamily {
 	endProcessTime := getGaugeValue(end, processStartTimeMetric)
 	if h.startProcessTime != 0 && endProcessTime != 0 && endProcessTime != h.startProcessTime {
@@ -207,26 +169,6 @@ func (h *LatencyHarness) startSnapshot(end map[string]*dto.MetricFamily) map[str
 	return h.start
 }
 
-// snapshotWentBackwards returns the first target series whose value in end went
-// backwards from start, which is proof the baseline does not belong to end.
-//
-// This is what gives counters the protection they cannot derive from their own
-// value. A bare counter has no internal structure, so `end < start` is the only
-// intrinsic evidence a single counter can offer, and a process that restarts and
-// then re-accumulates past its old value offers none at all: deltaCounter sees a
-// plausible increase and subtracts a stale baseline.
-//
-// Resets are process-wide. A Karpenter restart zeroes every metric the process
-// exports, so one series going backwards proves the baseline is invalid for all
-// of them, including counters whose values happened to overtake. Checking the
-// whole snapshot converts a per-series signal that counters cannot produce into
-// one they can borrow from the histograms.
-//
-// No false positives on valid data: across two scrapes of a single running
-// process, no Prometheus counter value and no histogram bucket can decrease, and
-// a genuine histogram delta is always monotonic. A decrease or a non-monotonic
-// delta means the process restarted, or a metric was unregistered and
-// re-registered, and both invalidate the baseline.
 func snapshotWentBackwards(start, end map[string]*dto.MetricFamily) (string, bool) {
 	if start == nil {
 		return "", false
@@ -244,8 +186,6 @@ func snapshotWentBackwards(start, end map[string]*dto.MetricFamily) (string, boo
 	return "", false
 }
 
-// counterSeriesWentBackwards reports the first series in end whose counter value
-// is below the same series in start.
 func counterSeriesWentBackwards(name string, start, end *dto.MetricFamily) (string, bool) {
 	startBySeries := indexBySeries(name, start)
 	for _, m := range end.GetMetric() {
@@ -261,9 +201,6 @@ func counterSeriesWentBackwards(name string, start, end *dto.MetricFamily) (stri
 	return "", false
 }
 
-// histogramSeriesWentBackwards reports the first series in end whose histogram
-// decreased on sample_count or sample_sum, or whose cumulative delta against
-// start is not monotonic. See cumulativeDelta for why non-monotonic is proof.
 func histogramSeriesWentBackwards(name string, start, end *dto.MetricFamily) (string, bool) {
 	startBySeries := indexBySeries(name, start)
 	for _, m := range end.GetMetric() {
@@ -287,7 +224,6 @@ func histogramSeriesWentBackwards(name string, start, end *dto.MetricFamily) (st
 	return "", false
 }
 
-// bucketCumByBound indexes a histogram's cumulative bucket counts by upper bound.
 func bucketCumByBound(h *dto.Histogram) map[float64]uint64 {
 	buckets := h.GetBucket()
 	out := make(map[float64]uint64, len(buckets))
@@ -297,9 +233,6 @@ func bucketCumByBound(h *dto.Histogram) map[float64]uint64 {
 	return out
 }
 
-// scrapeKarpenterMetricFamilies fetches and parses /metrics from a Karpenter
-// pod via the API-server pod proxy. Shared between LatencyHarness and
-// KarpenterMetricsPoller.
 func scrapeKarpenterMetricFamilies(ctx context.Context, env *Environment, podName string) (map[string]*dto.MetricFamily, error) {
 	data, err := env.KubeClient.CoreV1().Pods("kube-system").ProxyGet("http", podName, "8080", "/metrics", nil).DoRaw(ctx)
 	if err != nil {
@@ -313,10 +246,6 @@ func scrapeKarpenterMetricFamilies(ctx context.Context, env *Environment, podNam
 	return families, nil
 }
 
-// compactFamilies retains only the metric families the harness reduces at
-// Stop, plus process gauges the poller reads. The full Karpenter /metrics
-// response contains hundreds of families; retaining only the target set
-// keeps memory bounded across long test phases.
 func compactFamilies(families map[string]*dto.MetricFamily) map[string]*dto.MetricFamily {
 	keep := make(map[string]*dto.MetricFamily, len(TargetHistograms)+len(TargetCounters)+1)
 	for _, n := range TargetHistograms {
@@ -335,8 +264,6 @@ func compactFamilies(families map[string]*dto.MetricFamily) map[string]*dto.Metr
 	return keep
 }
 
-// seriesKey returns the canonical fingerprint for a labeled sample:
-// "metric_name" or "metric_name{k=v,k2=v2,...}" with keys sorted lexically.
 func seriesKey(name string, labels []*dto.LabelPair) string {
 	if len(labels) == 0 {
 		return name
@@ -349,7 +276,6 @@ func seriesKey(name string, labels []*dto.LabelPair) string {
 	return name + "{" + strings.Join(pairs, ",") + "}"
 }
 
-// labelMap returns the labels of a Metric as a plain map for HistogramStats.
 func labelMap(labels []*dto.LabelPair) map[string]string {
 	if len(labels) == 0 {
 		return nil
@@ -361,10 +287,6 @@ func labelMap(labels []*dto.LabelPair) map[string]string {
 	return out
 }
 
-// deltaHistogram computes per-series stats from the count delta between two
-// snapshots of the same MetricFamily. Nil start or end families are treated
-// as empty. Series present only at end are emitted with their end histogram
-// as the whole delta.
 func deltaHistogram(name string, start, end *dto.MetricFamily) map[string]HistogramStats {
 	out := map[string]HistogramStats{}
 	if end == nil {
@@ -384,14 +306,6 @@ func deltaHistogram(name string, start, end *dto.MetricFamily) map[string]Histog
 	return out
 }
 
-// deltaCounter computes counter-value deltas between two snapshots. Nil start
-// yields the raw end value; a counter reset (end < start) yields end (the new
-// baseline is treated as fresh observation).
-//
-// The end < start check is the last-ditch per-series defense and it cannot see a
-// restart that re-accumulated past the old value. snapshotWentBackwards is the
-// primary protection, because it decides baseline validity for the whole scrape
-// rather than per series, and Stop passes a nil start here when it fires.
 func deltaCounter(name string, start, end *dto.MetricFamily) map[string]uint64 {
 	out := map[string]uint64{}
 	if end == nil {
@@ -410,8 +324,6 @@ func deltaCounter(name string, start, end *dto.MetricFamily) map[string]uint64 {
 		}
 		delta := endV - startV
 		if delta < 0 {
-			// Counter reset (pod restart); take end as-is. endV is a Prometheus
-			// counter value and cannot be negative.
 			delta = endV
 		}
 		out[key] = uint64(delta)
@@ -419,7 +331,6 @@ func deltaCounter(name string, start, end *dto.MetricFamily) map[string]uint64 {
 	return out
 }
 
-// indexBySeries returns metrics from mf keyed by seriesKey.
 func indexBySeries(name string, mf *dto.MetricFamily) map[string]*dto.Metric {
 	out := map[string]*dto.Metric{}
 	if mf == nil {
@@ -431,10 +342,6 @@ func indexBySeries(name string, mf *dto.MetricFamily) map[string]*dto.Metric {
 	return out
 }
 
-// reduceHistogramDelta subtracts the start histogram from end (bucket-wise
-// and on sample_count / sample_sum) and derives percentile stats over the
-// resulting bucket distribution. Both histograms MUST share the same bucket
-// layout; deltas for missing start-buckets treat startCumulative as 0.
 func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) HistogramStats {
 	if end == nil {
 		return HistogramStats{}
@@ -445,19 +352,6 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 	startCount, startSum, startCumBy := resolveDeltaBaseline(startHistogram, end)
 	deltaCum, ok := cumulativeDelta(endBuckets, startCumBy)
 	if !ok {
-		// The subtraction produced a distribution that is not monotonically
-		// non-decreasing, which a genuine before/after pair of the same
-		// accumulating histogram can never be: every observation at or below a
-		// bucket bound is also at or below every higher bound. So the baseline
-		// does not belong to this series, typically because the process
-		// restarted and re-accumulated past the old sample_count. Discard it
-		// and treat end as the whole delta.
-		//
-		// This matters because a stale baseline leaves deltaCum non-monotonic,
-		// and inferMaxBound's per-bucket scan then stops at the first large
-		// bucket and never reaches the highest occupied one. A rejected score
-		// of 9.0 gets reported as a Max of 0.33, which silently satisfies the
-		// rejected arm's Max <= threshold.
 		startCount, startSum = 0, 0
 		deltaCum, _ = cumulativeDelta(endBuckets, nil)
 	}
@@ -465,9 +359,6 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 	if deltaCount == 0 {
 		return HistogramStats{Count: 0, Sum: endSum - startSum}
 	}
-	// Prometheus's text parser retains the +Inf bucket in end.GetBucket().
-	// Percentile / Max derivation must run against the finite tail only;
-	// truncation rate is what the finite tail failed to capture.
 	finiteBuckets, finiteCum := endBuckets, deltaCum
 	if n := len(endBuckets); n > 0 && math.IsInf(endBuckets[n-1].GetUpperBound(), +1) {
 		finiteBuckets = endBuckets[:n-1]
@@ -497,16 +388,6 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 	}
 }
 
-// resolveDeltaBaseline returns the baseline sample count, sum, and cumulative
-// bucket counts (keyed by upper bound) that the delta reduction subtracts from
-// end. A nil startHistogram, or a sample_count or sample_sum that went
-// backwards (the visible half of a counter reset), yields a zero baseline so
-// end is treated as the whole delta. Bucket-level validation belongs to
-// cumulativeDelta.
-//
-// LatencyHarness.Stop additionally discards the whole start snapshot when
-// process_start_time_seconds moved, which is the direct restart signal. These
-// checks are the per-series fallback for scrapes with no process collector.
 func resolveDeltaBaseline(startHistogram, end *dto.Histogram) (uint64, float64, map[float64]uint64) {
 	if startHistogram == nil {
 		return 0, 0, nil
@@ -517,14 +398,6 @@ func resolveDeltaBaseline(startHistogram, end *dto.Histogram) (uint64, float64, 
 	return startHistogram.GetSampleCount(), startHistogram.GetSampleSum(), bucketCumByBound(startHistogram)
 }
 
-// cumulativeDelta subtracts the baseline cumulative counts from end's buckets,
-// matching on upper bound. A nil startCumBy yields end unchanged.
-//
-// It returns false when the subtraction underflows, or when the result is not
-// monotonically non-decreasing. Either means startCumBy is not a valid baseline
-// for these buckets, because a real delta of one accumulating histogram is
-// always monotonic: an observation at or below one bound is at or below every
-// higher bound, so a lower bucket cannot gain more than a higher one.
 func cumulativeDelta(endBuckets []*dto.Bucket, startCumBy map[float64]uint64) ([]uint64, bool) {
 	out := make([]uint64, len(endBuckets))
 	prev := uint64(0)
@@ -543,14 +416,6 @@ func cumulativeDelta(endBuckets []*dto.Bucket, startCumBy map[float64]uint64) ([
 	return out, true
 }
 
-// inferMaxBound returns the upper bound of the highest finite bucket that
-// received a non-zero per-bucket delta. Cumulative counts are monotonically
-// non-decreasing, so a naive right-to-left scan of deltaCum reports the top
-// bucket whenever any observation occurred; the per-bucket-delta scan below
-// is what makes Max sensitive to where samples actually landed. When every
-// delta observation fell beyond the last finite bucket (the +Inf bucket) the
-// last finite bound is returned; callers pair this with BucketTruncationRate
-// to detect that condition.
 func inferMaxBound(endBuckets []*dto.Bucket, deltaCum []uint64) float64 {
 	if len(endBuckets) == 0 {
 		return 0
@@ -569,9 +434,6 @@ func inferMaxBound(endBuckets []*dto.Bucket, deltaCum []uint64) float64 {
 	return endBuckets[maxIdx].GetUpperBound()
 }
 
-// inferMinBound returns the lower bound of the lowest finite bucket that
-// received a non-zero per-bucket delta (0 for the first bucket), i.e. every
-// observation in the phase was > the returned value.
 func inferMinBound(endBuckets []*dto.Bucket, deltaCum []uint64) float64 {
 	prevUpper := 0.0
 	for i, c := range deltaCum {
@@ -583,11 +445,6 @@ func inferMinBound(endBuckets []*dto.Bucket, deltaCum []uint64) float64 {
 	return prevUpper
 }
 
-// interpolatePercentile returns the linearly-interpolated percentile from a
-// cumulative delta distribution. Follows Prometheus' histogram_quantile
-// convention: uniform-within-bucket, linear from the previous upper bound to
-// the current upper bound. Percentiles landing beyond the last finite bucket
-// return the last finite bound (a coarse under-estimate under truncation).
 func interpolatePercentile(buckets []*dto.Bucket, cum []uint64, total uint64, q float64) float64 {
 	if total == 0 || len(buckets) == 0 {
 		return 0

@@ -25,11 +25,6 @@ import (
 	"time"
 )
 
-// LatencySidecar is the JSON schema written alongside a PerformanceReport
-// when the LatencyHarness observed histogram or counter deltas. Offline
-// analysis tools unmarshal into this type to pair a PerformanceReport with
-// its latency companion; keep it stable across performance-suite tests so
-// prior artifacts continue to load.
 type LatencySidecar struct {
 	TestName            string                    `json:"test_name"`
 	ConsolidationPolicy string                    `json:"consolidation_policy"`
@@ -38,13 +33,6 @@ type LatencySidecar struct {
 	Counters            map[string]uint64         `json:"counters,omitempty"`
 }
 
-// WriteArtifactUnder writes data to <dir>/<name> at mode 0600 and returns the
-// path written. name is reduced to its base element and the resolved path is
-// checked to stay under dir, so a caller-supplied prefix cannot escape the
-// output directory.
-//
-// Shared by WriteLatencySidecar and the performance suite's report writer;
-// previously each had its own copy of the clean / base / Rel escape check.
 func WriteArtifactUnder(dir, name string, data []byte) (string, error) {
 	safeDir := filepath.Clean(dir)
 	path := filepath.Join(safeDir, filepath.Base(filepath.Clean(name)))
@@ -57,9 +45,6 @@ func WriteArtifactUnder(dir, name string, data []byte) (string, error) {
 	return path, nil
 }
 
-// WriteLatencySidecar writes sc to <dir>/<filePrefix>_latency.json. Returns
-// nil (no-op) when dir is empty, matching the report.go artifact posture so
-// suites can run without OUTPUT_DIR configured.
 func WriteLatencySidecar(dir, filePrefix string, sc LatencySidecar) error {
 	if dir == "" {
 		return nil

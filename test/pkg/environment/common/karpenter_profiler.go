@@ -113,9 +113,6 @@ func (kp *KarpenterProfiler) run(ctx context.Context) {
 }
 
 func (kp *KarpenterProfiler) establishPortForward(ctx context.Context, localPort int) error {
-	// EventuallyFindActiveKarpenterPod carries its own poll deadline
-	// (leaderPodPollTimeout), so no sub-context timeout is needed here. A 10s
-	// bound used to abort during a leader handover.
 	pod, err := kp.env.EventuallyFindActiveKarpenterPod(ctx)
 	if err != nil || pod == nil {
 		return fmt.Errorf("finding karpenter pod: %w", err)
@@ -259,26 +256,12 @@ const (
 	leaderPodPollTimeout  = 2 * time.Minute
 )
 
-// EventuallyFindActiveKarpenterPod polls FindActiveKarpenterPod until the
-// leader lease resolves to a pod that exists.
-//
-// Immediately after a Karpenter rollout the karpenter-leader-election Lease
-// still names the outgoing pod, so a single lookup returns NotFound and the
-// caller fails with "Pod not found" on a cluster that is merely mid-handover.
-// Every caller that discovers the pod once and then keeps using the name needs
-// this; the ones that re-discover on each scrape (KarpenterMetricsPoller's
-// per-poll recovery, LatencyHarness.Stop) self-heal and call the plain lookup.
-//
-// The last underlying lookup error is wrapped into the returned error, so a
-// timeout reports why the lease never resolved instead of only reporting the
-// deadline.
+// EventuallyFindActiveKarpenterPod polls FindActiveKarpenterPod until the leader lease resolves to a pod that exists.
 func (env *Environment) EventuallyFindActiveKarpenterPod(ctx context.Context) (*corev1.Pod, error) {
 	var pod *corev1.Pod
 	var lastErr error
 	if err := wait.PollUntilContextTimeout(ctx, leaderPodPollInterval, leaderPodPollTimeout, true,
 		func(ctx context.Context) (bool, error) {
-			// Never returns an error: a failed lookup means keep polling, and
-			// the cause is kept in lastErr for the timeout message below.
 			pod, lastErr = env.FindActiveKarpenterPod(ctx)
 			if lastErr == nil && pod == nil {
 				lastErr = fmt.Errorf("leader lease resolved to a nil pod")

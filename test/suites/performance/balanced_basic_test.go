@@ -31,7 +31,6 @@ import (
 
 var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Balanced Basic Fixture", func() {
-		// The basic_test.go fixture (1000 pods scaled down to 700) under Balanced.
 		It("should consolidate the basic fixture under Balanced", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyBalanced
 			smallDeployment := test.Deployment(test.CreateDeploymentOptions("small-resource-app", 500, "900m", "3100Mi"))
@@ -40,12 +39,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 
 			scaleOutReport, err := ReportScaleOutWithOutput(env, "Balanced Basic Scale Out", 1000, 15*time.Minute, "balanced_basic_scale_out")
 			Expect(err).ToNot(HaveOccurred())
-			// TotalPods just echoes the argument above; TotalNodes is measured.
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically(">", 0))
 
-			// Start the harness before submitting the scale-in. Any scoring
-			// between the update and the start scrape lands in the baseline and
-			// is subtracted out, which shows up as scored == 0.
 			h, err := common.StartLatencyHarness(env)
 			Expect(err).ToNot(HaveOccurred())
 

@@ -31,9 +31,6 @@ import (
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
-// scaleAndSettle updates the deployment to targetReplicas, waits for pods to
-// reach that count, then sleeps two consolidateAfter cycles so the
-// disruption controller has time to act before the next round.
 func scaleAndSettle(env *common.Environment, dep *appsv1.Deployment, targetReplicas int32, timeout time.Duration) {
 	dep.Spec.Replicas = lo.ToPtr(targetReplicas)
 	env.ExpectUpdated(dep)
@@ -44,21 +41,6 @@ func scaleAndSettle(env *common.Environment, dep *appsv1.Deployment, targetRepli
 
 var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Balanced Churn Chain", func() {
-		// A 400-pod / ~40-node scale-out followed by three scale-in /
-		// scale-out churn rounds, under Balanced. The RFC's 4-step max-churn
-		// ceiling at k=2 predicts the counter deltas diverge from an
-		// unconstrained policy by round 3. LatencyHarness spans the full churn
-		// window and the sidecar JSON carries consolidation_moves_total,
-		// nodeclaims_created_total, and
-		// karpenter_voluntary_disruption_decision_evaluation_duration_seconds
-		// deltas for offline inspection.
-		//
-		// There is no paired WhenEmptyOrUnderutilized arm. One was written, but
-		// nothing in the tree reads the sidecars, so the second arm doubled
-		// runtime to produce an artifact no comparison consumed. The
-		// regression coverage is expectBalancedDecisionsMatchThreshold, which
-		// needs only the Balanced arm. Reinstate a baseline arm when a
-		// comparison exists to consume it.
 		It("should measure churn under Balanced across three scale-in / scale-out rounds", func() {
 			By("Pinning ConsolidationPolicy for this run")
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyBalanced
@@ -74,11 +56,6 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				400, 15*time.Minute,
 				"balanced_churn_scale_out")
 			Expect(err).ToNot(HaveOccurred())
-			// TotalPods is the argument passed above, echoed back by
-			// ReportScaleOut, so asserting it proves nothing;
-			// EventuallyExpectHealthyPodCount inside the helper is the real pod
-			// check. TotalNodes is measured, and a zero would make the
-			// consolidation report below meaningless.
 			initialNodes := scaleOutReport.TotalNodes
 			Expect(initialNodes).To(BeNumerically(">", 0))
 

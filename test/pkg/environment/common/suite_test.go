@@ -23,9 +23,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// The specs in this package cover the unexported metric-reduction helpers in
-// latency_harness.go, so they run in package common rather than common_test.
-// They need no cluster and no Environment; `make test` runs them.
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Environment/Common")

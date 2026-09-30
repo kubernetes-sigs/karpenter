@@ -33,10 +33,6 @@ import (
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
-// buildFamilyRestrictedNodePool copies the suite NodePool and restricts it to a
-// single KWOK instance family. The copy inherits the suite BeforeEach settings,
-// including ConsolidationPolicy, so the caller pins the policy on the base
-// NodePool before calling.
 func buildFamilyRestrictedNodePool(base *v1.NodePool, family string) *v1.NodePool {
 	np := base.DeepCopy()
 	np.Name = fmt.Sprintf("%s-%s", family, base.Name)
@@ -50,19 +46,6 @@ func buildFamilyRestrictedNodePool(base *v1.NodePool, family string) *v1.NodePoo
 
 var _ = Describe("Performance", Label(debug.NoWatch), func() {
 	Context("Balanced Heterogeneous NodePools", func() {
-		// Two family-restricted NodePools ('c' and 'm' KWOK families) each
-		// carry a workload at a distinct pod density profile: a dense
-		// 500m/1Gi deployment on the c-pool, a sparse 2500m/8Gi deployment
-		// on the m-pool. Scaling both down makes Balanced take per-pool
-		// decisions (per RFC "source pool's policy governs"). The sidecar
-		// carries karpenter_consolidation_moves_total{nodepool}, per-pool
-		// disruption timing, and karpenter_nodeclaims_created_total.
-		//
-		// Pods select their pool with karpenter.sh/nodepool, which
-		// nodeclaimtemplate.go already stamps on provisioned nodes. An earlier
-		// revision used a custom perf.karpenter.sh/pool label; the NodePool
-		// CRD's CEL rule rejects any label under a karpenter.sh subdomain, so
-		// the NodePools failed admission and this context never ran.
 		BeforeEach(func() {
 			if !env.IsDefaultNodeClassKWOK() {
 				Skip("heterogeneous NodePool fixture uses KWOK-only instance-family labels")
@@ -118,13 +101,6 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				v1.ConsolidationPolicyBalanced, result)
 
 			By("Checking the scored moves belong to the two fixture NodePools")
-			// This context exists to exercise per-pool decisions, so the
-			// nodepool label is the point. Asserting the observed pools are a
-			// subset of the two created catches scoring attributed to a pool
-			// the fixture never made. It deliberately does not require both
-			// pools to have scored: whether the m-pool consolidates at all
-			// depends on how KWOK packs 60 sparse pods, and requiring it would
-			// make a 25-minute spec flaky.
 			scoredPools := expectBalancedDecisionsMatchThreshold(result)
 			Expect(scoredPools.Difference(sets.New(poolC.Name, poolM.Name)).UnsortedList()).To(BeEmpty(),
 				"Balanced scored a move against a NodePool this fixture did not create")
