@@ -60,7 +60,10 @@ type CloudProvider struct {
 	NextCreateErr      error
 	NextGetErr         error
 	NextDeleteErr      error
+	NextRebootErr      error
 	DeleteCalls        []*v1.NodeClaim
+	RebootCalls        []*v1.NodeClaim
+	RebootOperationIDs []string
 	GetCalls           []string
 
 	CreatedNodeClaims         map[string]*v1.NodeClaim
@@ -90,8 +93,11 @@ func (c *CloudProvider) Reset() {
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
 	c.NextDeleteErr = nil
+	c.NextRebootErr = nil
 	c.NextGetErr = nil
 	c.DeleteCalls = []*v1.NodeClaim{}
+	c.RebootCalls = nil
+	c.RebootOperationIDs = nil
 	c.GetCalls = nil
 	c.Drifted = ""
 	c.NodeClassGroupVersionKind = []schema.GroupVersionKind{
@@ -108,6 +114,20 @@ func (c *CloudProvider) Reset() {
 			TolerationDuration: 30 * time.Minute,
 		},
 	}
+}
+
+func (c *CloudProvider) Reboot(_ context.Context, nodeClaim *v1.NodeClaim, operationID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.NextRebootErr != nil {
+		temp := c.NextRebootErr
+		c.NextRebootErr = nil
+		return temp
+	}
+	c.RebootCalls = append(c.RebootCalls, nodeClaim)
+	c.RebootOperationIDs = append(c.RebootOperationIDs, operationID)
+	return nil
 }
 
 //nolint:gocyclo

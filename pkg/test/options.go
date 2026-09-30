@@ -61,6 +61,7 @@ type FeatureGates struct {
 	StaticCapacity            *bool
 	CapacityBuffer            *bool
 	TerminateFirstDrift       *bool
+	TerminateFirstRepair      *bool
 	PodDeletionCostManagement *bool
 }
 
@@ -101,6 +102,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			StaticCapacity:            lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
 			CapacityBuffer:            lo.FromPtrOr(opts.FeatureGates.CapacityBuffer, false),
 			TerminateFirstDrift:       lo.FromPtrOr(opts.FeatureGates.TerminateFirstDrift, false),
+			TerminateFirstRepair:      lo.FromPtrOr(opts.FeatureGates.TerminateFirstRepair, false),
 			PodDeletionCostManagement: lo.FromPtrOr(opts.FeatureGates.PodDeletionCostManagement, false),
 		},
 	}

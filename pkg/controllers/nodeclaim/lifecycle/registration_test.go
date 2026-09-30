@@ -667,7 +667,7 @@ var _ = Describe("Registration", func() {
 	Context("RegistrationHooks", func() {
 		It("should complete registration when a single hook passes", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
 						name: "always-pass",
@@ -696,7 +696,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should defer registration when a hook returns false", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
 						name: "capacity-reservation",
@@ -732,7 +732,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should return error when a hook returns an error", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
 						name: "failing-hook",
@@ -761,7 +761,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should defer registration when the second hook returns false with multiple hooks", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
 						name: "pass-hook",
@@ -798,7 +798,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should complete registration when multiple hooks all pass", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
 						name: "hook-one",
@@ -834,7 +834,7 @@ var _ = Describe("Registration", func() {
 		It("should call all hooks in parallel and list all pending hooks in status", func() {
 			var secondHookCalls atomic.Int32
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
 						name: "blocking-hook",
@@ -876,7 +876,7 @@ var _ = Describe("Registration", func() {
 		It("should complete registration after a hook transitions from not ready to ready", func() {
 			ready := atomic.Bool{}
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
 						name: "eventually-ready",
@@ -916,7 +916,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should complete registration with empty hooks slice", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), []cloudprovider.NodeLifecycleHook{})
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(), []cloudprovider.NodeLifecycleHook{})
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
@@ -936,7 +936,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should complete registration with nil hooks slice", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(), nil)
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(), nil)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
@@ -956,7 +956,7 @@ var _ = Describe("Registration", func() {
 		})
 		It("should propagate labels added by a registration hook to both the node and the nodeclaim", func() {
 			hookController := nodeclaimlifecycle.NewController(env.Clock, env.Client, cloudProvider,
-				events.NewRecorder(&record.FakeRecorder{}), nodepoolhealth.NewState(),
+				events.NewRecorder(&record.FakeRecorder{}), cluster, nodepoolhealth.NewState(),
 				[]cloudprovider.NodeLifecycleHook{
 					testHook{
 						name: "label-mutating-hook",

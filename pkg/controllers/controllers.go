@@ -52,6 +52,7 @@ import (
 	nodeclaimhydration "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/hydration"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
+	nodeclaimreboot "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/reboot"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
@@ -137,7 +138,7 @@ func NewControllers(
 		nodepoolvalidation.NewController(clock, kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState, o.registrationHooks),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, cluster, npState, o.registrationHooks),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
@@ -174,6 +175,11 @@ func NewControllers(
 		)
 	}
 
+	// Register the reboot controller alongside node repair. The repair disruption method itself is
+	// registered in the disruption controller; the standalone node/health controller was removed by #3311.
+	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
+		controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+	}
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))
 		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock, recorder))

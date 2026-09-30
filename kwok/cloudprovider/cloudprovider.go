@@ -149,6 +149,11 @@ func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	return "", nil
 }
 
+func (c CloudProvider) Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) error {
+	// KWOK simulates nodes as Kubernetes Node objects; there is no real instance to restart.
+	return cloudprovider.NewNodeRebootNotImplementedError()
+}
+
 func (c CloudProvider) Name() string {
 	return "kwok"
 }
