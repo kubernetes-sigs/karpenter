@@ -35,15 +35,13 @@ import (
 // target series; Stop scrapes again and reports the difference, so earlier
 // phases of the same suite do not leak into the numbers.
 //
-// Percentiles come from the per-bucket count delta, interpolated the way
-// Prometheus histogram_quantile does it: uniform within a bucket, linear from
-// the previous upper bound to the current one. Min and Max are bucket bounds
-// rather than observations, so they answer which buckets samples landed in, not
-// what the smallest sample was. A percentile landing past the last finite bucket
-// is reported as that bound, and BucketTruncationRate says how much of the
-// distribution the finite tail missed. Below minPercentileSamples observations
-// the percentiles are still reported but flagged PercentilesUnreliable, because
-// the sample count rather than the estimator is what makes them meaningless.
+// The reported shape is count, sum, mean and bucket bounds. No percentiles: a
+// quantile interpolated from a handful of samples across a bucket layout this
+// coarse is a number nobody should act on, and it reads as a measurement. Min
+// and Max are bucket bounds rather than observations, so they answer which
+// buckets samples landed in, not what the smallest sample was. The +Inf bucket
+// is excluded and BucketTruncationRate says how much of the distribution fell
+// past the last finite bound.
 //
 // A Karpenter restart zeroes every metric the process exports, so the start
 // snapshot becomes a wrong baseline rather than a stale one and the window the
@@ -58,22 +56,15 @@ import (
 // should add them back.
 
 type HistogramStats struct {
-	MetricName            string            `json:"metric_name"`
-	Labels                map[string]string `json:"labels,omitempty"`
-	Count                 uint64            `json:"count"`
-	Sum                   float64           `json:"sum"`
-	Mean                  float64           `json:"mean"`
-	P50                   float64           `json:"p50"`
-	P90                   float64           `json:"p90"`
-	P95                   float64           `json:"p95"`
-	P99                   float64           `json:"p99"`
-	Min                   float64           `json:"min"`
-	Max                   float64           `json:"max"`
-	PercentilesUnreliable bool              `json:"percentiles_unreliable,omitempty"`
-	BucketTruncationRate  float64           `json:"bucket_truncation_rate"`
+	MetricName           string            `json:"metric_name"`
+	Labels               map[string]string `json:"labels,omitempty"`
+	Count                uint64            `json:"count"`
+	Sum                  float64           `json:"sum"`
+	Mean                 float64           `json:"mean"`
+	Min                  float64           `json:"min"`
+	Max                  float64           `json:"max"`
+	BucketTruncationRate float64           `json:"bucket_truncation_rate"`
 }
-
-const minPercentileSamples = 20
 
 var TargetHistograms = []string{
 	"karpenter_pods_scheduling_decision_duration_seconds",
@@ -318,17 +309,12 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 	}
 	deltaSum := endSum - startSum
 	return HistogramStats{
-		Count:                 deltaCount,
-		Sum:                   deltaSum,
-		Mean:                  deltaSum / float64(deltaCount),
-		P50:                   interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.50),
-		P90:                   interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.90),
-		P95:                   interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.95),
-		P99:                   interpolatePercentile(finiteBuckets, finiteCum, deltaCount, 0.99),
-		Min:                   inferMinBound(finiteBuckets, finiteCum),
-		Max:                   inferMaxBound(finiteBuckets, finiteCum),
-		PercentilesUnreliable: deltaCount < minPercentileSamples,
-		BucketTruncationRate:  trunc,
+		Count:                deltaCount,
+		Sum:                  deltaSum,
+		Mean:                 deltaSum / float64(deltaCount),
+		Min:                  inferMinBound(finiteBuckets, finiteCum),
+		Max:                  inferMaxBound(finiteBuckets, finiteCum),
+		BucketTruncationRate: trunc,
 	}
 }
 
@@ -385,29 +371,6 @@ func inferMinBound(endBuckets []*dto.Bucket, deltaCum []uint64) float64 {
 			return prevUpper
 		}
 		prevUpper = endBuckets[i].GetUpperBound()
-	}
-	return prevUpper
-}
-
-func interpolatePercentile(buckets []*dto.Bucket, cum []uint64, total uint64, q float64) float64 {
-	if total == 0 || len(buckets) == 0 {
-		return 0
-	}
-	target := q * float64(total)
-	prevCum := uint64(0)
-	prevUpper := 0.0
-	for i, b := range buckets {
-		c := cum[i]
-		if float64(c) >= target {
-			upper := b.GetUpperBound()
-			bucketDelta := c - prevCum
-			if bucketDelta == 0 {
-				return upper
-			}
-			return prevUpper + (upper-prevUpper)*(target-float64(prevCum))/float64(bucketDelta)
-		}
-		prevCum = c
-		prevUpper = b.GetUpperBound()
 	}
 	return prevUpper
 }

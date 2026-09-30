@@ -69,7 +69,7 @@ func scoreBuckets(cum ...uint64) []*dto.Bucket {
 
 var _ = Describe("LatencyHarness", func() {
 	Context("reduceHistogramDelta", func() {
-		It("should derive count, sum, mean and percentiles from a uniform distribution", func() {
+		It("should derive count, sum and mean from a uniform distribution", func() {
 			end := mkHistogram(100, 30.0, []*dto.Bucket{
 				mkBucket(0.1, 25),
 				mkBucket(0.5, 50),
@@ -80,9 +80,8 @@ var _ = Describe("LatencyHarness", func() {
 			Expect(stats.Count).To(BeNumerically("==", 100))
 			Expect(stats.Sum).To(BeNumerically("~", 30.0, 1e-9))
 			Expect(stats.Mean).To(BeNumerically("~", 0.3, 1e-9))
-			Expect(stats.P50).To(BeNumerically("~", 0.5, 1e-9))
-			Expect(stats.P90).To(BeNumerically("~", 1.6, 1e-9))
 			Expect(stats.BucketTruncationRate).To(BeZero())
+			Expect(stats.Min).To(BeZero())
 			Expect(stats.Max).To(BeNumerically("~", 2.0, 1e-9))
 		})
 
@@ -102,11 +101,11 @@ var _ = Describe("LatencyHarness", func() {
 			stats := reduceHistogramDelta(end, start)
 			Expect(stats.Count).To(BeNumerically("==", 100))
 			Expect(stats.Sum).To(BeNumerically("~", 50.0, 1e-9))
-			Expect(stats.P50).To(BeNumerically("~", 1.0, 1e-9))
-			Expect(stats.P90).To(BeNumerically("~", 1.8, 1e-9))
+			Expect(stats.Min).To(BeNumerically("~", 0.1, 1e-9),
+				"Min over the delta buckets; an unsubtracted 0.1 bucket would report 0")
 		})
 
-		It("should report bucket truncation and cap percentiles at the last finite bound", func() {
+		It("should report bucket truncation and cap Max at the last finite bound", func() {
 			end := mkHistogram(100, 500.0, []*dto.Bucket{
 				mkBucket(1.0, 40),
 				mkBucket(5.0, 70),
@@ -115,7 +114,7 @@ var _ = Describe("LatencyHarness", func() {
 			stats := reduceHistogramDelta(end, nil)
 			Expect(stats.Count).To(BeNumerically("==", 100))
 			Expect(stats.BucketTruncationRate).To(BeNumerically("~", 0.10, 1e-9))
-			Expect(stats.P95).To(BeNumerically("~", 10.0, 1e-9), "P95 under truncation")
+			Expect(stats.Max).To(BeNumerically("~", 10.0, 1e-9), "Max under truncation")
 		})
 
 		It("should infer Max from the tightest bucket with samples under a concentrated distribution", func() {
@@ -145,10 +144,11 @@ var _ = Describe("LatencyHarness", func() {
 			})
 			stats := reduceHistogramDelta(same, same)
 			Expect(stats.Count).To(BeZero())
-			Expect(stats.P50).To(BeZero())
-			Expect(stats.P90).To(BeZero())
-			Expect(stats.P95).To(BeZero())
-			Expect(stats.P99).To(BeZero())
+			Expect(stats.Sum).To(BeZero())
+			Expect(stats.Mean).To(BeZero(), "Mean must not divide by a zero Count")
+			Expect(stats.Min).To(BeZero())
+			Expect(stats.Max).To(BeZero(), "Max must not report a bucket bound nothing landed in")
+			Expect(stats.BucketTruncationRate).To(BeZero())
 		})
 
 		It("should treat end as fresh observations when the sample count went backwards", func() {
@@ -192,14 +192,7 @@ var _ = Describe("LatencyHarness", func() {
 			Expect(rejected.Max).To(BeNumerically("~", 0.25, 1e-9), "rejected Max at score 0.2")
 		})
 
-		It("should flag percentiles unreliable below the minimum sample count", func() {
-			low := reduceHistogramDelta(mkHistogram(5, 1.0, scoreBuckets(5, 5, 5, 5, 5, 5, 5, 5)), nil)
-			Expect(low.PercentilesUnreliable).To(BeTrue(), "PercentilesUnreliable at Count=5")
-			high := reduceHistogramDelta(mkHistogram(40, 8.0, scoreBuckets(0, 40, 40, 40, 40, 40, 40, 40)), nil)
-			Expect(high.PercentilesUnreliable).To(BeFalse(), "PercentilesUnreliable at Count=40")
-		})
-
-		It("should exclude the +Inf bucket from percentiles and Max", func() {
+		It("should exclude the +Inf bucket from Max and the truncation rate", func() {
 			end := mkHistogram(100, 800.0, []*dto.Bucket{
 				mkBucket(1.0, 0),
 				mkBucket(5.0, 20),
@@ -208,8 +201,6 @@ var _ = Describe("LatencyHarness", func() {
 			})
 			stats := reduceHistogramDelta(end, nil)
 			Expect(stats.Count).To(BeNumerically("==", 100))
-			Expect(math.IsInf(stats.P95, +1)).To(BeFalse(), "P95 leaked +Inf")
-			Expect(stats.P95).To(BeNumerically("~", 10.0, 1e-9), "P95 under truncation is the last finite bound")
 			Expect(math.IsInf(stats.Max, +1)).To(BeFalse(), "Max leaked +Inf")
 			Expect(stats.Max).To(BeNumerically("~", 10.0, 1e-9), "Max is the tightest non-zero finite bucket")
 			Expect(stats.BucketTruncationRate).To(BeNumerically("~", 0.5, 1e-9))
