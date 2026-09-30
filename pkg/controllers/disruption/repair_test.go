@@ -74,11 +74,12 @@ var _ = Describe("Repair", func() {
 
 	// bindBlockingPod places a do-not-disrupt pod on the node. Such a pod blocks eviction, so the node is only a
 	// disruption candidate when the drain is bounded by a hard deadline (repair's RepairPolicy TGP, or the NodeClaim TGP).
-	bindBlockingPod := func(n *corev1.Node) {
+	bindBlockingPod := func(n *corev1.Node) *corev1.Pod {
 		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}}})
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, n)
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+		return pod
 	}
 
 	// markUnhealthy appends a condition matching a RepairPolicy at the current fake-clock time, re-applies the node,
@@ -496,6 +497,32 @@ var _ = Describe("Repair", func() {
 
 		ExpectSingletonReconciled(ctx, repairController)
 		Expect(queue.GetCommands()).To(HaveLen(1))
+	})
+
+	It("should size replacement capacity for a blocking pod when the drain is bounded", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{
+				ConditionType:          "BadNode",
+				ConditionStatus:        corev1.ConditionFalse,
+				TolerationDuration:     30 * time.Minute,
+				TerminationGracePeriod: lo.ToPtr(5 * time.Minute),
+			},
+		}
+		newRepairController()
+		initNode(nodeClaim, node)
+		blockingPod := bindBlockingPod(node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+		Expect(cmds[0].Replacements).To(HaveLen(1))
+		Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
+		Expect(lo.Map(cmds[0].Results.NewNodeClaims[0].Pods, func(p *corev1.Pod, _ int) string {
+			return p.Name
+		})).To(ContainElement(blockingPod.Name))
 	})
 
 	// A node whose unhealthy condition does not match any RepairPolicy is left alone.
