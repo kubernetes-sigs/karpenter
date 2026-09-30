@@ -287,6 +287,9 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 	startCount, startSum, startCumBy := resolveDeltaBaseline(startHistogram, end)
 	deltaCum, ok := cumulativeDelta(endBuckets, startCumBy)
 	if !ok {
+		// resolveDeltaBaseline's scalar checks miss a restart that re-accumulated past
+		// the old sample_count. The surviving evidence is a non-monotonic bucket delta,
+		// which hides the highest occupied bucket from inferMaxBound.
 		startCount, startSum = 0, 0
 		deltaCum, _ = cumulativeDelta(endBuckets, nil)
 	}
