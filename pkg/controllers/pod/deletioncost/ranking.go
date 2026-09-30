@@ -47,6 +47,10 @@ import (
 //     RankForBC(i, len(groupBC)); most-negative rank at index 0.
 //   - groupD (Group D): cleanup-only nodes; annotations get cleared.
 func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) (groupA, groupBC, groupD []*state.StateNode, err error) {
+	// PDC only annotates pods on nodes Karpenter owns. An unmanaged node with a
+	// deletion timestamp satisfies StateNode.Deleted(), so without this filter it
+	// reaches Group A and gets MinInt32 written on every pod, uncapped.
+	nodes = lo.Filter(nodes, func(n *state.StateNode, _ int) bool { return n.Managed() })
 	if len(nodes) == 0 {
 		return nil, nil, nil, nil
 	}

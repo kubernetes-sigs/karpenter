@@ -76,7 +76,7 @@ func expectPodAnnotationCleared(pod *corev1.Pod) {
 	updated := &corev1.Pod{}
 	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
 	Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),
-		"pod %s should not carry pod-deletion-cost (Group D clears it)", pod.Name)
+		"pod %s should not carry pod-deletion-cost", pod.Name)
 }
 
 var _ = Describe("Ranking", func() {
@@ -415,6 +415,34 @@ var _ = Describe("Ranking", func() {
 			// B's rank strictly less than C's.
 			Expect(expectPodRank(pdbBlockedPod)).To(Equal(math.MinInt32))
 			Expect(expectPodRank(driftedPod)).To(BeNumerically("<", expectPodRank(normalPod)))
+		})
+
+		It("should not annotate pods on an unmanaged node that is being deleted", func() {
+			// StateNode.Deleted() is true for a node with no NodeClaim and a
+			// deletion timestamp, and classifyNode tests isGoingAway before
+			// ValidateNodeDisruptable gets to reject the node. Without the
+			// Managed() filter at RankNodes' entry this node reaches Group A,
+			// so every pod on it takes MinInt32 and skips maxNodesPerCycle.
+			node := test.Node(test.NodeOptions{
+				Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, node)
+			pod := rsOwnedPod(test.PodOptions{NodeName: node.Name})
+			ExpectApplied(ctx, env.Client, pod)
+
+			// No NodeClaim is ever created for this node, so Managed() is false.
+			ExpectDeletionTimestampSet(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Managed()).To(BeFalse())
+			Expect(stateNode.Deleted()).To(BeTrue())
+
+			controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
+			_, err := controller.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			expectPodAnnotationCleared(pod)
 		})
 	})
 
