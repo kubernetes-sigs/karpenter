@@ -12,6 +12,13 @@ This repository is the home for both of the above components.
 
 The versioning strategy for this project is covered in detail in [the release type section of the compatibility documentation](https://karpenter.sh/docs/upgrading/compatibility/#release-types).
 
+## Release Cadence and Compatibility
+
+- `kubernetes-sigs/karpenter` does not follow a fixed release cadence. Individual providers (e.g. `karpenter-provider-aws`) may adhere to their own release schedules.
+- Minor version releases may include small breaking changes to the interfaces consumed by providers. Providers should expect to make adjustments when adopting a new minor version.
+- Customer-facing breaking changes are the responsibility of each provider to communicate to its users through that provider's release notes and upgrade guides.
+- Discussion of upcoming changes happens in the [Karpenter Working Group](https://github.com/kubernetes-sigs/karpenter#working-group-meetings).
+
 ## Releasing a New Version
 
 The following steps must be done by one of the [Karpenter Maintainers](https://github.com/kubernetes/org/blob/main/config/kubernetes-sigs/sig-autoscaling/teams.yaml):
