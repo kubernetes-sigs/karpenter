@@ -45,12 +45,13 @@ import (
 // the percentiles are still reported but flagged PercentilesUnreliable, because
 // the sample count rather than the estimator is what makes them meaningless.
 //
-// A Karpenter restart zeroes every metric the process exports, which makes the
-// start snapshot a wrong baseline rather than a stale one. Stop reads
-// process_start_time_seconds for the direct signal and falls back to
-// snapshotWentBackwards for a scrape with no process collector. Either one
-// discards the baseline, and the reported deltas then cover the post-restart
-// window only.
+// A Karpenter restart zeroes every metric the process exports, so the start
+// snapshot becomes a wrong baseline rather than a stale one and the window the
+// deltas cover is no longer the window the spec asked for. Stop reads
+// process_start_time_seconds and fails the spec when it moved, because a
+// controller that died under load is the result, not an inconvenience to work
+// around. reduceHistogramDelta's non-monotonic bucket check is the per-series
+// fallback for a scrape carrying no process collector.
 //
 // TargetHistograms omits the metrics that time the KWOK fake provider rather
 // than Karpenter. A provider running this harness against real infrastructure
@@ -135,7 +136,10 @@ func (h *LatencyHarness) Stop() (*LatencyResult, error) {
 			return nil, fmt.Errorf("end scrape: %w", err)
 		}
 	}
-	start := h.startSnapshot(end)
+	start, err := h.startSnapshot(end)
+	if err != nil {
+		return nil, err
+	}
 	res := &LatencyResult{
 		LatencyStats: map[string]HistogramStats{},
 		Counters:     map[string]uint64{},
@@ -155,73 +159,13 @@ func (h *LatencyHarness) Stop() (*LatencyResult, error) {
 	return res, nil
 }
 
-func (h *LatencyHarness) startSnapshot(end map[string]*dto.MetricFamily) map[string]*dto.MetricFamily {
+func (h *LatencyHarness) startSnapshot(end map[string]*dto.MetricFamily) (map[string]*dto.MetricFamily, error) {
 	endProcessTime := getGaugeValue(end, processStartTimeMetric)
 	if h.startProcessTime != 0 && endProcessTime != 0 && endProcessTime != h.startProcessTime {
-		GinkgoWriter.Printf("LatencyHarness: karpenter process restarted mid-window (process_start_time_seconds %.0f -> %.0f); discarding the start snapshot, deltas cover the post-restart window only\n",
+		return nil, fmt.Errorf("karpenter process restarted mid-measurement (process_start_time_seconds %.0f -> %.0f); the measured window is not the window under test",
 			h.startProcessTime, endProcessTime)
-		return nil
 	}
-	if series, backwards := snapshotWentBackwards(h.start, end); backwards {
-		GinkgoWriter.Printf("LatencyHarness: series %s went backwards between scrapes; discarding the start snapshot, deltas cover the post-restart window only\n", series)
-		return nil
-	}
-	return h.start
-}
-
-func snapshotWentBackwards(start, end map[string]*dto.MetricFamily) (string, bool) {
-	if start == nil {
-		return "", false
-	}
-	for _, name := range TargetCounters {
-		if series, backwards := counterSeriesWentBackwards(name, start[name], end[name]); backwards {
-			return series, true
-		}
-	}
-	for _, name := range TargetHistograms {
-		if series, backwards := histogramSeriesWentBackwards(name, start[name], end[name]); backwards {
-			return series, true
-		}
-	}
-	return "", false
-}
-
-func counterSeriesWentBackwards(name string, start, end *dto.MetricFamily) (string, bool) {
-	startBySeries := indexBySeries(name, start)
-	for _, m := range end.GetMetric() {
-		if m.GetCounter() == nil {
-			continue
-		}
-		key := seriesKey(name, m.GetLabel())
-		prev, ok := startBySeries[key]
-		if ok && prev.GetCounter() != nil && m.GetCounter().GetValue() < prev.GetCounter().GetValue() {
-			return key, true
-		}
-	}
-	return "", false
-}
-
-func histogramSeriesWentBackwards(name string, start, end *dto.MetricFamily) (string, bool) {
-	startBySeries := indexBySeries(name, start)
-	for _, m := range end.GetMetric() {
-		endHist := m.GetHistogram()
-		if endHist == nil {
-			continue
-		}
-		key := seriesKey(name, m.GetLabel())
-		prev, ok := startBySeries[key]
-		if !ok || prev.GetHistogram() == nil {
-			continue
-		}
-		startHist := prev.GetHistogram()
-		if endHist.GetSampleCount() < startHist.GetSampleCount() || endHist.GetSampleSum() < startHist.GetSampleSum() {
-			return key, true
-		}
-		if _, monotonic := cumulativeDelta(endHist.GetBucket(), bucketCumByBound(startHist)); !monotonic {
-			return key, true
-		}
-	}
-	return "", false
+	return h.start, nil
 }
 
 func bucketCumByBound(h *dto.Histogram) map[float64]uint64 {

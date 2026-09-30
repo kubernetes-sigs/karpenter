@@ -216,60 +216,6 @@ var _ = Describe("LatencyHarness", func() {
 		})
 	})
 
-	Context("snapshotWentBackwards", func() {
-		It("should detect a reset the counter alone cannot reveal", func() {
-			counterName := "karpenter_consolidation_moves_total"
-			histName := "karpenter_consolidation_score"
-
-			start := map[string]*dto.MetricFamily{
-				counterName: mkFamily(counterName, dto.MetricType_COUNTER, mkCounterMetric(100, nil)),
-				histName: mkFamily(histName, dto.MetricType_HISTOGRAM,
-					mkMetric(mkHistogram(100, 90.0, scoreBuckets(0, 0, 0, 0, 100, 100, 100, 100)), nil)),
-			}
-			end := map[string]*dto.MetricFamily{
-				counterName: mkFamily(counterName, dto.MetricType_COUNTER, mkCounterMetric(130, nil)),
-				histName: mkFamily(histName, dto.MetricType_HISTOGRAM,
-					mkMetric(mkHistogram(150, 219.0, scoreBuckets(0, 0, 130, 130, 130, 130, 130, 150)), nil)),
-			}
-
-			Expect(deltaCounter(counterName, start[counterName], end[counterName])[counterName]).To(BeNumerically("==", 30),
-				"deltaCounter against a stale baseline; if this changed, a per-series counter detector now exists and this spec needs rewriting")
-
-			series, backwards := snapshotWentBackwards(start, end)
-			Expect(backwards).To(BeTrue(),
-				"the score histogram went backwards, so the whole baseline is invalid")
-			Expect(series).To(Equal(histName), "offending series")
-
-			Expect(deltaCounter(counterName, nil, end[counterName])[counterName]).To(BeNumerically("==", 130),
-				"deltaCounter after dropping the baseline")
-		})
-
-		It("should not treat valid progress as a reset", func() {
-			counterName := "karpenter_consolidation_moves_total"
-			histName := "karpenter_consolidation_score"
-
-			start := map[string]*dto.MetricFamily{
-				counterName: mkFamily(counterName, dto.MetricType_COUNTER, mkCounterMetric(100, nil)),
-				histName: mkFamily(histName, dto.MetricType_HISTOGRAM,
-					mkMetric(mkHistogram(100, 60.0, scoreBuckets(0, 0, 0, 40, 100, 100, 100, 100)), nil)),
-			}
-			end := map[string]*dto.MetricFamily{
-				counterName: mkFamily(counterName, dto.MetricType_COUNTER, mkCounterMetric(175, nil)),
-				histName: mkFamily(histName, dto.MetricType_HISTOGRAM,
-					mkMetric(mkHistogram(175, 130.0, scoreBuckets(0, 0, 0, 55, 175, 175, 175, 175)), nil)),
-			}
-			series, backwards := snapshotWentBackwards(start, end)
-			Expect(backwards).To(BeFalse(), "valid progress reported %q as backwards", series)
-
-			end["karpenter_nodes_created_total"] = mkFamily("karpenter_nodes_created_total", dto.MetricType_COUNTER, mkCounterMetric(12, nil))
-			series, backwards = snapshotWentBackwards(start, end)
-			Expect(backwards).To(BeFalse(), "a new series at end reported %q as backwards", series)
-
-			_, backwards = snapshotWentBackwards(nil, end)
-			Expect(backwards).To(BeFalse(), "a nil start snapshot is the already-reset case")
-		})
-	})
-
 	Context("deltaHistogram", func() {
 		It("should emit one HistogramStats per label fingerprint", func() {
 			name := "karpenter_voluntary_disruption_decision_evaluation_duration_seconds"
