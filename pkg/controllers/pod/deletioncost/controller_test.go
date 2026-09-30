@@ -23,15 +23,18 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/pod/deletioncost"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -127,6 +130,104 @@ var _ = Describe("Controller", func() {
 
 		Expect(queue.Has(pod0)).To(BeFalse())
 		Expect(queue.Has(pod1)).To(BeFalse())
+	})
+
+	It("should only annotate pods whose controller owner reference is a ReplicaSet", func() {
+		// corev1.PodDeletionCost is read by kube-controller-manager's ReplicaSet
+		// controller against the pods it claims by controller reference. Two
+		// pods here are therefore writes with no effect and must not be
+		// enqueued: one controlled by a Job, and one carrying a ReplicaSet
+		// reference that is not the controller.
+		//
+		// The Job pod is deliberate: hasNonRSOwnedPods tolerates Job, so the
+		// node stays in Groups B/C and the enqueue gate is what excludes the
+		// pod, not the partition step.
+		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0])
+
+		rsPod := rsOwnedPod(test.PodOptions{NodeName: nodes[0].Name})
+		jobPod := test.Pod(test.PodOptions{
+			NodeName: nodes[0].Name,
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "batch/v1", Kind: "Job", Name: "test-job", UID: types.UID("test-job-uid"),
+				Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+			}}},
+		})
+		nonControllerRSPod := test.Pod(test.PodOptions{
+			NodeName: nodes[0].Name,
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "test-rs", UID: types.UID("test-rs-uid"),
+			}}},
+		})
+		ExpectApplied(ctx, env.Client, rsPod, jobPod, nonControllerRSPod)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+		controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
+		_, err := controller.Reconcile(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(queue.Has(rsPod)).To(BeTrue())
+		Expect(queue.Has(jobPod)).To(BeFalse())
+		Expect(queue.Has(nonControllerRSPod)).To(BeFalse())
+
+		ExpectObjectReconciled(ctx, env.Client, queue, rsPod)
+		for _, expectation := range []struct {
+			pod       *corev1.Pod
+			annotated bool
+		}{
+			{pod: rsPod, annotated: true},
+			{pod: jobPod, annotated: false},
+			{pod: nonControllerRSPod, annotated: false},
+		} {
+			observed := &corev1.Pod{}
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(expectation.pod), observed)).To(Succeed())
+			if expectation.annotated {
+				Expect(observed.Annotations).To(HaveKeyWithValue(corev1.PodDeletionCost, "-1"))
+			} else {
+				Expect(observed.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
+			}
+		}
+	})
+
+	It("should not consume a per-cycle slot for a node hosting no ReplicaSet-controlled pods", func() {
+		// enqueueCapped only spends budget on nodes that mutate a pod. Filtering
+		// happens before that guard, so a node whose pods are all outside the
+		// ReplicaSet gate must report no work and leave the cap for the next
+		// node.
+		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0])
+
+		jobPod := test.Pod(test.PodOptions{
+			NodeName: nodes[0].Name,
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "batch/v1", Kind: "Job", Name: "test-job", UID: types.UID("test-job-uid"),
+				Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+			}}},
+		})
+		ExpectApplied(ctx, env.Client, jobPod)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+		controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
+		_, err := controller.Reconcile(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(queue.Has(jobPod)).To(BeFalse())
+		// nodes_with_pending_annotation_writes is Reset then Set only for pools
+		// with a non-zero count, so "no node counted" shows up as an absent
+		// series rather than a zero sample.
+		_, found := FindMetricWithLabelValues(
+			"karpenter_pod_deletion_cost_nodes_with_pending_annotation_writes",
+			map[string]string{metrics.NodePoolLabel: nodePool.Name},
+		)
+		Expect(found).To(BeFalse(), "a node with no ReplicaSet-controlled pods must not be counted as enqueued work")
 	})
 
 	It("should not advance the consolidation cursor when the cluster is empty", func() {

@@ -25,7 +25,10 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
+	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,6 +42,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
+
+// replicaSetKind is the only owner kind whose controller reads
+// corev1.PodDeletionCost. kube-controller-manager's ReplicaSet controller
+// sorts its own pods by the annotation when scaling down; nothing else in-tree
+// reads it, so a write to a pod controlled by any other kind has no effect.
+var replicaSetKind = appsv1.SchemeGroupVersion.WithKind("ReplicaSet")
 
 const (
 	reconcileInterval = time.Minute
@@ -167,16 +176,29 @@ func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupB
 
 func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, rank int, cleanup bool, perNodePool map[string]int) bool {
 	pods, _ := node.Pods(ctx, c.kubeClient)
+	// Filter before the no-op guard so the guard, the enqueue and the
+	// per-cycle cap all read the same pod set. A node hosting only pods no
+	// ReplicaSet controls therefore spends no slot of maxNodesPerCycle.
+	pods = lo.Filter(pods, func(pod *corev1.Pod, _ int) bool { return isControlledByReplicaSet(pod) })
 	if !nodeMutatesAnyPod(pods, rank, cleanup) {
 		return false
 	}
 	for _, pod := range pods {
-        if pod.OwnerReferences[i].Kind == replicaset {
-		    c.queue.Add(pod, rank, cleanup)
-		}
+		c.queue.Add(pod, rank, cleanup)
 	}
 	perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
 	return true
+}
+
+// isControlledByReplicaSet reports whether the pod's controller owner reference
+// is an apps/v1 ReplicaSet. The controller reference is the one the ReplicaSet
+// controller itself matches on when it claims and ranks pods, so a pod merely
+// carrying a non-controller ReplicaSet reference is never ranked by it.
+func isControlledByReplicaSet(pod *corev1.Pod) bool {
+	owner := metav1.GetControllerOfNoCopy(pod)
+	return owner != nil &&
+		owner.Kind == replicaSetKind.Kind &&
+		owner.APIVersion == replicaSetKind.GroupVersion().String()
 }
 
 // enqueueCapped spends budget on nodes that actually mutate a pod; no-op
