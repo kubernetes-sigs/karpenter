@@ -123,8 +123,13 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		if !nodeclaimutils.IsNodeNotFoundError(err) {
 			return reconcile.Result{}, err
 		}
-		// If the Node disappears mid-reboot, keep polling until the reboot deadline before failing.
-		if c.pastRebootDeadline(nodeClaim) {
+		// If the Node disappears mid-reboot, keep polling until the reboot deadline before failing. Without a Node
+		// the drain can't run to start the issuance window, so bound that phase from the request instead.
+		deadline, ok := c.rebootDeadline(nodeClaim)
+		if !ok {
+			deadline = rebootRequestedAt(nodeClaim).Add(issuanceTimeout)
+		}
+		if c.clock.Now().After(deadline) {
 			result, msg := deadlineResult(nodeClaim)
 			return c.transitionToFailed(ctx, nodeClaim, nil, result, msg)
 		}

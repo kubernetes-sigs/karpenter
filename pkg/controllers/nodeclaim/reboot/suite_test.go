@@ -359,6 +359,17 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonIssued))
 		})
 
+		It("fails when the node is gone before the drain and the issuance timeout elapses", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim) // node intentionally not applied
+			result := ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+
+			env.Clock.Step(6 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+			expectReplaced(nodeClaim, "provider_error")
+		})
+
 		It("fails with invalid_request when the reboot termination grace period is malformed", func() {
 			nodeClaim.Annotations[v1.RebootTerminationGracePeriodAnnotationKey] = "5min"
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
