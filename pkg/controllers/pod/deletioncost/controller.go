@@ -43,22 +43,18 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
-// replicaSetKind is the only owner kind whose controller reads
-// corev1.PodDeletionCost. kube-controller-manager's ReplicaSet controller
-// sorts its own pods by the annotation when scaling down; nothing else in-tree
-// reads it, so a write to a pod controlled by any other kind has no effect.
+// kube-controller-manager's ReplicaSet controller is the only in-tree consumer
+// of corev1.PodDeletionCost, so writing it on a pod controlled by any other
+// kind has no effect.
 var replicaSetKind = appsv1.SchemeGroupVersion.WithKind("ReplicaSet")
 
 const (
 	reconcileInterval = time.Minute
-	// maxNodesPerCycle bounds the Groups B/C/D nodes actually annotated per
-	// reconcile. Group A nodes are exempt. With ~30 pods/node this bounds
-	// worst-case per-cycle pod writes near the RFC's 1,500 write target.
+	// At ~30 pods/node this keeps worst-case per-cycle pod writes near the
+	// RFC's 1,500 write target.
 	maxNodesPerCycle = 50
 )
 
-// Controller ranks Karpenter-managed nodes by consolidation preference each
-// cycle and enqueues per-pod annotation writes on the fire-and-forget Queue.
 type Controller struct {
 	clock         clock.Clock
 	kubeClient    client.Client
@@ -96,9 +92,8 @@ func (c *Controller) Name() string {
 	return "pod.deletioncost"
 }
 
-// Reconcile ranks the cluster's nodes and enqueues annotation writes on the
-// Queue. Annotation writes are fire-and-forget: this Reconcile does not wait
-// for the Queue to drain.
+// Reconcile enqueues annotation writes and returns without waiting for the
+// Queue to drain.
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
@@ -106,18 +101,16 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
-	// Advance the cursor only after enqueueing succeeds so a mid-reconcile
-	// error retries against the same state (see the assignment near the end
-	// of this method).
+	// Assigned only after enqueueing succeeds, so a mid-reconcile error retries
+	// against the same state. Do not hoist the assignment up here.
 	currentState := c.cluster.ConsolidationState()
 	if currentState.Equal(c.lastConsolidationState) {
 		log.FromContext(ctx).V(1).Info("no changes detected, skipping pod deletion cost update")
 		return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 	}
 
-	// Best-effort snapshot of state.Cluster: pointer aliases only. Torn
-	// reads are acceptable because annotation writes are best-effort and
-	// the next reconcile picks up any drift.
+	// Pointer aliases, not deep copies. Torn reads are acceptable: the writes are
+	// best-effort and the next reconcile picks up any drift.
 	var nodes []*state.StateNode
 	for n := range c.cluster.Nodes() {
 		nodes = append(nodes, n)
@@ -154,11 +147,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: reconcileInterval}, nil
 }
 
-// enqueueAnnotationWrites pushes per-pod annotation writes onto the Queue.
-// Group A is exempt from the per-cycle cap so disrupted-tainted and
-// marked-for-deletion nodes always annotate promptly. Nodes whose pods
-// already carry the planned state are skipped and do not consume the cap.
-// Returns per-nodepool counts of nodes annotated.
+// Group A bypasses the per-cycle cap so nodes already being torn down always
+// annotate promptly. Returns per-nodepool counts of nodes annotated.
 func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupBC, groupD []*state.StateNode) map[string]int {
 	perNodePool := map[string]int{}
 	for _, node := range groupA {
@@ -176,9 +166,8 @@ func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupB
 
 func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, rank int, cleanup bool, perNodePool map[string]int) bool {
 	pods, _ := node.Pods(ctx, c.kubeClient)
-	// Filter before the no-op guard so the guard, the enqueue and the
-	// per-cycle cap all read the same pod set. A node hosting only pods no
-	// ReplicaSet controls therefore spends no slot of maxNodesPerCycle.
+	// Filter before the no-op guard so the guard, the enqueue and the cap all
+	// read the same pod set.
 	pods = lo.Filter(pods, func(pod *corev1.Pod, _ int) bool { return isControlledByReplicaSet(pod) })
 	if !nodeMutatesAnyPod(pods, rank, cleanup) {
 		return false
@@ -190,10 +179,9 @@ func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, 
 	return true
 }
 
-// isControlledByReplicaSet reports whether the pod's controller owner reference
-// is an apps/v1 ReplicaSet. The controller reference is the one the ReplicaSet
-// controller itself matches on when it claims and ranks pods, so a pod merely
-// carrying a non-controller ReplicaSet reference is never ranked by it.
+// Matches on the controller reference specifically, because that is the one the
+// ReplicaSet controller uses to claim and rank pods. A pod carrying a
+// non-controller ReplicaSet reference is never ranked by it.
 func isControlledByReplicaSet(pod *corev1.Pod) bool {
 	owner := metav1.GetControllerOfNoCopy(pod)
 	return owner != nil &&
@@ -201,8 +189,6 @@ func isControlledByReplicaSet(pod *corev1.Pod) bool {
 		owner.APIVersion == replicaSetKind.GroupVersion().String()
 }
 
-// enqueueCapped spends budget on nodes that actually mutate a pod; no-op
-// nodes do not consume a slot.
 func (c *Controller) enqueueCapped(ctx context.Context, nodes []*state.StateNode, budget int, perNodePool map[string]int, rankAt func(i int) (int, bool)) int {
 	if budget <= 0 {
 		return 0
@@ -229,10 +215,8 @@ func nodeMutatesAnyPod(pods []*corev1.Pod, rank int, cleanup bool) bool {
 	return false
 }
 
-// podHasDesiredAnnotation reports whether the pod already carries the
-// intended pod-deletion-cost state. Shared with Queue.matchesDesired so the
-// controller's no-op guard and the queue's idempotency short-circuit read the
-// same rule.
+// Shared with Queue.matchesDesired so the controller's no-op guard and the
+// queue's idempotency short-circuit read the same rule.
 func podHasDesiredAnnotation(pod *corev1.Pod, rank int, cleanup bool) bool {
 	if cleanup {
 		_, has := pod.Annotations[corev1.PodDeletionCost]

@@ -39,9 +39,6 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-// pdbListFailingClient wraps a client.Client and returns an error when asked
-// to List PodDisruptionBudget objects; all other calls pass through unchanged.
-// Used to drive the PDB-list error path in RankNodes at the reconcile level.
 type pdbListFailingClient struct {
 	client.Client
 }
@@ -53,10 +50,6 @@ func (c *pdbListFailingClient) List(ctx context.Context, list client.ObjectList,
 	return c.Client.List(ctx, list, opts...)
 }
 
-// toggleablePDBListFailingClient is a pdbListFailingClient whose failure can
-// be flipped off from the outside so a single controller instance can observe
-// an initial failed reconcile followed by a successful one; used to verify
-// that the state cursor is not advanced when a reconcile step errors.
 type toggleablePDBListFailingClient struct {
 	client.Client
 	fail bool
@@ -76,21 +69,17 @@ var _ = Describe("Controller", func() {
 
 	BeforeEach(func() {
 		nodePool = test.NodePool()
-		// test.NodePool() leaves Disruption fields unset, so the deletion-cost
-		// controller routes every node to Group D:
-		//   - ConsolidateAfter nil Duration → "consolidation disabled" predicate
-		//   - Budgets unset → CRD default "10%" caps Groups B and C to 1 slot
-		// Set permissive defaults so tests exercise the partitioning under test
-		// rather than the disabled/budget-overflow paths.
+		// Without these, test.NodePool()'s unset Disruption fields route every
+		// node to Group D: nil ConsolidateAfter reads as consolidation-disabled,
+		// and the Budgets CRD default of 10% caps Groups B and C at 1 slot.
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 	})
 
-	// The PodDeletionCostManagement feature gate is enforced at registration in
-	// pkg/controllers/controllers.go (see the guarded NewController call there):
-	// when the gate is off the controller is never instantiated. The gate is
-	// read once at process start and is not dynamic, so there is no in-Reconcile
-	// runtime check to test.
+	// No gate test here on purpose: PodDeletionCostManagement is enforced at
+	// registration in pkg/controllers/controllers.go, read once at process start,
+	// so when it is off the controller is never instantiated and there is no
+	// in-Reconcile check to exercise.
 
 	It("should reconcile and update pod annotations when feature gate is enabled", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
@@ -110,14 +99,10 @@ var _ = Describe("Controller", func() {
 		result, err := controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
-		// Fire-and-forget shape: controller.Reconcile enqueued the pods; drive
-		// queue.Reconcile against each so the annotation write actually happens.
 		ExpectObjectReconciled(ctx, env.Client, queue, pod0)
 		ExpectObjectReconciled(ctx, env.Client, queue, pod1)
 
-		// Two disruptable nodes with the same-shape reschedulable pods produce
-		// ranks {-2, -1}. Pin the exact set so a future regression that swaps
-		// ranks or drops one of them surfaces here.
+		// Pin the exact rank set so a swap or a dropped node surfaces here.
 		updatedPod0 := &corev1.Pod{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod0), updatedPod0)).To(Succeed())
 		updatedPod1 := &corev1.Pod{}
@@ -133,15 +118,9 @@ var _ = Describe("Controller", func() {
 	})
 
 	It("should only annotate pods whose controller owner reference is a ReplicaSet", func() {
-		// corev1.PodDeletionCost is read by kube-controller-manager's ReplicaSet
-		// controller against the pods it claims by controller reference. Two
-		// pods here are therefore writes with no effect and must not be
-		// enqueued: one controlled by a Job, and one carrying a ReplicaSet
-		// reference that is not the controller.
-		//
-		// The Job pod is deliberate: hasNonRSOwnedPods tolerates Job, so the
-		// node stays in Groups B/C and the enqueue gate is what excludes the
-		// pod, not the partition step.
+		// The Job pod is the load-bearing fixture: hasNonRSOwnedPods tolerates
+		// Job, so the node stays in Groups B/C and the enqueue gate is what
+		// excludes the pod, not the partition step.
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -194,10 +173,6 @@ var _ = Describe("Controller", func() {
 	})
 
 	It("should not consume a per-cycle slot for a node hosting no ReplicaSet-controlled pods", func() {
-		// enqueueCapped only spends budget on nodes that mutate a pod. Filtering
-		// happens before that guard, so a node whose pods are all outside the
-		// ReplicaSet gate must report no work and leave the cap for the next
-		// node.
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -220,9 +195,8 @@ var _ = Describe("Controller", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(queue.Has(jobPod)).To(BeFalse())
-		// nodes_with_pending_annotation_writes is Reset then Set only for pools
-		// with a non-zero count, so "no node counted" shows up as an absent
-		// series rather than a zero sample.
+		// The metric is Reset then Set only for non-zero pools, so "not counted"
+		// is an absent series rather than a zero sample.
 		_, found := FindMetricWithLabelValues(
 			"karpenter_pod_deletion_cost_nodes_with_pending_annotation_writes",
 			map[string]string{metrics.NodePoolLabel: nodePool.Name},
@@ -231,12 +205,9 @@ var _ = Describe("Controller", func() {
 	})
 
 	It("should not advance the consolidation cursor when the cluster is empty", func() {
-		// Regression: the len(nodes)==0 short-circuit at controller.Reconcile
-		// must not advance lastConsolidationState. Otherwise the next
-		// reconcile after nodes appear would take the "unchanged" cursor
-		// short-circuit and drop the first ranking cycle. Verify by driving
-		// two reconciles with a node applied between them and expecting the
-		// pod to be annotated.
+		// Regression: the len(nodes)==0 short-circuit must not advance
+		// lastConsolidationState, or the first cycle after nodes appear takes the
+		// "unchanged" short-circuit and never ranks.
 		controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
 		result, err := controller.Reconcile(ctx)
 		Expect(err).To(Succeed())
@@ -265,13 +236,9 @@ var _ = Describe("Controller", func() {
 	})
 
 	It("should requeue with 1s backoff when cluster state is not synced", func() {
-		// Matches the disruption controller convention: wait for cluster sync
-		// before ranking against a potentially partial view. Apply a
-		// NodeClaim + Node to the API server but do NOT push them into the
-		// state.Cluster informer, and clear the hasSynced flag so Synced()
-		// re-runs the deep check and finds the state missing the applied
-		// node. Under this condition Reconcile must short-circuit with a 1s
-		// requeue and write no annotations.
+		// Applies a NodeClaim + Node to the API server without pushing them into
+		// the state.Cluster informer, then clears hasSynced so Synced() re-runs
+		// its deep check and finds state missing the applied node.
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -279,8 +246,8 @@ var _ = Describe("Controller", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		pod := rsOwnedPod(test.PodOptions{NodeName: node.Name})
 		ExpectApplied(ctx, env.Client, pod)
-		// Deliberately skip ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated:
-		// state.Cluster does not observe the applied node/nodeclaim.
+		// Skipping ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated is the
+		// point: state.Cluster must not observe the applied node/nodeclaim.
 		cluster.SetSynced(false)
 
 		controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
@@ -288,26 +255,16 @@ var _ = Describe("Controller", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.RequeueAfter).To(Equal(time.Second))
 
-		// The controller returned before ranking or patching, so the pod has
-		// no pod-deletion-cost annotation.
 		observed := &corev1.Pod{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), observed)).To(Succeed())
 		Expect(observed.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
 	})
 
 	It("should retry on the same state after a failed reconcile (skip cursor is not advanced on error)", func() {
-		// Regression: the lastConsolidationState cursor used to be advanced at
-		// the unchanged-state check, ahead of the rest of Reconcile. A
-		// mid-reconcile error therefore left the cursor advanced and the next
-		// reconcile short-circuited, silently dropping the retry. The
-		// assignment now sits at the tail of Reconcile.
-		//
-		// Setup: one node with the disrupted taint so RankNodes reaches
-		// the PDB list. First reconcile uses a client whose PDB list fails →
-		// error. Flip the toggle so the second reconcile succeeds. The pod
-		// must end up annotated: if the cursor had been advanced by the first
-		// failed reconcile, the second reconcile would take the "unchanged"
-		// short-circuit and leave the pod unannotated.
+		// Regression: the cursor used to be advanced at the unchanged-state check,
+		// ahead of the rest of Reconcile, so a mid-reconcile error left it
+		// advanced and the retry was silently dropped. The disrupted taint is
+		// what makes RankNodes reach the failing PDB list.
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -325,15 +282,10 @@ var _ = Describe("Controller", func() {
 		_, err := controller.Reconcile(ctx)
 		Expect(err).To(HaveOccurred())
 
-		// Flip the failure off and reconcile again with the SAME controller
-		// instance (so lastConsolidationState is preserved). If the first
-		// reconcile had advanced the cursor, this call would short-circuit
-		// on "unchanged" and leave the pod unenqueued.
+		// Reuses the SAME controller instance so lastConsolidationState survives.
 		failing.fail = false
 		_, err = controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
-		// The pod is on a disrupted-tainted node → Group A → math.MinInt32.
-		// Drive the queue so the annotation write actually lands on the pod.
 		ExpectObjectReconciled(ctx, env.Client, queue, pod)
 
 		observed := &corev1.Pod{}
@@ -357,8 +309,6 @@ var _ = Describe("Controller", func() {
 
 		controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
 
-		// First reconcile should enqueue (change detected). Drive the queue
-		// so the annotation write lands and the pod's ResourceVersion bumps.
 		result, err := controller.Reconcile(ctx)
 		Expect(err).To(Succeed())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
@@ -368,9 +318,7 @@ var _ = Describe("Controller", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), afterFirst)).To(Succeed())
 		Expect(afterFirst.Annotations).To(HaveKey(corev1.PodDeletionCost))
 
-		// Second reconcile should short-circuit at the ConsolidationState
-		// check and NOT enqueue. Verified by the queue being empty and the
-		// pod's ResourceVersion unchanged (no follow-up patch fires).
+		// An unchanged ResourceVersion is the evidence that no second patch fired.
 		result, err = controller.Reconcile(ctx)
 		Expect(err).To(Succeed())
 		Expect(result.RequeueAfter).To(Equal(time.Minute))
@@ -382,25 +330,18 @@ var _ = Describe("Controller", func() {
 			"second reconcile should have taken the change-detection short-circuit and not enqueued the pod")
 	})
 
-	// Cap-boundary cases (Group A exemption, Group C truncation at 50) live in
-	// ranking_test.go's "Bounded labeling" Context. Duplicating them here would
-	// only re-test that 3 < 50; the ranking-level tests already cover the cap.
+	// Cap-boundary cases live in ranking_test.go's "Bounded labeling" Context;
+	// repeating them here would only re-test that 3 < 50.
 
-	// Deferred behavior: a single dependency failure (PDB list or per-node pod
-	// list) aborts the entire Reconcile cycle. There is no per-NodePool partial
-	// success path; nodes on healthy NodePools also skip annotation for that
-	// cycle. This test documents the current single-error-aborts-all behavior.
-	// A per-NodePool granular error path (RankNodes fanning out per-NodePool
-	// with multierr) is a deferred follow-up; once it lands, this test should
-	// be updated to assert that a PDB-list failure only skips the affected
-	// NodePool and healthy NodePools still get their pods annotated.
+	// Documents current behavior, not desired behavior: one dependency failure
+	// aborts the whole cycle, so healthy NodePools skip annotation too. If the
+	// deferred per-NodePool granular error path lands, update this to assert
+	// healthy pools still get annotated.
 	Context("Deferred: per-NodePool error granularity", func() {
 		It("should _Deferred_ abort the entire reconcile when the PDB list fails, leaving healthy NodePools' pods unannotated", func() {
-			// Set up TWO NodePools. Node 0 belongs to nodePool (with a disrupted
-			// taint so RankNodes reaches the PDB list). Nodes 1 and 2 belong to
-			// otherPool and are healthy; under a per-NodePool granular error
-			// path they would still be ranked and annotated. Under the current
-			// abort-all behavior, none of the three pods gets an annotation.
+			// Two pools: node 0 carries the disrupted taint so RankNodes reaches
+			// the PDB list, and otherPool's two nodes are the healthy ones a
+			// granular error path would still annotate.
 			otherPool := test.NodePool()
 			otherPool.Name = "other-pool"
 			otherPool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
@@ -430,10 +371,6 @@ var _ = Describe("Controller", func() {
 			podOnHealthy2 := rsOwnedPod(test.PodOptions{NodeName: nodeOther2.Name})
 			ExpectApplied(ctx, env.Client, podOnDisrupted, podOnHealthy1, podOnHealthy2)
 
-			// Apply a PDB so the disrupted node has a plausible PDB world; the
-			// test client fails the list call itself, but seeding a real PDB
-			// keeps the fixture realistic in case future test-refactors probe
-			// the pre-list state.
 			minAvail := intstr.FromString("100%")
 			pdb := &policyv1.PodDisruptionBudget{
 				ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: podOnDisrupted.Namespace},
@@ -449,20 +386,14 @@ var _ = Describe("Controller", func() {
 			nodeClaims := []*v1.NodeClaim{ncPool0, ncOther1, ncOther2}
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			// Wrap env.Client to fail the PDB list. All other traffic (nodepool
-			// list, pod list, patches) flows through unchanged.
 			failing := &pdbListFailingClient{Client: env.Client}
 			controller := deletioncost.NewController(env.Clock, failing, cloudProvider, cluster, queue)
 			_, err := controller.Reconcile(ctx)
 			Expect(err).To(HaveOccurred(), "current behavior: PDB list failure aborts the whole reconcile")
 
-			// Assert only on the affected NodePool. The current abort-all
-			// behavior also leaves healthy-pool pods unannotated, but the
-			// deferred per-NodePool granular path changes that: healthy pools
-			// continue to rank. Locking in the abort-all shape for healthy
-			// pools here would create a false regression signal when the
-			// reshape lands, so this spec deliberately stays silent on
-			// podOnHealthy1/podOnHealthy2.
+			// Stays silent on podOnHealthy1/2 on purpose: asserting the abort-all
+			// shape for healthy pools would fire as a false regression the day the
+			// granular path lands.
 			observedDisrupted := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(podOnDisrupted), observedDisrupted)).To(Succeed())
 			Expect(observedDisrupted.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),

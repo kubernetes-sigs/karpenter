@@ -79,11 +79,8 @@ func makeCandidate(nodeName string, np *v1.NodePool, it *cloudprovider.InstanceT
 	sn := &state.StateNode{
 		Node: node,
 	}
-	// ComputeRescheduleDisruptionCost -> EvictionCost reads the
-	// PodDeletionCostManagement feature gate from options on the context.
-	// Inject default Options so the gate lookup finds a context; direct
-	// gate-branching assertions live in pkg/controllers/disruption/suite_test.go
-	// ("Pod Eviction Cost" block).
+	// EvictionCost reads the PodDeletionCostManagement gate off the context, so
+	// default Options must be injected. Gate-branching specs live in suite_test.go.
 	return &Candidate{
 		StateNode:                sn,
 		instanceType:             it,

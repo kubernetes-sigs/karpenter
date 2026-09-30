@@ -29,9 +29,6 @@ const (
 	resultLabel              = "result"
 )
 
-// Well-known `result` dimension values. These are metric-only values, so they
-// are first-class opmetrics.Value vars: the value string and its documentation
-// live in one place and emission sites refer to it by .Name.
 var (
 	ResultUpdated = opmetrics.Value{
 		Name: "updated",
@@ -55,9 +52,6 @@ var (
 	}
 )
 
-// Result is the `result` dimension for the annotation-write counter. Exported so
-// metric-assertion specs in the external test package name the same values the
-// emission sites use.
 var Result = opmetrics.Label{
 	Name:   resultLabel,
 	Help:   "Outcome of the pod-deletion-cost annotation write.",
@@ -65,10 +59,6 @@ var Result = opmetrics.Label{
 }
 
 var (
-	// A node only lands in this gauge when one of its pods would actually change
-	// annotation, so it tracks enqueued work rather than nodes examined. Reset
-	// each cycle so pools whose count drops to zero do not linger at their prior
-	// value.
 	nodesWithPendingAnnotationWrites = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
@@ -80,9 +70,6 @@ var (
 		[]opmetrics.Label{metrics.NodePool},
 		opmetrics.Alpha,
 	)
-	// pod_annotation_writes_total counts write attempts, not successes. The
-	// `result` dimension carries the updated-vs-skipped-vs-error split, matching
-	// the neutral naming of voluntary_disruption_decisions_total.
 	podAnnotationWritesTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{

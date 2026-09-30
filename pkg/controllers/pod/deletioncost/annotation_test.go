@@ -37,9 +37,6 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-// throttlingClient wraps a client.Client and returns 429 TooManyRequests for
-// the first N Patch calls. Used to verify the queue's Reconcile surfaces
-// retryable errors to controller-runtime.
 type throttlingClient struct {
 	client.Client
 	remaining atomic.Int64
@@ -58,11 +55,6 @@ func (c *throttlingClient) Patch(ctx context.Context, obj client.Object, patch c
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
-// notFoundClient wraps a client.Client and returns NotFound on every Patch.
-// Used to verify the queue's Reconcile routes IsNotFound through the
-// skipped_notfound branch. Real apiservers can return either NotFound or
-// Conflict for a stale-RV patch of a deleted object; this client pins the
-// NotFound path deterministically.
 type notFoundClient struct {
 	client.Client
 }
@@ -71,11 +63,7 @@ func (c *notFoundClient) Patch(_ context.Context, obj client.Object, _ client.Pa
 	return apierrors.NewNotFound(corev1.Resource("pods"), obj.GetName())
 }
 
-// blockingPatchClient blocks the first Patch invocation in-flight until the
-// caller closes proceed, signaling test setup that Patch has entered via the
-// entered channel. Subsequent Patch calls pass through unblocked. Used to
-// drive queue-contention specs where a caller must observe the reconcile
-// loop mid-Patch to exercise concurrent Add/Reconcile interleavings.
+// Holds the first Patch in flight until proceed closes, signaling entry on entered.
 type blockingPatchClient struct {
 	client.Client
 	entered chan struct{}
@@ -89,7 +77,6 @@ func (c *blockingPatchClient) Patch(ctx context.Context, obj client.Object, patc
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
-// countingClient wraps a client.Client and counts Patch invocations.
 type countingClient struct {
 	client.Client
 	mu    sync.Mutex
@@ -109,10 +96,6 @@ func (c *countingClient) PatchCount() int {
 	return c.count
 }
 
-// enqueueAndReconcile is the standard test flow: enqueue a pod on the shared
-// suite queue and immediately drive the queue's Reconcile against it. Returns
-// after a single Reconcile, mirroring what controller-runtime does per work
-// item.
 func enqueueAndReconcile(pod *corev1.Pod, rank int, clear bool) {
 	GinkgoHelper()
 	queue.Add(pod, rank, clear)
@@ -149,8 +132,7 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should overwrite customer-set pod-deletion-cost values", func() {
-			// v4 RFC: gate-ON = user is OK with Karpenter managing PDC. No
-			// overwrite-protection.
+			// Gate-ON means the user accepted Karpenter managing PDC, so no overwrite protection.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -254,10 +236,6 @@ var _ = Describe("Annotation", func() {
 
 	Context("Queue semantics", func() {
 		It("should skip the API call when the pod's annotation already matches the desired value", func() {
-			// The queue's Reconcile checks matchesDesired before patching so
-			// the reconcile completes without a Patch call. Count via a
-			// counting client that wraps env.Client and drives it as the
-			// queue's kubeClient.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -286,10 +264,6 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should surface 429 errors from Reconcile so controller-runtime can retry", func() {
-			// Under the queue swap the per-pod retry loop is gone; controller-
-			// runtime's rate limiter re-enqueues on error. Verify the queue
-			// returns the raw 429 error rather than swallowing it or classifying
-			// it as skipped.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -310,8 +284,6 @@ var _ = Describe("Annotation", func() {
 			Expect(apierrors.IsTooManyRequests(err)).To(BeTrue())
 			after := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultError.Name})
 			Expect(after-before).To(Equal(1.0), "retryable error should increment pod_annotation_writes_total{result=error}")
-			// The item stays enqueued on retryable errors so controller-runtime
-			// picks it back up on its next tick.
 			Expect(q.Has(pod)).To(BeTrue())
 
 			ExpectObjectReconciled(ctx, env.Client, q, pod)
@@ -323,13 +295,8 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should treat 409 Conflict on the patch as skipped and drop the item from the queue", func() {
-			// A racing writer bumps the live pod's ResourceVersion after the
-			// queue captured its snapshot. MergeFromWithOptimisticLock sends
-			// the snapshot's stale RV as a precondition, and the apiserver
-			// responds with 409 Conflict. The queue must treat that as
-			// terminal (drop the item, return nil) so controller-runtime does
-			// not retry a permanently-lost race. Mirrors the NotFound spec
-			// below.
+			// A racing writer bumps the live RV after the queue snapshotted the pod, so the
+			// optimistic-lock patch 409s. The queue must treat that as terminal, not retry.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -342,8 +309,6 @@ var _ = Describe("Annotation", func() {
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			// Snapshot the pod at its current ResourceVersion, then bump the
-			// live pod so a stale-RV patch will 409.
 			snapshot := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), snapshot)).To(Succeed())
 			live := snapshot.DeepCopy()
@@ -362,8 +327,6 @@ var _ = Describe("Annotation", func() {
 			after := podAnnotationWritesDelta(map[string]string{deletioncost.Result.Name: deletioncost.ResultSkippedConflict.Name})
 			Expect(after-before).To(Equal(1.0), "Conflict should increment pods_updated_total{result=skipped_conflict}")
 
-			// Live state preserved: the racing writer's label update stuck,
-			// and the queue's stale-RV patch never landed the annotation.
 			updated := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), updated)).To(Succeed())
 			Expect(updated.Annotations).ToNot(HaveKey(corev1.PodDeletionCost),
@@ -373,12 +336,7 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should treat NotFound on the patch as skipped and drop the item from the queue", func() {
-			// The wrapping client returns a synthetic NotFound on Patch so
-			// the queue's Reconcile routes deterministically through the
-			// IsNotFound branch. Real apiservers return NotFound when the
-			// target pod has been deleted before the patch lands; controller
-			// -runtime's fake client can return either NotFound or Conflict
-			// depending on RV bookkeeping.
+			// The fake client can return NotFound or Conflict for a stale-RV patch, so pin NotFound.
 			pod := rsOwnedPod(test.PodOptions{})
 			ExpectApplied(ctx, env.Client, pod)
 			live := &corev1.Pod{}
@@ -395,28 +353,20 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should treat a UID mismatch as a race and drop the reconcile silently", func() {
-			// The queue is keyed by (namespace, name, UID). A pod that arrives
-			// through the fetch adapter with a different UID than what was
-			// enqueued is a different pod entirely and must exit without
-			// annotating.
+			// The queue is keyed by (namespace, name, UID), so a fresh UID is a different pod.
 			pod := rsOwnedPod(test.PodOptions{})
 			queue.Add(pod, -1, false)
 			Expect(queue.Has(pod)).To(BeTrue())
 
-			// Fabricate a same-name replacement with a fresh UID: the map
-			// lookup misses and Reconcile returns nil.
 			replacement := pod.DeepCopy()
 			replacement.UID = "different-uid"
 			result, err := queue.Reconcile(ctx, replacement)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).To(BeZero())
-			// Original entry still enqueued for its own eventual reconcile.
 			Expect(queue.Has(pod)).To(BeTrue())
 		})
 
 		It("should collapse repeated Adds for the same pod into a single reconcile with the latest state", func() {
-			// Overwrite-on-Add: enqueue with rank -1, then -5, then Reconcile
-			// once. The persisted annotation reflects the latest add.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -438,18 +388,11 @@ var _ = Describe("Annotation", func() {
 			Expect(updated.Annotations[corev1.PodDeletionCost]).To(Equal("-5"))
 		})
 
-		// PENDING: The current Queue implementation cannot preserve a mid-flight
-		// Add(pod, newRank) when the Add races an in-progress Reconcile. Add's
-		// "no source push when already enqueued" combined with complete()'s
-		// unconditional delete drops the newer desired state: the queue is
-		// empty after the racing Reconcile returns, and controller-runtime is
-		// never told to re-enqueue the pod. The 60s Controller.Reconcile cycle
-		// re-Adds and eventually converges, so real-world impact is bounded,
-		// but the queue itself does not guarantee lossless mid-flight updates.
-		//
-		// This spec asserts the intended lossless behavior. Un-Pending it once
-		// the queue is repaired (e.g. always push to source, or version-check
-		// during complete).
+		// PENDING on a known Queue defect: Add's "no source push when already enqueued"
+		// plus complete()'s unconditional delete drops a desired-state update that
+		// races an in-progress Reconcile, and controller-runtime is never told to
+		// re-enqueue. The 60s Controller.Reconcile re-Adds, so impact is bounded.
+		// Un-Pend once the queue always pushes to source or version-checks in complete().
 		PIt("should preserve a mid-flight Add's desired state so the next reconcile lands the newer value", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
@@ -478,17 +421,11 @@ var _ = Describe("Annotation", func() {
 				done <- err
 			}()
 
-			// Wait for the first Patch to be in flight, then update the
-			// desired state before it returns.
 			Eventually(blocker.entered).WithTimeout(5 * time.Second).Should(BeClosed())
 			q.Add(pod, -5, false)
 			close(blocker.proceed)
 			Expect(<-done).ToNot(HaveOccurred())
 
-			// The queue must still have work outstanding for the pod; the
-			// mid-flight Add published a newer desired state that has not
-			// yet been persisted to the apiserver. Drain the queue against
-			// the pod to land the -5.
 			Expect(q.Has(pod)).To(BeTrue(),
 				"mid-flight Add(pod,-5) must leave the pod enqueued so the next Reconcile picks up the newer desired state")
 			ExpectObjectReconciled(ctx, env.Client, q, pod)
@@ -500,11 +437,7 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should leave every pod enqueued when a shared throttle window rejects each pod's first patch", func() {
-			// Two pods, both draining through a throttler primed to reject
-			// the next two Patch calls. Each pod's Reconcile surfaces a 429,
-			// so both entries stay in the map for controller-runtime's next
-			// tick. Guards against a regression where a shared-error path
-			// might accidentally clear other pods' entries.
+			// Guards against a shared-error path clearing another pod's queue entry.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -523,7 +456,6 @@ var _ = Describe("Annotation", func() {
 			q.Add(podA, -3, false)
 			q.Add(podB, -3, false)
 
-			// Drive both reconciles in parallel through the shared throttle.
 			var wg sync.WaitGroup
 			wg.Add(2)
 			errs := make(chan error, 2)
@@ -571,10 +503,8 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should preserve unrelated annotations when clearing the pod-deletion-cost annotation", func() {
-			// Regression: clearAnnotation must delete only the pod-deletion-cost
-			// key. A future refactor to `updated.Annotations = nil` would still
-			// pass the base clear spec above because that pod only carries the
-			// PDC key. Seed a pod with an unrelated key and assert it survives.
+			// Regression: clearAnnotation must delete only the PDC key. `Annotations = nil`
+			// would still pass the base spec above, which seeds no other keys.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -603,8 +533,6 @@ var _ = Describe("Annotation", func() {
 		})
 
 		It("should skip pods without annotations on do-not-disrupt nodes", func() {
-			// Already-cleared pods take the matchesDesired short-circuit and
-			// issue no Patch call.
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 				Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},

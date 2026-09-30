@@ -31,10 +31,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-// podAnnotationWritesDelta reads the current value of pod_annotation_writes_total for the given
-// label combination, returning 0 when the collector has not yet emitted a
-// sample. crmetrics.Registry is process-global so counter values accumulate
-// across specs; capture pre, run the scenario, and assert on the delta.
+// crmetrics.Registry is process-global, so capture pre and assert on the delta.
 func podAnnotationWritesDelta(labels map[string]string) float64 {
 	GinkgoHelper()
 	metric, ok := FindMetricWithLabelValues("karpenter_pod_deletion_cost_pod_annotation_writes_total", labels)
@@ -44,10 +41,7 @@ func podAnnotationWritesDelta(labels map[string]string) float64 {
 	return lo.FromPtr(metric.Counter.Value)
 }
 
-// nodesWithPendingAnnotationWritesGauge reads the current value of
-// nodes_with_pending_annotation_writes for the given label combination. The
-// gauge is Reset then Set on every reconcile, so the value is absolute rather
-// than cumulative and needs no pre/post delta.
+// Reset+Set per cycle, so the value is absolute.
 func nodesWithPendingAnnotationWritesGauge(labels map[string]string) float64 {
 	GinkgoHelper()
 	metric, ok := FindMetricWithLabelValues("karpenter_pod_deletion_cost_nodes_with_pending_annotation_writes", labels)
@@ -82,8 +76,6 @@ var _ = Describe("Metrics", func() {
 		_, err := controller.Reconcile(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
-		// The gauge is Set() and reset each cycle. All three nodes share the
-		// same nodepool, so the pool-scoped series carries the full count.
 		Expect(nodesWithPendingAnnotationWritesGauge(map[string]string{metrics.NodePoolLabel: nodePool.Name})).To(Equal(3.0))
 	})
 

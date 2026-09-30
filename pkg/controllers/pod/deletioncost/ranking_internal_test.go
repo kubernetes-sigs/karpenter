@@ -27,10 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Internal-package specs for helpers that need access to unexported symbols
-// (RankForBC, nodeMutatesAnyPod, lo.GroupBy sort-preservation contract).
-// The dot import shares Ginkgo's global spec registry with suite_test.go so
-// these run under the same RunSpecs entrypoint.
+// Specs for unexported symbols. The dot import shares suite_test.go's RunSpecs.
 var _ = Describe("RankForBC", func() {
 	It("produces contiguous negative ranks over n = 1..10", func() {
 		for n := 1; n <= 10; n++ {
@@ -81,12 +78,8 @@ var _ = Describe("nodeMutatesAnyPod", func() {
 	})
 })
 
-// lo.GroupBy contract: iterates the input slice in order and appends to
-// each group. RankNodes relies on this so drift/normal SavingsRatio sort
-// runs on partitions that preserve upstream sort order (e.g. name-sorted
-// cluster snapshot). If lo ever changes to a map-based implementation
-// this test fails loudly and RankNodes needs a stable-sort-then-partition
-// fallback.
+// lo.GroupBy iterates in slice order and appends per group. RankNodes depends on
+// that; if lo goes map-based this fails and RankNodes needs its own stable sort.
 var _ = Describe("lo.GroupBy sort preservation", func() {
 	type item struct {
 		id    int

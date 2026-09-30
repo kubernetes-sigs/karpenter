@@ -41,20 +41,14 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
-// nodeRankInfo carries the assertion-visible slots for a single node's
-// classification in a RankNodes result. Tests build it via rankInfoFor,
-// which folds the three RankNodes return slices into a name-keyed lookup
-// so per-test assertions read as declarative equalities.
 type nodeRankInfo struct {
 	rank    int
 	cleanup bool
 	found   bool
 }
 
-// rankInfoFor returns the rank/cleanup slot for a node name across the
-// three RankNodes return slices. Rank comes from deletioncost.RankForBC for
-// Groups B/C entries; Group A returns math.MinInt32; Group D returns
-// cleanup=true with rank unused.
+// rankInfoFor folds the three RankNodes slices into a per-node lookup: RankForBC
+// for B/C, math.MinInt32 for A, cleanup=true for D.
 func rankInfoFor(name string, groupA, groupBC, groupD []*state.StateNode) nodeRankInfo {
 	for _, n := range groupA {
 		if n.Node != nil && n.Node.Name == name {
@@ -74,9 +68,6 @@ func rankInfoFor(name string, groupA, groupBC, groupD []*state.StateNode) nodeRa
 	return nodeRankInfo{}
 }
 
-// totalRanked returns the aggregate node count across the three RankNodes
-// return slices. Used by tests that want the pre-cap size regardless of
-// which partition a node landed in.
 func totalRanked(groupA, groupBC, groupD []*state.StateNode) int {
 	return len(groupA) + len(groupBC) + len(groupD)
 }
@@ -97,9 +88,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(coreapis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
-	// PodDeletionCostManagement defaults to false, but every test in this suite
-	// is exercising the controller's enabled-path behavior. The "feature gate
-	// disabled" test creates its own context with the gate flipped off.
+	// Every spec here exercises the enabled path; the gate-disabled spec builds its own ctx.
 	opts := test.Options(test.OptionsFields{
 		FeatureGates: test.FeatureGates{PodDeletionCostManagement: lo.ToPtr(true)},
 	})
@@ -127,10 +116,6 @@ var _ = AfterEach(func() {
 	cluster.Reset()
 })
 
-// rsOwnedPod returns a test pod with a synthetic ReplicaSet owner reference so
-// the deletion-cost partition logic does not classify it as a non-RS-owned
-// pod (Group A). Tests that care about the non-RS-owned classification
-// construct pods directly with `test.Pod`.
 func rsOwnedPod(opts ...test.PodOptions) *corev1.Pod {
 	rsOwner := metav1.OwnerReference{
 		APIVersion:         "apps/v1",
@@ -143,8 +128,6 @@ func rsOwnedPod(opts ...test.PodOptions) *corev1.Pod {
 	if len(opts) == 0 {
 		opts = []test.PodOptions{{}}
 	}
-	// Inject the owner reference into the first option block so it merges
-	// with any user-supplied ObjectMeta fields.
 	opts[0].OwnerReferences = append(opts[0].OwnerReferences, rsOwner)
 	return test.Pod(opts...)
 }

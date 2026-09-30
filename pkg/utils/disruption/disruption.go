@@ -32,15 +32,10 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
-// PerNodeBaseDisruptionCost is the inherent cost of draining a node (cordon,
-// drain, API calls, replacement latency). Sets the minimum reschedule cost
-// so an "empty" node still costs something to disrupt. See
-// designs/balanced-consolidation.md.
+// Floors the reschedule cost so an "empty" node still costs something to
+// disrupt. See designs/balanced-consolidation.md.
 const PerNodeBaseDisruptionCost = 1.0
 
-// ResolveOfferingPrice returns the instance-type offering price for a node's
-// zone and capacity-type labels, or 0 if the instance type is nil, the
-// offering is missing, or the price is NaN.
 func ResolveOfferingPrice(labels map[string]string, instanceType *cloudprovider.InstanceType) float64 {
 	if instanceType == nil {
 		return 0
@@ -52,10 +47,7 @@ func ResolveOfferingPrice(labels map[string]string, instanceType *cloudprovider.
 	return price
 }
 
-// ComputeRescheduleDisruptionCost is PerNodeBaseDisruptionCost plus the sum of
-// positive per-pod EvictionCosts. The base term keeps SavingsRatio finite for
-// empty nodes; negative EvictionCosts are clamped to 0 so a low-cost pod
-// doesn't discount the base.
+// Negative EvictionCosts clamp to 0 so a low-cost pod cannot discount the base.
 func ComputeRescheduleDisruptionCost(ctx context.Context, reschedulablePods []*corev1.Pod) float64 {
 	cost := PerNodeBaseDisruptionCost
 	for _, p := range reschedulablePods {
@@ -64,9 +56,8 @@ func ComputeRescheduleDisruptionCost(ctx context.Context, reschedulablePods []*c
 	return cost
 }
 
-// SavingsRatio returns Price / RescheduleDisruptionCost (higher = prefer to
-// disrupt). Panics on zero: ComputeRescheduleDisruptionCost floors at
-// PerNodeBaseDisruptionCost, so a zero here is a caller bug.
+// Higher ratio means prefer to disrupt. A zero denominator is a caller bug:
+// ComputeRescheduleDisruptionCost floors at PerNodeBaseDisruptionCost.
 func SavingsRatio(price, rescheduleDisruptionCost float64) float64 {
 	if rescheduleDisruptionCost == 0 {
 		panic("SavingsRatio: rescheduleDisruptionCost is 0; use ComputeRescheduleDisruptionCost")
@@ -106,9 +97,8 @@ func LifetimeRemaining(clock clock.Clock, nodePool *v1.NodePool, nodeClaim *v1.N
 func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 	cost := 1.0
 	if costStr, ok := p.Annotations[v1.DisruptionCostAnnotationKey]; ok {
-		// karpenter.sh/disruption-cost is int32 per spec. Parse strictly so
-		// a bad value logs and skips (default 1.0 cost) instead of widening
-		// the input type; the reconcile keeps progressing.
+		// int32 per spec. A bad value logs and skips rather than failing the
+		// reconcile.
 		parsedCost, err := strconv.ParseInt(costStr, 10, 32)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed parsing disruption cost",
@@ -120,9 +110,8 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 		}
 	} else if !options.FromContext(ctx).FeatureGates.PodDeletionCostManagement {
 		if podDeletionCostStr, ok := p.Annotations[corev1.PodDeletionCost]; ok {
-			// controller.kubernetes.io/pod-deletion-cost is int32 per the
-			// K8s API spec. Mirror the RS controller's parsing so a bad
-			// value fails the same way here: log and skip (default 1.0).
+			// Mirrors the RS controller's own parsing so a bad value fails the
+			// same way here.
 			podDeletionCost, err := strconv.ParseInt(podDeletionCostStr, 10, 32)
 			if err != nil {
 				log.FromContext(ctx).Error(err, "failed parsing pod deletion cost",
@@ -133,13 +122,11 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 		}
 	}
 	if p.Spec.Priority != nil {
-		// 2^25 places priority in a band that exceeds the user-annotation
-		// band (2^27 divisor) but stays under the QoS band, so priority
-		// dominates user steering without overwhelming QoS classification.
+		// 2^25 puts priority above the user-annotation band (2^27) and below the
+		// QoS band, so priority outweighs user steering but not QoS.
 		cost += float64(*p.Spec.Priority) / math.Pow(2, 25)
 	}
 
-	// Clamp overall pod cost to [-10.0, 10.0] with the default at 1.0.
 	return lo.Clamp(cost, -10.0, 10.0)
 }
 

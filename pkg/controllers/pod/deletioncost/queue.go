@@ -45,8 +45,7 @@ import (
 const (
 	queueBaseDelay = 100 * time.Millisecond
 	queueMaxDelay  = 10 * time.Second
-	// Concurrency parity with the eviction queue; annotation writes are
-	// best-effort so the same linear-scaling shape works.
+	// Concurrency parity with the eviction queue.
 	minReconciles = 100
 	maxReconciles = 5000
 )
@@ -56,9 +55,7 @@ type queueItem struct {
 	clear bool
 }
 
-// Queue is a controller-runtime-backed fire-and-forget queue for pod
-// deletion-cost annotation writes, modeled after the eviction queue
-// (pkg/controllers/node/termination/terminator/eviction.go).
+// Fire-and-forget, modeled after terminator.Queue.
 type Queue struct {
 	sync.Mutex
 
@@ -99,10 +96,8 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
 
-// Add enqueues a desired annotation state for pod. Re-adding overwrites the
-// desired state (last-writer-wins) so a rank change between reconciles is
-// picked up on the next drain. The channel push only fires on first insertion
-// so a burst of Adds for the same pod does not fan out into duplicate work.
+// Add is last-writer-wins on the desired state, and pushes to the channel only
+// on first insertion so repeated Adds for one pod do not fan out.
 func (q *Queue) Add(pod *corev1.Pod, rank int, clear bool) {
 	q.Lock()
 	defer q.Unlock()
@@ -128,11 +123,6 @@ func (q *Queue) complete(qk terminator.QueueKey) {
 	delete(q.items, qk)
 }
 
-// Reconcile drains one pod's annotation update. Terminal outcomes (success,
-// NotFound, Conflict) remove the pod from the queue. Retryable API errors
-// return the error so controller-runtime's rate limiter re-enqueues with
-// exponential backoff. 429s in particular flow through this path so a
-// throttled apiserver naturally slows fan-out across all in-flight pods.
 func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, q.Name())
 
@@ -141,8 +131,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	item, ok := q.items[qk]
 	q.Unlock()
 	if !ok {
-		// Race: the enqueued pod was replaced (same name/namespace, different
-		// UID) before we picked up the reconcile. Matches terminator.Queue.
+		// The enqueued pod was replaced at the same name before we got here.
 		return reconcile.Result{}, nil
 	}
 
@@ -163,8 +152,6 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		q.complete(qk)
 		return reconcile.Result{}, nil
 	}
-	// NotFound and Conflict are counted separately so dashboards can
-	// distinguish target-disappeared from write-raced retries.
 	if apierrors.IsNotFound(err) {
 		log.FromContext(ctx).V(1).WithValues("pod", klog.KObj(pod)).Info("skipping pod annotation update, target not found")
 		podAnnotationWritesTotal.Inc(map[string]string{resultLabel: ResultSkippedNotFound.Name})

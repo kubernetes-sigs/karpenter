@@ -30,16 +30,9 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-// The suite hands env.Clock to state.NewCluster, matching every other suite that
-// builds a state.Cluster. Handing it its own clock.FakeClock instead still
-// compiles and leaves most specs green, but it decouples the cluster's view of
-// time from the env.Clock.Step calls the specs in this package depend on: the
-// steps advance the test's clock while state-layer time reads stay frozen.
-//
-// Cluster.IsNodeNominated reads the cluster's own clock rather than one the
-// caller passes in, which makes it the cheapest observable that tells the two
-// wirings apart. Shared clock: the nomination expires on schedule. Second
-// frozen clock: the node reports nominated forever.
+// Guards the suite's choice to hand env.Clock to state.NewCluster. A second
+// FakeClock still compiles but freezes state-layer time against env.Clock.Step.
+// Cluster.IsNodeNominated reads the cluster's own clock, so it tells them apart.
 var _ = Describe("Suite Clock Wiring", func() {
 	It("should let env.Clock drive the cluster's own time reads", func() {
 		nodePool := test.NodePool()
@@ -55,9 +48,6 @@ var _ = Describe("Suite Clock Wiring", func() {
 		// default BatchMaxDuration of 10s.
 		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
-		// Guards the assertions below against passing vacuously: both
-		// NominateNodeForPod and IsNodeNominated no-op when the providerID is
-		// absent from cluster.nodes, and IsNodeNominated then returns false.
 		Expect(cluster.IsNodeNominated(node.Spec.ProviderID)).To(BeTrue())
 
 		env.Clock.Step(10 * time.Second)

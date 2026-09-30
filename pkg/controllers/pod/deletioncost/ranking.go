@@ -37,15 +37,10 @@ import (
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-// RankNodes partitions Karpenter-managed nodes into four disruption tiers and
-// returns three ordered slices whose position implies the pod-deletion-cost
-// annotation to apply.
-//
-//   - groupA (Group A): going-away nodes. Every entry maps to math.MinInt32.
-//   - groupBC (Groups B + C): drifted first, then normal, ordered by
-//     SavingsRatio DESC. Position within the slice yields the rank via
-//     RankForBC(i, len(groupBC)); most-negative rank at index 0.
-//   - groupD (Group D): cleanup-only nodes; annotations get cleared.
+// RankNodes returns three slices whose position implies the pod-deletion-cost
+// annotation: groupA maps to math.MinInt32, groupBC is drifted then normal by
+// SavingsRatio DESC with the rank from RankForBC(i, len(groupBC)), and groupD
+// has its annotations cleared.
 func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) (groupA, groupBC, groupD []*state.StateNode, err error) {
 	// PDC only annotates pods on nodes Karpenter owns. An unmanaged node with a
 	// deletion timestamp satisfies StateNode.Deleted(), so without this filter it
@@ -55,15 +50,13 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 		return nil, nil, nil, nil
 	}
 
-	// Cluster-wide PDB list. ValidatePodsDisruptable reuses this per node.
 	pdbs, err := pdb.NewLimits(ctx, kubeClient)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("listing pod disruption budgets, %w", err)
 	}
 
-	// Sort once at entry by SavingsRatio DESC. lo.GroupBy preserves the
-	// iteration order per partition (proven by ranking_internal_test.go), so
-	// downstream slices inherit this order without a per-partition sort.
+	// Sorted once here: lo.GroupBy preserves per-partition iteration order, so
+	// each group inherits SavingsRatio DESC without its own sort.
 	sortBySavingsRatio(ctx, kubeClient, nodes, nodePoolToInstanceTypesMap)
 
 	groups := lo.GroupBy(nodes, func(n *state.StateNode) nodePartition {
@@ -74,8 +67,6 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	normal := groups[partitionNormal]
 	cleanupOnly := groups[partitionCleanupOnly]
 
-	// Per-NodePool budget: B/C overflow lands in D. The already-disrupting count
-	// is reason-dependent, so stats and budget are computed together per reason.
 	budgetFor := func(reason v1.DisruptionReason) map[string]int {
 		numNodes, disrupting := disruption.NodePoolStatsFromNodes(nodes, reason)
 		return disruption.NodePoolBudgetMap(ctx, clk, nodePoolMap, numNodes, disrupting, reason)
@@ -88,8 +79,7 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	cleanupOnly = append(cleanupOnly, driftOverflow...)
 	cleanupOnly = append(cleanupOnly, normalOverflow...)
 
-	// Concatenate drifted then normal so index 0 of groupBC carries the
-	// most-negative rank.
+	// Drifted first so index 0 carries the most-negative rank.
 	groupBC = append(drifted, normal...)
 
 	log.FromContext(ctx).V(1).WithValues(
@@ -101,19 +91,15 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	return disruptedBlocked, groupBC, cleanupOnly, nil
 }
 
-// RankForBC returns the pod-deletion-cost annotation value for a node at
-// index i within a Groups B+C slice of length n. Rank is negative and
-// contiguous: -n for index 0, -1 for the last index. Ascending rank means
-// the ReplicaSet controller evicts the top of the slice first.
+// RankForBC returns -n at index 0 rising to -1 at index n-1. The ReplicaSet
+// controller evicts the lowest value first, so index 0 goes first.
 func RankForBC(i, n int) int {
 	return -n + i
 }
 
-// applyPerNodePoolBudget is order-sensitive: nodes must be pre-sorted by
-// cross-pool SavingsRatio DESC (see sortBySavingsRatio) so the sequential
-// rank assignment places the highest-SavingsRatio node at the most-negative
-// rank regardless of pool identity. Do not rewrite with lo.GroupBy: Go map
-// iteration is non-deterministic and would randomize cross-pool priority.
+// applyPerNodePoolBudget requires nodes pre-sorted by cross-pool SavingsRatio
+// DESC. Do not rewrite with lo.GroupBy: map iteration order would randomize
+// cross-pool priority.
 func applyPerNodePoolBudget(nodes []*state.StateNode, budget map[string]int) (bounded, overflow []*state.StateNode) {
 	used := map[string]int{}
 	for _, node := range nodes {
@@ -137,10 +123,6 @@ const (
 	partitionCleanupOnly
 )
 
-// classifyNode routes a node to one of the four tiers. Cache-read failures
-// inside ValidatePodsDisruptable route silently to Group D; WaitForCacheSync
-// gates reconciles at manager startup, so cache-not-synced does not occur in
-// steady state.
 func classifyNode(ctx context.Context, kubeClient client.Client, clk clock.Clock, node *state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, pdbs pdb.Limits) nodePartition {
 	if isGoingAway(node) {
 		return partitionDisrupted
@@ -159,10 +141,8 @@ func classifyDisruptableNode(ctx context.Context, kubeClient client.Client, clk 
 	if hasNonRSOwnedPods(pods) || isInstanceTypeUnresolvable(node, nodePoolToInstanceTypesMap) {
 		return partitionCleanupOnly
 	}
-	// Check drift before consolidation-disabled so drifted nodes in a
-	// ConsolidateAfter=nil pool still land in Group B rather than Group D.
-	// The static-nodepool gate matches drift.ShouldDisrupt so we don't rank
-	// nodes the drift controller will never act on.
+	// Drift is checked first so a drifted node in a ConsolidateAfter=nil pool
+	// still ranks.
 	if isDrifted(node, nodePoolMap) {
 		return partitionDrifted
 	}
@@ -172,14 +152,9 @@ func classifyDisruptableNode(ctx context.Context, kubeClient client.Client, clk 
 	return partitionNormal
 }
 
-// isInstanceTypeUnresolvable reports whether disruption.NewCandidate would
-// reject the node because its NodePool has no resolvable entry in the
-// instance-type map. Routing them to Group D keeps PDC in lockstep with
-// consolidation, which excludes such nodes entirely.
-//
-// A nil map means "unknown, skip the filter" so direct-helper tests that do
-// not wire cloudProvider through still classify; empty labels get the same
-// treatment.
+// An unresolvable instance type leaves the offering price at 0, which makes the
+// node's position within groupBC meaningless. A nil map or a missing label means
+// instance types were never resolved at all, so the filter is skipped.
 func isInstanceTypeUnresolvable(node *state.StateNode, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) bool {
 	if nodePoolToInstanceTypesMap == nil {
 		return false
@@ -226,9 +201,8 @@ func isGoingAway(node *state.StateNode) bool {
 	return false
 }
 
-// isDrifted mirrors drift.ShouldDisrupt so PDC and the drift controller agree
-// on drifted candidates. Static-pool nodes are excluded: StaticDrift acts on
-// them separately.
+// isDrifted mirrors drift.ShouldDisrupt. Static-pool nodes are excluded because
+// StaticDrift acts on them separately.
 //
 // TODO: the drift-condition read and IsStatic gate are duplicated in
 // disruption/drift.go and disruption/staticdrift.go; dedupe in a follow-up.
@@ -262,10 +236,8 @@ func hasNonRSOwnedPods(pods []*corev1.Pod) bool {
 	return false
 }
 
-// sortBySavingsRatio orders nodes by disruptionutils.SavingsRatio DESC with a
-// node-name tie-break for determinism. Mirrors
-// disruption.consolidation.sortCandidates so PDC and consolidation agree on
-// which node to prefer.
+// sortBySavingsRatio mirrors disruption.consolidation.sortCandidates so PDC and
+// consolidation prefer the same node.
 func sortBySavingsRatio(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) {
 	if len(nodes) <= 1 {
 		return
@@ -280,9 +252,7 @@ func sortBySavingsRatio(ctx context.Context, kubeClient client.Client, nodes []*
 		offeringPrice := disruptionutils.ResolveOfferingPrice(labels, it)
 		pods, err := n.Pods(ctx, kubeClient)
 		if err != nil {
-			// Transient informer read miss: treat as zero-reschedulable so
-			// the base-cost floor drives the ratio. The next reconcile picks
-			// up the true pod list.
+			// Fall back to the base-cost floor; the next reconcile re-reads.
 			log.FromContext(ctx).V(1).WithValues("node", n.Name()).Error(err, "listing pods for savings-ratio sort; using base cost")
 			pods = nil
 		}

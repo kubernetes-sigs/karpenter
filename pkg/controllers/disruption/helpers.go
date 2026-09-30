@@ -317,22 +317,12 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 	return nodePoolMap, nodePoolToInstanceTypesMap, nil
 }
 
-// NodePoolStats returns per-NodePool counts of managed, initialized,
-// non-terminating nodes plus the subset that are currently disrupting
-// (marked for deletion, or NotReady for any reason other than Unhealthy).
-// The disrupting count is reason-dependent, so callers must pass the same
-// reason they later hand to MustGetAllowedDisruptions or NodePoolBudgetMap.
-// Convenience wrapper around NodePoolStatsFromNodes for callers that don't
-// already hold a DeepCopy.
+// The disrupting count is reason-dependent, so pass the same reason on to
+// MustGetAllowedDisruptions or NodePoolBudgetMap.
 func NodePoolStats(cluster *state.Cluster, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
 	return NodePoolStatsFromNodes(cluster.DeepCopyNodes(), reason)
 }
 
-// NodePoolBudgetMap returns per-NodePool remaining disruption budget for the
-// given reason. Result equals MustGetAllowedDisruptions minus already-disrupting,
-// clamped at 0. Consumed by the deletion-cost controller;
-// BuildDisruptionBudgetMapping keeps its own inline clamp path because it needs
-// both allowed and remaining for metrics and events.
 func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[string]*v1.NodePool, numNodes, disrupting map[string]int, reason v1.DisruptionReason) map[string]int {
 	out := map[string]int{}
 	for name, np := range nodePools {
@@ -352,10 +342,7 @@ func NodePoolBudgetMap(ctx context.Context, clk clock.Clock, nodePools map[strin
 	return out
 }
 
-// NodePoolStatsFromNodes computes the same per-NodePool counts as NodePoolStats
-// against a caller-supplied snapshot. Callers that already hold a DeepCopy
-// (e.g. the deletion-cost controller) reuse it here instead of paying for a
-// second cluster-wide deep copy.
+// NodePoolStats against a snapshot the caller already holds.
 func NodePoolStatsFromNodes(nodes []*state.StateNode, reason v1.DisruptionReason) (numNodes, disrupting map[string]int) {
 	numNodes = map[string]int{}
 	disrupting = map[string]int{}

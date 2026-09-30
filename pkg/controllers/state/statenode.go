@@ -472,7 +472,6 @@ func (in *StateNode) PodLimits() corev1.ResourceList {
 }
 
 // DisruptionCost returns the exact disruption cost for this node:
-// PerNodeBaseDisruptionCost + sum of positive per-pod eviction costs.
 // This is maintained incrementally as pods are added/removed.
 func (in *StateNode) DisruptionCost() float64 {
 	cost := disruptionutils.PerNodeBaseDisruptionCost

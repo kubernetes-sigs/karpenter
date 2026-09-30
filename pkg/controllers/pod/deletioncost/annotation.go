@@ -23,13 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// clearAnnotation removes pod-deletion-cost via merge-patch with optimistic
-// lock. MergeFromWithOptimisticLock is used so a concurrent writer of the
-// same annotation (customer kubectl, third-party HPAs, admission webhooks)
-// surfaces as a 409 Conflict; the queue's Reconcile then treats it as
-// Skipped and lets the next cycle converge. See
-// pkg/controllers/nodeclaim/lifecycle/controller.go for the same
-// annotation-race precedent.
+// The optimistic lock turns a concurrent writer into a 409, which Reconcile
+// records as Skipped and retries next cycle.
 func clearAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.Pod) error {
 	// MergeFromWithOptions captures pod by pointer; mutate a copy so the diff is non-empty.
 	updated := pod.DeepCopy()
@@ -38,9 +33,7 @@ func clearAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.
 	return kubeClient.Patch(ctx, updated, patch)
 }
 
-// patchAnnotation sets pod-deletion-cost=value via merge-patch with
-// optimistic lock. Symmetric with clearAnnotation; see that function's
-// comment for the Conflict-detection rationale.
+// patchAnnotation is the symmetric set; see clearAnnotation for the lock.
 func patchAnnotation(ctx context.Context, kubeClient client.Client, pod *corev1.Pod, value string) error {
 	updated := pod.DeepCopy()
 	if updated.Annotations == nil {
