@@ -171,7 +171,9 @@ func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, 
 		return false
 	}
 	for _, pod := range pods {
-		c.queue.Add(pod, rank, cleanup)
+        if pod.OwnerReferences[i].Kind == replicaset {
+		    c.queue.Add(pod, rank, cleanup)
+		}
 	}
 	perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
 	return true
