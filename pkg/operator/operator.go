@@ -179,9 +179,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 
 	log.FromContext(ctx).WithValues("version", Version).V(1).Info("discovered karpenter version")
 
-	if cfg := options.FromContext(ctx).SchedulerConfig; cfg != nil && cfg.PodTopologySpread != nil && len(cfg.PodTopologySpread.DefaultConstraints) != 0 {
-		log.FromContext(ctx).WithValues("default-topology-spread-constraints", cfg.PodTopologySpread.DefaultConstraints).Info("scheduler-config is set: applying these default topology spread constraints during scheduling to pods that declare none of their own")
-	}
+	logSchedulerConfig(ctx)
 
 	// Manager
 	mgrOpts := ctrl.Options{
@@ -282,6 +280,20 @@ func (o *Operator) Start(ctx context.Context) {
 		lo.Must0(o.Manager.Start(ctx))
 	})
 	wg.Wait()
+}
+
+// logSchedulerConfig logs the kube-scheduler behavior that scheduler-config makes Karpenter mirror during scheduling
+func logSchedulerConfig(ctx context.Context) {
+	cfg := options.FromContext(ctx).SchedulerConfig
+	if cfg == nil {
+		return
+	}
+	if cfg.PodTopologySpread != nil && len(cfg.PodTopologySpread.DefaultConstraints) != 0 {
+		log.FromContext(ctx).WithValues("default-topology-spread-constraints", cfg.PodTopologySpread.DefaultConstraints).Info("scheduler-config is set: applying these default topology spread constraints during scheduling to pods that declare none of their own")
+	}
+	if cfg.NodeResourcesFit != nil && cfg.NodeResourcesFit.ScoringStrategy != nil {
+		log.FromContext(ctx).WithValues("scoring-strategy", cfg.NodeResourcesFit.ScoringStrategy).Info("scheduler-config is set: ordering existing nodes during scheduling by this node resources fit scoring strategy")
+	}
 }
 
 func setupIndexers(ctx context.Context, mgr manager.Manager) {

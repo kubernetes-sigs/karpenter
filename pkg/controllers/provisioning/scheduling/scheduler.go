@@ -234,6 +234,7 @@ func NewScheduler(
 		}
 	}
 	s.deletingNodeNames = deletingNodeNames
+	s.nodeResourcesFitScorer = NewNodeResourcesFitScorer(ctx)
 	s.calculateExistingNodeClaims(ctx, stateNodes, daemonSetPods, nodeToNodePool, resolved.enforceConsolidateAfter)
 	return s
 }
@@ -285,6 +286,9 @@ type Scheduler struct {
 	instanceTypes map[string][]*cloudprovider.InstanceType
 	// cachedResourceClaims memoizes ResourceClaim lookups for the duration of a single scheduling loop.
 	cachedResourceClaims map[types.NamespacedName]*resourcev1.ResourceClaim
+	// nodeResourcesFitScorer orders existingNodes the way kube-scheduler ranks them. It is nil when no scoring strategy is
+	// configured, which keeps existing nodes in name order.
+	nodeResourcesFitScorer *NodeResourcesFitScorer
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -679,6 +683,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, p *corev1.Pod, volume
 	// If we set the existingNode to something valid, this means that we successfully scheduled to one of these nodes
 	if existingNode != nil {
 		existingNode.Add(ctx, p, s.cachedPodData[p.UID], requirements, volumes, allocationResult)
+		s.repositionExistingNode(idx)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to existing nodes")
@@ -870,20 +875,47 @@ func (s *Scheduler) updateRemainingResources(node *state.StateNode) {
 	}
 }
 
-// sortExistingNodes sorts existing nodes with initialized nodes first
+// sortExistingNodes sorts existing nodes with initialized nodes first, then by score when a scoring strategy is configured
 func (s *Scheduler) sortExistingNodes() {
+	if s.nodeResourcesFitScorer != nil {
+		for _, n := range s.existingNodes {
+			n.score = s.nodeResourcesFitScorer.Score(n)
+		}
+	}
 	// Order the existing nodes for scheduling with initialized nodes first
 	// This is done specifically for consolidation where we want to make sure we schedule to initialized nodes
 	// before we attempt to schedule uninitialized ones
 	sort.SliceStable(s.existingNodes, func(i, j int) bool {
-		if s.existingNodes[i].Initialized() && !s.existingNodes[j].Initialized() {
-			return true
-		}
-		if !s.existingNodes[i].Initialized() && s.existingNodes[j].Initialized() {
-			return false
-		}
-		return s.existingNodes[i].Name() < s.existingNodes[j].Name()
+		return s.existingNodeLess(s.existingNodes[i], s.existingNodes[j])
 	})
+}
+
+// existingNodeLess orders initialized nodes first, then nodes kube-scheduler would rank higher when a scorer is
+// configured, then nodes by name
+func (s *Scheduler) existingNodeLess(a, b *ExistingNode) bool {
+	if a.Initialized() != b.Initialized() {
+		return a.Initialized()
+	}
+	if s.nodeResourcesFitScorer != nil && a.score != b.score {
+		return a.score > b.score
+	}
+	return a.Name() < b.Name()
+}
+
+// repositionExistingNode re-scores the node at idx after a pod is added to it and moves it to its new place in the
+// order, so the next pod is tried against the nodes as kube-scheduler would rank them at that point
+func (s *Scheduler) repositionExistingNode(idx int) {
+	if s.nodeResourcesFitScorer == nil {
+		return
+	}
+	nodes := s.existingNodes
+	nodes[idx].score = s.nodeResourcesFitScorer.Score(nodes[idx])
+	for ; idx > 0 && s.existingNodeLess(nodes[idx], nodes[idx-1]); idx-- {
+		nodes[idx], nodes[idx-1] = nodes[idx-1], nodes[idx]
+	}
+	for ; idx < len(nodes)-1 && s.existingNodeLess(nodes[idx+1], nodes[idx]); idx++ {
+		nodes[idx], nodes[idx+1] = nodes[idx+1], nodes[idx]
+	}
 }
 
 // computeEffectiveZoneFromPod calculates the effective zone constraint by intersecting

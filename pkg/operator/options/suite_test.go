@@ -547,6 +547,79 @@ podTopologySpread:
 `)
 			Expect(err).To(HaveOccurred())
 		})
+		Context("nodeResourcesFit", func() {
+			It("should parse a scoring strategy with explicit resources", func() {
+				cfg, err := options.ParseSchedulerConfiguration(`
+nodeResourcesFit:
+  scoringStrategy:
+    type: MostAllocated
+    resources:
+      - name: cpu
+        weight: 3
+      - name: memory
+        weight: 1
+`)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(cfg.PodTopologySpread).To(BeNil())
+				Expect(cfg.NodeResourcesFit.ScoringStrategy.Type).To(Equal(options.MostAllocated))
+				Expect(cfg.NodeResourcesFit.ScoringStrategy.Resources).To(Equal([]options.ResourceSpec{{Name: "cpu", Weight: 3}, {Name: "memory", Weight: 1}}))
+			})
+			It("should default the resources to cpu and memory, as kube-scheduler does", func() {
+				cfg, err := options.ParseSchedulerConfiguration(`{"nodeResourcesFit":{"scoringStrategy":{"type":"LeastAllocated"}}}`)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(cfg.NodeResourcesFit.ScoringStrategy.Resources).To(Equal(options.DefaultScoringResources))
+			})
+			It("should default a zero weight to 1, as kube-scheduler does", func() {
+				cfg, err := options.ParseSchedulerConfiguration(`
+nodeResourcesFit:
+  scoringStrategy:
+    type: MostAllocated
+    resources:
+      - name: cpu
+`)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(cfg.NodeResourcesFit.ScoringStrategy.Resources).To(Equal([]options.ResourceSpec{{Name: "cpu", Weight: 1}}))
+			})
+			It("should leave existing node ordering unset when no scoring strategy is given", func() {
+				cfg, err := options.ParseSchedulerConfiguration(`nodeResourcesFit: {}`)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(cfg.NodeResourcesFit.ScoringStrategy).To(BeNil())
+			})
+			It("should parse alongside podTopologySpread", func() {
+				cfg, err := options.ParseSchedulerConfiguration(`{"podTopologySpread":{"defaultConstraints":[{"maxSkew":1,"topologyKey":"topology.kubernetes.io/zone","whenUnsatisfiable":"ScheduleAnyway"}]},"nodeResourcesFit":{"scoringStrategy":{"type":"MostAllocated"}}}`)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(cfg.PodTopologySpread.DefaultConstraints).To(HaveLen(1))
+				Expect(cfg.NodeResourcesFit.ScoringStrategy.Type).To(Equal(options.MostAllocated))
+			})
+			It("should reject a missing type", func() {
+				_, err := options.ParseSchedulerConfiguration(`{"nodeResourcesFit":{"scoringStrategy":{}}}`)
+				Expect(err).To(HaveOccurred())
+			})
+			It("should reject RequestedToCapacityRatio, which Karpenter doesn't support", func() {
+				_, err := options.ParseSchedulerConfiguration(`{"nodeResourcesFit":{"scoringStrategy":{"type":"RequestedToCapacityRatio"}}}`)
+				Expect(err).To(HaveOccurred())
+			})
+			It("should reject the requestedToCapacityRatio shape as an unknown field", func() {
+				_, err := options.ParseSchedulerConfiguration(`
+nodeResourcesFit:
+  scoringStrategy:
+    type: MostAllocated
+    requestedToCapacityRatio:
+      shape:
+        - utilization: 0
+          score: 0
+`)
+				Expect(err).To(HaveOccurred())
+			})
+			DescribeTable("should reject a weight outside of [0, 100]",
+				func(weight int) {
+					_, err := options.ParseSchedulerConfiguration(fmt.Sprintf(`{"nodeResourcesFit":{"scoringStrategy":{"type":"MostAllocated","resources":[{"name":"cpu","weight":%d}]}}}`, weight))
+					Expect(err).To(HaveOccurred())
+				},
+				Entry("negative", -1),
+				Entry("over 100", 101),
+			)
+		})
 	})
 })
 
