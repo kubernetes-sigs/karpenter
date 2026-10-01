@@ -23,8 +23,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clock "k8s.io/utils/clock/testing"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -292,5 +294,79 @@ var _ = Describe("HasDRARequirements", func() {
 			},
 		}
 		Expect(pod.HasDRARequirements(p)).To(BeTrue())
+	})
+})
+
+var _ = Describe("IsControlledBy", func() {
+	replicaSet := []schema.GroupVersionKind{{Group: "apps", Version: "v1", Kind: "ReplicaSet"}}
+	podWithOwners := func(refs ...metav1.OwnerReference) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{OwnerReferences: refs}}
+	}
+	rsRef := func(controller bool) metav1.OwnerReference {
+		return metav1.OwnerReference{
+			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "rs", UID: "rs-uid",
+			Controller: lo.ToPtr(controller),
+		}
+	}
+
+	It("should return false for a pod with no owner references", func() {
+		Expect(pod.IsControlledBy(podWithOwners(), replicaSet)).To(BeFalse())
+	})
+
+	It("should return true when the controller reference matches", func() {
+		Expect(pod.IsControlledBy(podWithOwners(rsRef(true)), replicaSet)).To(BeTrue())
+	})
+
+	It("should return false when the only matching reference is not the controller", func() {
+		p := podWithOwners(rsRef(false))
+		Expect(pod.IsControlledBy(p, replicaSet)).To(BeFalse())
+		// The difference from IsOwnedBy, which accepts any owner reference, is the
+		// whole reason both exist.
+		Expect(pod.IsOwnedBy(p, replicaSet)).To(BeTrue())
+	})
+
+	It("should return false when the controller reference is absent from every reference", func() {
+		Expect(pod.IsControlledBy(podWithOwners(
+			metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "rs", UID: "rs-uid"},
+			metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: "sts-uid"},
+		), replicaSet)).To(BeFalse())
+	})
+
+	It("should return false when the controller is a different kind", func() {
+		Expect(pod.IsControlledBy(podWithOwners(metav1.OwnerReference{
+			APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: "sts-uid",
+			Controller: lo.ToPtr(true),
+		}), replicaSet)).To(BeFalse())
+	})
+
+	// A CRD is free to define its own ReplicaSet kind under its own group. Matching
+	// on the Kind string alone would mistake it for apps/v1.
+	It("should return false when the kind matches under a different APIVersion", func() {
+		Expect(pod.IsControlledBy(podWithOwners(metav1.OwnerReference{
+			APIVersion: "example.com/v1", Kind: "ReplicaSet", Name: "rs", UID: "rs-uid",
+			Controller: lo.ToPtr(true),
+		}), replicaSet)).To(BeFalse())
+	})
+
+	It("should match the controller against any GVK in the set", func() {
+		gvks := []schema.GroupVersionKind{
+			{Group: "apps", Version: "v1", Kind: "ReplicaSet"},
+			{Group: "batch", Version: "v1", Kind: "Job"},
+			{Group: "apps", Version: "v1", Kind: "DaemonSet"},
+		}
+		Expect(pod.IsControlledBy(podWithOwners(metav1.OwnerReference{
+			APIVersion: "batch/v1", Kind: "Job", Name: "job", UID: "job-uid",
+			Controller: lo.ToPtr(true),
+		}), gvks)).To(BeTrue())
+		Expect(pod.IsControlledBy(podWithOwners(metav1.OwnerReference{
+			APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: "sts-uid",
+			Controller: lo.ToPtr(true),
+		}), gvks)).To(BeFalse())
+	})
+
+	It("should back IsControlledByReplicaSet", func() {
+		Expect(pod.IsControlledByReplicaSet(podWithOwners(rsRef(true)))).To(BeTrue())
+		Expect(pod.IsControlledByReplicaSet(podWithOwners(rsRef(false)))).To(BeFalse())
+		Expect(pod.IsControlledByReplicaSet(podWithOwners())).To(BeFalse())
 	})
 })

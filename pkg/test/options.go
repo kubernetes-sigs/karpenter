@@ -54,14 +54,15 @@ type OptionsFields struct {
 }
 
 type FeatureGates struct {
-	NodeRepair              *bool
-	ReservedCapacity        *bool
-	SpotToSpotConsolidation *bool
-	NodeOverlay             *bool
-	StaticCapacity          *bool
-	CapacityBuffer          *bool
-	TerminateFirstDrift     *bool
-	TerminateFirstRepair    *bool
+	NodeRepair                *bool
+	ReservedCapacity          *bool
+	SpotToSpotConsolidation   *bool
+	NodeOverlay               *bool
+	StaticCapacity            *bool
+	CapacityBuffer            *bool
+	TerminateFirstDrift       *bool
+	TerminateFirstRepair      *bool
+	PodDeletionCostManagement *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -94,14 +95,15 @@ func Options(overrides ...OptionsFields) *options.Options {
 		IgnoreDRARequests:                lo.FromPtrOr(opts.IgnoreDRARequests, true),
 		SchedulerConfig:                  opts.SchedulerConfig,
 		FeatureGates: options.FeatureGates{
-			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
-			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
-			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
-			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
-			StaticCapacity:          lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
-			CapacityBuffer:          lo.FromPtrOr(opts.FeatureGates.CapacityBuffer, false),
-			TerminateFirstDrift:     lo.FromPtrOr(opts.FeatureGates.TerminateFirstDrift, false),
-			TerminateFirstRepair:    lo.FromPtrOr(opts.FeatureGates.TerminateFirstRepair, false),
+			NodeRepair:                lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
+			ReservedCapacity:          lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
+			SpotToSpotConsolidation:   lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
+			NodeOverlay:               lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
+			StaticCapacity:            lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
+			CapacityBuffer:            lo.FromPtrOr(opts.FeatureGates.CapacityBuffer, false),
+			TerminateFirstDrift:       lo.FromPtrOr(opts.FeatureGates.TerminateFirstDrift, false),
+			TerminateFirstRepair:      lo.FromPtrOr(opts.FeatureGates.TerminateFirstRepair, false),
+			PodDeletionCostManagement: lo.FromPtrOr(opts.FeatureGates.PodDeletionCostManagement, false),
 		},
 	}
 }
