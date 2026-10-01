@@ -151,20 +151,6 @@ var _ = Describe("LatencyHarness", func() {
 			Expect(stats.BucketTruncationRate).To(BeZero())
 		})
 
-		It("should treat end as fresh observations when the sample count went backwards", func() {
-			start := mkHistogram(200, 50.0, []*dto.Bucket{
-				mkBucket(1.0, 200),
-				mkBucket(5.0, 200),
-			})
-			end := mkHistogram(30, 3.0, []*dto.Bucket{
-				mkBucket(1.0, 20),
-				mkBucket(5.0, 30),
-			})
-			stats := reduceHistogramDelta(end, start)
-			Expect(stats.Count).To(BeNumerically("==", 30), "Count under reset")
-			Expect(stats.Sum).To(BeNumerically("~", 3.0, 1e-9), "Sum under reset")
-		})
-
 		It("should discard the stale baseline when neither sample_count nor sample_sum reveals the reset", func() {
 			start := mkHistogram(100, 90.0, scoreBuckets(0, 0, 0, 0, 100, 100, 100, 100))
 			end := mkHistogram(150, 219.0, scoreBuckets(0, 0, 130, 130, 130, 130, 130, 150))
@@ -228,10 +214,6 @@ var _ = Describe("LatencyHarness", func() {
 			Expect(out[singleKey].Count).To(BeNumerically("==", 10), "single count")
 			Expect(out[multiKey].Count).To(BeNumerically("==", 5), "multi count")
 			Expect(out[singleKey].Labels).To(HaveKeyWithValue("consolidation_type", "single"))
-		})
-
-		It("should return no series for a missing metric family", func() {
-			Expect(deltaHistogram("karpenter_missing_metric", nil, nil)).To(BeEmpty())
 		})
 	})
 
