@@ -82,7 +82,7 @@ var _ = Describe("CloudProvider error metric labels", func() {
 		Expect(metricFamily.Metric).To(HaveLen(1))
 		Expect(metricLabels(metricFamily.Metric[0])).To(Equal(map[string]string{
 			"controller": "nodeclaim-lifecycle",
-			"error":      "",
+			"error":      UnknownError.Name,
 			"method":     "Get",
 			"nodepool":   "default",
 			"provider":   "fake",
