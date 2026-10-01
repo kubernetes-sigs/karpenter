@@ -65,8 +65,19 @@ type RepairPolicy struct {
 	// ConditionStatus condition when a node is unhealthy
 	ConditionStatus corev1.ConditionStatus
 	// TolerationDuration is the duration the controller will wait
-	// before force terminating nodes that are unhealthy.
+	// before repairing nodes that are unhealthy. It is a confidence delay: eligibility (and repair
+	// ordering age) is counted only after it elapses.
 	TolerationDuration time.Duration
+	// TerminationGracePeriod is the Axis-2 drain bound for repair of this condition:
+	//   nil      -> inherit the NodePool/NodeClaim TerminationGracePeriod
+	//   non-zero -> min(this, nodeclaim.TerminationGracePeriod) — bound the drain even on a pool that set none,
+	//               so repair is never the unbounded 19-day hang.
+	//   0        -> forceful: skip the drain for conditions the kubelet can't evict through (wedged kernel,
+	//               lost heartbeat).
+	TerminationGracePeriod *time.Duration
+	// Priority is an ordering weight (0-100) for repair. Higher repairs first. Collisions are expected and
+	// unresolved; only the ordering matters, not the magnitude (it is compressed to a dense rank).
+	Priority int
 }
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
@@ -90,6 +101,12 @@ type CloudProvider interface {
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
+	// Reboot restarts the instance backing the NodeClaim in place without terminating it.
+	// operationID identifies a logical reboot operation; providers with native idempotency should
+	// use it to make repeated calls for the same operation replay-safe. Reboot returns once the
+	// provider accepts the request; recovery is observed by the reboot controller. Providers that
+	// do not support in-place reboot must return a *NodeRebootNotImplementedError.
+	Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) error
 	// RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter
 	// to monitor on the node.
 	RepairPolicies() []RepairPolicy
@@ -130,6 +147,10 @@ type InstanceType struct {
 	Offerings Offerings
 	// Resources are the full resource capacities for this instance type
 	Capacity corev1.ResourceList
+	// VolumeAttachmentLimits is the expected number of volumes that can be attached to nodes of this instance type, keyed by
+	// CSI driver name. Cloud providers that do not know a driver's limit ahead of time may omit it; limits reported
+	// by a node's CSINode take precedence once the node registers.
+	VolumeAttachmentLimits map[string]int
 	// DynamicResources contains DRA device metadata for this instance type.
 	// Cloud providers that do not support DRA may leave this as the zero value.
 	DynamicResources DynamicResources
@@ -181,6 +202,13 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 		*out = make(corev1.ResourceList, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val.DeepCopy()
+		}
+	}
+	if in.VolumeAttachmentLimits != nil {
+		in, out := &in.VolumeAttachmentLimits, &out.VolumeAttachmentLimits
+		*out = make(map[string]int, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
 		}
 	}
 	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
@@ -340,12 +368,12 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 		jPrice := math.MaxFloat64
 
 		for _, of := range its[i].Offerings {
-			if of.Available && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
+			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
 				iPrice = of.Price
 			}
 		}
 		for _, of := range its[j].Offerings {
-			if of.Available && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
+			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
 				jPrice = of.Price
 			}
 		}
@@ -406,7 +434,7 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 	// If minValue requirement fails, we return an error that indicates the first requirement key that couldn't be satisfied.
 	for i, it := range its {
 		for _, req := range requirements {
-			if req.MinValues != nil {
+			if req.MinValues() != nil {
 				if _, ok := valuesForKey[req.Key]; !ok {
 					valuesForKey[req.Key] = sets.New[string]()
 				}
@@ -420,7 +448,7 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 		}
 		for k, v := range valuesForKey {
 			// Collect all the min values that are violated
-			if len(v) < lo.FromPtr(requirements.Get(k).MinValues) {
+			if len(v) < lo.FromPtr(requirements.Get(k).MinValues()) {
 				incompatibleKeys[k] = len(v)
 			} else {
 				// If the key now satisfies min values, remove it from the map.
@@ -555,6 +583,32 @@ func (ofs Offerings) Available() Offerings {
 	})
 }
 
+// Launchable reports whether a new node can actually be launched into this offering right now. It requires the offering
+// to be healthy (Available) and, for a reserved offering, to have remaining reservation capacity. Availability alone is
+// insufficient because capacity and health are independent axes: a full-but-healthy reservation is Available with a
+// ReservationCapacity of 0, and launching into it would fail. Non-reserved offerings are never reservation-constrained,
+// so for them Launchable is equivalent to Available.
+func (o *Offering) Launchable() bool {
+	if !o.Available {
+		return false
+	}
+	// Being out of reservation capacity disqualifies only reserved offerings. Index the requirement map directly and use
+	// the allocation-free Requirement.Has, avoiding Offering.CapacityType() (which calls Requirement.Any() ->
+	// UnsortedList() and allocates on every call). An offering with no capacity-type requirement isn't
+	// reservation-constrained, so it stays launchable.
+	req, ok := o.Requirements[v1.CapacityTypeLabelKey]
+	return !ok || !req.Has(v1.CapacityTypeReserved) || o.ReservationCapacity > 0
+}
+
+// Launchable returns the offerings that can currently be launched into (see Offering.Launchable). Use this rather than
+// Available anywhere availability is a proxy for "can launch/price this now" (pricing, ordering, capacity-type
+// selection); use Available only where the pure health signal is intended.
+func (ofs Offerings) Launchable() Offerings {
+	return lo.Filter(ofs, func(o *Offering, _ int) bool {
+		return o.Launchable()
+	})
+}
+
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering *Offering, _ int) bool {
@@ -634,6 +688,27 @@ func IgnoreNodeClaimNotFoundError(err error) error {
 		return nil
 	}
 	return err
+}
+
+// NodeRebootNotImplementedError is returned by CloudProviders that do not support in-place reboot.
+// The reboot controller treats it as a terminal, non-retryable signal that reboot is unavailable
+// for this provider (so a reboot policy that requires it is rejected at startup validation).
+type NodeRebootNotImplementedError struct{}
+
+func NewNodeRebootNotImplementedError() *NodeRebootNotImplementedError {
+	return &NodeRebootNotImplementedError{}
+}
+
+func (e *NodeRebootNotImplementedError) Error() string {
+	return "reboot is not implemented by this cloud provider"
+}
+
+func IsNodeRebootNotImplementedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rebootErr *NodeRebootNotImplementedError
+	return errors.As(err, &rebootErr)
 }
 
 // InsufficientCapacityError is an error type returned by CloudProviders when a launch fails due to a lack of capacity from NodeClaim requirements

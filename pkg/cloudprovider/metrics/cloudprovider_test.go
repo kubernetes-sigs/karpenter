@@ -35,13 +35,13 @@ var _ = Describe("Cloudprovider", func() {
 	Describe("CloudProvider nodeclaim errors via GetErrorTypeLabelValue()", func() {
 		Context("when the error is known", func() {
 			It("nodeclaim not found should be recognized", func() {
-				Expect(metrics.GetErrorTypeLabelValue(nodeClaimNotFoundErr)).To(Equal(metrics.NodeClaimNotFoundError))
+				Expect(metrics.GetErrorTypeLabelValue(nodeClaimNotFoundErr)).To(Equal(metrics.NodeClaimNotFoundError.Name))
 			})
 			It("insufficient capacity should be recognized", func() {
-				Expect(metrics.GetErrorTypeLabelValue(insufficientCapacityErr)).To(Equal(metrics.InsufficientCapacityError))
+				Expect(metrics.GetErrorTypeLabelValue(insufficientCapacityErr)).To(Equal(metrics.InsufficientCapacityError.Name))
 			})
 			It("nodeclass not ready should be recognized", func() {
-				Expect(metrics.GetErrorTypeLabelValue(nodeClassNotReadyErr)).To(Equal(metrics.NodeClassNotReadyError))
+				Expect(metrics.GetErrorTypeLabelValue(nodeClassNotReadyErr)).To(Equal(metrics.NodeClassNotReadyError.Name))
 			})
 		})
 		Context("when the error is unknown", func() {

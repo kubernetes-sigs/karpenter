@@ -18,6 +18,7 @@ package scheduling
 
 import (
 	"fmt"
+	"iter"
 	"slices"
 	"sort"
 	"strings"
@@ -233,21 +234,22 @@ func (b badKeyError) Error() string {
 	return fmt.Sprintf("key %s, %s not in %s", b.key, b.incoming, b.existing)
 }
 
-// intersectKeys is much faster and allocates less han getting the two key sets separately and intersecting them
-func (r Requirements) intersectKeys(rhs Requirements) sets.Set[string] {
-	smallest := r
-	largest := rhs
-	if len(smallest) > len(largest) {
-		smallest, largest = largest, smallest
-	}
-	keys := sets.Set[string]{}
-
-	for key := range smallest {
-		if _, ok := largest[key]; ok {
-			keys.Insert(key)
+// intersectKeys iterates over the keys present in both requirements sets in O(len(smallest))
+func (r Requirements) intersectKeys(rhs Requirements) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		smallest := r
+		largest := rhs
+		if len(smallest) > len(largest) {
+			smallest, largest = largest, smallest
+		}
+		for key := range smallest {
+			if _, ok := largest[key]; ok {
+				if !yield(key) {
+					return
+				}
+			}
 		}
 	}
-	return keys
 }
 
 // Intersects returns errors if the requirements don't have overlapping values, undefined keys are allowed
@@ -275,7 +277,7 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 
 func (r Requirements) HasMinValues() bool {
 	for _, req := range r {
-		if req.MinValues != nil {
+		if req.MinValues() != nil {
 			return true
 		}
 	}
@@ -283,10 +285,17 @@ func (r Requirements) HasMinValues() bool {
 }
 
 func (r Requirements) String() string {
-	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool {
-		return v1.RestrictedLabels.Has(requirement.Key)
-	})
-	stringRequirements := lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() })
-	slices.Sort(stringRequirements)
-	return strings.Join(stringRequirements, ", ")
+	result := make([]string, 0, len(r))
+
+	for _, requirement := range r {
+		// Skip restricted labels
+		if v1.RestrictedLabels.Has(requirement.Key) {
+			continue
+		}
+
+		result = append(result, requirement.String())
+	}
+
+	slices.Sort(result)
+	return strings.Join(result, ", ")
 }

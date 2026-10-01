@@ -14,7 +14,7 @@ set -euo pipefail
 
 # get the latest version
 KWOK_REPO=kubernetes-sigs/kwok
-KWOK_RELEASE=v0.6.0
+KWOK_RELEASE=v0.8.0
 # make a base directory for multi-base kustomization
 HOME_DIR=$(mktemp -d)
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
@@ -110,33 +110,41 @@ cat <<EOF > "${BASE}/kustomization.yaml"
 EOF
 
 # Create num_partitions
+# In v0.7.0+, kwok is configured via a kwok.yaml ConfigMap instead of CLI args.
+selector_path=/options/manageNodesWithLabelSelector
 for ((i=0; i<PARTITION_COUNT; i++))
 do
   SUB_LET_DIR=$HOME_DIR/${alphabet[i]}
   mkdir ${SUB_LET_DIR}
 
-  cat <<EOF > "${SUB_LET_DIR}/patch.yaml"
-  - op: replace
-    path: /spec/template/spec/containers/0/args/2
-    value: --manage-nodes-with-label-selector=kwok-partition=${alphabet[i]}
+  partition_patch=$(cat <<EOF
+[
+  {"op":"test","path":"${selector_path}","value":""},
+  {"op":"replace","path":"${selector_path}","value":"kwok-partition=${alphabet[i]}"}
+]
 EOF
+)
+  kubectl patch --local --type=json -f "${BASE}/kwok.yaml" \
+    -p "${partition_patch}" \
+    -o yaml > "${SUB_LET_DIR}/kwok.yaml"
 
 cat <<EOF > "${SUB_LET_DIR}/kustomization.yaml"
   apiVersion: kustomize.config.k8s.io/v1beta1
   kind: Kustomization
+  namespace: kube-system
   images:
   - name: registry.k8s.io/kwok/kwok
     newTag: "${KWOK_RELEASE}"
   resources:
   - ./../base/deployment
   nameSuffix: -${alphabet[i]}
-  patches:
-    - path: ${SUB_LET_DIR}/patch.yaml
-      target:
-        group: apps
-        version: v1
-        kind: Deployment
-        name: kwok-controller
+  configMapGenerator:
+  - name: kwok
+    namespace: kube-system
+    options:
+      disableNameSuffixHash: true
+    files:
+    - kwok.yaml
 EOF
 
 done

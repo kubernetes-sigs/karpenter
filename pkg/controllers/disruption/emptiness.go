@@ -118,5 +118,5 @@ func (e *Emptiness) Class() string {
 }
 
 func (e *Emptiness) ConsolidationType() string {
-	return "empty"
+	return EmptyConsolidationType.Name
 }

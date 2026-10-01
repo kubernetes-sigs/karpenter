@@ -566,6 +566,20 @@ func (c *Cluster) PodNodeClaimMapping(podKey types.NamespacedName) string {
 	return ""
 }
 
+// PodsMappedToNodeClaim returns the keys of the pods that were simulated to schedule against the given nodeClaim
+// during the most recent scheduling decision for each pod
+func (c *Cluster) PodsMappedToNodeClaim(nodeClaimName string) []types.NamespacedName {
+	var podKeys []types.NamespacedName
+	// TODO: store reverse mapping for perf
+	c.podToNodeClaim.Range(func(k, v any) bool {
+		if v.(string) == nodeClaimName {
+			podKeys = append(podKeys, k.(types.NamespacedName))
+		}
+		return true
+	})
+	return podKeys
+}
+
 // PodSchedulingSuccessTimeRegistrationHealthyCheck returns when Karpenter first thought it could schedule a pod in its scheduling simulation.
 // This returns 0, false if the pod was never considered in scheduling as a pending pod.
 func (c *Cluster) PodSchedulingSuccessTimeRegistrationHealthyCheck(podKey types.NamespacedName) time.Time {
@@ -652,6 +666,7 @@ func (c *Cluster) Reset() {
 	c.podAcks = sync.Map{}
 	c.podsSchedulingAttempted = sync.Map{}
 	c.podsSchedulableTimes = sync.Map{}
+	c.podToNodeClaim = sync.Map{}
 	c.bufferPodCounts = map[string]int{}
 }
 
@@ -856,10 +871,11 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 		return client.IgnoreNotFound(serrors.Wrap(fmt.Errorf("getting CSINode to determine volume limit, %w", err), "CSINode", klog.KRef("", n.Node.Name)))
 	}
 	for _, driver := range csiNode.Spec.Drivers {
-		if driver.Allocatable == nil {
+		if driver.Allocatable == nil || driver.Allocatable.Count == nil {
+			n.volumeUsage.AddUnbounded(driver.Name)
 			continue
 		}
-		n.volumeUsage.AddLimit(driver.Name, int(lo.FromPtr(driver.Allocatable.Count)))
+		n.volumeUsage.AddLimit(driver.Name, int(*driver.Allocatable.Count))
 	}
 	return nil
 }

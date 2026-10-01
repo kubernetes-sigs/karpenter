@@ -25,6 +25,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
+	kwokcloudprovider "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -63,6 +65,7 @@ var (
 	defaultNodePool []byte
 	nodeClassPath   = flag.String("default-nodeclass", "", "Pass in a default cloud specific node class")
 	nodePoolPath    = flag.String("default-nodepool", "", "Pass in a default karpenter nodepool")
+	repairCondition = flag.String("repair-condition", "", "Pass in a <type>=<status> node condition that matches a cloud provider RepairPolicy, for repair specs to inject")
 )
 
 type Environment struct {
@@ -181,6 +184,23 @@ func (env *Environment) DefaultNodePool(nodeClass *unstructured.Unstructured) *v
 
 func (env *Environment) IsDefaultNodeClassKWOK() bool {
 	return env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Kind == "KWOKNodeClass"
+}
+
+// RepairCondition returns the node condition repair specs inject to make a node repair-eligible: --repair-condition if
+// set, otherwise KWOK's simulated condition. It must match a RepairPolicy and be one nothing on the node resets, so the
+// fault holds while the node stays Ready. ok is false when the provider has none configured.
+func (env *Environment) RepairCondition() (condType corev1.NodeConditionType, condStatus corev1.ConditionStatus, ok bool) {
+	if value := lo.FromPtr(repairCondition); value != "" {
+		t, s, found := strings.Cut(value, "=")
+		if !found || t == "" || s == "" {
+			panic(fmt.Sprintf("--repair-condition must be <type>=<status>, got %q", value))
+		}
+		return corev1.NodeConditionType(t), corev1.ConditionStatus(s), true
+	}
+	if env.IsDefaultNodeClassKWOK() {
+		return kwokcloudprovider.KWOKUnhealthyCondition, corev1.ConditionTrue, true
+	}
+	return "", "", false
 }
 
 func decodeNodeClass() *unstructured.Unstructured {

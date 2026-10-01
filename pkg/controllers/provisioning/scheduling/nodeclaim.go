@@ -44,6 +44,7 @@ type NodeClaim struct {
 	NodeClaimTemplate
 
 	Pods                 []*corev1.Pod
+	volumes              scheduling.Volumes
 	reservationManager   *ReservationManager
 	topology             *Topology
 	daemonOverheadGroups []DaemonOverheadGroup
@@ -59,6 +60,9 @@ type NodeClaim struct {
 	//   this expansion.
 	reservedOfferings    cloudprovider.Offerings
 	reservedOfferingMode ReservedOfferingMode
+	// creditReservationCapacity models slots a disruption candidate will free on termination: a reservation with a
+	// positive credit here is classified as reservable even if its offering's static ReservationCapacity is 0.
+	creditReservationCapacity map[string]int // reservationID -> credit count
 }
 
 // ReservedOfferingError indicates a NodeClaim couldn't be created or a pod couldn't be added to an exxisting NodeClaim
@@ -89,6 +93,7 @@ func NewNodeClaim(
 	instanceTypes []*cloudprovider.InstanceType,
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
+	creditReservationCapacity map[string]int,
 ) *NodeClaim {
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	template := *nodeClaimTemplate
@@ -108,23 +113,35 @@ func NewNodeClaim(
 	}
 
 	return &NodeClaim{
-		NodeClaimTemplate:    template,
-		topology:             topology,
-		daemonOverheadGroups: groupsForNodeClaim,
-		hostname:             hostname,
-		reservedOfferings:    cloudprovider.Offerings{},
-		reservationManager:   reservationManager,
-		reservedOfferingMode: reservedOfferingMode,
+		NodeClaimTemplate:         template,
+		volumes:                   scheduling.Volumes{},
+		topology:                  topology,
+		daemonOverheadGroups:      groupsForNodeClaim,
+		hostname:                  hostname,
+		reservedOfferings:         cloudprovider.Offerings{},
+		reservationManager:        reservationManager,
+		reservedOfferingMode:      reservedOfferingMode,
+		creditReservationCapacity: creditReservationCapacity,
 	}
 }
 
 // CanAdd returns whether the pod can be added to the NodeClaim
-// based on the taints/tolerations, host port compatibility,
+// based on the taints/tolerations, volume limits, host port compatibility,
 // requirements, resources, reserved capacity reservations, and topology requirements
-func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, relaxMinValues bool, allocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, err error) {
+func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, volumes scheduling.Volumes, relaxMinValues bool, allocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
 		return nil, nil, nil, nil, err
+	}
+	// Filter out instance types which can't support the pod's volumes in addition to those of pods already
+	// scheduled to this NodeClaim
+	instanceTypes := n.InstanceTypeOptions
+	if len(volumes) != 0 {
+		prospectiveVolumes := n.volumes.Union(volumes)
+		instanceTypes = filterInstanceTypesByVolumeAttachmentLimits(instanceTypes, prospectiveVolumes)
+		if len(instanceTypes) == 0 {
+			return nil, nil, nil, nil, volumeAttachmentLimitError(n.InstanceTypeOptions, prospectiveVolumes)
+		}
 	}
 
 	baseRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
@@ -147,7 +164,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	// volume topology constraints affect downstream topology checks (e.g., pod anti-affinity).
 	var lastErr error
 	for _, volReqs := range volumeAlternatives {
-		reqs, its, ofs, result, err := n.tryVolumeAlternative(ctx, pod, podData, baseRequirements, volReqs, relaxMinValues, allocator)
+		reqs, its, ofs, result, err := n.tryVolumeAlternative(ctx, pod, podData, instanceTypes, baseRequirements, volReqs, relaxMinValues, allocator)
 		if err != nil {
 			lastErr = err
 			continue
@@ -161,7 +178,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 // checking topology, instance types, and offerings compatibility.
 //
 //nolint:gocyclo
-func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, podData *PodData, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements, relaxMinValues bool, allocator *dynamicresources.Allocator) (scheduling.Requirements, []*cloudprovider.InstanceType, []*cloudprovider.Offering, *dynamicresources.AllocationResult, error) {
+func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, podData *PodData, instanceTypes []*cloudprovider.InstanceType, baseRequirements scheduling.Requirements, volReqs scheduling.Requirements, relaxMinValues bool, allocator *dynamicresources.Allocator) (scheduling.Requirements, []*cloudprovider.InstanceType, []*cloudprovider.Offering, *dynamicresources.AllocationResult, error) {
 	nodeClaimRequirements := scheduling.NewRequirements(baseRequirements.Values()...)
 
 	// Add volume requirements to nodeClaimRequirements ONLY (not to pod's affinity).
@@ -210,11 +227,11 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 
-	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, pod, podData.Requests, n.daemonOverheadGroups, requests, relaxMinValues)
+	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(instanceTypes, nodeClaimRequirements, pod, podData.Requests, n.daemonOverheadGroups, requests, relaxMinValues)
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
 		for key, minValues := range unsatisfiableKeys {
-			nodeClaimRequirements.Get(key).MinValues = new(minValues)
+			nodeClaimRequirements.Get(key).SetMinValues(minValues)
 		}
 	}
 	if err != nil {
@@ -242,12 +259,13 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 }
 
 // Add updates the NodeClaim to schedule the pod to this NodeClaim, updating
-// the NodeClaim with new requirements, instance types, and offerings to reserve
+// the NodeClaim with new requirements, instance types, volumes, and offerings to reserve
 // based on the pod scheduling
-func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, nodeClaimRequirements scheduling.Requirements, instanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, allocator *dynamicresources.Allocator) {
+func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, nodeClaimRequirements scheduling.Requirements, instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, allocator *dynamicresources.Allocator) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	n.InstanceTypeOptions = instanceTypes
+	n.volumes.Insert(volumes)
 	// Daemon overhead is excluded here to avoid double-counting
 	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 	n.Requirements = nodeClaimRequirements
@@ -309,19 +327,40 @@ func (n *NodeClaim) offeringsToReserve(
 		return nil, nil
 	}
 
-	hasCompatibleOffering := false
+	// We distinguish three kinds of compatible offering because, once availability (health) and reservation capacity are
+	// decoupled, "the reservation is full" (ReservationCapacity==0, still Available) and "the reservation has capacity but
+	// I couldn't grab a slot this pessimistic pass" (ReservationCapacity>0, CanReserve==false) require opposite handling in
+	// strict mode: the former should fall back to on-demand/spot (or, with no fallback, defer), while the latter must defer
+	// so pessimistic reservation only schedules one NodeClaim per loop.
+	reservedWithCapacity := false  // compatible reserved offering with real capacity (cap>0) — a pessimism candidate
+	reservedFull := false          // compatible reserved offering that is full right now (Available, cap==0)
+	hasUnreservedFallback := false // compatible on-demand/spot offering to fall back to
 	var reservedOfferings cloudprovider.Offerings
 	for _, it := range instanceTypes {
 		for _, o := range it.Offerings {
-			if o.CapacityType() != v1.CapacityTypeReserved || !o.Available {
+			if !o.Available {
 				continue
 			}
-			// Track every incompatible reserved offering for release. Since releasing a reservation is a no-op when there is no
+			// Track every incompatible offering for release. Since releasing a reservation is a no-op when there is no
 			// reservation for the given host, there's no need to check that a reservation actually exists for the offering.
 			if !nodeClaimRequirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 				continue
 			}
-			hasCompatibleOffering = true
+			if o.CapacityType() != v1.CapacityTypeReserved {
+				hasUnreservedFallback = true
+				continue
+			}
+			// A full-but-healthy reservation (Available=true, ReservationCapacity=0) can't be reserved right now, but it is
+			// NOT a pessimism candidate — it has no real capacity to wait for this loop, so it must not force a defer that
+			// would starve the on-demand/spot fallback. Track it separately for the reserved-only exhaustion case below.
+			// A reservation with a slot credited back for this loop (a disruption candidate that will free it) is treated
+			// as reservable even though its static capacity is 0 — this is the terminate-first "would the pods fit once
+			// the slot is freed?" pass. The ReservationManager was credited to match, so CanReserve reflects the slot.
+			if o.ReservationCapacity == 0 && n.creditReservationCapacity[o.ReservationID()] == 0 {
+				reservedFull = true
+				continue
+			}
+			reservedWithCapacity = true
 			// Note that reservation is an idempotent operation - if we have previously successfully reserved an offering for
 			// this host, this operation is guaranteed to succeed. We may also succeed to make reservations for offerings which
 			// failed in previous iterations if other NodeClaims have released them since the last attempt.
@@ -331,20 +370,35 @@ func (n *NodeClaim) offeringsToReserve(
 		}
 	}
 
-	if n.reservedOfferingMode == ReservedOfferingModeStrict {
-		// If an instance type with a compatible reserved offering exists, but we failed to make any reservations, we should
-		// fail. This could occur when all of the capacity for compatible instances has been reserved by previously created
-		// nodeclaims. Since we reserve offering pessimistically, i.e. we will reserve any offering that the instance could
-		// be launched with, we should fall back and attempt to schedule this pod in a subsequent scheduling simulation once
-		// reservation capacity is available again.
-		if hasCompatibleOffering && len(reservedOfferings) == 0 {
-			return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
+	strict := n.reservedOfferingMode == ReservedOfferingModeStrict
+	// onlyFullReservations: the pod's only compatible option is a reservation that is full right now — no reserved
+	// offering with real (or credited) capacity, and no on-demand/spot fallback. A reservation with a slot credited
+	// back for this loop is classified reservable above, so this is false for the terminate-first credit-back pass.
+	onlyFullReservations := reservedFull && !reservedWithCapacity && !hasUnreservedFallback
+
+	// Pessimism: a compatible reserved offering has real capacity but we couldn't reserve any this pass (another
+	// NodeClaim in this loop pessimistically holds it). Defer and retry next loop rather than falling back — this is
+	// what limits provisioning to one NodeClaim per loop when a pod is compatible with multiple reserved offerings.
+	if strict && reservedWithCapacity && len(reservedOfferings) == 0 {
+		return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
+	}
+
+	// The only compatible option is a full reservation. In strict mode defer until a slot frees, instead of creating a
+	// NodeClaim that getCapacityType would default to on-demand — which would mislaunch a reserved-only pool. In
+	// fallback mode fail with a PLAIN error — NOT a ReservedOfferingError, which would poison cross-NodePool
+	// fallthrough — so the scheduler falls through to a lower-weight NodePool, reproducing the pre-decouple behavior (a
+	// full reservation used to be Available=false and simply wasn't offered here).
+	if onlyFullReservations {
+		if strict {
+			return nil, NewReservedOfferingError(fmt.Errorf("all compatible reserved offerings are full and no on-demand or spot fallback is available"))
 		}
-		// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,
-		// we should fail to add the pod to this nodeclaim.
-		if len(n.reservedOfferings) != 0 && len(reservedOfferings) == 0 {
-			return nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
-		}
+		return nil, fmt.Errorf("the only compatible reserved offering is full; falling through to other NodePools")
+	}
+
+	// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,
+	// we should fail to add the pod to this nodeclaim.
+	if strict && len(n.reservedOfferings) != 0 && len(reservedOfferings) == 0 {
+		return nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
 	}
 	return reservedOfferings, nil
 }
@@ -410,7 +464,10 @@ func (n *NodeClaim) FinalizeScheduling(drivers ...string) {
 
 func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {
 	n.InstanceTypeOptions = lo.Filter(n.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) bool {
-		launchPrice := it.Offerings.Available().WorstLaunchPrice(reqs)
+		// Launchable (not Available): a full-but-healthy reservation is Available with 0 capacity and a near-zero
+		// price, but the node will really launch at on-demand/spot price. Pricing this filter off Available would let a
+		// cost-increasing consolidation through; pricing it off what can actually launch keeps the cost guarantee.
+		launchPrice := it.Offerings.Launchable().WorstLaunchPrice(reqs)
 		return launchPrice < maxPrice
 	})
 	if _, _, err := n.InstanceTypeOptions.SatisfiesMinValues(reqs); err != nil {
@@ -635,4 +692,37 @@ func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList
 		}
 	}
 	return false, hasOffering
+}
+
+// filterInstanceTypesByVolumeAttachmentLimits returns the instance types which can support the given volumes. Instance types
+// without a declared limit for a driver are assumed to support any number of its volumes.
+func filterInstanceTypesByVolumeAttachmentLimits(instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes) []*cloudprovider.InstanceType {
+	return lo.Filter(instanceTypes, func(it *cloudprovider.InstanceType, _ int) bool {
+		for driver, vols := range volumes {
+			if limit, ok := it.VolumeAttachmentLimits[driver]; ok && len(vols) > limit {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// volumeAttachmentLimitError returns an error indicating that no instance type option can support the given volumes,
+// attributing the failure to a specific driver when possible.
+func volumeAttachmentLimitError(instanceTypes []*cloudprovider.InstanceType, volumes scheduling.Volumes) error {
+	for driver, vols := range volumes {
+		maxLimit, exceedsAll := -1, true
+		for _, it := range instanceTypes {
+			limit, ok := it.VolumeAttachmentLimits[driver]
+			if !ok || len(vols) <= limit {
+				exceedsAll = false
+				break
+			}
+			maxLimit = max(maxLimit, limit)
+		}
+		if exceedsAll {
+			return scheduling.NewVolumeLimitExceededError(fmt.Errorf("would exceed volume limit for all instance type options"), driver, len(vols), maxLimit)
+		}
+	}
+	return fmt.Errorf("would exceed volume limit for all instance type options")
 }

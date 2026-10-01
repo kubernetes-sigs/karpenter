@@ -3044,6 +3044,248 @@ var _ = Context("Scheduling", func() {
 			// 5 of the same PVC should all be schedulable on the same node
 			Expect(nodeList.Items).To(HaveLen(1))
 		})
+		Context("InstanceType VolumeAttachmentLimits", func() {
+			var storageClass *storagev1.StorageClass
+			BeforeEach(func() {
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					fake.NewInstanceType("limited-instance-type",
+						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("1024"),
+							corev1.ResourcePods: resource.MustParse("1024"),
+						}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 10}),
+					),
+				}
+				storageClass = test.StorageClass(test.StorageClassOptions{
+					ObjectMeta:        metav1.ObjectMeta{Name: "my-storage-class"},
+					Provisioner:       new(csiProvider),
+					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+					Zones:             []string{"test-zone-1"},
+				})
+			})
+			It("should launch enough nodes for all pods in a single scheduling loop", func() {
+				ExpectApplied(ctx, env.Client, nodePool, storageClass)
+				var pods []*corev1.Pod
+				for i := range 100 {
+					pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("my-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-%d", i)},
+					})
+					ExpectApplied(ctx, env.Client, pvc)
+					pods = append(pods, test.UnschedulablePod(test.PodOptions{
+						PersistentVolumeClaims: []string{pvc.Name},
+					}))
+				}
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				var nodeList corev1.NodeList
+				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+				// each node supports 10 attachments, so 100 pods with one PVC each require 10 nodes which
+				// should all be created in a single scheduling loop
+				Expect(nodeList.Items).To(HaveLen(10))
+			})
+			DescribeTable("should use instance type limits until the CSINode driver is published",
+				func(registered bool) {
+					ExpectApplied(ctx, env.Client, nodePool, storageClass)
+					nodeClaim := test.NodeClaim(v1.NodeClaim{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+						},
+					})
+					ExpectApplied(ctx, env.Client, nodeClaim)
+					if registered {
+						ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nodeClaim)
+					} else {
+						var err error
+						nodeClaim, err = ExpectNodeClaimDeployedNoNode(ctx, env.Client, cloudProvider, nodeClaim)
+						Expect(err).ToNot(HaveOccurred())
+						cluster.UpdateNodeClaim(nodeClaim)
+					}
+
+					var pods []*corev1.Pod
+					for i := range 11 {
+						pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+							StorageClassName: new(storageClass.Name),
+							ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-%d", i)},
+						})
+						ExpectApplied(ctx, env.Client, pvc)
+						pods = append(pods, test.UnschedulablePod(test.PodOptions{
+							PersistentVolumeClaims: []string{pvc.Name},
+						}))
+					}
+					ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+					Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+				},
+				Entry("before node registration", false),
+				Entry("after node registration", true),
+			)
+			It("should account for pods with multiple volumes", func() {
+				ExpectApplied(ctx, env.Client, nodePool, storageClass)
+				var pods []*corev1.Pod
+				for i := range 6 {
+					pvcA := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("my-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-a-%d", i)},
+					})
+					pvcB := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("my-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-b-%d", i)},
+					})
+					ExpectApplied(ctx, env.Client, pvcA, pvcB)
+					pods = append(pods, test.UnschedulablePod(test.PodOptions{
+						PersistentVolumeClaims: []string{pvcA.Name, pvcB.Name},
+					}))
+				}
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				var nodeList corev1.NodeList
+				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+				// each node can only hold 5 of the 6 pods due to the volume limit
+				Expect(nodeList.Items).To(HaveLen(2))
+			})
+			It("should count each PVC once when shared by multiple pods", func() {
+				ExpectApplied(ctx, env.Client, nodePool, storageClass)
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					StorageClassName: new("my-storage-class"),
+					ObjectMeta:       metav1.ObjectMeta{Name: "my-claim"},
+				})
+				ExpectApplied(ctx, env.Client, pvc)
+				var pods []*corev1.Pod
+				for range 100 {
+					pods = append(pods, test.UnschedulablePod(test.PodOptions{
+						PersistentVolumeClaims: []string{pvc.Name},
+					}))
+				}
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				var nodeList corev1.NodeList
+				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+				// 100 pods sharing the same PVC only require a single volume attachment
+				Expect(nodeList.Items).To(HaveLen(1))
+			})
+			It("should not limit volumes for drivers without a declared limit", func() {
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					fake.NewInstanceType("instance-type",
+						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("1024"),
+							corev1.ResourcePods: resource.MustParse("1024"),
+						}),
+						fake.WithVolumeAttachmentLimits(map[string]int{"other.csi.provider": 1}),
+					),
+				}
+				ExpectApplied(ctx, env.Client, nodePool, storageClass)
+				var pods []*corev1.Pod
+				for i := range 20 {
+					pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("my-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-%d", i)},
+					})
+					ExpectApplied(ctx, env.Client, pvc)
+					pods = append(pods, test.UnschedulablePod(test.PodOptions{
+						PersistentVolumeClaims: []string{pvc.Name},
+					}))
+				}
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				var nodeList corev1.NodeList
+				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+				// the declared limit is for a different driver, so the pods' volumes are not limited
+				Expect(nodeList.Items).To(HaveLen(1))
+			})
+			It("should not schedule pods which exceed the volume limits of every instance type", func() {
+				ExpectApplied(ctx, env.Client, nodePool, storageClass)
+				var claimNames []string
+				for i := range 11 {
+					pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("my-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-%d", i)},
+					})
+					ExpectApplied(ctx, env.Client, pvc)
+					claimNames = append(claimNames, pvc.Name)
+				}
+				pod := test.UnschedulablePod(test.PodOptions{
+					PersistentVolumeClaims: claimNames,
+				})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectNotScheduled(ctx, env.Client, pod)
+			})
+			It("should filter out instance types which cannot support the pod's volumes", func() {
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					// cheaper, but can't support the pod's volumes
+					fake.NewInstanceType("small-limit",
+						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("16"),
+							corev1.ResourcePods: resource.MustParse("1024"),
+						}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 2}),
+					),
+					fake.NewInstanceType("large-limit",
+						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("1024"),
+							corev1.ResourcePods: resource.MustParse("1024"),
+						}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 20}),
+					),
+				}
+				ExpectApplied(ctx, env.Client, nodePool, storageClass)
+				var claimNames []string
+				for i := range 5 {
+					pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("my-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-%d", i)},
+					})
+					ExpectApplied(ctx, env.Client, pvc)
+					claimNames = append(claimNames, pvc.Name)
+				}
+				pod := test.UnschedulablePod(test.PodOptions{
+					PersistentVolumeClaims: claimNames,
+				})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("large-limit"))
+			})
+			It("should filter out instance types which cannot support all of the pod's volumes across multiple CSI drivers", func() {
+				const localCSIProvider = "local.csi.provider"
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					fake.NewInstanceType("partial-support",
+						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("16"),
+							corev1.ResourcePods: resource.MustParse("1024"),
+						}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 10, localCSIProvider: 1}),
+					),
+					fake.NewInstanceType("full-support",
+						fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("1024"),
+							corev1.ResourcePods: resource.MustParse("1024"),
+						}),
+						fake.WithVolumeAttachmentLimits(map[string]int{csiProvider: 10, localCSIProvider: 10}),
+					),
+				}
+				localStorageClass := test.StorageClass(test.StorageClassOptions{
+					ObjectMeta:        metav1.ObjectMeta{Name: "local-storage-class"},
+					Provisioner:       new(localCSIProvider),
+					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+					Zones:             []string{"test-zone-1"},
+				})
+				ExpectApplied(ctx, env.Client, nodePool, storageClass, localStorageClass)
+				var claimNames []string
+				for i := range 2 {
+					pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("my-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-%d", i)},
+					})
+					localPVC := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+						StorageClassName: new("local-storage-class"),
+						ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-local-claim-%d", i)},
+					})
+					ExpectApplied(ctx, env.Client, pvc, localPVC)
+					claimNames = append(claimNames, pvc.Name, localPVC.Name)
+				}
+				pod := test.UnschedulablePod(test.PodOptions{
+					PersistentVolumeClaims: claimNames,
+				})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("full-support"))
+			})
+		})
 		It("should schedule pods using a PV with multiple zones", func() {
 			// Use multiple node selector terms so the PV zones are ORed.
 			nodeSelectorTerms := []corev1.NodeSelectorTerm{

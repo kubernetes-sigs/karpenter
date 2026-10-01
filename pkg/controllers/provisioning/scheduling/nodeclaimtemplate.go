@@ -112,13 +112,16 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	if !i.IsStaticNodeClaim {
 		// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
 		instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
-		i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
+		i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues(), lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 			return i.Name
 		})...))
 
-		// Collect available capacity types from the selected instance types
+		// Collect launchable capacity types from the selected instance types. Use Launchable (not Available) so a
+		// full-but-healthy reservation (Available, ReservationCapacity=0) doesn't contribute `reserved` to the
+		// capacity-type requirement — otherwise we could build a NodeClaim that includes `reserved` and then can't
+		// launch into it.
 		capacityTypes := lo.Uniq(lo.FlatMap(instanceTypes, func(it *cloudprovider.InstanceType, _ int) []string {
-			return lo.Map(it.Offerings.Available().Compatible(i.Requirements), func(o *cloudprovider.Offering, _ int) string {
+			return lo.Map(it.Offerings.Launchable().Compatible(i.Requirements), func(o *cloudprovider.Offering, _ int) string {
 				return o.CapacityType()
 			})
 		}))
