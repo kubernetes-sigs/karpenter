@@ -14,6 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Balanced consolidation over the basic two-deployment fixture: scale out to
+// 1000 pods, cut both deployments to 350 replicas, and measure the consolidation
+// phase with ConsolidationPolicyBalanced set on the NodePool.
+
 package performance
 
 import (

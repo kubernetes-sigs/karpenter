@@ -14,6 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Unit specs for the LatencyHarness delta reduction: what reduceHistogramDelta,
+// deltaCounter, seriesKey and compactFamilies do to a scrape, against hand-built
+// MetricFamily fixtures. The Balanced e2e specs exercise the same code, but a
+// wrong delta reaches them only as a wrong number in a JSON artifact and costs a
+// cluster run per data point.
+
 package common
 
 import (

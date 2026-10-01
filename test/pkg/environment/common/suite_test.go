@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Ginkgo entry point for the test/pkg/environment/common unit specs, so they run
+// under make test alongside ./pkg/....
+
 package common
 
 import (

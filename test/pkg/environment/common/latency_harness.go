@@ -14,6 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// LatencyHarness scrapes Karpenter's /metrics from the active pod before and
+// after a test phase and reports the difference, so earlier phases do not leak
+// into the numbers. Stats are count, sum, mean and bucket bounds; Min and Max
+// say which buckets samples landed in, not what the smallest and largest sample
+// were, and there are no percentiles because a quantile interpolated across this
+// bucket layout from a handful of samples is not a measurement. The +Inf bucket
+// is excluded and BucketTruncationRate says how much of the distribution fell
+// past the last finite bound. A restart zeroes every metric the process exports,
+// so Stop fails the spec when process_start_time_seconds moved instead of
+// reporting deltas over a window the spec did not ask for. TargetHistograms
+// omits the metrics that time the KWOK fake provider rather than Karpenter.
+
 package common
 
 import (
@@ -31,31 +43,6 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 )
-
-// LatencyHarness measures Karpenter's own histograms and counters across a test
-// phase. Start scrapes /metrics from the active Karpenter pod and keeps the
-// target series; Stop scrapes again and reports the difference, so earlier
-// phases of the same suite do not leak into the numbers.
-//
-// The reported shape is count, sum, mean and bucket bounds. No percentiles: a
-// quantile interpolated from a handful of samples across a bucket layout this
-// coarse is a number nobody should act on, and it reads as a measurement. Min
-// and Max are bucket bounds rather than observations, so they answer which
-// buckets samples landed in, not what the smallest sample was. The +Inf bucket
-// is excluded and BucketTruncationRate says how much of the distribution fell
-// past the last finite bound.
-//
-// A Karpenter restart zeroes every metric the process exports, so the start
-// snapshot becomes a wrong baseline rather than a stale one and the window the
-// deltas cover is no longer the window the spec asked for. Stop reads
-// process_start_time_seconds and fails the spec when it moved, because a
-// controller that died under load is the result, not an inconvenience to work
-// around. reduceHistogramDelta's non-monotonic bucket check is the per-series
-// fallback for a scrape carrying no process collector.
-//
-// TargetHistograms omits the metrics that time the KWOK fake provider rather
-// than Karpenter. A provider running this harness against real infrastructure
-// should add them back.
 
 type HistogramStats struct {
 	MetricName           string            `json:"metric_name"`

@@ -14,6 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Balanced consolidation under churn: three scale-in and scale-out rounds over
+// one 400-pod deployment, with the latency harness spanning all three rounds so
+// the deltas cover the whole churn window rather than the last round.
+
 package performance
 
 import (
