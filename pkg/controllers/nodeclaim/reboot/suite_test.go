@@ -430,6 +430,19 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(recorder.Calls(events.RebootObserved)).To(Equal(1))
 		})
 
+		It("records a success once when a stale cached NodeClaim is reconciled again", func() {
+			node.Status.NodeInfo.BootID = "boot-2"
+			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			stale := ExpectExists(ctx, env.Client, nodeClaim).DeepCopy()
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			_, err := rebootController.Reconcile(ctx, stale)
+			Expect(err).To(HaveOccurred())
+			ExpectMetricCounterValue(reboot.RebootsTotal, 1, map[string]string{"result": "succeeded"})
+			ExpectMetricHistogramSampleCountValue("karpenter_nodes_reboot_recovery_duration_seconds", 1, map[string]string{})
+		})
+
 		It("succeeds when the boot changed and the node is Ready", func() {
 			node.Status.NodeInfo.BootID = "boot-2"
 			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}

@@ -351,17 +351,18 @@ func (c *Controller) transitionToFailed(ctx context.Context, nodeClaim *v1.NodeC
 func (c *Controller) setTerminal(ctx context.Context, nodeClaim *v1.NodeClaim, reason, msg string) error {
 	// Clear episode-scoped state so a later reboot starts clean.
 	c.clearIssuanceStarted(nodeClaim.UID)
+	// Use optimistic locking to avoid double-counting terminal metrics from stale reconciles.
 	if _, hadPreBoot := nodeClaim.Annotations[v1.RebootPreBootIDAnnotationKey]; hadPreBoot {
 		stored := nodeClaim.DeepCopy()
 		delete(nodeClaim.Annotations, v1.RebootPreBootIDAnnotationKey)
-		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return err
 		}
 	}
 	stored := nodeClaim.DeepCopy()
 	nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRebooting, reason, msg)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return err
 		}
 	}
