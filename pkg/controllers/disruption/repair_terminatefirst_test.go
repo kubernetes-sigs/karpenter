@@ -397,6 +397,60 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(cmds[0].Candidates[0].RepairCondition).To(Equal(corev1.NodeConditionType("BadNode")))
 	})
 
+	It("should carry a blocking pod in the terminate-first plan for a reserved NodePool whose reservation is full", func() {
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
+		reservationID := "r-" + mostExpensiveInstance.Name
+		mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
+		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+		mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+			Price:               mostExpensiveOffering.Price / 1_000_000.0,
+			Available:           true, // full but healthy
+			ReservationCapacity: 0,
+			Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				cloudprovider.ReservationIDLabel: reservationID,
+			}),
+		})
+		ExpectSingletonReconciled(ctx, pricingController)
+
+		nodePool := test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+			Requirements: []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{mostExpensiveInstance.Name}},
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved}},
+			},
+		}}}})
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+			v1.NodePoolLabelKey:              nodePool.Name,
+			corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+			v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+			corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+			cloudprovider.ReservationIDLabel: reservationID,
+		}}, Status: v1.NodeClaimStatus{
+			ProviderID:  test.RandomProviderID(),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32"), corev1.ResourcePods: resource.MustParse("100")},
+		}})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		// A pod that blocks eviction: repair's bounded drain removes it, so the credit-back plan must still place it.
+		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"}}})
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		markUnhealthy(node)
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+		Expect(cmds[0].Replacements).To(HaveLen(0))
+		Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
+		Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
+		Expect(lo.Map(cmds[0].Results.NewNodeClaims[0].Pods, func(p *corev1.Pod, _ int) string { return p.Name })).To(ConsistOf(pod.Name))
+	})
+
 	// A static NodePool with no node limit has unbounded headroom (nodeLimit defaults to MaxInt64), so repair always
 	// replaces-first — gate on or off. Guards against a mutation that treats the no-limit default as 0, which would make
 	// every unlimited static pool look at-limit (always terminate-first with the gate on, always Blocked with it off).

@@ -168,7 +168,9 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
 			}}, nil
 		}
-		results, terminateFirst, err := SimulateSchedulingWithReservedFallback(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, candidate, terminateFirstEnabled)
+		// Repair pre-spins for all reschedulable workload, including pods whose eviction is currently blocked.
+		results, terminateFirst, err := SimulateSchedulingWithReservedFallback(ctx, r.kubeClient, r.cluster, r.provisioner, r.clock, r.recorder, candidate,
+			terminateFirstEnabled, SimulationOptions{IncludeBlockedCandidatePods: true})
 		if err != nil {
 			if errors.Is(err, errCandidateDeleting) {
 				continue
