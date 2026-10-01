@@ -160,7 +160,7 @@ func (d *decorator) Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operati
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	err := d.CloudProvider.Reboot(ctx, nodeClaim, operationID)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodePoolNameForNodeClaim(nodeClaim), err))
 	}
 	return err
 }
