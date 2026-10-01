@@ -138,7 +138,7 @@ func classifyDisruptableNode(ctx context.Context, kubeClient client.Client, clk 
 	if verr != nil {
 		return partitionCleanupOnly
 	}
-	if hasNonRSOwnedPods(pods) || isInstanceTypeUnresolvable(node, nodePoolToInstanceTypesMap) {
+	if hasNonRSOwnedPods(pods) || isUnpriceable(node, nodePoolToInstanceTypesMap) {
 		return partitionCleanupOnly
 	}
 	// Drift is checked first so a drifted node in a ConsolidateAfter=nil pool
@@ -152,10 +152,18 @@ func classifyDisruptableNode(ctx context.Context, kubeClient client.Client, clk 
 	return partitionNormal
 }
 
-// An unresolvable instance type leaves the offering price at 0, which makes the
-// node's position within groupBC meaningless. A nil map or a missing label means
-// instance types were never resolved at all, so the filter is skipped.
-func isInstanceTypeUnresolvable(node *state.StateNode, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) bool {
+// isUnpriceable reports whether the node's NodePool offers no instance type
+// matching the node's instance-type label. ResolveOfferingPrice returns 0 for
+// such a node. groupBC is ordered by savings ratio, price over reschedule cost,
+// so every unpriceable node sits at ratio 0, ties with the rest of them, and
+// breaks on name. That position says nothing about how cheap the node is to
+// disrupt, so it routes to partitionCleanupOnly, where rank is unused.
+//
+// The early returns cover the case where nothing was priced at all: a nil map,
+// or a node missing the NodePool or instance-type label. No ranking is being
+// corrupted then, so the filter stands down instead of routing every node to
+// cleanup.
+func isUnpriceable(node *state.StateNode, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) bool {
 	if nodePoolToInstanceTypesMap == nil {
 		return false
 	}

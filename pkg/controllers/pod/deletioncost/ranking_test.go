@@ -960,6 +960,84 @@ var _ = Describe("Ranking", func() {
 			),
 		)
 
+		// isUnpriceable has two branches that return true and the suite covered
+		// neither: a NodePool absent from the instance-type map, and a node whose
+		// instance-type label is absent from its NodePool's map. The priced node
+		// is the control, so this also shows the filter is selective rather than
+		// routing every node to cleanup.
+		It("should _Edge_ route an unpriceable node to Group D and leave a priced node ranked", func() {
+			const pricedIT, absentIT, zone, ct = "priced-it", "absent-it", "test-zone-1", v1.CapacityTypeOnDemand
+			unmappedPool := test.NodePool()
+			unmappedPool.Name = "pool-absent-from-instance-type-map"
+			unmappedPool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
+			unmappedPool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+			ExpectApplied(ctx, env.Client, nodePool, unmappedPool)
+
+			newNode := func(poolName, itName string) (*v1.NodeClaim, *corev1.Node) {
+				return test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey:            poolName,
+						corev1.LabelInstanceTypeStable: itName,
+						corev1.LabelTopologyZone:       zone,
+						v1.CapacityTypeLabelKey:        ct,
+					}},
+					Status: v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+				})
+			}
+			ncPriced, nodePriced := newNode(nodePool.Name, pricedIT)
+			ncAbsentIT, nodeAbsentIT := newNode(nodePool.Name, absentIT)
+			ncAbsentPool, nodeAbsentPool := newNode(unmappedPool.Name, pricedIT)
+
+			allNodeClaims := []*v1.NodeClaim{ncPriced, ncAbsentIT, ncAbsentPool}
+			allNodes := []*corev1.Node{nodePriced, nodeAbsentIT, nodeAbsentPool}
+			for i := range allNodes {
+				ExpectApplied(ctx, env.Client, allNodeClaims[i], allNodes[i])
+				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{NodeName: allNodes[i].Name}))
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, allNodes, allNodeClaims)
+
+			// unmappedPool is deliberately absent from itMap, and nodePool's entry
+			// deliberately omits absentIT.
+			itMap := map[string]map[string]*cloudprovider.InstanceType{
+				nodePool.Name: {pricedIT: &cloudprovider.InstanceType{
+					Name: pricedIT,
+					Offerings: cloudprovider.Offerings{{
+						Available: true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  ct,
+							corev1.LabelTopologyZone: zone,
+						}),
+						Price: 1.0,
+					}},
+				}},
+			}
+			nodePoolMap := map[string]*v1.NodePool{nodePool.Name: nodePool, unmappedPool.Name: unmappedPool}
+
+			var stateNodes []*state.StateNode
+			for n := range cluster.Nodes() {
+				stateNodes = append(stateNodes, n)
+			}
+			groupA, groupBC, groupD, err := deletioncost.RankNodes(ctx, env.Client, env.Clock, stateNodes, nodePoolMap, itMap)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(totalRanked(groupA, groupBC, groupD)).To(Equal(3))
+
+			infoPriced := rankInfoFor(nodePriced.Name, groupA, groupBC, groupD)
+			Expect(infoPriced.found).To(BeTrue())
+			Expect(infoPriced.cleanup).To(BeFalse(), "a node with a resolvable offering price must stay in Group B/C")
+
+			for _, tc := range []struct {
+				name   string
+				reason string
+			}{
+				{nodeAbsentIT.Name, "a node whose instance-type label is absent from its NodePool's map is unpriceable and must land in Group D"},
+				{nodeAbsentPool.Name, "a node whose NodePool is absent from the instance-type map is unpriceable and must land in Group D"},
+			} {
+				info := rankInfoFor(tc.name, groupA, groupBC, groupD)
+				Expect(info.found).To(BeTrue())
+				Expect(info.cleanup).To(BeTrue(), tc.reason)
+			}
+		})
+
 		It("should _Edge_ route a non-tainted node with a PDB-blocked pod to Group D", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
