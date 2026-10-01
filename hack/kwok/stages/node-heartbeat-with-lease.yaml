@@ -1,0 +1,72 @@
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: Stage
+metadata:
+  name: node-heartbeat-with-lease
+spec:
+  resourceRef:
+    apiGroup: v1
+    kind: Node
+  selector:
+    matchExpressions:
+    - key: .status.phase
+      operator: In
+      values: ["Running"]
+    - key: '.status.conditions.[] | select( .type == "Ready" ) | .status'
+      operator: In
+      values: ["True"]
+  delay:
+    durationMilliseconds: 600000
+    jitterDurationMilliseconds: 610000
+  next:
+    statusSubresource: status
+    # This overrides KWOK's built-in node-heartbeat-with-lease stage (a locally-applied Stage of the same name wins over
+    # the one from stage-fast). The built-in heartbeat rebuilds status.conditions from KWOK's managed set (NodeReady +
+    # the Lease) and would DROP any custom condition injected on the node. Node repair needs a node that is unhealthy
+    # (carries a repair-eligible condition) yet still Ready=True and heart-beating, so it remains a valid disruption
+    # candidate. This override re-emits the simulated KWOKUnhealthy condition (see kwok/cloudprovider RepairPolicies and
+    # the KWOKUnhealthyCondition constant) on every heartbeat, preserving its pinned lastTransitionTime. Re-emitting each
+    # fire is robust regardless of stage scheduling: a heartbeat already scheduled while the node was healthy would
+    # otherwise wipe a freshly-injected fault on the next (~10 min) interval. When a test clears the condition, it is
+    # absent from status so nothing re-emits it and the node heals.
+    statusTemplate: |
+      {{ $now := Now }}
+      {{ $lastTransitionTime := or .metadata.creationTimestamp $now }}
+      conditions:
+      {{ range NodeConditions }}
+      - lastHeartbeatTime: {{ $now | Quote }}
+        lastTransitionTime: {{ $lastTransitionTime | Quote }}
+        message: {{ .message | Quote }}
+        reason: {{ .reason | Quote }}
+        status: {{ .status | Quote }}
+        type: {{ .type | Quote }}
+      {{ end }}
+      {{ range .status.conditions }}
+      {{ if eq .type "KWOKUnhealthy" }}
+      - lastHeartbeatTime: {{ $now | Quote }}
+        lastTransitionTime: {{ .lastTransitionTime | Quote }}
+        message: {{ .message | Quote }}
+        reason: {{ .reason | Quote }}
+        status: {{ .status | Quote }}
+        type: {{ .type | Quote }}
+      {{ end }}
+      {{ end }}
+
+      addresses:
+      {{ with .status.addresses }}
+      {{ YAML . 1 }}
+      {{ else }}
+      {{ with NodeIP }}
+      - address: {{ . | Quote }}
+        type: InternalIP
+      {{ end }}
+      {{ with NodeName }}
+      - address: {{ . | Quote }}
+        type: Hostname
+      {{ end }}
+      {{ end }}
+
+      {{ with NodePort }}
+      daemonEndpoints:
+        kubeletEndpoint:
+          Port: {{ . }}
+      {{ end }}
