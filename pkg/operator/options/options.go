@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/docs"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -56,6 +57,9 @@ var (
 )
 
 type optionsKey struct{}
+
+// NodeRepairStage is the stability of the NodeRepair feature gate.
+const NodeRepairStage = docs.Alpha
 
 type FeatureGates struct {
 	inputStr string
