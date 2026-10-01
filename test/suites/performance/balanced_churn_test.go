@@ -77,9 +77,9 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(err).ToNot(HaveOccurred())
 			result, err := h.Stop()
 			Expect(err).ToNot(HaveOccurred())
-			emitPolicyRun(consolidationReport,
-				"balanced_churn_consolidation",
-				v1.ConsolidationPolicyBalanced, result)
+			consolidationReport.LatencyStats = result.LatencyStats
+			consolidationReport.Counters = result.Counters
+			OutputPerformanceReport(consolidationReport, "balanced_churn_consolidation")
 
 			expectBalancedDecisionsMatchThreshold(result)
 		})

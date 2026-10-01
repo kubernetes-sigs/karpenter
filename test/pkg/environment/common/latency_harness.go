@@ -21,6 +21,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -376,4 +378,16 @@ func inferMinBound(endBuckets []*dto.Bucket, deltaCum []uint64) float64 {
 		prevUpper = endBuckets[i].GetUpperBound()
 	}
 	return prevUpper
+}
+
+func WriteArtifactUnder(dir, name string, data []byte) (string, error) {
+	safeDir := filepath.Clean(dir)
+	path := filepath.Join(safeDir, filepath.Base(filepath.Clean(name)))
+	if rel, err := filepath.Rel(safeDir, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("refusing to write outside %q", safeDir)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
 }

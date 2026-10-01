@@ -96,9 +96,9 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			By("Capturing LatencyHarness result at end of consolidation")
 			result, err := h.Stop()
 			Expect(err).ToNot(HaveOccurred())
-			emitPolicyRun(consolidationReport,
-				"balanced_heterogeneous_consolidation",
-				v1.ConsolidationPolicyBalanced, result)
+			consolidationReport.LatencyStats = result.LatencyStats
+			consolidationReport.Counters = result.Counters
+			OutputPerformanceReport(consolidationReport, "balanced_heterogeneous_consolidation")
 
 			By("Checking the scored moves belong to the two fixture NodePools")
 			scoredPools := expectBalancedDecisionsMatchThreshold(result)

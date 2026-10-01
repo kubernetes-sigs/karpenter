@@ -18,8 +18,6 @@ package performance
 
 import (
 	"fmt"
-	"os"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -28,28 +26,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
-
-func writeLatencySidecar(testName, filePrefix string, policy v1.ConsolidationPolicy, result *common.LatencyResult) {
-	if result == nil {
-		GinkgoWriter.Printf("LatencyHarness: nil result for %s (%s); skipping sidecar\n", testName, policy)
-		return
-	}
-	GinkgoWriter.Printf("LatencyHarness [%s, %s]: %d histogram series, %d counter series\n",
-		testName, policy, len(result.LatencyStats), len(result.Counters))
-	sc := common.LatencySidecar{
-		TestName:            testName,
-		ConsolidationPolicy: string(policy),
-		Timestamp:           time.Now(),
-		LatencyStats:        result.LatencyStats,
-		Counters:            result.Counters,
-	}
-	Expect(common.WriteLatencySidecar(os.Getenv("OUTPUT_DIR"), filePrefix, sc)).To(Succeed())
-}
-
-func emitPolicyRun(report *PerformanceReport, filePrefix string, policy v1.ConsolidationPolicy, result *common.LatencyResult) {
-	OutputPerformanceReport(report, filePrefix)
-	writeLatencySidecar(report.TestName, filePrefix, policy, result)
-}
 
 const scoreBucketBelowThreshold = 0.33
 
