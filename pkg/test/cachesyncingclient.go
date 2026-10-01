@@ -37,16 +37,15 @@ type CacheSyncingClient struct {
 	client.Client
 }
 
-const (
-	pollInterval = 10 * time.Millisecond
-	pollTimeout  = 1 * time.Second
-)
-
-// pollForCacheSync blocks until condition returns done or pollTimeout elapses.
-// If we timeout on polling, the assumption is that the cache updated to a newer version
+// pollForCacheSync blocks until condition returns done or the attempts are exhausted.
+// Attempts are bounded by count rather than wall time so slow (e.g. -race, coverage) runs still sync.
+// If we exhaust our attempts, the assumption is that the cache updated to a newer version
 // and we missed the current WRITE operation that we just performed.
 func pollForCacheSync(ctx context.Context, condition wait.ConditionWithContextFunc) {
-	_ = wait.PollUntilContextTimeout(ctx, pollInterval, pollTimeout, true, condition)
+	_ = wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
+		Duration: 10 * time.Millisecond,
+		Steps:    100, // This whole poll should take ~1s
+	}, condition)
 }
 
 func (c *CacheSyncingClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
