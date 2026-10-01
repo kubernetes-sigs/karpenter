@@ -49,9 +49,17 @@ import (
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
+// SimulationOptions configures disruption-specific scheduling behavior.
+type SimulationOptions struct {
+	// IncludeBlockedCandidatePods includes candidate pods even when they cannot currently be evicted.
+	IncludeBlockedCandidatePods bool
+}
+
+// SimulateScheduling determines whether candidate workloads can be rescheduled after disruption.
+//
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, clk clock.Clock, recorder events.Recorder,
-	schedulerOpts []scheduling.Options, candidates ...*Candidate,
+	schedulerOpts []scheduling.Options, simulationOpts SimulationOptions, candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.DeepCopyNodes()
@@ -75,22 +83,28 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
 
-	// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
-	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
-	// these pods are evicted is wasteful.
-	pdbs, err := pdb.NewLimits(ctx, kubeClient)
-	if err != nil {
-		return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
-	}
 	// candidatePods are the pods on consolidation candidate nodes that we will reschedule. Their UIDs feed
 	// deletingPodUIDs below so the DRA allocator frees the devices they hold and re-allocates their claims onto the
 	// replacement capacity, mirroring how pods on already-deleting nodes are treated.
 	var candidatePods []*corev1.Pod
-	for _, n := range candidates {
-		currentlyReschedulablePods := lo.Filter(n.reschedulablePods, func(p *corev1.Pod, _ int) bool {
-			return pdbs.IsCurrentlyReschedulable(p, clk, recorder)
+	if simulationOpts.IncludeBlockedCandidatePods {
+		candidatePods = lo.FlatMap(candidates, func(candidate *Candidate, _ int) []*corev1.Pod {
+			return candidate.reschedulablePods
 		})
-		candidatePods = append(candidatePods, currentlyReschedulablePods...)
+	} else {
+		// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
+		// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
+		// these pods are evicted is wasteful. Repair opts out because its bounded drain owns when those pods leave,
+		// while replacement planning must still account for their demand.
+		pdbs, err := pdb.NewLimits(ctx, kubeClient)
+		if err != nil {
+			return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+		}
+		candidatePods = lo.FlatMap(candidates, func(candidate *Candidate, _ int) []*corev1.Pod {
+			return lo.Filter(candidate.reschedulablePods, func(p *corev1.Pod, _ int) bool {
+				return pdbs.IsCurrentlyReschedulable(p, clk, recorder)
+			})
+		})
 	}
 	pods = append(pods, candidatePods...)
 
@@ -167,7 +181,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 //     reservation that still has capacity. If every reschedulable pod places, terminateFirst is false and the caller
 //     replaces-first with these Results (as it always has).
 //
-//  2. Only if pass 1 leaves pods pending AND the TerminateFirstDrift gate is on AND the candidate itself holds a
+//  2. Only if pass 1 leaves pods pending AND terminateFirstEnabled is set by the caller AND the candidate itself holds a
 //     reservation: re-simulate in strict mode with the candidate's reservation slot credited back (modeling the slot it
 //     will free on termination). If every pod then places, terminateFirst is true — deleting the candidate is exactly
 //     what unblocks the reschedule. Strict mode makes surplus pods that wouldn't fit the freed slot fail rather than
@@ -183,24 +197,27 @@ func SimulateSchedulingWithReservedFallback(
 	clk clock.Clock,
 	recorder events.Recorder,
 	candidate *Candidate,
+	terminateFirstEnabled bool,
+	simulationOpts SimulationOptions,
 ) (results scheduling.Results, terminateFirst bool, err error) {
 	// Pass 1: replace-first feasibility.
-	results, err = SimulateScheduling(ctx, kubeClient, cluster, provisioner, clk, recorder, nil, candidate)
+	results, err = SimulateScheduling(ctx, kubeClient, cluster, provisioner, clk, recorder, nil, simulationOpts, candidate)
 	if err != nil || results.AllNonPendingPodsScheduled() {
 		return results, false, err
 	}
 
-	// Terminate-first only applies when enabled and the candidate holds a reservation whose freed slot could unblock
-	// the reschedule. Otherwise the pending pods in results are a Blocked signal for the caller.
+	// The gate is caller-supplied so each method controls terminate-first independently (drift: TerminateFirstDrift,
+	// repair: TerminateFirstRepair). Only a reserved candidate is eligible: its slot is finite and exclusive, so a
+	// replacement can't be staged until the old node frees it — on-demand/spot can just add a node (replace-first).
 	reservationID := candidate.Labels()[cloudprovider.ReservationIDLabel]
-	if !options.FromContext(ctx).FeatureGates.TerminateFirstDrift || candidate.capacityType != v1.CapacityTypeReserved || reservationID == "" {
+	if !terminateFirstEnabled || candidate.capacityType != v1.CapacityTypeReserved || reservationID == "" {
 		return results, false, nil
 	}
 
 	// Pass 2: terminate-first feasibility — credit the candidate's reservation slot back and require every pod to place
 	// under strict mode.
 	tfResults, err := SimulateScheduling(ctx, kubeClient, cluster, provisioner, clk, recorder,
-		[]scheduling.Options{scheduling.DisableReservedCapacityFallback, scheduling.CreditReservationCapacity(reservationID, 1)}, candidate)
+		[]scheduling.Options{scheduling.DisableReservedCapacityFallback, scheduling.CreditReservationCapacity(reservationID, 1)}, simulationOpts, candidate)
 	if err != nil {
 		return results, false, err
 	}
