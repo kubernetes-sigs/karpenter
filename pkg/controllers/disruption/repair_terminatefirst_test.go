@@ -64,7 +64,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	BeforeEach(func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
 		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
-			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(repairTGP)},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(repairTGP), Action: cloudprovider.ReplaceNode},
 		}
 		repairController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 			disruption.WithMethods(disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue))))
@@ -100,7 +100,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		// metric is never emitted.
 		Expect(cmds[0].Candidates).To(HaveLen(1))
 		Expect(lo.FromPtr(cmds[0].Candidates[0].TerminationGracePeriod)).To(Equal(repairTGP))
-		Expect(cmds[0].Candidates[0].RepairCondition).To(Equal(corev1.NodeConditionType("BadNode")))
+		Expect(cmds[0].Candidates[0].RepairPolicyResult.Condition).To(Equal(corev1.NodeConditionType("BadNode")))
 	})
 
 	// Below the limit there's room to stage a replacement, so repair replaces-first even with the gate on.
@@ -394,7 +394,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
 		// Drain bound and repair condition stamped on the terminate-first path too (M13/M14).
 		Expect(lo.FromPtr(cmds[0].Candidates[0].TerminationGracePeriod)).To(Equal(repairTGP))
-		Expect(cmds[0].Candidates[0].RepairCondition).To(Equal(corev1.NodeConditionType("BadNode")))
+		Expect(cmds[0].Candidates[0].RepairPolicyResult.Condition).To(Equal(corev1.NodeConditionType("BadNode")))
 	})
 
 	It("should carry a blocking pod in the terminate-first plan for a reserved NodePool whose reservation is full", func() {
