@@ -118,9 +118,9 @@ var _ = Describe("Controller", func() {
 	})
 
 	It("should only annotate pods whose controller owner reference is a ReplicaSet", func() {
-		// The Job pod is the load-bearing fixture: hasNonRSOwnedPods tolerates
-		// Job, so the node stays in Groups B/C and the enqueue gate is what
-		// excludes the pod, not the partition step.
+		// The Job pod is the load-bearing fixture: hasPinningPods tolerates Job,
+		// so the node stays in Groups B/C and the enqueue gate is what excludes
+		// the pod, not the partition step.
 		nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
 			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
@@ -136,13 +136,7 @@ var _ = Describe("Controller", func() {
 				Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
 			}}},
 		})
-		nonControllerRSPod := test.Pod(test.PodOptions{
-			NodeName: nodes[0].Name,
-			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "test-rs", UID: types.UID("test-rs-uid"),
-			}}},
-		})
-		ExpectApplied(ctx, env.Client, rsPod, jobPod, nonControllerRSPod)
+		ExpectApplied(ctx, env.Client, rsPod, jobPod)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 		controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
@@ -151,7 +145,6 @@ var _ = Describe("Controller", func() {
 
 		Expect(queue.Has(rsPod)).To(BeTrue())
 		Expect(queue.Has(jobPod)).To(BeFalse())
-		Expect(queue.Has(nonControllerRSPod)).To(BeFalse())
 
 		ExpectObjectReconciled(ctx, env.Client, queue, rsPod)
 		for _, expectation := range []struct {
@@ -160,7 +153,6 @@ var _ = Describe("Controller", func() {
 		}{
 			{pod: rsPod, annotated: true},
 			{pod: jobPod, annotated: false},
-			{pod: nonControllerRSPod, annotated: false},
 		} {
 			observed := &corev1.Pod{}
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(expectation.pod), observed)).To(Succeed())
@@ -170,6 +162,46 @@ var _ = Describe("Controller", func() {
 				Expect(observed.Annotations).ToNot(HaveKey(corev1.PodDeletionCost))
 			}
 		}
+	})
+
+	// A pod whose only ReplicaSet reference is not the controller reference is in
+	// the same position as a bare pod: no controller claims it, so nothing would
+	// recreate it elsewhere and it pins its node. hasPinningPods reads ownership
+	// through the controller reference, so the node routes to Group D and its
+	// ReplicaSet-controlled pods have their annotations cleared instead of ranked.
+	It("should treat a pod with a non-controller ReplicaSet reference as pinning its node", func() {
+		nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name}},
+			Status:     v1.NodeClaimStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")}},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
+
+		// Pre-annotated so a Group D route is observable as a clear, not as an
+		// absence that a skipped node would also produce.
+		pinnedNodeRSPod := rsOwnedPod(test.PodOptions{
+			NodeName:   nodes[0].Name,
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{corev1.PodDeletionCost: "-5"}},
+		})
+		nonControllerRSPod := test.Pod(test.PodOptions{
+			NodeName: nodes[0].Name,
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "test-rs", UID: types.UID("test-rs-uid"),
+			}}},
+		})
+		controlPod := rsOwnedPod(test.PodOptions{NodeName: nodes[1].Name})
+		ExpectApplied(ctx, env.Client, pinnedNodeRSPod, nonControllerRSPod, controlPod)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+		controller := deletioncost.NewController(env.Clock, env.Client, cloudProvider, cluster, queue)
+		_, err := controller.Reconcile(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		expectPodAnnotationCleared(pinnedNodeRSPod)
+		// The gate never annotates the non-controller pod either way.
+		expectPodAnnotationCleared(nonControllerRSPod)
+		Expect(expectPodRank(controlPod)).To(BeNumerically("<", 0),
+			"the node with no pinning pod must still rank, so the Group D route is caused by the non-controller reference")
 	})
 
 	It("should not consume a per-cycle slot for a node hosting no ReplicaSet-controlled pods", func() {

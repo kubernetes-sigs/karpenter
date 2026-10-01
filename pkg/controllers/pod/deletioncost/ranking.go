@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -138,7 +139,7 @@ func classifyDisruptableNode(ctx context.Context, kubeClient client.Client, clk 
 	if verr != nil {
 		return partitionCleanupOnly
 	}
-	if hasNonRSOwnedPods(pods) || isUnpriceable(node, nodePoolToInstanceTypesMap) {
+	if hasPinningPods(pods) || isUnpriceable(node, nodePoolToInstanceTypesMap) {
 		return partitionCleanupOnly
 	}
 	// Drift is checked first so a drifted node in a ConsolidateAfter=nil pool
@@ -224,21 +225,30 @@ func isDrifted(node *state.StateNode, nodePoolMap map[string]*v1.NodePool) bool 
 	return node.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
 }
 
-// hasNonRSOwnedPods reports whether the node hosts a pod that pins it:
-// StatefulSet ordinals hold PVs, and bare pods can't be recreated.
-func hasNonRSOwnedPods(pods []*corev1.Pod) bool {
+// Controllers that replace a pod they own somewhere else in the cluster, so a
+// pod under one of them does not pin its node.
+var recreatingControllers = []schema.GroupVersionKind{
+	{Group: "apps", Version: "v1", Kind: "ReplicaSet"},
+	{Group: "batch", Version: "v1", Kind: "Job"},
+	{Group: "apps", Version: "v1", Kind: "DaemonSet"},
+}
+
+// hasPinningPods reports whether the node hosts a pod that pins it, meaning
+// nothing would bring that pod back elsewhere: StatefulSet ordinals hold PVs to
+// a zone, and a pod no controller claims has nothing to replace it at all.
+//
+// Controller reference, not any owner reference. Only the controller replaces a
+// deleted pod; a non-controller owner reference is garbage-collection linkage
+// and does not make a pod recreatable. That also makes "is this pod
+// ReplicaSet-owned" mean the same thing here as it does at the enqueue gate,
+// which reads it through the same primitive.
+func hasPinningPods(pods []*corev1.Pod) bool {
 	for _, pod := range pods {
 		if pod.Namespace == "kube-system" {
 			continue
 		}
-		if len(pod.OwnerReferences) == 0 {
+		if !podutils.IsControlledBy(pod, recreatingControllers) {
 			return true
-		}
-		for i := range pod.OwnerReferences {
-			ownerKind := pod.OwnerReferences[i].Kind
-			if ownerKind != "ReplicaSet" && ownerKind != "Job" && ownerKind != "DaemonSet" {
-				return true
-			}
 		}
 	}
 	return false

@@ -26,9 +26,7 @@ import (
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,12 +39,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
-
-// kube-controller-manager's ReplicaSet controller is the only in-tree consumer
-// of corev1.PodDeletionCost, so writing it on a pod controlled by any other
-// kind has no effect.
-var replicaSetKind = appsv1.SchemeGroupVersion.WithKind("ReplicaSet")
 
 const (
 	reconcileInterval = time.Minute
@@ -166,9 +160,11 @@ func (c *Controller) enqueueAnnotationWrites(ctx context.Context, groupA, groupB
 
 func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, rank int, cleanup bool, perNodePool map[string]int) bool {
 	pods, _ := node.Pods(ctx, c.kubeClient)
-	// Filter before the no-op guard so the guard, the enqueue and the cap all
-	// read the same pod set.
-	pods = lo.Filter(pods, func(pod *corev1.Pod, _ int) bool { return isControlledByReplicaSet(pod) })
+	// kube-controller-manager's ReplicaSet controller is the only in-tree consumer
+	// of corev1.PodDeletionCost, so writing it on a pod controlled by any other
+	// kind has no effect. Filter before the no-op guard so the guard, the enqueue
+	// and the cap all read the same pod set.
+	pods = lo.Filter(pods, func(pod *corev1.Pod, _ int) bool { return podutils.IsControlledByReplicaSet(pod) })
 	if !nodeMutatesAnyPod(pods, rank, cleanup) {
 		return false
 	}
@@ -177,16 +173,6 @@ func (c *Controller) tryEnqueueNode(ctx context.Context, node *state.StateNode, 
 	}
 	perNodePool[node.Labels()[v1.NodePoolLabelKey]]++
 	return true
-}
-
-// Matches on the controller reference specifically, because that is the one the
-// ReplicaSet controller uses to claim and rank pods. A pod carrying a
-// non-controller ReplicaSet reference is never ranked by it.
-func isControlledByReplicaSet(pod *corev1.Pod) bool {
-	owner := metav1.GetControllerOfNoCopy(pod)
-	return owner != nil &&
-		owner.Kind == replicaSetKind.Kind &&
-		owner.APIVersion == replicaSetKind.GroupVersion().String()
 }
 
 func (c *Controller) enqueueCapped(ctx context.Context, nodes []*state.StateNode, budget int, perNodePool map[string]int, rankAt func(i int) (int, bool)) int {

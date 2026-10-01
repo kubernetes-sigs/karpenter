@@ -21,6 +21,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/clock"
 
@@ -178,12 +179,39 @@ func IsOwnedByNode(pod *corev1.Pod) bool {
 	})
 }
 
+// IsControlledByReplicaSet returns true if the pod's controller is a ReplicaSet.
+// The ReplicaSet controller claims pods by controller reference, so a pod
+// carrying a ReplicaSet reference that is not the controller reference is not
+// one it manages.
+func IsControlledByReplicaSet(pod *corev1.Pod) bool {
+	return IsControlledBy(pod, []schema.GroupVersionKind{
+		{Group: "apps", Version: "v1", Kind: "ReplicaSet"},
+	})
+}
+
 func IsOwnedBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
 	for _, ignoredOwner := range gvks {
 		for _, owner := range pod.OwnerReferences {
 			if owner.APIVersion == ignoredOwner.GroupVersion().String() && owner.Kind == ignoredOwner.Kind {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// IsControlledBy reports whether the pod's controller reference matches any of
+// the given GVKs. IsOwnedBy accepts a match on any owner reference; this accepts
+// only the controller reference, which is the one owner whose controller
+// actuates the pod. A pod with no controller reference matches nothing.
+func IsControlledBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
+	owner := metav1.GetControllerOfNoCopy(pod)
+	if owner == nil {
+		return false
+	}
+	for _, gvk := range gvks {
+		if owner.APIVersion == gvk.GroupVersion().String() && owner.Kind == gvk.Kind {
+			return true
 		}
 	}
 	return false
