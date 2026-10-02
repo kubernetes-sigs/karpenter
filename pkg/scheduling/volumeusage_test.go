@@ -17,12 +17,32 @@ limitations under the License.
 package scheduling
 
 import (
+	"context"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 var _ = Describe("VolumeUsage", func() {
+	var (
+		ctx    context.Context
+		scheme *runtime.Scheme
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		scheme = runtime.NewScheme()
+		Expect(v1.AddToScheme(scheme)).To(Succeed())
+		Expect(storagev1.AddToScheme(scheme)).To(Succeed())
+	})
+
 	It("should only use fallback limits until the driver is published", func() {
 		const driver = "fake.csi.provider"
 		usage := NewVolumeUsage()
@@ -38,5 +58,71 @@ var _ = Describe("VolumeUsage", func() {
 		usage.AddUnbounded(driver)
 		usage.AddFallbackLimit(driver, 1)
 		Expect(usage.ExceedsLimits(Volumes{driver: sets.New("volume-a", "volume-b", "volume-c")})).To(Succeed())
+	})
+
+	Describe("GetVolumes", func() {
+		newPod := func(claimName string) *v1.Pod {
+			return &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Spec: v1.PodSpec{
+					Volumes: []v1.Volume{{
+						Name: "data",
+						VolumeSource: v1.VolumeSource{
+							PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: claimName},
+						},
+					}},
+				},
+			}
+		}
+
+		It("should tolerate a missing PersistentVolume and not return an error", func() {
+			// PVC references a PV that has been deleted from the cluster (e.g. manually).
+			// Without this tolerance, one missing PV would fail node-state reconciliation
+			// and could block cluster sync after a controller restart.
+			pvc := &v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pvc", Namespace: "default"},
+				Spec: v1.PersistentVolumeClaimSpec{
+					VolumeName:       "test-pv",
+					StorageClassName: lo.ToPtr("test-storage-class"),
+				},
+			}
+			kubeClient := fakecr.NewClientBuilder().WithScheme(scheme).WithObjects(pvc).Build()
+
+			volumes, err := GetVolumes(ctx, kubeClient, newPod("test-pvc"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(volumes).To(BeEmpty())
+		})
+
+		It("should return volumes correctly when the PersistentVolume exists", func() {
+			pv := &v1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pv"},
+				Spec: v1.PersistentVolumeSpec{
+					PersistentVolumeSource: v1.PersistentVolumeSource{
+						CSI: &v1.CSIPersistentVolumeSource{Driver: "ebs.csi.aws.com", VolumeHandle: "vol-test"},
+					},
+				},
+			}
+			pvc := &v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pvc", Namespace: "default"},
+				Spec: v1.PersistentVolumeClaimSpec{
+					VolumeName:       "test-pv",
+					StorageClassName: lo.ToPtr("test-storage-class"),
+				},
+			}
+			kubeClient := fakecr.NewClientBuilder().WithScheme(scheme).WithObjects(pv, pvc).Build()
+
+			volumes, err := GetVolumes(ctx, kubeClient, newPod("test-pvc"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(volumes).To(HaveKey("ebs.csi.aws.com"))
+		})
+
+		It("should tolerate a missing PersistentVolumeClaim and not return an error", func() {
+			// Existing behavior: a missing PVC is already tolerated. This test guards it.
+			kubeClient := fakecr.NewClientBuilder().WithScheme(scheme).Build()
+
+			volumes, err := GetVolumes(ctx, kubeClient, newPod("nonexistent-pvc"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(volumes).To(BeEmpty())
+		})
 	})
 })
