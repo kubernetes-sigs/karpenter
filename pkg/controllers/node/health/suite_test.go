@@ -109,6 +109,31 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
+		It("should delete nodes that registered unhealthy before the NodeClass label was synced", func() {
+			nodeClassLabelKey := v1.NodeClassLabelKey(nodeClaim.Spec.NodeClassRef.GroupKind())
+			nodeClassName := node.Labels[nodeClassLabelKey]
+			delete(node.Labels, nodeClassLabelKey)
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:               "BadNode",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: env.Clock.Now()},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			// Sync the NodeClass label onto the Node without changing its conditions
+			node = ExpectExists(ctx, env.Client, node)
+			conditions := node.Status.Conditions
+			node.Labels[nodeClassLabelKey] = nodeClassName
+			ExpectApplied(ctx, env.Client, node)
+			node = ExpectExists(ctx, env.Client, node)
+			Expect(node.Status.Conditions).To(Equal(conditions))
+
+			env.Clock.Step(60 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, healthController, node)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
+		})
 		It("should not delete node when unhealthy type does not match cloud provider passed in value", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "FakeHealthyNode",

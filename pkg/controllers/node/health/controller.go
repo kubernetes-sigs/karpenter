@@ -81,6 +81,11 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 			UpdateFunc: func(e event.UpdateEvent) bool {
 				oldNode := e.ObjectOld.(*corev1.Node)
 				newNode := e.ObjectNew.(*corev1.Node)
+				// The Create event is filtered by IsManaged when the NodeClass label is synced onto the Node after kubelet
+				// registration, so reconcile when the Node first becomes managed.
+				if !nodeutils.IsManaged(oldNode, c.cloudProvider) {
+					return true
+				}
 				if len(oldNode.Status.Conditions) != len(newNode.Status.Conditions) {
 					return true
 				}
