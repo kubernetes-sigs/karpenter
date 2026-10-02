@@ -58,18 +58,20 @@ type RepairPolicyMatcher struct {
 
 // RepairResult merges all eligible policies for one Node. Condition, ConditionStatus, Reason, ReasonRegex, Fallback,
 // and SelectedEligibleAt identify the deterministic source of the selected Action, while TerminationGracePeriod is
-// the shortest bound.
+// the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it.
 type RepairResult struct {
-	Score                  float64
-	Action                 cloudprovider.RepairAction
-	Condition              corev1.NodeConditionType
-	ConditionStatus        corev1.ConditionStatus
-	Reason                 string
-	ReasonRegex            string
-	Fallback               bool
-	SelectedEligibleAt     time.Time
-	TerminationGracePeriod *time.Duration
-	selectedPriority       int
+	Score                            float64
+	Action                           cloudprovider.RepairAction
+	Condition                        corev1.NodeConditionType
+	ConditionStatus                  corev1.ConditionStatus
+	Reason                           string
+	ReasonRegex                      string
+	Fallback                         bool
+	SelectedEligibleAt               time.Time
+	TerminationGracePeriod           *time.Duration
+	TerminationGracePeriodCondition  corev1.NodeConditionType
+	selectedPriority                 int
+	terminationGracePeriodEligibleAt time.Time
 }
 
 // NewRepairPolicyMatcher validates and compiles a complete provider repair policy set.
@@ -238,12 +240,13 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, transitionTi
 	}
 	age := now.Sub(eligibleAt)
 	r.Score = max(r.Score, float64(rank)+age.Minutes()/agingConstant.Minutes())
-	if policy.TerminationGracePeriod != nil &&
-		(r.TerminationGracePeriod == nil || *policy.TerminationGracePeriod < *r.TerminationGracePeriod) {
+	if policy.TerminationGracePeriod != nil && r.shorterTerminationGracePeriod(*policy.TerminationGracePeriod, condition.Type, eligibleAt) {
 		r.TerminationGracePeriod = policy.TerminationGracePeriod
+		r.TerminationGracePeriodCondition = condition.Type
+		r.terminationGracePeriodEligibleAt = eligibleAt
 	}
 
-	selected := repairActionRank(policy.Action) > repairActionRank(r.Action)
+	selected := r.Action == "" || policy.Action.IsMoreDisruptiveThan(r.Action)
 	if policy.Action == r.Action {
 		switch {
 		case policy.Priority != r.selectedPriority:
@@ -266,6 +269,21 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, transitionTi
 	}
 }
 
+// shorterTerminationGracePeriod reports whether a policy bound should replace the current one. Equal bounds keep the
+// earliest-eligible condition, then the lowest condition type, so the source is independent of condition order.
+func (r *RepairResult) shorterTerminationGracePeriod(bound time.Duration, condition corev1.NodeConditionType, eligibleAt time.Time) bool {
+	switch {
+	case r.TerminationGracePeriod == nil:
+		return true
+	case bound != *r.TerminationGracePeriod:
+		return bound < *r.TerminationGracePeriod
+	case !eligibleAt.Equal(r.terminationGracePeriodEligibleAt):
+		return eligibleAt.Before(r.terminationGracePeriodEligibleAt)
+	default:
+		return condition < r.TerminationGracePeriodCondition
+	}
+}
+
 func denseRanks(policies []cloudprovider.RepairPolicy) map[int]int {
 	uniquePriorities := map[int]struct{}{}
 	for _, policy := range policies {
@@ -281,15 +299,4 @@ func denseRanks(policies []cloudprovider.RepairPolicy) map[int]int {
 		ranks[priority] = rank
 	}
 	return ranks
-}
-
-func repairActionRank(action cloudprovider.RepairAction) int {
-	switch action {
-	case cloudprovider.ReplaceNode:
-		return 1
-	case cloudprovider.RebootNode:
-		return 0
-	default:
-		return -1
-	}
 }

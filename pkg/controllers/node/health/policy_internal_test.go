@@ -458,6 +458,25 @@ var _ = Describe("Repair Policies", func() {
 				Expect(result.SelectedEligibleAt).To(Equal(now.Add(-15 * time.Minute)))
 				Expect(result.TerminationGracePeriod).NotTo(BeNil())
 				Expect(*result.TerminationGracePeriod).To(Equal(rebootGracePeriod))
+				Expect(result.TerminationGracePeriodCondition).To(Equal(corev1.NodeConditionType("HighPriority")))
+			}
+		})
+
+		It("uses earliest eligibility, then condition type, to attribute equal termination grace periods", func() {
+			gracePeriod := 5 * time.Minute
+			nodeMatcher := newMatcher([]cloudprovider.RepairPolicy{
+				{ConditionType: "ConditionA", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "ConditionB", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "ConditionC", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TerminationGracePeriod: &gracePeriod, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "Fallback", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+			})
+			conditionA := corev1.NodeCondition{Type: "ConditionA", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now)}
+			conditionB := corev1.NodeCondition{Type: "ConditionB", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-time.Minute))}
+			conditionC := corev1.NodeCondition{Type: "ConditionC", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-time.Minute))}
+
+			for _, conditions := range [][]corev1.NodeCondition{{conditionA, conditionB, conditionC}, {conditionC, conditionB, conditionA}} {
+				result := evaluate(nodeMatcher, now, conditions...)
+				Expect(result.TerminationGracePeriodCondition).To(Equal(corev1.NodeConditionType("ConditionB")))
 			}
 		})
 
