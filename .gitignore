@@ -9,6 +9,10 @@ go.work.sum
 report.json
 *__debug_*
 bin/
+# `go build` on a package under .github/scripts writes its binary to the working
+# directory, named after the package directory, so it lands at the repo root
+# where bin/ does not cover it.
+/perf-aggregate
 
 # Common in OSs and IDEs
 .idea

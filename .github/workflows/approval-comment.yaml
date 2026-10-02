@@ -2,9 +2,21 @@ name: ApprovalComment
 on:
   pull_request_review:
     types: [submitted]
+permissions:
+  contents: read
 jobs:
   approval-comment:
-    if: startsWith(github.event.review.body, '/karpenter perf')
+    # The association test is what makes this workflow's name true. Downstream
+    # workflows key off this run and now check out the commit it records, so
+    # without the test any PR author could have their own branch built and
+    # executed by a privileged workflow_run job. There is no association test in
+    # the review body check itself: startsWith matches whoever submits the
+    # review. aws/karpenter-provider-aws gates the same trigger on org
+    # membership through an API call; author_association carries that answer in
+    # the event payload with no extra action dependency.
+    if: |
+      startsWith(github.event.review.body, '/karpenter perf') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
