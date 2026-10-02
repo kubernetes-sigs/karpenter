@@ -151,6 +151,16 @@ var _ = Describe("DRA Provisioner Internals", func() {
 			Expect(effective).To(BeEmpty())
 		})
 
+		It("should release the whole aggregated share of a single multi-share claim when its pod deletes", func() {
+			// One claim holding two shares of a device, summed by the controller into a single 384Mi
+			// contribution. When its pod deletes, the full 384Mi must be freed, not just one share's worth.
+			meta := sharedMeta(
+				contribution([]types.UID{"deleting-a"}, map[resourcev1.QualifiedName]string{"memory": "384Mi"}),
+			)
+			effective := effectiveConsumedCapacity(meta, sets.New[types.UID]("deleting-a"))
+			Expect(effective).To(BeEmpty())
+		})
+
 		It("should retain a contribution that mixes deleting and live pods", func() {
 			// A single claim reserved by both a deleting and a live pod is not fully deleting, so its capacity stays.
 			meta := sharedMeta(

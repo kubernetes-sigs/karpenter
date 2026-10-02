@@ -807,6 +807,127 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			})
 		})
 
+		It("flags a device as invalid when a claim reports a negative consumed-capacity contribution", func() {
+			// claim-b reports a negative memory contribution. Consumed capacity is never negative, so the whole
+			// claim-b contribution is untrustworthy: it is excluded from the aggregate (its positive connections
+			// too) and the device is flagged invalid so it fails closed at allocation. Dropping only the negative
+			// dimension would read as zero usage and fail open on an allow-multiple device. See #3209.
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("256Mi"),
+					"connections": resource.MustParse("1"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory":      resource.MustParse("-128Mi"),
+					"connections": resource.MustParse("3"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			// claim-b's negative invalidates the device: it fails closed at allocation regardless of the aggregate.
+			Expect(meta.InvalidConsumedCapacity).To(BeTrue())
+			// Only claim-a's valid contribution is aggregated; claim-b's connections=3 is not partially kept.
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory":      resource.MustParse("256Mi"),
+				"connections": resource.MustParse("1"),
+			})
+			// claim-b contributes nothing to the per-claim breakdown; its whole contribution is excluded.
+			contributionForPod := func(uid types.UID) deviceallocation.ContributionMetadata {
+				for _, c := range meta.Contributions {
+					for _, podUID := range c.PodUIDs {
+						if podUID == uid {
+							return c
+						}
+					}
+				}
+				return deviceallocation.ContributionMetadata{}
+			}
+			Expect(contributionForPod("uid-b").ConsumedCapacity).To(BeNil())
+		})
+
+		It("sums multiple shares of the same device within a claim rather than overwriting", func() {
+			// A multi-allocatable device can be allocated more than once to the same claim as distinct shares that
+			// differ only by ShareID. deviceID ignores ShareID, so the shares collapse to one key; their consumed
+			// capacity must be summed, not overwritten by the last share.
+			shareA, shareB := types.UID("11111111-1111-1111-1111-111111111111"), types.UID("22222222-2222-2222-2222-222222222222")
+			resultA := deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("256Mi"),
+			})
+			resultA.ShareID = &shareA
+			resultB := deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("128Mi"),
+			})
+			resultB.ShareID = &shareB
+			claim := withReservedFor(resourceClaim("claim-a", resultA, resultB), podRef("pod-a", "uid-a"))
+			ExpectApplied(ctx, env.Client, claim)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claim))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			devices := collectDevices(seq)
+			meta := devices[deviceID("device-0")]
+			Expect(meta.Shared).To(BeTrue())
+			// Both shares are summed: 256Mi + 128Mi. Before the fix the second share overwrote the first (128Mi).
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("384Mi"),
+			})
+			// The summed capacity is attributed to the single referencing claim's contribution (paired with its
+			// reserving pod), not just the device aggregate. effectiveConsumedCapacity subtracts this per-claim
+			// contribution, so it must carry the full 384Mi for the whole share to be released when pod-a deletes.
+			Expect(meta.Contributions).To(HaveLen(1))
+			Expect(meta.Contributions[0].PodUIDs).To(ConsistOf(types.UID("uid-a")))
+			expectCapacity(meta.Contributions[0].ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("384Mi"),
+			})
+		})
+
+		It("clears the invalid flag once the offending claim is gone", func() {
+			// The flag is recomputed from the claims that currently reference the device, not latched on it. When
+			// the claim carrying the negative goes away the device is allocatable again, with the capacity the
+			// surviving claim still holds.
+			claimA := withReservedFor(
+				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("256Mi"),
+				})),
+				podRef("pod-a", "uid-a"),
+			)
+			claimB := withReservedFor(
+				resourceClaim("claim-b", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
+					"memory": resource.MustParse("-128Mi"),
+				})),
+				podRef("pod-b", "uid-b"),
+			)
+			ExpectApplied(ctx, env.Client, claimA, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimA))
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err := controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(collectDevices(seq)[deviceID("device-0")].InvalidConsumedCapacity).To(BeTrue())
+
+			ExpectDeleted(ctx, env.Client, claimB)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(claimB))
+
+			seq, err = controller.AllocatedDevices(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			meta := collectDevices(seq)[deviceID("device-0")]
+			Expect(meta.InvalidConsumedCapacity).To(BeFalse())
+			expectCapacity(meta.ConsumedCapacity, map[resourcev1.QualifiedName]resource.Quantity{
+				"memory": resource.MustParse("256Mi"),
+			})
+		})
+
 		It("surfaces per-claim contributions paired with their reserving pods", func() {
 			claimA := withReservedFor(
 				resourceClaim("claim-a", deviceResultWithCapacity("device-0", map[resourcev1.QualifiedName]resource.Quantity{
