@@ -15,21 +15,63 @@ on:
         description: Sha of the github commit to check out
         required: true
         type: string
+      timeoutMinutes:
+        description: >-
+          Wall clock ceiling for this leg, in minutes. It has to be applied as a
+          job level timeout-minutes, because go test -timeout does not cover the
+          benchmark phase: testing.M.Run stops its alarm before it calls
+          runBenchmarks, and -run='^$' below means no test function is ever
+          matched to hold the alarm open. Without a job timeout the only ceiling
+          is GitHub's 360 minute default. -timeout is set from the same number so
+          it cannot drift into a claim the run does not honour.
+        required: false
+        default: 45
+        type: number
 jobs:
   run-test:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeoutMinutes }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.githubSha }}
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
       - name: Run Test
         id: test-run
         shell: bash
+        env:
+          GOTOOLCHAIN: auto
         run: |
+          echo "Go version: $(go version)"
+          echo "Working directory: $(pwd)"
+          cd ${{ inputs.path }}
+          echo "Test directory: $(pwd)"
+          echo "Listing test files with build tag:"
+          grep -rl "test_performance" . --include="*.go" || echo "No files with test_performance tag"
+          mkdir -p output
+          echo "Running benchmarks..."
+          # -count=4 rather than 6. The comparison job gates on allocs/op, which
+          # follows the code path rather than the runner, so its within-side
+          # spread is orders of magnitude below the 20% gate threshold and extra
+          # samples buy the gate nothing. sec/op is reported for humans and is
+          # not gated. Four is the floor and not an arbitrary choice: benchstat
+          # compares with a Mann-Whitney U test, which cannot report below p=0.1
+          # with three samples a side, so -count=3 would leave the gate unable to
+          # fire at any effect size.
+          #
+          # Each sample also pays untimed per-sample setup, which on the
+          # disruption leg is about 34 s against benchmark bodies of 0.3 s to
+          # 102 s, so it is most of the cost at the small sizes. Dropping two
+          # samples drops two rounds of that setup as well.
+          if ! go test -tags=test_performance -run='^$' -bench=. -benchmem -benchtime=1x -count=4 -timeout=${{ inputs.timeoutMinutes }}m -cpuprofile output/cpu.out -memprofile output/mem.out -v 2>&1 | tee output/results.txt; then
+            echo "::error::go test failed. Output:"
+            cat output/results.txt
+            exit 1
+          fi
           {
-            cd ${{ inputs.path }}
-            mkdir output
-            go test -tags=test_performance -run=1 -bench=. -count=1 -cpuprofile output/cpu.out -memprofile output/mem.out > output/results.txt
             echo 'OUTPUT<<EOF'
             cat output/results.txt
             echo EOF
