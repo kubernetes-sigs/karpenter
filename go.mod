@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
-	github.com/awslabs/operatorpkg v0.0.0-20260903001236-7040d0c02b82
+	github.com/awslabs/operatorpkg v0.0.0-20261002163259-5e8ed3699dea
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936
