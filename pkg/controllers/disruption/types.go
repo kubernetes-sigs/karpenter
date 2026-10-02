@@ -102,6 +102,8 @@ type Candidate struct {
 	// RepairPolicyResult is the policy decision for this candidate's current node snapshot. ShouldDisrupt populates it,
 	// so a repair pass evaluates each candidate once before sorting and constructing a command.
 	RepairPolicyResult health.RepairResult
+	// RebootEscalated reports that recent reboot history converted a reboot decision to replacement.
+	RebootEscalated bool
 }
 
 // ScoreResult holds the three values needed to decide whether a move passes.

@@ -119,7 +119,10 @@ func (r *Repair) evaluate(ctx context.Context, node *corev1.Node, now time.Time)
 		"eligible-at", result.SelectedEligibleAt,
 	}
 	if result.TerminationGracePeriod != nil {
-		values = append(values, "termination-grace-period", *result.TerminationGracePeriod)
+		values = append(values,
+			"termination-grace-period", *result.TerminationGracePeriod,
+			"termination-grace-period-condition", result.TerminationGracePeriodCondition,
+		)
 	}
 	if !r.decisionLogMonitor.HasChanged(string(node.UID), values) {
 		return result
