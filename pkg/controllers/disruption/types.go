@@ -428,12 +428,17 @@ func (c Command) LogValues() []any {
 	podCount := lo.Reduce(c.Candidates, func(acc int, cd *Candidate, _ int) int { return acc + len(cd.reschedulablePods) }, 0)
 
 	candidateNodes := lo.Map(c.Candidates, func(candidate *Candidate, _ int) any {
-		return map[string]any{
+		m := map[string]any{
 			"Node":          klog.KObj(candidate.Node),
 			"NodeClaim":     klog.KObj(candidate.NodeClaim),
 			"instance-type": candidate.Labels()[corev1.LabelInstanceTypeStable],
 			"capacity-type": candidate.Labels()[v1.CapacityTypeLabelKey],
 		}
+		// Logged with the command rather than at resolution, so it appears once when the escalated replacement runs.
+		if candidate.RebootEscalated {
+			m["reboot-escalated"] = true
+		}
+		return m
 	})
 	replacementNodes := lo.Map(c.Replacements, func(replacement *Replacement, _ int) any {
 		ct := replacement.Requirements.Get(v1.CapacityTypeLabelKey)

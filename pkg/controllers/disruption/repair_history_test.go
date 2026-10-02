@@ -17,6 +17,7 @@ limitations under the License.
 package disruption
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -133,5 +134,23 @@ var _ = Describe("RebootHistory", func() {
 		wg.Wait()
 
 		Expect(history.recentReboots("nodeclaim-uid", history.clock.Now()).count).To(Equal(rebootsBeforeReplacement))
+	})
+
+	It("logs reboot escalation with the command", func() {
+		history := NewRebootHistory()
+		history.RecordCommittedReboot("nodeclaim-uid")
+		history.RecordCommittedReboot("nodeclaim-uid")
+
+		escalated := candidateWithAction("nodeclaim-uid", cloudprovider.RebootNode)
+		escalated.Node = &corev1.Node{}
+		Expect(history.Resolve(escalated)).To(BeTrue())
+		replaced := candidateWithAction("other-uid", cloudprovider.ReplaceNode)
+		replaced.Node = &corev1.Node{}
+		Expect(history.Resolve(replaced)).To(BeTrue())
+
+		values := Command{Candidates: []*Candidate{escalated, replaced}}.LogValues()
+		disruptedNodes := values[slices.Index(values, any("disrupted-nodes"))+1].([]any)
+		Expect(disruptedNodes[0]).To(HaveKeyWithValue("reboot-escalated", true))
+		Expect(disruptedNodes[1]).ToNot(HaveKey("reboot-escalated"))
 	})
 })
