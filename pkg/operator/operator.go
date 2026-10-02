@@ -86,6 +86,7 @@ var (
 			Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
 		},
 		[]opmetrics.Label{buildVersion, buildGoVersion, buildGoArch, buildCommit},
+		opmetrics.GA,
 	)
 )
 

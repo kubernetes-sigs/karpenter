@@ -47,16 +47,31 @@ const (
 
 // Karpenter specific annotations
 const (
-	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
+	DoNotDisruptAnnotationKey = apis.Group + "/do-not-disrupt"
+	// DoNotRepairAnnotationKey vetoes voluntary node repair on a node, distinct from do-not-disrupt.
+	DoNotRepairAnnotationKey                   = apis.Group + "/do-not-repair"
 	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
 	NodeClaimMinValuesRelaxedAnnotationKey     = apis.Group + "/nodeclaim-min-values-relaxed"
+	RebootPreBootIDAnnotationKey               = apis.Group + "/reboot-pre-boot-id"
+	RebootTerminationGracePeriodAnnotationKey  = apis.Group + "/reboot-termination-grace-period"
 	// DRADriversAnnotationKey records the comma-separated set of DRA driver names whose devices were allocated to pods
 	// scheduled to this NodeClaim. The initialization controller can gate on these drivers having published their
 	// ResourceSlices before marking the node initialized.
 	DRADriversAnnotationKey = apis.Group + "/requested-dra-drivers"
+	// DisruptionCostAnnotationKey is the user-facing Karpenter annotation for
+	// expressing the cost of evicting a pod during consolidation. Customers set
+	// it on workloads to influence which pods Karpenter prefers to evict.
+	//
+	// This annotation is read by pkg/utils/disruption.EvictionCost. When the
+	// PodDeletionCostManagement feature gate is enabled, Karpenter writes
+	// controller.kubernetes.io/pod-deletion-cost as a coordination signal to
+	// the ReplicaSet controller and EvictionCost reads only this annotation.
+	// When the gate is off, EvictionCost falls back to
+	// controller.kubernetes.io/pod-deletion-cost if this key is absent.
+	DisruptionCostAnnotationKey = apis.Group + "/disruption-cost"
 )
 
 // Karpenter specific finalizers

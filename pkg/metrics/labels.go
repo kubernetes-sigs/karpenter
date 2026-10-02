@@ -49,7 +49,7 @@ var (
 
 // disruptionReasonValues are the voluntary-disruption reasons, shared by the
 // disruption metrics and the NodeClaim/Pod disruption counters.
-var disruptionReasonValues = []opmetrics.Value{reasonUnderutilized, reasonEmpty, reasonDrifted}
+var disruptionReasonValues = []opmetrics.Value{reasonUnderutilized, reasonEmpty, reasonDrifted, reasonUnhealthy}
 
 // nodeClaimDisruptedReasonValues is the union of every reason a NodeClaim is
 // disrupted: the voluntary-disruption reasons plus the involuntary paths.

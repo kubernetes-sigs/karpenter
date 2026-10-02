@@ -189,6 +189,32 @@ func (env *Environment) ExpectCreatedOrUpdated(objects ...client.Object) {
 	}
 }
 
+// ExpectRepairFaultInjected makes a node repair-eligible by injecting env.RepairCondition(), backdated past any
+// RepairPolicy toleration so repair can act on it immediately.
+func (env *Environment) ExpectRepairFaultInjected(node *corev1.Node) {
+	GinkgoHelper()
+	condType, condStatus, ok := env.RepairCondition()
+	Expect(ok).To(BeTrue(), "no repair condition for this provider, pass --repair-condition")
+	n := env.GetNode(node.Name)
+	env.ExpectStatusUpdated(env.ReplaceNodeConditions(&n, corev1.NodeCondition{
+		Type:               condType,
+		Status:             condStatus,
+		LastTransitionTime: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
+		Reason:             "E2ETest",
+		Message:            "injected repair-eligible fault",
+	}))
+}
+
+// ExpectRepairFaultCleared removes the condition ExpectRepairFaultInjected injected, healing the node.
+func (env *Environment) ExpectRepairFaultCleared(node *corev1.Node) {
+	GinkgoHelper()
+	condType, _, ok := env.RepairCondition()
+	Expect(ok).To(BeTrue(), "no repair condition for this provider, pass --repair-condition")
+	n := env.GetNode(node.Name)
+	n.Status.Conditions = lo.Reject(n.Status.Conditions, func(c corev1.NodeCondition, _ int) bool { return c.Type == condType })
+	env.ExpectStatusUpdated(&n)
+}
+
 func (env *Environment) ReplaceNodeConditions(node *corev1.Node, conds ...corev1.NodeCondition) *corev1.Node {
 	keys := sets.New[string](lo.Map(conds, func(c corev1.NodeCondition, _ int) string { return string(c.Type) })...)
 	node.Status.Conditions = lo.Reject(node.Status.Conditions, func(c corev1.NodeCondition, _ int) bool {

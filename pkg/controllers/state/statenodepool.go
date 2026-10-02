@@ -163,8 +163,13 @@ func (n *NodePoolState) ReleaseNodeCount(npName string, count int64) {
 
 	// We retry until CompareAndSwap is successful
 	for {
-		currentlyReserved := n.nodePoolNameToNodePoolLimit[npName].Load()
-		if n.nodePoolNameToNodePoolLimit[npName].CompareAndSwap(
+		reserved, ok := n.nodePoolNameToNodePoolLimit[npName]
+		// Cleanup can drop the entry between reserve and release. Nothing to release then.
+		if !ok {
+			return
+		}
+		currentlyReserved := reserved.Load()
+		if reserved.CompareAndSwap(
 			currentlyReserved,
 			lo.Ternary(currentlyReserved-count < 0, 0, currentlyReserved-count)) {
 			return

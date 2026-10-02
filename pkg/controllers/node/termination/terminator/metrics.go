@@ -60,6 +60,7 @@ var PodsEvictionRequestsTotal = opmetrics.NewPrometheusCounter(
 		Help:      "The total number of pod eviction requests made by Karpenter, labeled by response code",
 	},
 	[]opmetrics.Label{Code},
+	opmetrics.Alpha,
 )
 
 var PodsDrainedTotal = opmetrics.NewPrometheusCounter(
@@ -71,4 +72,5 @@ var PodsDrainedTotal = opmetrics.NewPrometheusCounter(
 		Help:      "The total number of pods drained during node termination by Karpenter, labeled by reason",
 	},
 	[]opmetrics.Label{DrainReason},
+	opmetrics.Alpha,
 )

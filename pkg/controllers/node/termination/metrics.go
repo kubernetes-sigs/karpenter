@@ -39,6 +39,7 @@ var (
 			Objectives: metrics.SummaryObjectives(),
 		},
 		[]opmetrics.Label{metrics.NodePool},
+		opmetrics.Beta,
 	)
 	NodesDrainedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -49,6 +50,7 @@ var (
 			Help:      "The total number of nodes drained by Karpenter",
 		},
 		[]opmetrics.Label{metrics.NodePool},
+		opmetrics.Alpha,
 	)
 	NodeLifetimeDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
@@ -85,5 +87,6 @@ var (
 			},
 		},
 		[]opmetrics.Label{metrics.NodePool},
+		opmetrics.Alpha,
 	)
 )
