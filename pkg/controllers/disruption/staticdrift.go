@@ -24,9 +24,11 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -37,13 +39,15 @@ type StaticDrift struct {
 	cluster       *state.Cluster
 	provisioner   *provisioning.Provisioner
 	cloudprovider cloudprovider.CloudProvider
+	recorder      events.Recorder
 }
 
-func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider) *StaticDrift {
+func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider, recorder events.Recorder) *StaticDrift {
 	return &StaticDrift{
 		cluster:       cluster,
 		provisioner:   provisioner,
 		cloudprovider: cloudprovider,
+		recorder:      recorder,
 	}
 }
 
@@ -105,6 +109,9 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 
 		// We will not get a negative value here
 		if maxAllowedDrifts == 0 {
+			for _, c := range npCandidates[:maxDrifts] {
+				d.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim, "static NodePool is at its node limit and cannot stage a replacement")...)
+			}
 			continue
 		}
 
