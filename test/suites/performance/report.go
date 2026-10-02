@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -82,15 +81,9 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 // outputDir. The caller-supplied filePrefix is sanitized to prevent path
 // traversal via the OUTPUT_DIR environment variable or the prefix itself.
 func writeReportFiles(report *PerformanceReport, filePrefix, outputDir string) {
-	safeDir := filepath.Clean(outputDir)
 	safePrefix := filepath.Base(filepath.Clean(filePrefix))
 	writeUnder := func(name string, data []byte) (string, error) {
-		path := filepath.Join(safeDir, name)
-		// Defense in depth: ensure the resolved path stays under safeDir.
-		if rel, err := filepath.Rel(safeDir, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("refusing to write outside %q", safeDir)
-		}
-		return path, os.WriteFile(path, data, 0600)
+		return common.WriteArtifactUnder(outputDir, name, data)
 	}
 	if reportJSON, err := json.MarshalIndent(report, "", "  "); err == nil {
 		if path, err := writeUnder(fmt.Sprintf("%s_performance_report.json", safePrefix), reportJSON); err == nil {
