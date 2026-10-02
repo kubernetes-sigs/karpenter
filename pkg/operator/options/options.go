@@ -69,6 +69,7 @@ type FeatureGates struct {
 	TerminateFirstDrift       bool
 	TerminateFirstRepair      bool
 	PodDeletionCostManagement bool
+	NodePoolDriftBackoff      bool
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -140,7 +141,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,CapacityBuffer=false,TerminateFirstDrift=false,TerminateFirstRepair=false,PodDeletionCostManagement=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, StaticCapacity, CapacityBuffer, TerminateFirstDrift, TerminateFirstRepair, and PodDeletionCostManagement.")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,CapacityBuffer=false,TerminateFirstDrift=false,TerminateFirstRepair=false,PodDeletionCostManagement=false,NodePoolDriftBackoff=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, StaticCapacity, CapacityBuffer, TerminateFirstDrift, TerminateFirstRepair, PodDeletionCostManagement, and NodePoolDriftBackoff.")
 	fs.StringVar(&o.schedulerConfigRaw, "scheduler-config", env.WithDefaultString("SCHEDULER_CONFIG", ""), "A YAML/JSON document configuring the parts of the cluster's kube-scheduler behavior that Karpenter must mirror during scheduling simulation, currently only podTopologySpread.defaultConstraints. Empty means no scheduler-config overrides.")
 }
 
@@ -193,6 +194,7 @@ func DefaultFeatureGates() FeatureGates {
 		TerminateFirstDrift:       false,
 		TerminateFirstRepair:      false,
 		PodDeletionCostManagement: false,
+		NodePoolDriftBackoff:      false,
 	}
 }
 
@@ -205,32 +207,21 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	if err := cliflag.NewMapStringBool(&gateMap).Set(gateStr); err != nil {
 		return gates, err
 	}
-	if val, ok := gateMap["NodeRepair"]; ok {
-		gates.NodeRepair = val
-	}
-	if val, ok := gateMap["SpotToSpotConsolidation"]; ok {
-		gates.SpotToSpotConsolidation = val
-	}
-	if val, ok := gateMap["ReservedCapacity"]; ok {
-		gates.ReservedCapacity = val
-	}
-	if val, ok := gateMap["NodeOverlay"]; ok {
-		gates.NodeOverlay = val
-	}
-	if val, ok := gateMap["StaticCapacity"]; ok {
-		gates.StaticCapacity = val
-	}
-	if val, ok := gateMap["CapacityBuffer"]; ok {
-		gates.CapacityBuffer = val
-	}
-	if val, ok := gateMap["TerminateFirstDrift"]; ok {
-		gates.TerminateFirstDrift = val
-	}
-	if val, ok := gateMap["TerminateFirstRepair"]; ok {
-		gates.TerminateFirstRepair = val
-	}
-	if val, ok := gateMap["PodDeletionCostManagement"]; ok {
-		gates.PodDeletionCostManagement = val
+	for name, gate := range map[string]*bool{
+		"NodeRepair":                &gates.NodeRepair,
+		"SpotToSpotConsolidation":   &gates.SpotToSpotConsolidation,
+		"ReservedCapacity":          &gates.ReservedCapacity,
+		"NodeOverlay":               &gates.NodeOverlay,
+		"StaticCapacity":            &gates.StaticCapacity,
+		"CapacityBuffer":            &gates.CapacityBuffer,
+		"TerminateFirstDrift":       &gates.TerminateFirstDrift,
+		"TerminateFirstRepair":      &gates.TerminateFirstRepair,
+		"PodDeletionCostManagement": &gates.PodDeletionCostManagement,
+		"NodePoolDriftBackoff":      &gates.NodePoolDriftBackoff,
+	} {
+		if val, ok := gateMap[name]; ok {
+			*gate = val
+		}
 	}
 
 	return gates, nil
