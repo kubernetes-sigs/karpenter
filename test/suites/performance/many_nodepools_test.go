@@ -1,0 +1,322 @@
+/*
+Copyright The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package performance
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/debug"
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
+)
+
+const (
+	// manyNodePoolsPodLabelKey pins pods to a specific NodePool via nodeSelector
+	// and the pool via a matching NodePool requirement. The taint of the same
+	// key blocks pods without a matching toleration from landing on the pool's
+	// nodes. Together these give per-pool workload isolation so consolidation
+	// cannot merge across pools and defeat the reconciler-scan measurement.
+	manyNodePoolsPodLabelKey = "mnp-pool"
+
+	// manyNodePoolsPodCPU and manyNodePoolsPodMemory are intentionally small so
+	// bin-packing is not the constraint. The signal we stress is per-pool
+	// scheduler and disruption-loop cost, not resource fit.
+	manyNodePoolsPodCPU    = "100m"
+	manyNodePoolsPodMemory = "128Mi"
+
+	// manyNodePoolsPodsPerPool is the baseline replica count per NodePool for
+	// the initial scale-out and the second (re)scale-out phase. Scale-in halves
+	// this to manyNodePoolsScaleInPodsPerPool.
+	manyNodePoolsPodsPerPool        = 2
+	manyNodePoolsScaleInPodsPerPool = 1
+
+	// manyNodePoolsWarmUpDuration lets the NodePool subcontrollers (hash,
+	// counter, readiness, registrationhealth) reach steady state before the
+	// first workload lands. At the largest sweep size the first-touch reconcile
+	// churn is on the order of tens of seconds; isolating it keeps the
+	// scale-out measurement clean.
+	manyNodePoolsWarmUpDuration = 60 * time.Second
+)
+
+// manyNodePoolsFamilies and manyNodePoolsSizes must intersect the value sets
+// that KWOK's fake instance-type catalog and the suite BeforeEach admit for
+// the karpenter.kwok.sh/instance-family and instance-size labels; the suite
+// BeforeEach caps instance-size to Lt "32". Empty intersection produces a
+// NodePool the scheduler cannot satisfy.
+var manyNodePoolsFamilies = []string{"c", "m", "s"}
+var manyNodePoolsSizes = []string{"1", "2", "4", "8", "16"}
+
+// buildManyNodePool returns a NodePool derived from the suite BeforeEach's
+// shared template. Distinctness is enforced three ways: (1) a per-pool
+// InstanceFamily requirement combined with an InstanceSize requirement so the
+// scheduler cannot short-circuit its per-pool instance-type walk; (2) a
+// per-pool label on the template so cross-pool consolidation cannot find
+// interchangeable candidates; (3) a per-pool taint that blocks pods without a
+// matching toleration from crossing pool boundaries. The three constraints
+// are redundant on purpose so a subtle mismatch in one path does not silently
+// weaken the isolation the perf test depends on.
+func buildManyNodePool(template *v1.NodePool, index int) *v1.NodePool {
+	np := template.DeepCopy()
+	name := fmt.Sprintf("mnp-%03d", index)
+	np.Name = name
+	np.ResourceVersion = ""
+
+	family := manyNodePoolsFamilies[index%len(manyNodePoolsFamilies)]
+	size := manyNodePoolsSizes[(index/len(manyNodePoolsFamilies))%len(manyNodePoolsSizes)]
+
+	test.ReplaceRequirements(np,
+		v1.NodeSelectorRequirementWithMinValues{
+			Key:      v1alpha1.InstanceFamilyLabelKey,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{family},
+		},
+		v1.NodeSelectorRequirementWithMinValues{
+			Key:      v1alpha1.InstanceSizeLabelKey,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{size},
+		},
+		v1.NodeSelectorRequirementWithMinValues{
+			Key:      manyNodePoolsPodLabelKey,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{name},
+		},
+	)
+
+	if np.Spec.Template.Labels == nil {
+		np.Spec.Template.Labels = map[string]string{}
+	}
+	np.Spec.Template.Labels[manyNodePoolsPodLabelKey] = name
+
+	np.Spec.Template.Spec.Taints = append(np.Spec.Template.Spec.Taints, corev1.Taint{
+		Key:    manyNodePoolsPodLabelKey,
+		Value:  name,
+		Effect: corev1.TaintEffectNoSchedule,
+	})
+
+	return np
+}
+
+// buildManyNodePoolDeployment returns a Deployment pinned to a single
+// NodePool. The nodeSelector routes scheduling and the toleration matches
+// the pool's taint. Pod resources stay small (100m / 128Mi) so bin-packing
+// is not the constraint; the signal we care about is per-pool reconciler
+// cost.
+//
+// The zone topologySpreadConstraint is what puts the scheduler's topology
+// path in scope. With no spread constraint, pod affinity, or pod
+// anti-affinity on these pods, Topology.Update builds no TopologyGroup, so
+// the per-pod domain construction and filtering that scales with NodePool
+// count never executes and this test cannot observe it however many
+// NodePools it creates.
+//
+// Zone rather than hostname: the domain universe comes from NodePool
+// template requirements and instance-type offerings, and KWOK's catalog
+// declares four zones for every instance type. Hostname domains do not
+// exist until the nodes do.
+//
+// ScheduleAnyway rather than DoNotSchedule: the phase assertions require
+// every pod to land, and a hard zone constraint on a pool-pinned workload
+// can be infeasible. The topology work is reached either way, because the
+// TopologyGroup and its domain walk are built for any spread constraint
+// regardless of WhenUnsatisfiable.
+//
+// NodeTaintsPolicy Honor rather than the unset default: unset means Ignore,
+// and under Ignore TopologyDomainGroup.ForEachDomain calls the per-domain
+// callback and continues without looking at taints at all. That skips the
+// per-domain taint walk this fixture exists to stress, because every
+// NodePool contributes its own NoSchedule taint to each of the four zone
+// domains, so the walk is the part that grows with NodePool count. Honor
+// makes ForEachDomain run Taints.ToleratesPod over each domain's taint
+// groups until one matches the pod, which is the cost the per-pool
+// scheduler path actually pays in a tainted multi-tenant cluster.
+//
+// Honor does not change where pods land here. The zone domain set is the
+// same four zones under both policies, because every instance type in the
+// KWOK catalog offers all four zones and each pod tolerates its own pool's
+// taint, so every domain keeps at least one tolerated taint group. Only
+// the cost of arriving at that domain set changes.
+func buildManyNodePoolDeployment(poolName string, replicas int32) *appsv1.Deployment {
+	depName := fmt.Sprintf("%s-dep", poolName)
+	opts := test.CreateDeploymentOptions(
+		depName,
+		replicas,
+		manyNodePoolsPodCPU,
+		manyNodePoolsPodMemory,
+		test.WithNodeSelector(map[string]string{manyNodePoolsPodLabelKey: poolName}),
+		test.WithTolerations([]corev1.Toleration{{
+			Key:      manyNodePoolsPodLabelKey,
+			Operator: corev1.TolerationOpEqual,
+			Value:    poolName,
+			Effect:   corev1.TaintEffectNoSchedule,
+		}}),
+		test.WithTopologySpreadConstraints([]corev1.TopologySpreadConstraint{{
+			MaxSkew:           1,
+			TopologyKey:       corev1.LabelTopologyZone,
+			WhenUnsatisfiable: corev1.ScheduleAnyway,
+			NodeTaintsPolicy:  lo.ToPtr(corev1.NodeInclusionPolicyHonor),
+			// CreateDeploymentOptions labels the pods app=<name>, so this
+			// selects this deployment's own replicas and nothing else.
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": depName},
+			},
+		}}),
+	)
+	return test.Deployment(opts)
+}
+
+// startPhaseLatencyHarness starts a per-phase LatencyHarness against the
+// active Karpenter pod. Callers Stop the harness after the phase's Report*
+// returns and pass the LatencyResult to writeManyNodePoolsLatencySidecar.
+func startPhaseLatencyHarness() *common.LatencyHarness {
+	harness, err := common.StartLatencyHarness(env)
+	Expect(err).ToNot(HaveOccurred())
+	return harness
+}
+
+// writeManyNodePoolsLatencySidecar emits a paired latency-companion JSON to
+// OUTPUT_DIR when set. A write error is logged and swallowed: the primary
+// PerformanceReport is already on disk, and downstream analysis treats the
+// sidecar as best-effort. The consolidation-policy field records the
+// effective policy for the phase so the sidecar carries the run-time value
+// rather than a compile-time constant.
+func writeManyNodePoolsLatencySidecar(testName, filePrefix string, policy v1.ConsolidationPolicy, result *common.LatencyResult) {
+	err := common.WriteLatencySidecar(os.Getenv("OUTPUT_DIR"), filePrefix, common.LatencySidecar{
+		TestName:            testName,
+		ConsolidationPolicy: string(policy),
+		Timestamp:           time.Now(),
+		LatencyStats:        result.LatencyStats,
+		Counters:            result.Counters,
+	})
+	if err != nil {
+		GinkgoWriter.Printf("LatencyHarness: %v\n", err)
+	}
+}
+
+var _ = Describe("Performance", Label(debug.NoWatch), func() {
+	Context("Many NodePools", func() {
+		// The DescribeTable sweeps NodePool counts to characterize the
+		// per-pool reconciler-scan cost as an emergent scaling curve
+		// rather than a single 500-pool data point. Assertions are
+		// deliberately soft: verify pod counts and error-free execution;
+		// let the emitted PerformanceReport JSON and paired
+		// LatencySidecar carry the quantitative signal for offline
+		// analysis. Threshold-based hard bounds land in a follow-up once
+		// the curve is characterized on the fork's CI.
+		DescribeTable("scaling curve baseline scale-out, scale-in, second scale-out",
+			func(nodePoolCount int) {
+				totalInitialPods := nodePoolCount * manyNodePoolsPodsPerPool
+				totalScaleInPods := nodePoolCount * manyNodePoolsScaleInPodsPerPool
+				policy := nodePool.Spec.Disruption.ConsolidationPolicy
+				filePrefixBase := fmt.Sprintf("many_nodepools_%d", nodePoolCount)
+				testNameBase := fmt.Sprintf("Many NodePools %d", nodePoolCount)
+
+				By(fmt.Sprintf("Creating %d distinct NodePools plus one shared NodeClass", nodePoolCount))
+				env.ExpectCreated(nodeClass)
+				pools := make([]*v1.NodePool, nodePoolCount)
+				for i := 0; i < nodePoolCount; i++ {
+					pools[i] = buildManyNodePool(nodePool, i)
+					env.ExpectCreated(pools[i])
+				}
+
+				By(fmt.Sprintf("Waiting %s for NodePool subcontrollers to reach steady state", manyNodePoolsWarmUpDuration))
+				time.Sleep(manyNodePoolsWarmUpDuration)
+
+				// Phase 1: initial scale-out 0 -> 2 pods per NodePool. Start
+				// the harness before the deployment-create loop so the /metrics
+				// baseline snapshot does not subtract out reconciler work
+				// completed while the loop is still creating deployments.
+				scaleOutPrefix := fmt.Sprintf("%s_scale_out", filePrefixBase)
+				scaleOutName := fmt.Sprintf("%s Scale Out", testNameBase)
+				By(fmt.Sprintf("Phase 1 scale-out: 0 -> %d pods per NodePool (%d pods total)", manyNodePoolsPodsPerPool, totalInitialPods))
+
+				scaleOutHarness := startPhaseLatencyHarness()
+				deployments := make([]*appsv1.Deployment, nodePoolCount)
+				for i := 0; i < nodePoolCount; i++ {
+					deployments[i] = buildManyNodePoolDeployment(pools[i].Name, int32(manyNodePoolsPodsPerPool))
+					env.ExpectCreated(deployments[i])
+				}
+
+				scaleOutReport, err := ReportScaleOutWithOutput(env, scaleOutName, totalInitialPods, 30*time.Minute, scaleOutPrefix)
+				Expect(err).ToNot(HaveOccurred(), "Phase 1 scale-out should complete without error")
+				scaleOutLatency, err := scaleOutHarness.Stop()
+				Expect(err).ToNot(HaveOccurred())
+				writeManyNodePoolsLatencySidecar(scaleOutName, scaleOutPrefix, policy, scaleOutLatency)
+				Expect(scaleOutReport.TestType).To(Equal("scale-out"))
+				Expect(scaleOutReport.TotalPods).To(Equal(totalInitialPods))
+				initialNodes := scaleOutReport.TotalNodes
+
+				// Phase 2: scale-in 2 -> 1 pod per NodePool. Start the harness
+				// before the update loop for the same reason as Phase 1.
+				consolidationPrefix := fmt.Sprintf("%s_consolidation", filePrefixBase)
+				consolidationName := fmt.Sprintf("%s Consolidation", testNameBase)
+				By(fmt.Sprintf("Phase 2 scale-in: %d -> %d pods per NodePool (%d pods total)", manyNodePoolsPodsPerPool, manyNodePoolsScaleInPodsPerPool, totalScaleInPods))
+
+				consolidationHarness := startPhaseLatencyHarness()
+				for i := 0; i < nodePoolCount; i++ {
+					deployments[i].Spec.Replicas = new(int32(manyNodePoolsScaleInPodsPerPool))
+					env.ExpectUpdated(deployments[i])
+				}
+
+				consolidationReport, err := ReportConsolidationWithOutput(env, consolidationName, totalInitialPods, totalScaleInPods, initialNodes, 30*time.Minute, consolidationPrefix)
+				Expect(err).ToNot(HaveOccurred(), "Phase 2 consolidation should complete without error")
+				consolidationLatency, err := consolidationHarness.Stop()
+				Expect(err).ToNot(HaveOccurred())
+				writeManyNodePoolsLatencySidecar(consolidationName, consolidationPrefix, policy, consolidationLatency)
+				Expect(consolidationReport.TestType).To(Equal("consolidation"))
+				Expect(consolidationReport.TotalPods).To(Equal(totalScaleInPods))
+
+				// Phase 3: second scale-out 1 -> 2 pods per NodePool. This
+				// measures a warm-cluster provisioning fan-out (informer
+				// caches populated, NodePool subcontrollers past their
+				// first-touch churn) as a control against Phase 1, which
+				// includes cold-cluster churn.
+				scaleOutRepeatPrefix := fmt.Sprintf("%s_scale_out_repeat", filePrefixBase)
+				scaleOutRepeatName := fmt.Sprintf("%s Scale Out Repeat", testNameBase)
+				By(fmt.Sprintf("Phase 3 scale-out repeat: %d -> %d pods per NodePool (%d pods total)", manyNodePoolsScaleInPodsPerPool, manyNodePoolsPodsPerPool, totalInitialPods))
+
+				scaleOutRepeatHarness := startPhaseLatencyHarness()
+				for i := 0; i < nodePoolCount; i++ {
+					deployments[i].Spec.Replicas = new(int32(manyNodePoolsPodsPerPool))
+					env.ExpectUpdated(deployments[i])
+				}
+
+				scaleOutRepeatReport, err := ReportScaleOutWithOutput(env, scaleOutRepeatName, totalInitialPods, 30*time.Minute, scaleOutRepeatPrefix)
+				Expect(err).ToNot(HaveOccurred(), "Phase 3 scale-out repeat should complete without error")
+				scaleOutRepeatLatency, err := scaleOutRepeatHarness.Stop()
+				Expect(err).ToNot(HaveOccurred())
+				writeManyNodePoolsLatencySidecar(scaleOutRepeatName, scaleOutRepeatPrefix, policy, scaleOutRepeatLatency)
+				Expect(scaleOutRepeatReport.TestType).To(Equal("scale-out"))
+				Expect(scaleOutRepeatReport.TotalPods).To(Equal(totalInitialPods))
+			},
+			Entry("50 NodePools", 50),
+			Entry("100 NodePools", 100),
+			Entry("250 NodePools", 250),
+			Entry("500 NodePools", 500),
+		)
+	})
+})
