@@ -54,6 +54,7 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 	if s.IsConsolidated() {
 		return []Command{}, nil
 	}
+	defer s.beginSimulationSession(ctx, s.ConsolidationType())()
 	candidates = s.SortCandidates(ctx, candidates)
 
 	// Set a timeout

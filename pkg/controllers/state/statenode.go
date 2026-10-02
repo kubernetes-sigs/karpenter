@@ -200,6 +200,17 @@ func (in *StateNode) ShallowCopy() *StateNode {
 	}
 }
 
+// CopyForScheduling returns a lightweight simulation-owned copy. Kubernetes
+// objects and accounting maps are immutable during a scheduling simulation, but
+// host-port and volume usage are updated as pods are placed and must not leak
+// between speculative solves.
+func (in *StateNode) CopyForScheduling() *StateNode {
+	out := in.ShallowCopy()
+	out.hostPortUsage = in.hostPortUsage.DeepCopy()
+	out.volumeUsage = in.volumeUsage.DeepCopy()
+	return out
+}
+
 func (in *StateNode) Name() string {
 	if in.Node == nil {
 		return in.NodeClaim.Name
