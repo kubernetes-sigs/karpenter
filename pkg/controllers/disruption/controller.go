@@ -111,7 +111,7 @@ func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, ku
 		// Delete empty nodes across all consolidation policies (WhenEmpty, WhenEmptyOrUnderutilized, Balanced).
 		NewEmptiness(c),
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
-		NewStaticDrift(cluster, provisioner, cp),
+		NewStaticDrift(cluster, provisioner, cp, recorder),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 		NewDrift(kubeClient, cluster, provisioner, recorder, clk),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
