@@ -19,6 +19,7 @@ package v1
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -26,7 +27,19 @@ import (
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(), in.Spec.Disruption.validateBudgetTimeZones())
+	return errs
+}
+
+func (in *Disruption) validateBudgetTimeZones() (errs error) {
+	for _, budget := range in.Budgets {
+		if budget.TimeZone == nil {
+			continue
+		}
+		if _, err := time.LoadLocation(*budget.TimeZone); err != nil {
+			errs = multierr.Append(errs, fmt.Errorf("invalid time zone %q in budgets", *budget.TimeZone))
+		}
+	}
 	return errs
 }
 
