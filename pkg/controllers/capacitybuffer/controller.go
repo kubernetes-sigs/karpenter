@@ -46,7 +46,12 @@ import (
 // controller needs — so tests can substitute a fake, and we avoid an import
 // cycle on the provisioner package.
 type ProvisionerTrigger interface {
+	// Trigger wakes the provisioner, deduping repeated triggers for the same
+	// object UID within a batching window.
 	Trigger(uid types.UID)
+	// TriggerReconcile wakes the provisioner without an associated object, for
+	// callers reacting to an event that has no stable object UID to dedupe on.
+	TriggerReconcile()
 }
 
 // Controller reconciles CapacityBuffer resources by resolving their pod template
@@ -76,8 +81,11 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	cb := &autoscalingv1beta1.CapacityBuffer{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, cb); err != nil {
 		if errors.IsNotFound(err) {
-			// The buffer was deleted; drop its virtual pods from the cache.
+			// The buffer was deleted; drop its virtual pods from the cache and
+			// wake the provisioner so it refreshes cluster state (e.g.
+			// bufferPodCounts).
 			c.virtualPodCache.RemoveEntry(req.NamespacedName)
+			c.trigger.TriggerReconcile()
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -116,10 +124,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Notify the provisioner so it can construct virtual pods and update the
 	// Provisioning condition in the next reconciliation. We trigger on every
 	// successful reconcile (not just status changes) so newly-applied buffers
-	// that already have accurate status still cause a provisioning pass.
-	if c.trigger != nil && resolved {
-		c.trigger.Trigger(cb.UID)
-	}
+	// that already have accurate status still cause a provisioning pass. We
+	// also trigger when the buffer failed to resolve (resolved == false): its
+	// stale entry was just dropped from the cache, and the provisioner must run
+	// to refresh cluster state so empty nodes can be reclaimed on an idle
+	// cluster.
+	c.trigger.Trigger(cb.UID)
 
 	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 }
