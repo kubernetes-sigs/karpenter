@@ -541,6 +541,18 @@ func (e InstanceTypeFilterError) resourcesString() string {
 	return fmt.Sprintf("min=%s, max=%s", minStr, maxStr)
 }
 
+// IsInfeasible reports whether this scheduling failure is structurally infeasible
+// (no instance type can ever satisfy the pod) as opposed to a transient capacity
+// constraint such as offerings being temporarily unavailable. If any instance type
+// meets both requirements AND fits (requirementsAndFits), the only gap is offerings,
+// which can change, so it's transient. Everything else is permanent.
+func (e InstanceTypeFilterError) IsInfeasible() bool {
+	if e.minValuesIncompatibleErr != nil {
+		return true
+	}
+	return !e.requirementsAndFits
+}
+
 //nolint:gocyclo
 func (e InstanceTypeFilterError) Error() string {
 	// minValues is specified in the requirements and is not met
