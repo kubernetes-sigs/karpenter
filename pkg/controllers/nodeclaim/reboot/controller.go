@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -98,7 +99,8 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
 			nc, ok := o.(*v1.NodeClaim)
-			return ok && nc.StatusConditions().Get(v1.ConditionTypeRebooting) != nil
+			// Predicates get the shared cached object; WithObservedOnly keeps StatusConditions() from initializing conditions on it
+			return ok && nc.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting) != nil
 		}))).
 		WithOptions(controller.Options{RateLimiter: reasonable.RateLimiter(), MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
