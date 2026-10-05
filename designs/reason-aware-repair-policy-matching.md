@@ -98,9 +98,9 @@ reason-specific policy matches a supported condition.
 
 The complete `RepairPolicy` is shown because matching consumes its existing
 condition and toleration fields together with the fields added here.
-`ReasonRegex` and `Action` are added by this RFC. `TerminationGracePeriod` is
-defined by the voluntary repair RFC. This RFC specifies how overlapping
-policies combine it.
+`ReasonRegex` and `Action` are added by this RFC. `TerminationGracePeriod` and
+`Priority` are defined by the voluntary repair RFC. This RFC specifies how
+overlapping policies combine them.
 
 ```go
 type RepairAction string
@@ -123,6 +123,8 @@ type RepairPolicy struct {
 	TolerationDuration time.Duration
 	// TerminationGracePeriod is this policy's optional drain bound.
 	TerminationGracePeriod *time.Duration
+	// Priority is this policy's repair ordering weight from 0 to 100.
+	Priority int
 	// Action is the repair response requested by this policy.
 	Action RepairAction
 }
@@ -178,21 +180,21 @@ Validation rejects a policy set containing:
 - An empty condition type, invalid condition status, invalid non-empty
   `ReasonRegex`, or unsupported `Action`.
 - A negative toleration or negative termination grace period.
+- A priority outside the range 0 to 100.
 - Missing or multiple policies with an empty `ReasonRegex` across the complete
   policy set.
 - A default fallback whose action is not `ReplaceNode`.
-- A `RebootNode` policy when the cloud provider does not implement
-  `CloudProvider.Reboot`.
+- A `RebootNode` policy until repair dispatches the reboot lifecycle.
 
 Karpenter compiles each non-empty pattern once during validation using Go's
 [`regexp`](https://pkg.go.dev/regexp) package. Go's implementation guarantees
 linear-time execution, which avoids backtracking behavior in the repair loop.
 
-Karpenter validates the policy set before registering repair as a disruption
-method. An invalid set reports a startup configuration error and skips only
-repair registration. The manager, provisioning, and other disruption methods
-continue. Karpenter does not revert to direct forceful repair because that
-would bypass the voluntary repair controls.
+Karpenter validates the policy set when it registers repair as a disruption
+method under the `NodeRepair` feature gate. An empty or invalid set fails startup with a
+configuration error, so repair never runs with a partially valid policy set.
+Karpenter does not revert to direct forceful repair because that would bypass
+the voluntary repair controls.
 
 ### How It Works
 
@@ -250,8 +252,8 @@ The eligible policies for one condition are combined as follows:
 1. Select the more disruptive action using `RebootNode < ReplaceNode`.
 2. Select the shortest defined `TerminationGracePeriod` across all eligible
    policies.
-3. Retain the earliest `eligibleAt` among eligible policies that request the
-   selected action.
+3. Among eligible policies that request the selected action, retain the highest
+   `Priority`, then the earliest `eligibleAt`.
 
 Suppose a reboot policy becomes eligible after 10 minutes and an overlapping
 replacement policy becomes eligible after 30 minutes. At 10 minutes, only the
@@ -267,10 +269,11 @@ existing expression.
 #### Termination Grace Period
 
 This RFC defines how overlapping eligible reason policies contribute their
-termination grace period. Karpenter selects the shortest defined provider limit
-and combines it with the immutable value stored on the NodeClaim. For a
+termination grace period. Karpenter selects the shortest defined provider limit,
+and repair combines it with the immutable value stored on the NodeClaim when it
+builds the disruption command. For a
 NodePool-owned NodeClaim, this is the NodePool setting captured at creation.
-Standalone NodeClaims carry their own value. In either case, matching uses the
+Standalone NodeClaims carry their own value. In either case, repair uses the
 same bound that execution observes:
 
 ```text
@@ -297,18 +300,20 @@ with the new static policy list.
 
 #### Matching Output
 
-Each current condition produces at most one merged eligible result. The result
-contains:
+Matching applies the same merge rules across every current condition on the
+Node and produces at most one eligible result. The result contains:
 
-- Node and NodeClaim names and UIDs.
-- The current condition type, status, and reason.
+- The selected condition type, status, and reason.
+- The matching `ReasonRegex` and whether the fallback was used.
 - The selected `Action`.
 - The selected action's `eligibleAt`.
-- The resolved nullable `TerminationGracePeriod`.
+- The shortest nullable policy `TerminationGracePeriod` and the condition that
+  supplied it.
+- The repair ordering score defined by the voluntary repair RFC.
 
-Matching writes no durable state. A separate candidate-resolution stage
-chooses among eligible conditions on the same Node and applies shared
-disruption controls.
+Matching writes no durable state. The candidate-resolution RFC defines how
+results across conditions on the same Node combine, and shared disruption
+applies its controls to the resulting candidate.
 
 ```mermaid
 flowchart TD
@@ -321,7 +326,6 @@ flowchart TD
     F --> W
     W -->|No| N["No eligible result for this condition"]
     W -->|Yes| G["Merge eligible policies: action, TGP, and eligibleAt"]
-    NC["Current NodeClaim TGP"] --> G
     G --> O["Emit one eligible result"]
 ```
 
@@ -337,8 +341,9 @@ Default replacement behavior is represented by the policy set's one policy with
 an empty `ReasonRegex`. This makes compatibility visible in provider policy and
 prevents an unknown reason from silently disabling repair.
 
-Matching emits no ordering field. Cross-Node ordering remains owned by shared
-disruption and is outside this RFC.
+Matching emits the ordering score so shared disruption can order Nodes without
+evaluating policy again. Cross-Node ordering semantics remain owned by shared
+disruption and are outside this RFC.
 
 `RebootNode` requires the provider-neutral primitive and lifecycle proposed in
 [#3259](https://github.com/kubernetes-sigs/karpenter/pull/3259). Matching emits
@@ -353,9 +358,10 @@ the same Node. Commitment carries the candidate's resolved value unchanged. For
 Operators need to distinguish a specific match from a fallback and a waiting
 policy from an eligible one. Reasons, regular expressions, and Node identities
 are unsuitable metric labels, so matching keeps those details in structured
-logs. Each decision records the Node, current reason, whether fallback was
-used, the number of matching and eligible policies, selected action,
-eligibility time, and resolved termination grace period.
+logs. Each changed decision records the Node, selected condition, status,
+reason, matching expression, whether fallback was used, selected action,
+eligibility time, and termination grace period with the condition that
+supplied it.
 
 Matching adds no new metric state. The voluntary repair RFC's existing
 `karpenter_voluntary_disruption_eligible_nodes{reason="unhealthy"}` gauge reports
@@ -452,7 +458,7 @@ Before Node Repair reaches beta:
 - Every supported cloud provider supplies a validated policy set with one
   replacement fallback and documents which reasons are stable
   machine-readable policy inputs.
-- Tests cover complete-set validation, repair-only disablement, overlapping
+- Tests cover complete-set validation, startup failure, overlapping
   expressions, fallback suppression, all three merge rules, restart
   reconstruction, and reason-only changes.
 - Logs and existing voluntary-disruption metrics explain why a condition is
