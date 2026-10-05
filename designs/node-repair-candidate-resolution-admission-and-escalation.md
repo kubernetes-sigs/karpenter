@@ -25,8 +25,8 @@ only from reboot history could repair a Node whose current fault has already
 cleared.
 
 This RFC defines the decision lifecycle between matching and action execution:
-how current eligible results and process-local reboot history produce one
-candidate, how shared disruption admits it, when the selected action commits,
+how current eligible results produce one candidate and process-local reboot
+history resolves its action, how shared disruption admits it, when the selected action commits,
 and how a completed reboot affects later repair decisions.
 
 ### Terminology
@@ -36,12 +36,12 @@ and how a completed reboot affects later repair decisions.
   eligible.
 - **Repair candidate:** The single repair recommendation selected for one Node
   and NodeClaim.
-- **Reboot history:** Process-local state recording that a reboot was selected
-  for a NodeClaim and whether its lifecycle has resolved.
+- **Reboot history:** Process-local state recording when reboots committed for
+  a NodeClaim within a sliding 24-hour window.
 - **Commitment:** The point after which Karpenter can no longer reliably cancel
   the selected action.
 - **Action resolution:** The step that applies process-local reboot history to
-  the action requested by current eligible results.
+  the action selected by candidate resolution.
 
 ### Use Cases
 
@@ -69,15 +69,16 @@ and how a completed reboot affects later repair decisions.
 - Reconstructing completed reboot history after controller restart or
   leadership transfer. The reboot RFC separately owns restart recovery for an
   active reboot lifecycle.
-- Defining reset rules, multiple reboot attempts, or additional in-place repair
-  actions.
+- Defining configurable reboot attempt limits, recovery-based reset rules, or
+  additional in-place repair actions.
 - Adding customer-facing repair policy.
 
 ## What This Review Needs Consensus On
 
 1. Current eligible results and process-local reboot history jointly determine
-   which actions remain available, with one logical reboot attempt allowed per
-   NodeClaim while that history remains available.
+   which actions remain available, with two committed reboots allowed per
+   NodeClaim within a sliding 24-hour window while that history remains
+   available.
 2. All current eligible results for one Node resolve deterministically into one
    candidate by combining action and drain urgency independently.
 3. Shared disruption admits a reconstructible candidate, while the selected
@@ -88,23 +89,22 @@ and how a completed reboot affects later repair decisions.
 This RFC consumes the eligible results produced by the
 [reason-aware matching RFC](https://github.com/kubernetes-sigs/karpenter/pull/3263).
 Each disruption loop reads those results with the current NodeClaim and any
-process-local reboot history. Action resolution first constrains the actions
-available after a prior reboot. Candidate resolution then combines the
-remaining results into at most one recommendation. Shared disruption applies
+process-local reboot history. Candidate resolution first combines the results
+into at most one recommendation. Action resolution then applies prior reboots
+to its action. Shared disruption applies
 its existing safety controls before committing reboot or replacement.
 
 ```mermaid
 flowchart TD
-    M["Current eligible results"] --> A["Resolve actions from reboot history"]
+    M["Current eligible results"] --> C["Resolve one repair candidate"]
+    C --> A["Resolve action from reboot history"]
     H["Process-local reboot history"] --> A
-    A --> C["Resolve one repair candidate"]
-    C --> D["Shared disruption admission"]
+    A --> D["Shared disruption admission"]
     D --> K{"Selected action"}
     K -->|RebootNode| R["Commit Rebooting=True handoff"]
     K -->|ReplaceNode| P["Begin NodeClaim deletion"]
     R -->|"record selected reboot"| H
     R --> E["Reboot lifecycle"]
-    E -->|"observe terminal Rebooting=False"| H
 ```
 
 For example, consider a Node whose current `AcceleratorReady=False` condition
@@ -119,31 +119,30 @@ has reason `NvidiaXID48Error`:
 4. While the reboot lifecycle is active, no other voluntary disruption begins
    for that NodeClaim.
 5. After the lifecycle resolves, cleared health produces no repair. If current
-   matching still emits an eligible reboot result, action resolution converts
-   it to replacement, which passes through candidate resolution and admission
-   again.
+   matching still emits an eligible reboot result, a second reboot may follow.
+   Once two reboots have been committed within 24 hours, action resolution converts
+   the reboot to replacement, which passes through admission again.
 
 This boundary keeps matching, candidate selection, and post-reboot escalation
 separate from action execution. The reboot RFC owns its durable handoff,
 operation identity, restart recovery, and terminal outcome. This RFC stores no
-additional API state. Process loss can forget that a completed reboot consumed
+additional API state. Process loss can forget that completed reboots consumed
 the NodeClaim's reboot allowance. Reconstructing that history is outside scope.
 
 ### Process-Local Reboot History
 
 Node Repair keeps process-local reboot history keyed by NodeClaim UID. Action
-resolution uses this history to distinguish a NodeClaim with no prior reboot
-from one whose reboot lifecycle has resolved.
+resolution uses this history to count the reboots committed for a NodeClaim
+within a sliding 24-hour window.
 
 An **active reboot lifecycle** has `Rebooting=True` with reason
 `RebootRequested` or `RebootIssued`. A **terminal reboot lifecycle** has
 `Rebooting=False` with reason `RebootSucceeded` or `RebootFailed`.
 
-Shared disruption records the entry after the reboot handoff commits. The
-repair method marks it resolved after observing a terminal `Rebooting`
-condition. Creation and resolution must be atomic with repair admission in the
-same process. Resolved history remains until the NodeClaim no longer exists or
-the controller loses the process-local entry.
+Shared disruption records each reboot handoff exactly once after it commits. A
+retry that observes an active lifecycle does not record it again. Each reboot
+stops counting 24 hours after commitment. The NodeClaim's history expires 24
+hours after its last recorded reboot or when the controller loses it.
 
 The reboot lifecycle remains authoritative for active reboot recovery. This RFC
 does not require completed reboot history to be reconstructed after restart or
@@ -154,43 +153,44 @@ leadership transfer.
 Matching answers whether current evidence qualifies for repair. Process-local
 reboot history constrains the available response without creating repair work
 after that evidence clears. Karpenter therefore applies **action resolution**
-to every current eligible result before combining results into a candidate:
+to the candidate after combining current eligible results:
 
-| Reboot state | Current eligible action | Resolved action |
+| Reboot state | Candidate action | Resolved action |
 |---|---|---|
-| No process-local history | `RebootNode` or `ReplaceNode` | Keep the current action |
-| Active process-local history or active reboot lifecycle | Any action | Produce no repair result |
-| Resolved process-local history | `RebootNode` | `ReplaceNode` |
-| Resolved process-local history | `ReplaceNode` | `ReplaceNode` |
+| Fewer than two reboots in the window | `RebootNode` or `ReplaceNode` | Keep the current action |
+| Active reboot lifecycle | Any action | Produce no repair result |
+| Two reboots in the window | `RebootNode` | `ReplaceNode` |
+| Two reboots in the window | `ReplaceNode` | `ReplaceNode` |
 | Any state | No eligible result | No repair |
 
-Active process-local history or an active reboot lifecycle takes precedence over
-resolved-history escalation. This suppresses another admission before the
-informer observes the committed `Rebooting=True` handoff.
+An active reboot lifecycle takes precedence over escalation. Shared disruption
+excludes a NodeClaim with `Rebooting=True` from the candidate set before
+candidate or action resolution runs.
 
-#### Resolved Reboot Attempts
+#### Exhausted Reboot Attempts
 
-In the `NvidiaXID48Error` example, the resolved attempt
-does not authorize replacement by itself. Matching must still emit a current
+In the `NvidiaXID48Error` example, exhausted attempts
+do not authorize replacement by themselves. Matching must still emit a current
 eligible result. If it does, action resolution changes only `RebootNode` to
 `ReplaceNode` and retains the condition, `eligibleAt`, and
 `terminationGracePeriod`. Restarting toleration would add a delay the current
 policy did not request because that result is already eligible. If the
 condition clears, matching emits nothing and no replacement is considered.
 
-A reboot is consumed at commitment for the NodeClaim's lifetime while
-process-local history remains available. A changed reason, a period of healthy
-operation, or a later reboot-clearable fault does not restore it. Keying the
-allowance to a reason would let last-writer-wins reason churn create repeated
-reboots. Resetting it after recovery would require a recovery definition,
-stability interval, and attempt limit.
+Each reboot is consumed at commitment and counts against the NodeClaim for 24
+hours while process-local history remains available. A changed reason, healthy
+operation within the window, or a later reboot-clearable fault does not restore
+it. Keying the allowance to a reason would let last-writer-wins reason
+churn create repeated reboots. Resetting it after recovery would require a
+recovery definition and stability interval.
 
-The lifetime bound can replace a Node that another reboot might have recovered.
-For example, a Node may remain healthy for several days after reboot and later
-develop a different reboot-clearable fault. The initial strategy accepts that
+The window bound can replace a Node that another reboot might have recovered.
+For example, a Node may recover from two reboots and develop a different
+reboot-clearable fault later the same day. The initial strategy accepts that
 cost to keep autonomous repair bounded while the history remains available. A
-future strategy can add reset rules, durable history, or additional attempts
-behind action resolution without changing the other stages. A successor
+future strategy can add recovery-based reset rules, durable history, or
+configurable attempts behind action resolution without changing the other
+stages. A successor
 NodeClaim receives its own allowance. Restarting the controller can clear the
 allowance, as described in the non-goals.
 
@@ -200,15 +200,15 @@ An active reboot lifecycle produces no repair result, and shared disruption
 prevents another voluntary disruption from starting for that NodeClaim. The
 reboot RFC defines provider invocation, retry, recovery observation, terminal
 outcomes, and restart behavior. When the lifecycle reaches a terminal outcome,
-the repair method marks its process-local history resolved and current matching
-determines whether any later repair remains eligible.
+the NodeClaim returns to the candidate set and current matching determines
+whether any later repair remains eligible.
 
 ### Candidate Resolution
 
 Matching evaluates current conditions independently, so one Node may produce
 several eligible results for the same NodeClaim. Starting each result could
 race repair actions. Selecting the first result would make informer iteration
-part of repair policy. Karpenter instead combines all action-resolved results
+part of repair policy. Karpenter instead combines all current eligible results
 into at most one **repair candidate**:
 
 1. **Select the action.** Choose the more disruptive action using
@@ -216,17 +216,19 @@ into at most one **repair candidate**:
    current instance to be removed, while reboot cannot. Several reboot results
    still select reboot because their count alone does not justify replacement.
 2. **Select the driving result.** Among results requesting the selected action,
-   choose the earliest `eligibleAt`, then break ties by condition type, status,
-   and reason. This records the result that has waited longest after its own
-   toleration and makes the choice independent of iteration order.
+   choose the highest policy `Priority`, then the earliest `eligibleAt`, then
+   the lowest condition type. This records the most urgent result that has
+   waited longest after its own toleration and makes the choice independent of
+   iteration order.
 3. **Select the drain bound.** Use the shortest defined
    `terminationGracePeriod` among every eligible result. Action and drain
    urgency carry different evidence, so a strict bound remains relevant even
-   when another condition selects the action. If every result is `nil`, the
-   candidate remains unbounded.
+   when another condition selects the action. Equal bounds keep the earliest
+   eligible condition, then the lowest condition type. If every result is
+   `nil`, the candidate remains unbounded.
 
 For example, assume a NodeClaim with no prior reboot attempt has three eligible
-results:
+results with equal priority:
 
 | Result | Current condition | `eligibleAt` | Action | Termination grace period |
 |---|---|---|---|---|
@@ -356,7 +358,7 @@ downstream lifecycle.
 
 The reboot RFC owns the durable handoff, operation identity, action execution,
 restart recovery, active-disruption exclusion, and terminal outcome. This RFC
-consumes that outcome only to update process-local reboot history.
+records only the committed handoff in process-local reboot history.
 
 Repair vetoes and PDBs remain shared admission inputs. Their configuration and
 general evaluation are outside this RFC.
@@ -374,8 +376,8 @@ logs rather than metric labels.
 
 Existing shared-disruption metrics and events explain budget and veto blocks.
 The reboot lifecycle's conditions, events, and metrics explain active execution
-and terminal outcomes. Candidate logs include whether process-local history
-converted a requested reboot to replacement.
+and terminal outcomes. Disruption command logs mark a replacement that
+process-local history escalated from a requested reboot.
 
 Action resolution is recomputed during every disruption loop, so converting
 `RebootNode` to `ReplaceNode` is not an API event and adds no counter. The
@@ -387,9 +389,9 @@ escalation transition can own a counter without changing this boundary.
 | Case | Behavior |
 |---|---|
 | An active reboot lifecycle exists | No repair result is produced, and new voluntary disruption waits for the lifecycle to resolve. |
-| A reboot resolves and its fault remains eligible | The current result becomes `ReplaceNode` and passes ordinary admission. |
+| A reboot resolves and its fault remains eligible | A second reboot may follow. After two reboots within the window, the current result becomes `ReplaceNode` and passes ordinary admission. |
 | A reboot resolves and its fault clears | Matching produces no result, so reboot history creates no replacement. |
-| A different reboot-clearable fault becomes eligible later | The consumed reboot converts that current result to replacement. |
+| A different reboot-clearable fault becomes eligible later | Two reboots within the window convert that current result to replacement. |
 | Replacement is already eligible after reboot | Replacement remains replacement and participates in candidate resolution normally. |
 | Reboot reaches a terminal failure or timeout | The lifecycle resolves, the budget slot is released, and current matching determines whether replacement is eligible. |
 | The controller restarts while reboot is active | The reboot RFC owns lifecycle recovery and continued disruption exclusion. |
@@ -418,9 +420,8 @@ controller restarts.
 status ownership and conflict handling, and upgrade and rollback semantics for
 state used only by post-reboot action resolution. The reboot lifecycle already
 owns durable execution state, operation identity, and restart recovery. The
-initial strategy keeps repeat suppression and escalation history process-local
-and accepts that a restart may allow another reboot after the prior lifecycle
-resolves. Waiting candidates remain reconstructible and are not persisted in
+initial strategy keeps escalation history process-local and accepts that a
+restart may allow more reboots after the prior lifecycle resolves. Waiting candidates remain reconstructible and are not persisted in
 either strategy.
 
 ### Reset Reboot by Reason or Recovery
@@ -430,9 +431,10 @@ Node appears healthy for a period.
 
 **Why It Falls Short.** Reasons are last-writer-wins and may churn without a
 condition transition, so per-reason allowance can create repeated reboots.
-Recovery reset needs a recovery definition, stability interval, attempt limit,
-and more history. Those policies can be added behind action resolution after
-operational evidence supports their thresholds.
+Recovery reset needs a recovery definition, stability interval, and more
+history. The fixed window bounds reboots without them. Those policies can be
+added behind action resolution after operational evidence supports their
+thresholds.
 
 ### Replace Directly from Reboot History
 
@@ -469,14 +471,11 @@ Before Node Repair reaches beta:
   and the reboot lifecycle in
   [#3259](https://github.com/kubernetes-sigs/karpenter/pull/3259) are available.
 - Tests cover action resolution with no history, an active reboot lifecycle,
-  and resolved history, deterministic candidate merging, nullable termination
+  and exhausted attempts, deterministic candidate merging, nullable termination
   grace periods, budget reservation and release, commitment boundaries,
-  process-local history creation and resolution, and cleanup after NodeClaim
-  deletion.
-- Tests verify that active process-local history suppresses another repair
-  before the committed `Rebooting=True` handoff is observed, active reboot
-  lifecycle state continues that suppression, and each terminal outcome updates
-  process-local history when observed.
+  process-local history recording, keying by NodeClaim UID, and window expiry.
+- Tests verify that an active reboot lifecycle suppresses another repair and
+  that concurrent commits never record more than the escalation threshold.
 - Restart tests remain owned by the reboot lifecycle. Candidate-resolution
   tests accept that completed reboot history is not reconstructed after process
   loss.
