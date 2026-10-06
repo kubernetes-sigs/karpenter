@@ -24,8 +24,7 @@ import (
 )
 
 const (
-	Group              = "karpenter.sh"
-	CompatibilityGroup = "compatibility." + Group
+	Group = "karpenter.sh"
 )
 
 //go:generate go tool -modfile=../../go.tools.mod controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds

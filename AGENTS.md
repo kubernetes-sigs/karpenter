@@ -45,6 +45,48 @@ A file for [guiding coding agents](https://agents.md/).
   on metrics and for logging, so a literal is sufficient and keeps the full set
   of names scrapeable directly from source.
 
+## Metric Labels
+
+Metric dimensions and their values are documented in code as
+`metrics.Label{Name, Help, Values}` / `metrics.Value{Name, Help}`; the provider's
+docs generator turns them into per-dimension help and value tables.
+
+- Describe every dimension with a `Label`; never pass a bare string literal as a
+  metric's label name.
+- Reuse an existing `Label` when one already fits; reference its `.Name` rather
+  than redeclaring the dimension.
+- Define a `Label` in the most generic package that fits — shared dimensions in
+  `pkg/metrics`, operator-agnostic ones upstream in operatorpkg — and only
+  co-locate it in its owning package when an import cycle prevents centralizing.
+- Enumerate a dimension's stable values as `metrics.Value`s, listing the
+  well-known ones even when the set is not exhaustive. A value's `Name` comes from
+  a const, never a magic string; a value that exists only as a metric value should
+  be a first-class `metrics.Value` var that its emission site references by `.Name`.
+
+## Well Known Annotations
+
+Karpenter's annotations are documented in code as
+`wellknown.Annotation{Name, Example, UsedOn, Help, Values, Stage, InternalOnly}` in
+`pkg/apis/v1/labels.go`, so a docs generator can render a reference page from them
+mirroring https://kubernetes.io/docs/reference/labels-annotations-taints/.
+
+- Describe every new annotation with a `wellknown.Annotation`, and add it to
+  `KarpenterAnnotations`.
+- Set `InternalOnly` when only Karpenter should ever set the annotation. Internal
+  only annotations are always `docs.Alpha`.
+- Enumerate the annotation's well known values as `docs.Value`s. A value's
+  `Name` comes from a const, never a magic string.
+
+## Feature Gates
+
+Feature gates are documented in code as `options.FeatureGate{Name, Default, Stage, Help}`
+in `pkg/operator/options/options.go`; the `--feature-gates` default, its help text, and
+`DefaultFeatureGates` are derived from them.
+
+- Add every new gate as a `FeatureGate` var, list it in `KarpenterFeatureGates`, and
+  add its field to `FeatureGates`.
+- Reference a gate by its var (e.g. `NodeRepairFeatureGate.Name`), never a string literal.
+
 ## Issue and PR Guidelines
 
 - Never create an issue.

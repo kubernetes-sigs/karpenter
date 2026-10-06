@@ -335,6 +335,7 @@ var _ = Describe("CEL/Validation", func() {
 			Entry("should allow disruption reason Drifted", DisruptionReasonDrifted),
 			Entry("should allow disruption reason Underutilized", DisruptionReasonUnderutilized),
 			Entry("should allow disruption reason Empty", DisruptionReasonEmpty),
+			Entry("should allow disruption reason Unhealthy", DisruptionReasonUnhealthy),
 		)
 
 		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {

@@ -71,6 +71,7 @@ var (
 		&corev1.PersistentVolumeClaim{},
 		&corev1.Pod{},
 		&corev1.PodTemplate{},
+		&corev1.Service{},
 		// karpenter.sh
 		&v1.NodeClaim{},
 		&v1.NodePool{},
@@ -181,7 +182,7 @@ func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
 					defer GinkgoRecover()
 					g.Expect(env.ExpectTestingFinalizerRemoved(&metaList.Items[i])).To(Succeed())
 					g.Expect(client.IgnoreNotFound(env.Client.Delete(env, &metaList.Items[i],
-						client.PropagationPolicy(metav1.DeletePropagationForeground),
+						client.PropagationPolicy(metav1.DeletePropagationBackground),
 						&client.DeleteOptions{GracePeriodSeconds: new(int64(0))}))).To(Succeed())
 				})
 				// If the deletes eventually succeed, we should have no elements here at the end of the test

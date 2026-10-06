@@ -37,7 +37,8 @@ var (
 			Name:      "node_count",
 			Help:      "Current count of nodes in cluster state",
 		},
-		[]string{},
+		[]opmetrics.Label{},
+		opmetrics.GA,
 	)
 	ClusterStateSynced = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -47,7 +48,8 @@ var (
 			Name:      "synced",
 			Help:      "Returns 1 if cluster state is synced and 0 otherwise. Synced checks that nodeclaims and nodes that are stored in the APIServer have the same representation as Karpenter's cluster state",
 		},
-		[]string{},
+		[]opmetrics.Label{},
+		opmetrics.GA,
 	)
 	ClusterStateUnsyncedTimeSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -57,7 +59,8 @@ var (
 			Name:      "unsynced_time_seconds",
 			Help:      "The time for which cluster state is not synced",
 		},
-		[]string{},
+		[]opmetrics.Label{},
+		opmetrics.GA,
 	)
 	PodSchedulingDecisionSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
@@ -68,6 +71,7 @@ var (
 			Help:      "The time it takes for Karpenter to first try to schedule a pod after it's been seen.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{},
+		[]opmetrics.Label{},
+		opmetrics.Alpha,
 	)
 )

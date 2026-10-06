@@ -33,7 +33,6 @@ import (
 )
 
 const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
-const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
@@ -254,5 +253,5 @@ func (m *MultiNodeConsolidation) Class() string {
 }
 
 func (m *MultiNodeConsolidation) ConsolidationType() string {
-	return MultiNodeConsolidationType
+	return MultiNodeConsolidationType.Name
 }

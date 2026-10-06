@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/docs"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -60,12 +61,106 @@ type optionsKey struct{}
 type FeatureGates struct {
 	inputStr string
 
-	NodeRepair              bool
-	ReservedCapacity        bool
-	SpotToSpotConsolidation bool
-	NodeOverlay             bool
-	StaticCapacity          bool
-	CapacityBuffer          bool
+	NodeRepair                bool
+	ReservedCapacity          bool
+	SpotToSpotConsolidation   bool
+	NodeOverlay               bool
+	StaticCapacity            bool
+	CapacityBuffer            bool
+	TerminateFirstDrift       bool
+	TerminateFirstRepair      bool
+	PodDeletionCostManagement bool
+}
+
+// FeatureGate is the source-of-truth description of a feature gate. Declaring gates as FeatureGates keeps each gate's
+// name, default, and stage in one place, and lets a docs generator render a feature gate reference from them.
+type FeatureGate struct {
+	// Name is the gate's name in --feature-gates, e.g. "NodeRepair".
+	Name string
+	// Default is whether the gate is enabled when it isn't set.
+	Default bool
+	// Stage is the stability of the gated feature.
+	Stage docs.Stage
+	// Help is human-readable documentation for the gate: what enabling it does.
+	Help string
+}
+
+var (
+	NodeRepairFeatureGate = FeatureGate{
+		Name:    "NodeRepair",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Enables node repair. Karpenter replaces nodes with an unhealthy condition matching one of the cloud " +
+			"provider's repair policies, subject to disruption budgets.",
+	}
+	ReservedCapacityFeatureGate = FeatureGate{
+		Name:    "ReservedCapacity",
+		Default: true,
+		Stage:   docs.Beta,
+		Help: "Enables capacity reservations. Karpenter can launch nodes into reserved capacity, and prefers it " +
+			"over on-demand and spot capacity.",
+	}
+	SpotToSpotConsolidationFeatureGate = FeatureGate{
+		Name:    "SpotToSpotConsolidation",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help:    "Enables spot-to-spot consolidation. Karpenter can replace spot nodes with cheaper spot nodes.",
+	}
+	NodeOverlayFeatureGate = FeatureGate{
+		Name:    "NodeOverlay",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Enables the NodeOverlay API. Karpenter applies NodeOverlay price and capacity adjustments to " +
+			"instance types when scheduling.",
+	}
+	StaticCapacityFeatureGate = FeatureGate{
+		Name:    "StaticCapacity",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Enables static NodePools. Karpenter keeps NodePools that set spec.replicas at that number of nodes, " +
+			"regardless of pod demand.",
+	}
+	CapacityBufferFeatureGate = FeatureGate{
+		Name:    "CapacityBuffer",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Enables the CapacityBuffer API (autoscaling.x-k8s.io). Karpenter provisions and keeps the spare " +
+			"capacity CapacityBuffers describe.",
+	}
+	TerminateFirstDriftFeatureGate = FeatureGate{
+		Name:    "TerminateFirstDrift",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Karpenter terminates a drifted node before its replacement is ready when it can't launch the " +
+			"replacement first, e.g. for a full capacity reservation or a static NodePool at its node limit.",
+	}
+	TerminateFirstRepairFeatureGate = FeatureGate{
+		Name:    "TerminateFirstRepair",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Karpenter terminates an unhealthy node before its replacement is ready when it can't launch the " +
+			"replacement first. Requires NodeRepair.",
+	}
+	PodDeletionCostManagementFeatureGate = FeatureGate{
+		Name:    "PodDeletionCostManagement",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Karpenter sets controller.kubernetes.io/pod-deletion-cost on pods so ReplicaSet scale-down prefers " +
+			"nodes it plans to consolidate, and stops reading that annotation as a disruption cost.",
+	}
+)
+
+// KarpenterFeatureGates are the feature gates Karpenter supports, in the order --feature-gates lists them.
+var KarpenterFeatureGates = []FeatureGate{
+	NodeRepairFeatureGate,
+	ReservedCapacityFeatureGate,
+	SpotToSpotConsolidationFeatureGate,
+	NodeOverlayFeatureGate,
+	StaticCapacityFeatureGate,
+	CapacityBufferFeatureGate,
+	TerminateFirstDriftFeatureGate,
+	TerminateFirstRepairFeatureGate,
+	PodDeletionCostManagementFeatureGate,
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -137,7 +232,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false,CapacityBuffer=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, StaticCapacity, and CapacityBuffer.")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", featureGatesDefault()), featureGatesHelp())
 	fs.StringVar(&o.schedulerConfigRaw, "scheduler-config", env.WithDefaultString("SCHEDULER_CONFIG", ""), "A YAML/JSON document configuring the parts of the cluster's kube-scheduler behavior that Karpenter must mirror during scheduling simulation, currently only podTopologySpread.defaultConstraints. Empty means no scheduler-config overrides.")
 }
 
@@ -181,12 +276,15 @@ func (o *Options) ToContext(ctx context.Context) context.Context {
 
 func DefaultFeatureGates() FeatureGates {
 	return FeatureGates{
-		NodeRepair:              false,
-		ReservedCapacity:        true,
-		SpotToSpotConsolidation: false,
-		NodeOverlay:             false,
-		StaticCapacity:          false,
-		CapacityBuffer:          false,
+		NodeRepair:                NodeRepairFeatureGate.Default,
+		ReservedCapacity:          ReservedCapacityFeatureGate.Default,
+		SpotToSpotConsolidation:   SpotToSpotConsolidationFeatureGate.Default,
+		NodeOverlay:               NodeOverlayFeatureGate.Default,
+		StaticCapacity:            StaticCapacityFeatureGate.Default,
+		CapacityBuffer:            CapacityBufferFeatureGate.Default,
+		TerminateFirstDrift:       TerminateFirstDriftFeatureGate.Default,
+		TerminateFirstRepair:      TerminateFirstRepairFeatureGate.Default,
+		PodDeletionCostManagement: PodDeletionCostManagementFeatureGate.Default,
 	}
 }
 
@@ -199,23 +297,32 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	if err := cliflag.NewMapStringBool(&gateMap).Set(gateStr); err != nil {
 		return gates, err
 	}
-	if val, ok := gateMap["NodeRepair"]; ok {
+	if val, ok := gateMap[NodeRepairFeatureGate.Name]; ok {
 		gates.NodeRepair = val
 	}
-	if val, ok := gateMap["SpotToSpotConsolidation"]; ok {
+	if val, ok := gateMap[SpotToSpotConsolidationFeatureGate.Name]; ok {
 		gates.SpotToSpotConsolidation = val
 	}
-	if val, ok := gateMap["ReservedCapacity"]; ok {
+	if val, ok := gateMap[ReservedCapacityFeatureGate.Name]; ok {
 		gates.ReservedCapacity = val
 	}
-	if val, ok := gateMap["NodeOverlay"]; ok {
+	if val, ok := gateMap[NodeOverlayFeatureGate.Name]; ok {
 		gates.NodeOverlay = val
 	}
-	if val, ok := gateMap["StaticCapacity"]; ok {
+	if val, ok := gateMap[StaticCapacityFeatureGate.Name]; ok {
 		gates.StaticCapacity = val
 	}
-	if val, ok := gateMap["CapacityBuffer"]; ok {
+	if val, ok := gateMap[CapacityBufferFeatureGate.Name]; ok {
 		gates.CapacityBuffer = val
+	}
+	if val, ok := gateMap[TerminateFirstDriftFeatureGate.Name]; ok {
+		gates.TerminateFirstDrift = val
+	}
+	if val, ok := gateMap[TerminateFirstRepairFeatureGate.Name]; ok {
+		gates.TerminateFirstRepair = val
+	}
+	if val, ok := gateMap[PodDeletionCostManagementFeatureGate.Name]; ok {
+		gates.PodDeletionCostManagement = val
 	}
 
 	return gates, nil
@@ -321,4 +428,17 @@ func FromContext(ctx context.Context) *Options {
 		panic("options doesn't exist in context")
 	}
 	return retval.(*Options)
+}
+
+// featureGatesDefault is the default --feature-gates value, e.g. "NodeRepair=false,ReservedCapacity=true".
+func featureGatesDefault() string {
+	return strings.Join(lo.Map(KarpenterFeatureGates, func(g FeatureGate, _ int) string {
+		return fmt.Sprintf("%s=%t", g.Name, g.Default)
+	}), ",")
+}
+
+func featureGatesHelp() string {
+	names := lo.Map(KarpenterFeatureGates, func(g FeatureGate, _ int) string { return g.Name })
+	return fmt.Sprintf("Optional features can be enabled / disabled using feature gates. Current options are: %s, and %s.",
+		strings.Join(names[:len(names)-1], ", "), names[len(names)-1])
 }

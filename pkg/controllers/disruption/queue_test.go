@@ -206,6 +206,46 @@ var _ = Describe("Queue", func() {
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
+		It("should emit the consolidation type in the failures metric when a command fails", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			replacements := []*disruption.Replacement{
+				{
+					NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct},
+				},
+			}
+
+			// A single-node consolidation command's Decision() is "replace" (it has both
+			// candidates and replacements) while its ConsolidationType() is "single". The
+			// failures metric must report the consolidation type, not the decision.
+			c := disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			cmd := &disruption.Command{
+				Method:            disruption.NewSingleNodeConsolidation(c),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements:      replacements,
+			}
+			Expect(cmd.Decision()).To(Equal(disruption.ReplaceDecision))
+			Expect(cmd.ConsolidationType()).To(Equal(disruption.SingleNodeConsolidationType.Name))
+			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+
+			// This metric isn't reset between specs, so clear it to isolate this failure.
+			disruption.DisruptionQueueFailuresTotal.Reset()
+
+			// Step the clock to trigger the timeout so the command fails.
+			env.Clock.Step(11 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+			ExpectMetricCounterValue(disruption.DisruptionQueueFailuresTotal, 1, map[string]string{
+				disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType.Name,
+			})
+		})
 		It("should fully handle a command when replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
