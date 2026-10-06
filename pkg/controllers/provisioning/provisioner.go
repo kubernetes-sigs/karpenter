@@ -155,10 +155,7 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	}
 	// Update CapacityBuffer state. Two things happen here:
 	// 1. Patch the Provisioning condition on each buffer (FitsExistingCapacity vs RequiresNewCapacity).
-	// 2. Update cluster.bufferPodCounts so the emptiness disruption path knows
-	//    which nodes host buffer capacity and should not be deleted as "empty".
-	//    Consolidation does NOT use this — it naturally accounts for buffer pods
-	//    because GetPendingPods injects them into the simulation's pending set.
+	// 2. Update cluster.bufferPodCounts so disruption knows which nodes host buffer capacity.
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
 		if err := p.updateBufferProvisioningStatus(ctx, results); err != nil {
 			log.FromContext(ctx).Error(err, "updating CapacityBuffer provisioning status")

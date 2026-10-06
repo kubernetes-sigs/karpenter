@@ -3047,6 +3047,18 @@ var _ = Describe("Buffer Pod Counts", func() {
 		Expect(cluster.HasBufferPods("provider-b")).To(BeFalse())
 	})
 
+	It("should mark the cluster unconsolidated only when the counts change", func() {
+		cluster.UpdateBufferPodCounts(map[string]int{"provider-a": 2})
+		state := cluster.ConsolidationState()
+		env.Clock.Step(time.Second)
+
+		cluster.UpdateBufferPodCounts(map[string]int{"provider-a": 2})
+		Expect(cluster.ConsolidationState()).To(Equal(state))
+
+		cluster.UpdateBufferPodCounts(map[string]int{"provider-a": 1, "provider-b": 1})
+		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
+	})
+
 	It("should not store entries with count zero", func() {
 		cluster.UpdateBufferPodCounts(map[string]int{
 			"provider-a": 0,

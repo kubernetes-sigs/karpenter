@@ -2308,6 +2308,50 @@ func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	return onDemandInstances[0]
 }
 
+func capacityBufferContext() context.Context {
+	return options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{CapacityBuffer: lo.ToPtr(true)}}))
+}
+
+// capacityBuffer returns a ready buffer of four pods and its PodTemplate
+func capacityBuffer(cpu string) []client.Object {
+	template := &corev1.PodTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "buffer-template", Namespace: "default"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name:      "pause",
+			Image:     "pause",
+			Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu)}},
+		}}}},
+	}
+	buffer := test.ReadyBuffer("buffer", 4)
+	buffer.UID = ""
+	buffer.Status.Conditions[0].LastTransitionTime = metav1.Now()
+	return []client.Object{template, buffer}
+}
+
+func onDemandInstanceType(name, cpu string, price float64) *cloudprovider.InstanceType {
+	return fake.NewInstanceType(name,
+		fake.WithResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu), corev1.ResourcePods: resource.MustParse("100")}),
+		fake.WithOfferings(cloudprovider.Offering{Available: true, Price: price, Requirements: scheduling.NewLabelRequirements(map[string]string{
+			v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+			corev1.LabelTopologyZone: "test-zone-1",
+		})}),
+	)
+}
+
+func consolidatableNodeClaimAndNode(nodePool *v1.NodePool, instanceType *cloudprovider.InstanceType) (*v1.NodeClaim, *corev1.Node) {
+	nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+			v1.NodePoolLabelKey:            nodePool.Name,
+			corev1.LabelInstanceTypeStable: instanceType.Name,
+			v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+			corev1.LabelTopologyZone:       "test-zone-1",
+		}},
+		Status: v1.NodeClaimStatus{Allocatable: instanceType.Capacity},
+	})
+	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+	return nodeClaim, node
+}
+
 //nolint:unparam
 func fromInt(i int32) *intstr.IntOrString {
 	v := intstr.FromInt32(i)

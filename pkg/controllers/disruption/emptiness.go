@@ -18,13 +18,17 @@ package disruption
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 )
 
 // Emptiness is a subreconciler that deletes empty candidates.
@@ -48,13 +52,6 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.NodePool.Name))...)
 		return false
 	}
-	// A node hosting virtual buffer pods is not empty — the provisioner placed
-	// buffer capacity here intentionally. Deleting it would trigger immediate
-	// re-provisioning (pointless churn).
-	if e.cluster.HasBufferPods(c.ProviderID()) {
-		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("Node %q has buffer pods", c.Node.Name))...)
-		return false
-	}
 	return c.IsEmpty() && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
@@ -66,6 +63,9 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 		return []Command{}, nil
 	}
 	candidates = e.sortCandidates(ctx, candidates)
+	// Nodes without buffer pods go first, so the buffer is checked against the nodes that remain
+	withoutBuffer, withBuffer := lo.FilterReject(candidates, func(c *Candidate, _ int) bool { return !e.cluster.HasBufferPods(c.ProviderID()) })
+	candidates = append(withoutBuffer, withBuffer...)
 
 	empty := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
@@ -77,6 +77,19 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 			// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 			constrainedByBudgets = true
 			continue
+		}
+		if e.cluster.HasBufferPods(candidate.ProviderID()) {
+			fits, err := e.bufferFitsWithout(ctx, append(slices.Clone(empty), candidate)...)
+			if errors.Is(err, errCandidateDeleting) {
+				continue
+			}
+			if err != nil {
+				return []Command{}, err
+			}
+			if !fits {
+				e.recorder.Publish(disruptionevents.Unconsolidatable(candidate.Node, candidate.NodeClaim, fmt.Sprintf("Node %q has buffer pods", candidate.Node.Name))...)
+				continue
+			}
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
@@ -106,7 +119,29 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 		}
 		return []Command{}, err
 	}
+	// The validator doesn't re-check the buffer
+	if lo.SomeBy(validCmd.Candidates, func(c *Candidate) bool { return e.cluster.HasBufferPods(c.ProviderID()) }) {
+		fits, err := e.bufferFitsWithout(ctx, validCmd.Candidates...)
+		if err != nil && !errors.Is(err, errCandidateDeleting) {
+			return []Command{}, err
+		}
+		if !fits {
+			log.FromContext(ctx).V(1).WithValues(validCmd.LogValues()...).Info("abandoning empty node consolidation attempt, buffer pods no longer fit elsewhere")
+			return []Command{}, nil
+		}
+	}
 	return []Command{validCmd}, nil
+}
+
+// bufferFitsWithout returns true if all virtual pods fit on existing nodes without the candidates.
+// It returns false if the simulation has no virtual pods.
+func (e *Emptiness) bufferFitsWithout(ctx context.Context, candidates ...*Candidate) (bool, error) {
+	results, err := SimulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, e.clock, e.recorder, []pscheduling.Options{pscheduling.IsConsolidationSimulation}, SimulationOptions{}, candidates...)
+	if err != nil {
+		return false, err
+	}
+	onExistingNodes, onNewNodeClaims, failed := virtualPodPlacement(results)
+	return onExistingNodes && !onNewNodeClaims && !failed, nil
 }
 
 func (e *Emptiness) Reason() v1.DisruptionReason {
