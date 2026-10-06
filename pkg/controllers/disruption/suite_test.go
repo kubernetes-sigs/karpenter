@@ -893,6 +893,33 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		Expect(err).To(Succeed())
 		Expect(budgets[nodePool.Name]).To(Equal(8))
 	})
+	It("should consider rebooting nodes to the disruption count for all reasons, while draining and once issued", func() {
+		// An absolute budget, so a node wrongly dropped from the total can't cancel out of a percentage.
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "10"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// A committed reboot is in-place: never marked for deletion. Every reason must see it, or another method could
+		// disrupt on top of it and exceed the NodePool's budget. nodes[0] is still draining (Ready, Initialized);
+		// nodes[1] is issued (NotReady, initialized label removed) and must not drop out as an uninitialized node.
+		nodeClaims[0].StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "rebooting")
+		nodeClaims[1].StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonIssued, "rebooting")
+		ExpectApplied(ctx, env.Client, nodeClaims[0], nodeClaims[1])
+		delete(nodes[1].Labels, v1.NodeInitializedLabelKey)
+		ExpectApplied(ctx, env.Client, nodes[1])
+		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, nodes[1])
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, reason)
+			Expect(err).To(Succeed())
+			Expect(budgets[nodePool.Name]).To(Equal(8))
+		}
+	})
 })
 
 var _ = Describe("Pod Eviction Cost", func() {

@@ -19,8 +19,10 @@ package disruption_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -203,6 +205,166 @@ var _ = Describe("Repair", func() {
 		Expect(cmds).To(HaveLen(1))
 		Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
 		Expect(cmds[0].Replacements).To(BeEmpty())
+	})
+
+	It("should commit an in-place reboot (no replacement, no termination) for a RebootNode policy", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode, TerminationGracePeriod: lo.ToPtr(5 * time.Minute)},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+		}
+		newRepairController()
+		initNode(nodeClaim, node)
+		markUnhealthyWithReason(node, "BadNode", "RebootMe")
+		env.Clock.Step(11 * time.Minute)
+
+		// A committed reboot stops the pass and requeues immediately.
+		result := ExpectSingletonReconciled(ctx, repairController)
+		Expect(result.RequeueAfter).To(Equal(singleton.RequeueImmediately))
+
+		// Reboot is in-place, so nothing is queued.
+		Expect(queue.GetCommands()).To(BeEmpty())
+
+		// The NodeClaim is handed off to the reboot controller
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
+		Expect(cond.IsTrue()).To(BeTrue())
+		Expect(cond.Reason).To(Equal(v1.RebootReasonRequested))
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.RebootTerminationGracePeriodAnnotationKey, "5m0s"))
+		Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).Reason).To(Equal(string(v1.DisruptionReasonUnhealthy)))
+		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
+			"decision":          string(disruption.RebootDecision),
+			metrics.ReasonLabel: strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
+		})
+		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			metrics.ReasonLabel:   strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
+			metrics.NodePoolLabel: nodePool.Name,
+		})
+		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+			"condition":                  "bad_node",
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.TerminationModeLabel: metrics.TerminationModeEventual,
+		})
+
+		// The next pass must not recommit the reboot or clear its DisruptionReason.
+		result = ExpectSingletonReconciled(ctx, repairController)
+		Expect(result.RequeueAfter).ToNot(Equal(singleton.RequeueImmediately))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+	})
+
+	It("should leave the reboot TGP annotation unset (unbounded) when neither policy nor NodeClaim sets one", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+		}
+		newRepairController()
+		initNode(nodeClaim, node)
+		markUnhealthyWithReason(node, "BadNode", "RebootMe")
+		env.Clock.Step(11 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+		// nil policy TGP + nil NodeClaim TGP -> unbounded graceful drain: the annotation is left unset (not "0s").
+		Expect(nodeClaim.Annotations).ToNot(HaveKey(v1.RebootTerminationGracePeriodAnnotationKey))
+	})
+
+	It("should inherit the NodeClaim's TGP as the reboot bound when the policy sets none", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+		}
+		newRepairController()
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 7 * time.Minute}
+		initNode(nodeClaim, node)
+		markUnhealthyWithReason(node, "BadNode", "RebootMe")
+		env.Clock.Step(11 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.RebootTerminationGracePeriodAnnotationKey, "7m0s"))
+	})
+
+	It("should remove a stale reboot TGP annotation when the new reboot is unbounded", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+		}
+		newRepairController()
+		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.RebootTerminationGracePeriodAnnotationKey: "5m0s"})
+		initNode(nodeClaim, node)
+		markUnhealthyWithReason(node, "BadNode", "RebootMe")
+		env.Clock.Step(11 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+		Expect(nodeClaim.Annotations).ToNot(HaveKey(v1.RebootTerminationGracePeriodAnnotationKey))
+	})
+
+	Context("reboot history", func() {
+		BeforeEach(func() {
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
+				// Required default fallback; its toleration outlasts these specs so only history escalates to replace.
+				{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 48 * time.Hour, Action: cloudprovider.ReplaceNode},
+			}
+			newRepairController()
+			initNode(nodeClaim, node)
+			markUnhealthyWithReason(node, "BadNode", "RebootMe")
+			env.Clock.Step(11 * time.Minute)
+		})
+
+		// rebootAndSucceed commits a reboot through repair, then completes it successfully while the fault persists,
+		// so the node is eligible for repair again.
+		rebootAndSucceed := func() {
+			GinkgoHelper()
+			// Commits on the first pass, even right after a previous reboot finished: the commit re-reads the
+			// NodeClaim, so the sweep clearing the finished reboot's DisruptionReason in the same pass can't conflict.
+			result := ExpectSingletonReconciled(ctx, repairController)
+			Expect(result.RequeueAfter).To(Equal(singleton.RequeueImmediately))
+			Expect(queue.GetCommands()).To(BeEmpty())
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonRequested))
+			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRebooting, v1.RebootReasonSucceeded, "node rebooted and rejoined the cluster")
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+			node = ExpectExists(ctx, env.Client, node)
+			for i := range node.Status.Conditions {
+				if node.Status.Conditions[i].Type == "BadNode" {
+					node.Status.Conditions[i].LastTransitionTime = metav1.Time{Time: env.Clock.Now()}
+				}
+			}
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+			env.Clock.Step(11 * time.Minute)
+		}
+
+		It("should escalate to replacement when the fault recurs after two successful reboots", func() {
+			rebootAndSucceed()
+			rebootAndSucceed()
+
+			// A third occurrence within the window replaces the node instead of rebooting it again.
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonSucceeded))
+		})
+
+		It("should reboot again once earlier reboots age out of the window", func() {
+			rebootAndSucceed()
+			rebootAndSucceed()
+
+			// The history window runs on the repair clock, so reboots older than 24h no longer count.
+			env.Clock.Step(25 * time.Hour)
+			rebootAndSucceed()
+		})
 	})
 
 	// Repair never fires before the policy toleration elapses.

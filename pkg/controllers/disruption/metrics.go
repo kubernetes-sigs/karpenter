@@ -75,6 +75,10 @@ var (
 				Name: string(TerminateFirstDecision),
 				Help: "The candidate(s) were deleted without staging a replacement first; reactive provisioning refills afterward.",
 			},
+			{
+				Name: string(RebootDecision),
+				Help: "The candidate(s) were rebooted in place.",
+			},
 		},
 	}
 	// ApprovalDim is the `decision` dimension for the balanced-consolidation move

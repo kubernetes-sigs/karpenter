@@ -360,8 +360,9 @@ func NodePoolStatsFromNodes(nodes []*state.StateNode, reason v1.DisruptionReason
 		// This prevents odd roundup cases with percentages where replacement nodes that
 		// aren't initialized could be counted towards the total, resulting in more disruptions
 		// to active nodes than desired, where Karpenter should wait for these nodes to be
-		// healthy before continuing.
-		if !node.Managed() || !node.Initialized() {
+		// healthy before continuing. Reboot resets Initialized after issuance,
+		// but the node still counts against the budget until reboot completes.
+		if !node.Managed() || (!node.Initialized() && !node.RebootInProgress()) {
 			continue
 		}
 
@@ -376,15 +377,18 @@ func NodePoolStatsFromNodes(nodes []*state.StateNode, reason v1.DisruptionReason
 		numNodes[nodePool]++
 
 		// A node is subtracted from the allowed disruptions when it is:
-		//   1. Marked for deletion (a disruption is already in flight), or
-		//   2. NotReady — EXCEPT for the Unhealthy (repair) budget.
+		//   1. Marked for deletion (a disruption is already in flight),
+		//   2. Rebooting (an in-place disruption is already in flight), for every reason, or
+		//   3. NotReady — EXCEPT for the Unhealthy (repair) budget.
 		// Repair must not count merely-unhealthy nodes: NotReady is precisely repair's trigger, so counting those
 		// nodes against the repair budget would let a wave of unhealthy nodes starve the very budget that repairs them
 		// (a node.health cohort could zero the budget and freeze repair). An in-flight repair still counts once its
 		// candidate is MarkedForDeletion. Other reasons keep the reason-agnostic "unhealthy nodes consume budget"
 		// semantics introduced for consolidation/drift (kubernetes-sigs/karpenter#981).
 		notReady := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status != corev1.ConditionTrue
-		if node.MarkedForDeletion() || (notReady && reason != v1.DisruptionReasonUnhealthy) {
+		// Count active reboots against every disruption budget otherwise
+		// other methods could disrupt concurrently and exceed the NodePool budget.
+		if node.MarkedForDeletion() || node.RebootInProgress() || (notReady && reason != v1.DisruptionReasonUnhealthy) {
 			disrupting[nodePool]++
 		}
 	}
