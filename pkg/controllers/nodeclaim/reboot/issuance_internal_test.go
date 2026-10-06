@@ -18,9 +18,10 @@ package reboot
 
 import (
 	"context"
-	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clock "k8s.io/utils/clock/testing"
@@ -28,18 +29,16 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// Checks that a NodeClaim deleted mid-reboot doesn't leak its in-memory issuance timer
-func TestIssuanceTimerClearedOnDeletion(t *testing.T) {
-	clk := clock.NewFakeClock(time.Now())
-	c := &Controller{clock: clk, issuanceStarted: map[types.UID]time.Time{}}
-	nodeClaim := &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: "rebooting", UID: "uid-1", DeletionTimestamp: &metav1.Time{Time: clk.Now()}, Finalizers: []string{v1.TerminationFinalizer}}}
-	nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "rebooting")
-	c.ensureIssuanceStarted(nodeClaim.UID)
+var _ = Describe("Reboot Issuance Timer", func() {
+	It("should not leak the in-memory issuance timer for a NodeClaim deleted mid-reboot", func() {
+		clk := clock.NewFakeClock(time.Now())
+		c := &Controller{clock: clk, issuanceStarted: map[types.UID]time.Time{}}
+		nodeClaim := &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: "rebooting", UID: "uid-1", DeletionTimestamp: &metav1.Time{Time: clk.Now()}, Finalizers: []string{v1.TerminationFinalizer}}}
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "rebooting")
+		c.ensureIssuanceStarted(nodeClaim.UID)
 
-	if _, err := c.Reconcile(context.Background(), nodeClaim); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := c.issuanceStarted[nodeClaim.UID]; ok {
-		t.Fatal("issuance timer leaked for a deleted NodeClaim")
-	}
-}
+		_, err := c.Reconcile(context.Background(), nodeClaim)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c.issuanceStarted).ToNot(HaveKey(nodeClaim.UID))
+	})
+})
