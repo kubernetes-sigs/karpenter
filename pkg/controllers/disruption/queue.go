@@ -266,42 +266,48 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			return
 		}
 		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()))...)
-		// Drift also flows through this queue, so only report a policy for consolidation.
-		consolidationPolicy := ""
-		if cmd.ConsolidationType() != "" {
-			consolidationPolicy = pretty.ToSnakeCase(string(cmd.Candidates[i].NodePool.Spec.Disruption.ConsolidationPolicy))
-		}
-		labels := map[string]string{
-			metrics.ReasonLabel:              strings.ToLower(string(cmd.Reason())),
-			metrics.NodePoolLabel:            cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-			metrics.ConsolidationPolicyLabel: consolidationPolicy,
-			metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(cmd.Candidates[i].NodeClaim),
-		}
-		metrics.NodeClaimsDisruptedTotal.Inc(labels)
-		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
-		// Repair records the policy result on the candidate; emit the per-condition/per-image unhealthy-disrupted metric
-		// here (at actual termination), not at command production, so an abandoned command doesn't over-count.
-		if condition := cmd.Candidates[i].RepairPolicyResult.Condition; cmd.Reason() == v1.DisruptionReasonUnhealthy && condition != "" {
-			// Termination mode reflects the drain bound repair actually applied (candidate.TerminationGracePeriod),
-			// not the NodeClaim's own Spec.TGP — a forceful (0) or bounded policy overrides it. nil means repair
-			// inherited the NodeClaim's mode.
-			mode := nodeclaimutils.DisruptionTerminationMode(cmd.Candidates[i].NodeClaim)
-			if tgp := cmd.Candidates[i].TerminationGracePeriod; tgp != nil {
-				mode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
-			}
-			NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
-				conditionLabel:               pretty.ToSnakeCase(string(condition)),
-				metrics.NodePoolLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel:    cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-				imageIDLabel:                 cmd.Candidates[i].NodeClaim.Status.ImageID,
-				metrics.TerminationModeLabel: mode,
-			})
-		}
+		recordCandidateDisrupted(cmd, cmd.Candidates[i])
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
 	return multierr.Combine(errs...)
+}
+
+// recordCandidateDisrupted records the per-NodeClaim and per-pod disruption metrics for a candidate the command is
+// disrupting.
+func recordCandidateDisrupted(cmd *Command, candidate *Candidate) {
+	// Drift also flows through this queue, so only report a policy for consolidation.
+	consolidationPolicy := ""
+	if cmd.ConsolidationType() != "" {
+		consolidationPolicy = pretty.ToSnakeCase(string(candidate.NodePool.Spec.Disruption.ConsolidationPolicy))
+	}
+	labels := map[string]string{
+		metrics.ReasonLabel:              strings.ToLower(string(cmd.Reason())),
+		metrics.NodePoolLabel:            candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel:        candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
+		metrics.ConsolidationPolicyLabel: consolidationPolicy,
+		metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(candidate.NodeClaim),
+	}
+	metrics.NodeClaimsDisruptedTotal.Inc(labels)
+	metrics.PodsDisruptionInitiatedTotal.Add(float64(len(candidate.reschedulablePods)), labels)
+	// Repair records the policy result on the candidate; emit the per-condition/per-image unhealthy-disrupted metric
+	// when the disruption is carried out, not at command production, so an abandoned command doesn't over-count.
+	if condition := candidate.RepairPolicyResult.Condition; cmd.Reason() == v1.DisruptionReasonUnhealthy && condition != "" {
+		// Termination mode reflects the drain bound repair actually applied (candidate.TerminationGracePeriod),
+		// not the NodeClaim's own Spec.TGP — a forceful (0) or bounded policy overrides it. nil means repair
+		// inherited the NodeClaim's mode.
+		mode := nodeclaimutils.DisruptionTerminationMode(candidate.NodeClaim)
+		if tgp := candidate.TerminationGracePeriod; tgp != nil {
+			mode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
+		}
+		NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
+			conditionLabel:               pretty.ToSnakeCase(string(condition)),
+			metrics.NodePoolLabel:        candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel:    candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
+			imageIDLabel:                 candidate.NodeClaim.Status.ImageID,
+			metrics.TerminationModeLabel: mode,
+		})
+	}
 }
 
 // markDisrupted taints the node and adds the Disrupted condition to the NodeClaim for a candidate that is about to be disrupted
@@ -389,6 +395,15 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		"command", cmd.String(),
 	}, cmd.LogValues()...)...).Info("disrupting node(s)")
 
+	// Reboot is already handed off to its controller, so only record metrics here.
+	if cmd.Decision() == RebootDecision {
+		for _, candidate := range cmd.Candidates {
+			recordCandidateDisrupted(cmd, candidate)
+		}
+		q.recordDecisionPerformed(cmd)
+		return nil
+	}
+
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
 	markedCandidates, markDisruptedErr := q.markDisrupted(ctx, cmd)
 	// If we get a failure marking some nodes as disrupted, if we are launching replacements, we shouldn't continue
@@ -437,6 +452,11 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	q.Unlock()
 
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
+	q.recordDecisionPerformed(cmd)
+	return nil
+}
+
+func (q *Queue) recordDecisionPerformed(cmd *Command) {
 	nodePools := lo.Uniq(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
 		return c.NodePool.Name
 	}))
@@ -453,7 +473,6 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
 		ConsolidationTypeLabel: cmd.ConsolidationType(),
 	})
-	return nil
 }
 
 // HasAny checks to see if the candidate is part of an currently executing command.

@@ -252,6 +252,8 @@ type Command struct {
 	PoolDisruptionCosts map[string]float64
 	// TerminateFirst marks a delete-only terminate-first command (RFC #3203); Decision() surfaces it as TerminateFirstDecision.
 	TerminateFirst bool
+	// Reboot is already handed off to its controller, so the queue only records the decision.
+	Reboot bool
 }
 
 // Reason returns the disruption reason for this command.
@@ -270,6 +272,7 @@ var (
 	DeleteDecision  Decision = "delete"
 	// TerminateFirstDecision is a delete-only decision distinguished from DeleteDecision for terminate-first (RFC #3203).
 	TerminateFirstDecision Decision = "terminate-first"
+	RebootDecision         Decision = "reboot"
 	// ApprovedDecision and RejectedDecision are the decision label values emitted
 	// by the Balanced consolidation move metrics (consolidation_moves_total and
 	// consolidation_score).
@@ -279,6 +282,8 @@ var (
 
 func (c Command) Decision() Decision {
 	switch {
+	case len(c.Candidates) > 0 && c.Reboot:
+		return RebootDecision
 	case len(c.Candidates) > 0 && len(c.Replacements) > 0:
 		return ReplaceDecision
 	case len(c.Candidates) > 0 && len(c.Replacements) == 0:
@@ -387,6 +392,10 @@ func (c Command) SourceCost() float64 {
 // replacement with no available compatible offering contributes 0 to
 // destination cost and inflates them.
 func (c Command) EstimatedSavings() float64 {
+	// A reboot keeps the instance, so it saves nothing.
+	if c.Reboot {
+		return 0
+	}
 	sourcePrice := c.SourceCost()
 
 	// For delete consolidation, all source cost is savings
