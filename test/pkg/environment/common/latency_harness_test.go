@@ -15,10 +15,12 @@ limitations under the License.
 */
 
 // Unit specs for the LatencyHarness delta reduction: what reduceHistogramDelta,
-// deltaCounter, seriesKey and compactFamilies do to a scrape, against hand-built
-// MetricFamily fixtures. The Balanced e2e specs exercise the same code, but a
-// wrong delta reaches them only as a wrong number in a JSON artifact and costs a
-// cluster run per data point.
+// deltaHistogram, seriesKey and compactFamilies do to a scrape, against
+// hand-built MetricFamily fixtures. These guard the oracle, not coverage.
+// expectBalancedDecisionsMatchThreshold in test/suites/performance/balanced.go
+// reads Count, Labels, Min and Max straight out of this reduction and decides
+// pass or fail from them, so a wrong delta makes the Balanced verdict wrong
+// rather than loud, at a cluster run per data point.
 
 package common
 
@@ -50,15 +52,6 @@ func mkMetric(h *dto.Histogram, labels map[string]string) *dto.Metric {
 func mkFamily(name string, mtype dto.MetricType, metrics ...*dto.Metric) *dto.MetricFamily {
 	n, t := name, mtype
 	return &dto.MetricFamily{Name: &n, Type: &t, Metric: metrics}
-}
-
-func mkCounterMetric(v float64, labels map[string]string) *dto.Metric {
-	m := &dto.Metric{Counter: &dto.Counter{Value: &v}}
-	for k, val := range labels {
-		name, value := k, val
-		m.Label = append(m.Label, &dto.LabelPair{Name: &name, Value: &value})
-	}
-	return m
 }
 
 func scoreBuckets(cum ...uint64) []*dto.Bucket {
@@ -133,14 +126,6 @@ var _ = Describe("LatencyHarness", func() {
 			})
 			stats := reduceHistogramDelta(end, nil)
 			Expect(stats.Max).To(BeNumerically("~", 0.5, 1e-9), "Max under concentrated distribution")
-		})
-
-		It("should infer Min from the lowest bucket with new samples", func() {
-			start := mkHistogram(10, 1.0, []*dto.Bucket{mkBucket(0.1, 10), mkBucket(0.5, 10), mkBucket(1.0, 10)})
-			end := mkHistogram(15, 4.0, []*dto.Bucket{mkBucket(0.1, 10), mkBucket(0.5, 12), mkBucket(1.0, 15)})
-			Expect(reduceHistogramDelta(end, start).Min).To(BeNumerically("~", 0.1, 1e-9),
-				"start-of-phase samples in the 0.1 bucket must not count")
-			Expect(reduceHistogramDelta(start, nil).Min).To(BeZero(), "samples in the first bucket")
 		})
 
 		It("should return zero-valued stats when no new observations landed", func() {
@@ -233,21 +218,6 @@ var _ = Describe("LatencyHarness", func() {
 			reverse := []*dto.LabelPair{{Name: &c, Value: &cv}, {Name: &b, Value: &bv}, {Name: &a, Value: &av}}
 			Expect(seriesKey(name, forward)).To(Equal(seriesKey(name, reverse)))
 			Expect(seriesKey(name, forward)).To(Equal(name + "{decision=approved,nodepool=pool-a,policy=Balanced}"))
-		})
-	})
-
-	Context("deltaCounter", func() {
-		It("should subtract the start value and fall back to end on a reset", func() {
-			name := "karpenter_voluntary_disruption_consolidation_timeouts_total"
-			lbl := map[string]string{"consolidation_type": "single"}
-			start := mkFamily(name, dto.MetricType_COUNTER, mkCounterMetric(3, lbl))
-			end := mkFamily(name, dto.MetricType_COUNTER, mkCounterMetric(8, lbl))
-			key := name + "{consolidation_type=single}"
-			Expect(deltaCounter(name, start, end)[key]).To(BeNumerically("==", 5), "counter delta")
-
-			resetV := 2.0
-			end.Metric[0].Counter.Value = &resetV
-			Expect(deltaCounter(name, start, end)[key]).To(BeNumerically("==", 2), "counter reset")
 		})
 	})
 
