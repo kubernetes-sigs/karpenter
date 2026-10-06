@@ -54,7 +54,6 @@ const (
 const (
 	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
 	DoNotRepairAnnotationKey                   = apis.Group + "/do-not-repair"
-	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
