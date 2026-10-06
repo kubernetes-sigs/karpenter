@@ -195,14 +195,15 @@ func (env *Environment) ExpectRepairFaultInjected(node *corev1.Node) {
 	GinkgoHelper()
 	condType, condStatus, ok := env.RepairCondition()
 	Expect(ok).To(BeTrue(), "no repair condition for this provider, pass --repair-condition")
-	n := env.GetNode(node.Name)
-	env.ExpectStatusUpdated(env.ReplaceNodeConditions(&n, corev1.NodeCondition{
-		Type:               condType,
-		Status:             condStatus,
-		LastTransitionTime: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
-		Reason:             "E2ETest",
-		Message:            "injected repair-eligible fault",
-	}))
+	env.expectNodeConditionsPatched(node.Name, func(n *corev1.Node) {
+		env.ReplaceNodeConditions(n, corev1.NodeCondition{
+			Type:               condType,
+			Status:             condStatus,
+			LastTransitionTime: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
+			Reason:             "E2ETest",
+			Message:            "injected repair-eligible fault",
+		})
+	})
 }
 
 // ExpectRepairFaultCleared removes the condition ExpectRepairFaultInjected injected, healing the node.
@@ -210,9 +211,25 @@ func (env *Environment) ExpectRepairFaultCleared(node *corev1.Node) {
 	GinkgoHelper()
 	condType, _, ok := env.RepairCondition()
 	Expect(ok).To(BeTrue(), "no repair condition for this provider, pass --repair-condition")
-	n := env.GetNode(node.Name)
-	n.Status.Conditions = lo.Reject(n.Status.Conditions, func(c corev1.NodeCondition, _ int) bool { return c.Type == condType })
-	env.ExpectStatusUpdated(&n)
+	env.expectNodeConditionsPatched(node.Name, func(n *corev1.Node) {
+		n.Status.Conditions = lo.Reject(n.Status.Conditions, func(c corev1.NodeCondition, _ int) bool { return c.Type == condType })
+	})
+}
+
+// expectNodeConditionsPatched applies mutate to the node's status conditions with a strategic-merge patch, so only
+// the changed conditions are sent. A full status Update would send the whole object, and the Node status subresource
+// persists metadata: a stale read from the test's cache would silently revert a just-written label or annotation
+// (e.g. do-not-repair). The patch carries the read's resourceVersion, so a write that lands between the Get and the
+// Patch conflicts and the next attempt re-reads, rather than the conditions list being computed from a stale read.
+func (env *Environment) expectNodeConditionsPatched(name string, mutate func(*corev1.Node)) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) {
+		n := &corev1.Node{}
+		g.Expect(env.Client.Get(env.Context, types.NamespacedName{Name: name}, n)).To(Succeed())
+		stored := n.DeepCopy()
+		mutate(n)
+		g.Expect(env.Client.Status().Patch(env.Context, n, client.StrategicMergeFrom(stored, client.MergeFromWithOptimisticLock{}))).To(Succeed())
+	}).WithTimeout(time.Second * 10).Should(Succeed())
 }
 
 func (env *Environment) ReplaceNodeConditions(node *corev1.Node, conds ...corev1.NodeCondition) *corev1.Node {
