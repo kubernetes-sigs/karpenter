@@ -88,7 +88,7 @@ var (
 		UsedOn:  []runtime.Object{&v1.Node{}, &NodeClaim{}},
 		Help:    "Users set this to block node repair, independently of karpenter.sh/do-not-disrupt.",
 		Values:  []docs.Value{{Name: trueValue, Help: "Repair is blocked."}},
-		Stage:   options.NodeRepairStage,
+		Stage:   options.NodeRepairFeatureGate.Stage,
 	}
 	NodePoolHashAnnotation = wellknown.Annotation{
 		Name:    NodePoolHashAnnotationKey,

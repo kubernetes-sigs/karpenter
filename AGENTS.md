@@ -77,6 +77,16 @@ mirroring https://kubernetes.io/docs/reference/labels-annotations-taints/.
 - Enumerate the annotation's well known values as `docs.Value`s. A value's
   `Name` comes from a const, never a magic string.
 
+## Feature Gates
+
+Feature gates are documented in code as `options.FeatureGate{Name, Default, Stage, Help}`
+in `pkg/operator/options/options.go`; the `--feature-gates` default, its help text, and
+`DefaultFeatureGates` are derived from them.
+
+- Add every new gate as a `FeatureGate` var, list it in `KarpenterFeatureGates`, and
+  add its field to `FeatureGates`.
+- Reference a gate by its var (e.g. `NodeRepairFeatureGate.Name`), never a string literal.
+
 ## Issue and PR Guidelines
 
 - Never create an issue.
