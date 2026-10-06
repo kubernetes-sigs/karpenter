@@ -102,7 +102,6 @@ type Queue struct {
 	cluster             *state.Cluster
 	clock               clock.Clock
 	provisioner         *provisioning.Provisioner
-	podErrorCache       *pscheduling.PodErrorCache
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
@@ -119,7 +118,6 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		cluster:             cluster,
 		clock:               clock,
 		provisioner:         provisioner,
-		podErrorCache:       pscheduling.NewPodErrorCache(),
 	}
 	return queue
 }
@@ -366,7 +364,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	// tainted with the Karpenter taint, the provisioning controller will continue
 	// to do scheduling simulations and nominate the pods on the candidate nodes until
 	// the node is cleaned up.
-	cmd.Results.Record(log.IntoContext(ctx, operatorlogging.NopLogger), q.recorder, q.cluster, q.podErrorCache)
+	cmd.Results.Record(log.IntoContext(ctx, operatorlogging.NopLogger), q.recorder, q.cluster)
 
 	q.Lock()
 	for _, c := range cmd.Candidates {
