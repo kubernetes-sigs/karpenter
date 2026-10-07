@@ -214,9 +214,6 @@ func NewControllers(
 			deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, deletionCostQueue),
 		)
 	}
-	if !o.disableVPAPrediction {
-		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
-	}
 
 	return controllers
 }
