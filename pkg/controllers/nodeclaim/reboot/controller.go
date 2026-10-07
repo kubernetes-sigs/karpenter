@@ -224,15 +224,20 @@ func (c *Controller) reconcileIssued(ctx context.Context, nodeClaim *v1.NodeClai
 }
 
 // drain evicts pods before reboot, with residual pods allowed to ride the reboot post deadline.
-// Every reboot observes at least minDrainTime to catch late pod bindings.
+// A drained reboot observes at least minDrainTime to catch late pod bindings.
 func (c *Controller) drain(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node, tgp *time.Duration) (done bool, res reconcile.Result, err error) {
+	// A forceful reboot skips the drain, so every pod rides the reboot.
+	if tgp != nil && *tgp == 0 {
+		return true, reconcile.Result{}, nil
+	}
 	// Drain deadlines are measured from when the reboot was requested.
 	floor := rebootRequestedAt(nodeClaim).Add(minDrainTime)
 	var deadline *time.Time
 	if tgp != nil {
 		deadline = lo.ToPtr(rebootRequestedAt(nodeClaim).Add(max(*tgp, minDrainTime)))
 	}
-	if err := c.terminator.Drain(ctx, node, deadline); err != nil {
+	// A timeout, not a force-delete deadline: residual pods are never deleted.
+	if err := c.terminator.Drain(ctx, node, deadline, terminator.Timeout); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return false, reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
@@ -243,7 +248,7 @@ func (c *Controller) drain(ctx context.Context, nodeClaim *v1.NodeClaim, node *c
 		if remaining := deadline.Sub(c.clock.Now()); remaining > 0 {
 			return false, reconcile.Result{RequeueAfter: min(pollInterval, remaining)}, nil
 		}
-		return true, reconcile.Result{}, nil // deadline elapsed (always at or past the floor)
+		return true, reconcile.Result{}, nil // deadline elapsed (always at or past the floor): residual pods ride the reboot
 	}
 	// Hold through the minimum drain window to catch late bindings.
 	if remaining := floor.Sub(c.clock.Now()); remaining > 0 {
