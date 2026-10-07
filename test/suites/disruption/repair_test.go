@@ -39,7 +39,7 @@ import (
 // other providers pass --repair-condition, and the specs skip without one.
 var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 	BeforeAll(func() {
-		if _, _, ok := env.RepairCondition(); !ok {
+		if _, ok := env.RepairCondition(); !ok {
 			Skip("node repair regression specs require --repair-condition for this provider")
 		}
 	})
