@@ -61,8 +61,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("interference/scaleOut", 0.40)),
 				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("interference/scaleOut", 620)),
-				"Karpenter controller P95 memory should be less than 620 MB during scale-out")
+			Expect(scaleOutReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("interference/scaleOut", 310)),
+				"Karpenter controller P95 live heap should be less than 310 MB during scale-out")
 			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("interference/scaleOut", 0.90)),
 				"Karpenter controller avg CPU should be less than 0.90 cores during scale-out")
 
@@ -90,8 +90,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should be greater than 38%")
 			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("interference/interference", 0.40)),
 				"Average memory utilization should be greater than 40%")
-			Expect(interferenceReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("interference/interference", 1205)),
-				"Karpenter controller P95 memory should be less than 1205 MB during interference")
+			Expect(interferenceReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("interference/interference", 590)),
+				"Karpenter controller P95 live heap should be less than 590 MB during interference")
 			Expect(interferenceReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("interference/interference", 1.30)),
 				"Karpenter controller avg CPU should be less than 1.30 cores during interference")
 
@@ -124,8 +124,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average CPU utilization should remain greater than 38% after consolidation")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("interference/consolidation", 0.40)),
 				"Average memory utilization should remain greater than 40% after consolidation")
-			Expect(consolidationReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("interference/consolidation", 820)),
-				"Karpenter controller P95 memory should be less than 820 MB during consolidation")
+			Expect(consolidationReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("interference/consolidation", 540)),
+				"Karpenter controller P95 live heap should be less than 540 MB during consolidation")
 			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("interference/consolidation", 0.80)),
 				"Karpenter controller avg CPU should be less than 0.80 cores during consolidation")
 

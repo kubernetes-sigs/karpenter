@@ -66,6 +66,8 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	if report.MetricsSampleCount > 0 {
 		GinkgoWriter.Printf("Karpenter Memory (P95/Avg/Max): %.2f / %.2f / %.2f MB (%d samples)\n",
 			report.KarpenterP95MemoryMB, report.KarpenterAvgMemoryMB, report.KarpenterMaxMemoryMB, report.MetricsSampleCount)
+		GinkgoWriter.Printf("Karpenter Heap (P95/Avg/Max): %.2f / %.2f / %.2f MB (%d samples)\n",
+			report.KarpenterP95HeapMB, report.KarpenterAvgHeapMB, report.KarpenterMaxHeapMB, report.MetricsSampleCount)
 		GinkgoWriter.Printf("Karpenter CPU (P95/Avg/Max): %.4f / %.4f / %.4f cores (%d samples)\n",
 			report.KarpenterP95CPUCores, report.KarpenterAvgCPUCores, report.KarpenterMaxCPUCores, report.MetricsSampleCount)
 	} else {
@@ -170,6 +172,9 @@ func ReportScaleOut(env *common.Environment, testName string, expectedPods int, 
 		KarpenterP95MemoryMB:    stats.P95MemoryMB,
 		KarpenterAvgMemoryMB:    stats.AvgMemoryMB,
 		KarpenterMaxMemoryMB:    stats.MaxMemoryMB,
+		KarpenterP95HeapMB:      stats.P95HeapMB,
+		KarpenterAvgHeapMB:      stats.AvgHeapMB,
+		KarpenterMaxHeapMB:      stats.MaxHeapMB,
 		KarpenterP95CPUCores:    stats.P95CPUCores,
 		KarpenterAvgCPUCores:    stats.AvgCPUCores,
 		KarpenterMaxCPUCores:    stats.MaxCPUCores,
@@ -243,6 +248,9 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 		KarpenterP95MemoryMB:    stats.P95MemoryMB,
 		KarpenterAvgMemoryMB:    stats.AvgMemoryMB,
 		KarpenterMaxMemoryMB:    stats.MaxMemoryMB,
+		KarpenterP95HeapMB:      stats.P95HeapMB,
+		KarpenterAvgHeapMB:      stats.AvgHeapMB,
+		KarpenterMaxHeapMB:      stats.MaxHeapMB,
 		KarpenterP95CPUCores:    stats.P95CPUCores,
 		KarpenterAvgCPUCores:    stats.AvgCPUCores,
 		KarpenterMaxCPUCores:    stats.MaxCPUCores,
@@ -360,6 +368,9 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 		KarpenterP95MemoryMB:    stats.P95MemoryMB,
 		KarpenterAvgMemoryMB:    stats.AvgMemoryMB,
 		KarpenterMaxMemoryMB:    stats.MaxMemoryMB,
+		KarpenterP95HeapMB:      stats.P95HeapMB,
+		KarpenterAvgHeapMB:      stats.AvgHeapMB,
+		KarpenterMaxHeapMB:      stats.MaxHeapMB,
 		KarpenterP95CPUCores:    stats.P95CPUCores,
 		KarpenterAvgCPUCores:    stats.AvgCPUCores,
 		KarpenterMaxCPUCores:    stats.MaxCPUCores,
@@ -441,6 +452,10 @@ func ReportScaleOutWithOutput(env *common.Environment, testName string, expected
 		return nil, err
 	}
 	OutputPerformanceReport(report, filePrefix)
+	// Without samples every resource stat is zero and would pass its threshold.
+	if report.MetricsSampleCount == 0 {
+		return nil, fmt.Errorf("collected no Karpenter metrics samples")
+	}
 	return report, nil
 }
 
@@ -451,6 +466,10 @@ func ReportConsolidationWithOutput(env *common.Environment, testName string, ini
 		return nil, err
 	}
 	OutputPerformanceReport(report, filePrefix)
+	// Without samples every resource stat is zero and would pass its threshold.
+	if report.MetricsSampleCount == 0 {
+		return nil, fmt.Errorf("collected no Karpenter metrics samples")
+	}
 	return report, nil
 }
 
@@ -461,5 +480,9 @@ func ReportDriftWithOutput(env *common.Environment, testName string, expectedPod
 		return nil, err
 	}
 	OutputPerformanceReport(report, filePrefix)
+	// Without samples every resource stat is zero and would pass its threshold.
+	if report.MetricsSampleCount == 0 {
+		return nil, fmt.Errorf("collected no Karpenter metrics samples")
+	}
 	return report, nil
 }
