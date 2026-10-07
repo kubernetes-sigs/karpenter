@@ -14,11 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Balanced consolidation across two instance-family-restricted NodePools, one
-// dense and one sparse, checking that the moves Balanced scored belong to the
-// pools this fixture created. KWOK only: the fixture selects on KWOK
-// instance-family labels.
-
 package performance
 
 import (

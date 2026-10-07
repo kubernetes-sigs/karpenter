@@ -14,13 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Helpers shared by the three Balanced consolidation specs.
-// expectBalancedDecisionsMatchThreshold checks that every scored Balanced move
-// the run recorded sits on the right side of the 1/BalancedK threshold, to the
-// resolution the consolidation_score bucket layout allows: the approved arm
-// compares Min against the bucket bound below the threshold, so it cannot
-// distinguish an approval at 0.34 from one at 0.5.
-
 package performance
 
 import (

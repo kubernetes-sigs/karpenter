@@ -14,18 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// LatencyHarness scrapes Karpenter's /metrics from the active pod before and
-// after a test phase and reports the difference, so earlier phases do not leak
-// into the numbers. Stats are count, sum, mean and bucket bounds; Min and Max
-// say which buckets samples landed in, not what the smallest and largest sample
-// were, and there are no percentiles because a quantile interpolated across this
-// bucket layout from a handful of samples is not a measurement. The +Inf bucket
-// is excluded and BucketTruncationRate says how much of the distribution fell
-// past the last finite bound. A restart zeroes every metric the process exports,
-// so Stop fails the spec when process_start_time_seconds moved instead of
-// reporting deltas over a window the spec did not ask for. TargetHistograms
-// omits the metrics that time the KWOK fake provider rather than Karpenter.
-
 package common
 
 import (
@@ -276,9 +264,6 @@ func reduceHistogramDelta(end *dto.Histogram, startHistogram *dto.Histogram) His
 	startCount, startSum, startCumBy := resolveDeltaBaseline(startHistogram, end)
 	deltaCum, ok := cumulativeDelta(endBuckets, startCumBy)
 	if !ok {
-		// resolveDeltaBaseline's scalar checks miss a restart that re-accumulated past
-		// the old sample_count. The surviving evidence is a non-monotonic bucket delta,
-		// which hides the highest occupied bucket from inferMaxBound.
 		startCount, startSum = 0, 0
 		deltaCum, _ = cumulativeDelta(endBuckets, nil)
 	}

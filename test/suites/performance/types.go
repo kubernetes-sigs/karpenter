@@ -57,7 +57,6 @@ type PerformanceReport struct {
 	KarpenterMaxCPUCores float64 `json:"karpenter_max_cpu_cores"`
 	MetricsSampleCount   int     `json:"metrics_sample_count"`
 
-	// Karpenter histogram and counter deltas over the measured phase, from LatencyHarness
 	LatencyStats map[string]common.HistogramStats `json:"latency_stats,omitempty"`
 	Counters     map[string]uint64                `json:"counters,omitempty"`
 

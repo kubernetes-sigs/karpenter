@@ -256,7 +256,6 @@ const (
 	leaderPodPollTimeout  = 2 * time.Minute
 )
 
-// EventuallyFindActiveKarpenterPod polls FindActiveKarpenterPod until the leader lease resolves to a pod that exists.
 func (env *Environment) EventuallyFindActiveKarpenterPod(ctx context.Context) (*corev1.Pod, error) {
 	var pod *corev1.Pod
 	var lastErr error
