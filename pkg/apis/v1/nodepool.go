@@ -94,7 +94,7 @@ type Disruption struct {
 	ConsolidateAfter NillableDuration `json:"consolidateAfter,omitempty"`
 	//nolint:kubeapilinter
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
-	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified.
+	// algorithm.
 	// Valid values: "WhenEmpty", "WhenEmptyOrUnderutilized", "Balanced".
 	// When replicas is set, ConsolidationPolicy is simply ignored.
 	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
