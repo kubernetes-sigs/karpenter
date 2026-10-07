@@ -91,7 +91,18 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
-func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time) error {
+// DrainMode says what a drain does with pods still on the node at its deadline.
+type DrainMode int
+
+const (
+	// ForceDelete deletes pods whose grace period would extend past the deadline, bypassing PDBs and do-not-disrupt.
+	ForceDelete DrainMode = iota
+	// Timeout only evicts, and leaves pods still on the node once the deadline passes.
+	Timeout
+)
+
+func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time, mode DrainMode) error {
+	timeout := mode == Timeout && nodeGracePeriodExpirationTime != nil
 	pods, err := nodeutils.GetPods(ctx, t.kubeClient, node.Name)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
@@ -111,7 +122,7 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	// naturally.
 	var deleteEligible, gracefulCandidates []*corev1.Pod
 	for _, p := range waiting {
-		if needsForceDelete(p, nodeGracePeriodExpirationTime, t.clock) {
+		if mode == ForceDelete && needsForceDelete(p, nodeGracePeriodExpirationTime, t.clock) {
 			deleteEligible = append(deleteEligible, p)
 		} else {
 			gracefulCandidates = append(gracefulCandidates, p)
@@ -123,7 +134,11 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	podGroups := t.groupPodsByPriority(gracefulCandidates)
 	for _, group := range podGroups {
 		if len(group) > 0 {
-			t.evictionQueue.Add(nodeGracePeriodExpirationTime, group...)
+			if timeout {
+				t.evictionQueue.AddWithTimeout(*nodeGracePeriodExpirationTime, group...)
+			} else {
+				t.evictionQueue.Add(nodeGracePeriodExpirationTime, group...)
+			}
 			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(waiting)))
 		}
 	}
