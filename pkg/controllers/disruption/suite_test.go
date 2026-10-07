@@ -190,7 +190,7 @@ var _ = AfterEach(func() {
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
 	disruption.NodepoolDecisionsPerformed.Reset()
-	disruption.NodeClaimsUnhealthyDisruptedTotal.Reset()
+	health.NodeClaimsUnhealthyDisruptedTotal.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {

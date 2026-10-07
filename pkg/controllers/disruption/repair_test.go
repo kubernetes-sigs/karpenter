@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	karpenterevents "sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -189,7 +190,7 @@ var _ = Describe("Repair", func() {
 
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmds[0])
 		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
-		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, metricLabels)
+		ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, metricLabels)
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -240,7 +241,7 @@ var _ = Describe("Repair", func() {
 			metrics.ReasonLabel:   strings.ToLower(string(v1.DisruptionReasonUnhealthy)),
 			metrics.NodePoolLabel: nodePool.Name,
 		})
-		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+		ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
 			"condition":                  "bad_node",
 			metrics.NodePoolLabel:        nodePool.Name,
 			metrics.TerminationModeLabel: metrics.TerminationModeEventual,
@@ -870,12 +871,12 @@ var _ = Describe("Repair", func() {
 		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 		Expect(ExpectExists(ctx, env.Client, nodeClaim).Annotations).To(
 			HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, env.Clock.Now().Add(5*time.Minute).Format(time.RFC3339)))
-		ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
-			disruption.RepairCondition.Name: "high_priority",
-			metrics.NodePoolLabel:           nodePool.Name,
-			metrics.CapacityTypeLabel:       v1.CapacityTypeOnDemand,
-			disruption.ImageID.Name:         "ami-test-1234",
-			metrics.TerminationModeLabel:    metrics.TerminationModeEventual,
+		ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+			health.RepairCondition.Name:  "high_priority",
+			metrics.NodePoolLabel:        nodePool.Name,
+			metrics.CapacityTypeLabel:    v1.CapacityTypeOnDemand,
+			health.ImageID.Name:          "ami-test-1234",
+			metrics.TerminationModeLabel: metrics.TerminationModeEventual,
 		})
 	})
 

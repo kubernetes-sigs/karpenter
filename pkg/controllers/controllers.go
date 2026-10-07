@@ -42,6 +42,7 @@ import (
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
+	uninitializedrepair "sigs.k8s.io/karpenter/pkg/controllers/node/health/uninitialized"
 	nodehydration "sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
@@ -175,10 +176,13 @@ func NewControllers(
 		)
 	}
 
-	// Register the reboot controller alongside node repair. The repair disruption method itself is
-	// registered in the disruption controller; the standalone node/health controller was removed by #3311.
-	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
-		controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+	// Register the reboot controller and the uninitialized-node repair controller alongside node repair. The repair
+	// disruption method itself, which handles initialized nodes, is registered in the disruption controller.
+	if options.FromContext(ctx).FeatureGates.NodeRepair {
+		controllers = append(controllers,
+			nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
+			uninitializedrepair.NewController(clock, kubeClient, cluster, recorder),
+		)
 	}
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))

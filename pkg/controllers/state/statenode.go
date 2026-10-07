@@ -214,6 +214,14 @@ func (in *StateNode) GetRepairResult(now time.Time) health.RepairResult {
 	return health.Resolve(in.repairPolicyMatches, now)
 }
 
+// GetRepairResultSince is GetRepairResult with each policy's toleration measured from no earlier than notBefore.
+func (in *StateNode) GetRepairResultSince(now, notBefore time.Time) health.RepairResult {
+	if in.Node == nil {
+		return health.RepairResult{}
+	}
+	return health.ResolveSince(in.repairPolicyMatches, now, notBefore)
+}
+
 func (in *StateNode) Name() string {
 	if in.Node == nil {
 		return in.NodeClaim.Name

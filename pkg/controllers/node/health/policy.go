@@ -342,6 +342,20 @@ func Resolve(matches []RepairPolicyMatch, now time.Time) RepairResult {
 	return result
 }
 
+// ResolveSince is Resolve with every match's toleration measured from no earlier than notBefore, so time a condition
+// held before notBefore (e.g. while the node was rebooting) doesn't count toward its toleration or its score.
+func ResolveSince(matches []RepairPolicyMatch, now, notBefore time.Time) RepairResult {
+	result := RepairResult{}
+	for _, match := range matches {
+		eligibleAt := match.eligibleAt
+		if earliest := notBefore.Add(match.policy.TolerationDuration); eligibleAt.Before(earliest) {
+			eligibleAt = earliest
+		}
+		result.mergePolicy(match.policy, match.rank, eligibleAt, now)
+	}
+	return result
+}
+
 // Matches returns true when the condition is covered by the provider policy set, regardless of toleration.
 func (p *RepairPolicyMatcher) Matches(condition corev1.NodeCondition) bool {
 	_, ok := p.groups[policyKey{conditionType: condition.Type, conditionStatus: condition.Status}]

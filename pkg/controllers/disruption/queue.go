@@ -50,6 +50,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -300,11 +301,11 @@ func recordCandidateDisrupted(cmd *Command, candidate *Candidate) {
 		if tgp := candidate.TerminationGracePeriod; tgp != nil {
 			mode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
 		}
-		NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
-			conditionLabel:               pretty.ToSnakeCase(string(condition)),
+		health.NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
+			health.ConditionLabel:        pretty.ToSnakeCase(string(condition)),
 			metrics.NodePoolLabel:        candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel:    candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
-			imageIDLabel:                 candidate.NodeClaim.Status.ImageID,
+			health.ImageIDLabel:          candidate.NodeClaim.Status.ImageID,
 			metrics.TerminationModeLabel: mode,
 		})
 	}
