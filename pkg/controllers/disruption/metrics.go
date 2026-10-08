@@ -53,6 +53,8 @@ var (
 		Help:   "The consolidation algorithm that produced the decision.",
 		Values: []opmetrics.Value{MultiNodeConsolidationType, SingleNodeConsolidationType, EmptyConsolidationType},
 	}
+	// DecisionDim is the `decision` dimension for the voluntary-disruption decision
+	// counters, whose value is the command's action.
 	DecisionDim = opmetrics.Label{
 		Name: decisionLabel,
 		Help: "The disruption decision taken for the candidate(s).",
@@ -70,12 +72,29 @@ var (
 				Help: "The candidate(s) were deleted without replacement.",
 			},
 			{
+				Name: string(TerminateFirstDecision),
+				Help: "The candidate(s) were deleted without staging a replacement first; reactive provisioning refills afterward.",
+			},
+			{
+				Name: string(RebootDecision),
+				Help: "The candidate(s) were rebooted in place.",
+			},
+		},
+	}
+	// ApprovalDim is the `decision` dimension for the balanced-consolidation move
+	// metrics, which score each candidate move and record whether it was approved or
+	// rejected — a disjoint value set from DecisionDim, so it is a separate Label.
+	ApprovalDim = opmetrics.Label{
+		Name: decisionLabel,
+		Help: "Whether a scored balanced-consolidation move was approved or rejected.",
+		Values: []opmetrics.Value{
+			{
 				Name: string(ApprovedDecision),
-				Help: "The disruption decision was approved for execution.",
+				Help: "The move's cost savings justified the pod disruption; it was approved.",
 			},
 			{
 				Name: string(RejectedDecision),
-				Help: "The disruption decision was rejected before execution.",
+				Help: "The move's cost savings did not justify the pod disruption; it was rejected.",
 			},
 		},
 	}
@@ -105,6 +124,7 @@ var (
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]opmetrics.Label{metrics.DisruptionReason, ConsolidationType},
+		opmetrics.Beta,
 	)
 	DecisionsPerformedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -115,6 +135,7 @@ var (
 			Help:      "Number of disruption decisions performed. Labeled by disruption decision, reason, and consolidation type.",
 		},
 		[]opmetrics.Label{DecisionDim, metrics.DisruptionReason, ConsolidationType},
+		opmetrics.GA,
 	)
 	NodepoolDecisionsPerformed = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -125,6 +146,7 @@ var (
 			Help:      "Number of disruption decisions performed by nodepool. Labeled by nodepool name, disruption decision, reason, and consolidation type.",
 		},
 		[]opmetrics.Label{metrics.NodePool, DecisionDim, metrics.DisruptionReason, ConsolidationType},
+		opmetrics.Alpha,
 	)
 	EligibleNodes = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -135,6 +157,7 @@ var (
 			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption reason.",
 		},
 		[]opmetrics.Label{metrics.DisruptionReason},
+		opmetrics.Beta,
 	)
 	ConsolidationTimeoutsTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -145,6 +168,7 @@ var (
 			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
 		},
 		[]opmetrics.Label{ConsolidationType},
+		opmetrics.Beta,
 	)
 	FailedValidationsTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -155,6 +179,7 @@ var (
 			Help:      "Number of candidates that were selected for disruption but failed validation. Labeled by consolidation type.",
 		},
 		[]opmetrics.Label{ConsolidationType},
+		opmetrics.Alpha,
 	)
 	NodePoolAllowedDisruptions = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -165,6 +190,7 @@ var (
 			Help:      "The number of nodes for a given NodePool that can be concurrently disrupting at a point in time. Labeled by NodePool. Note that allowed disruptions can change very rapidly, as new nodes may be created and others may be deleted at any point.",
 		},
 		[]opmetrics.Label{metrics.NodePool, metrics.DisruptionReason},
+		opmetrics.GA,
 	)
 	NodePoolNodesConsumingBudgets = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -175,6 +201,7 @@ var (
 			Help:      "The number of nodes consuming the budget of a nodepool at a point in time. Labeled by NodePool.",
 		},
 		[]opmetrics.Label{metrics.NodePool, metrics.DisruptionReason},
+		opmetrics.Alpha,
 	)
 	DisruptionQueueFailuresTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -185,6 +212,7 @@ var (
 			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
 		[]opmetrics.Label{DecisionDim, metrics.DisruptionReason, ConsolidationType},
+		opmetrics.Beta,
 	)
 	ConsolidationScoreHistogram = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
@@ -194,7 +222,8 @@ var (
 			Help:      "Score of balanced consolidation moves. Labeled by decision, NodePool, and policy.",
 			Buckets:   []float64{0.1, 0.25, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0},
 		},
-		[]opmetrics.Label{DecisionDim, metrics.NodePool, Policy},
+		[]opmetrics.Label{ApprovalDim, metrics.NodePool, Policy},
+		opmetrics.Alpha,
 	)
 	ConsolidationMovesTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -203,6 +232,37 @@ var (
 			Name:      "consolidation_moves_total",
 			Help:      "Number of balanced consolidation moves. Labeled by decision, NodePool, and policy.",
 		},
-		[]opmetrics.Label{DecisionDim, metrics.NodePool, Policy},
+		[]opmetrics.Label{ApprovalDim, metrics.NodePool, Policy},
+		opmetrics.Alpha,
 	)
+	// NodeClaimsUnhealthyDisruptedTotal preserves the per-condition/per-image breakdown the retired node.health
+	// controller emitted, which the reason-labeled karpenter_nodeclaims_disrupted_total loses. Labeled by the repair
+	// condition, the owning NodePool, the capacity type, and the image ID.
+	NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeClaimSubsystem,
+			Name:      "unhealthy_disrupted_total",
+			Help:      "Number of unhealthy nodeclaims disrupted in total by node repair. Labeled by the condition the node was disrupted on, the owning nodepool, the capacity type, the image ID, and the termination mode.",
+		},
+		[]opmetrics.Label{RepairCondition, metrics.NodePool, metrics.CapacityType, ImageID, metrics.TerminationMode},
+		opmetrics.Alpha,
+	)
+)
+
+const (
+	conditionLabel = "condition"
+	imageIDLabel   = "image_id"
+)
+
+var (
+	RepairCondition = opmetrics.Label{
+		Name: conditionLabel,
+		Help: "The node status condition type that triggered node repair disruption.",
+	}
+	ImageID = opmetrics.Label{
+		Name: imageIDLabel,
+		Help: "The image ID of the node that was disrupted.",
+	}
 )

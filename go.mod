@@ -4,8 +4,7 @@ go 1.26.6
 
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
-	github.com/avast/retry-go v3.0.0+incompatible
-	github.com/awslabs/operatorpkg v0.0.0-20260828233137-b2a3ac602e40
+	github.com/awslabs/operatorpkg v0.0.0-20261002163259-5e8ed3699dea
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936

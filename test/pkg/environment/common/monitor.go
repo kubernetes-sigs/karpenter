@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -41,6 +42,8 @@ type Monitor struct {
 	mu sync.RWMutex
 
 	nodesAtReset map[string]*corev1.Node
+	// restartsAtReset snapshots each pod's container restart counts at the last Reset()
+	restartsAtReset map[types.UID]map[string]int32 // pod UID -> container name -> restart count
 }
 
 type state struct {
@@ -52,9 +55,10 @@ type state struct {
 
 func NewMonitor(ctx context.Context, kubeClient client.Client) *Monitor {
 	m := &Monitor{
-		ctx:          ctx,
-		kubeClient:   kubeClient,
-		nodesAtReset: map[string]*corev1.Node{},
+		ctx:             ctx,
+		kubeClient:      kubeClient,
+		nodesAtReset:    map[string]*corev1.Node{},
+		restartsAtReset: map[types.UID]map[string]int32{},
 	}
 	m.Reset()
 	return m
@@ -67,10 +71,18 @@ func (m *Monitor) Reset() {
 
 	st := m.poll()
 	m.nodesAtReset = deepCopyMap(st.nodes)
+	m.restartsAtReset = map[types.UID]map[string]int32{}
+	for _, pod := range st.pods.Items {
+		containers := map[string]int32{}
+		for _, cs := range pod.Status.ContainerStatuses {
+			containers[cs.Name] = cs.RestartCount
+		}
+		m.restartsAtReset[pod.UID] = containers
+	}
 }
 
-// RestartCount returns the containers and number of restarts for that container for all containers in the pods in the
-// given namespace
+// RestartCount returns the containers and number of restarts observed since the last Reset() for that container
+// for all containers in the pods in the given namespace.
 func (m *Monitor) RestartCount(namespace string) map[string]int {
 	st := m.poll()
 
@@ -81,9 +93,13 @@ func (m *Monitor) RestartCount(namespace string) map[string]int {
 		if pod.Namespace != namespace {
 			continue
 		}
+		// A pod with no baseline (UID absent) is new since the lastReset(); its counts are
+		// diffed against a zero value.
+		baseline := m.restartsAtReset[pod.UID]
 		for _, cs := range pod.Status.ContainerStatuses {
-			name := fmt.Sprintf("%s/%s", pod.Name, cs.Name)
-			restarts[name] = int(cs.RestartCount)
+			if delta := int(cs.RestartCount - baseline[cs.Name]); delta > 0 {
+				restarts[fmt.Sprintf("%s/%s", pod.Name, cs.Name)] = delta
+			}
 		}
 	}
 	return restarts

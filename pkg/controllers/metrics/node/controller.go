@@ -80,6 +80,7 @@ func initializeMetrics() {
 			Help:      "Node allocatable are the resources allocatable by nodes.",
 		},
 		nodeLabelNamesWithResourceType(),
+		opmetrics.Beta,
 	)
 	TotalPodRequests = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -90,6 +91,7 @@ func initializeMetrics() {
 			Help:      "Node total pod requests are the resources requested by pods bound to nodes, including the DaemonSet pods.",
 		},
 		nodeLabelNamesWithResourceType(),
+		opmetrics.Beta,
 	)
 	TotalPodLimits = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -100,6 +102,7 @@ func initializeMetrics() {
 			Help:      "Node total pod limits are the resources specified by pod limits, including the DaemonSet pods.",
 		},
 		nodeLabelNamesWithResourceType(),
+		opmetrics.Beta,
 	)
 	TotalDaemonRequests = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -110,6 +113,7 @@ func initializeMetrics() {
 			Help:      "Node total daemon requests are the resource requested by DaemonSet pods bound to nodes.",
 		},
 		nodeLabelNamesWithResourceType(),
+		opmetrics.Beta,
 	)
 	TotalDaemonLimits = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -120,6 +124,7 @@ func initializeMetrics() {
 			Help:      "Node total daemon limits are the resources specified by DaemonSet pod limits.",
 		},
 		nodeLabelNamesWithResourceType(),
+		opmetrics.Beta,
 	)
 	SystemOverhead = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -130,6 +135,7 @@ func initializeMetrics() {
 			Help:      "Node system daemon overhead are the resources reserved for system overhead, the difference between the node's capacity and allocatable values are reported by the status.",
 		},
 		nodeLabelNamesWithResourceType(),
+		opmetrics.Beta,
 	)
 	Lifetime = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -140,6 +146,7 @@ func initializeMetrics() {
 			Help:      "Node age in seconds",
 		},
 		nodeLabelNames(),
+		opmetrics.Alpha,
 	)
 	ClusterUtilization = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -150,6 +157,7 @@ func initializeMetrics() {
 			Help:      "Utilization of allocatable resources by pod requests",
 		},
 		[]opmetrics.Label{metrics.ResourceType},
+		opmetrics.Alpha,
 	)
 }
 

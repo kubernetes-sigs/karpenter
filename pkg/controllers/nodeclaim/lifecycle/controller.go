@@ -23,7 +23,6 @@ import (
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
@@ -43,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -78,7 +78,7 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, nodePoolState *nodepoolhealth.State, registrationHooks []cloudprovider.NodeLifecycleHook) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, nodePoolState *nodepoolhealth.State, registrationHooks []cloudprovider.NodeLifecycleHook) *Controller {
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
@@ -86,7 +86,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 		nodePoolState: nodePoolState,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Hour, time.Minute), recorder: recorder, clock: clk},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cluster: cluster, cache: cache.New(time.Hour, time.Minute), recorder: recorder, clock: clk},
 		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, npState: nodePoolState, registrationHooks: registrationHooks, clock: clk},
 		initialization: &Initialization{kubeClient: kubeClient, clock: clk},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, npState: nodePoolState},
@@ -296,25 +296,14 @@ func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx c
 	// We use the kubernetes object TerminationGracePeriod to infer that the DeletionTimestamp is always equal to the time the NodeClaim is deleted.
 	// This should not be confused with the NodeClaim.spec.terminationGracePeriod field introduced in Karpenter Custom Resources.
 	if nodeClaim.Spec.TerminationGracePeriod != nil && !nodeClaim.DeletionTimestamp.IsZero() {
-		terminationTimeString := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339)
-		return c.annotateTerminationGracePeriodTerminationTime(ctx, nodeClaim, terminationTimeString)
+		terminationTime := nodeClaim.DeletionTimestamp.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
+		if err := nodeclaimutils.PatchTerminationTimestampAnnotation(ctx, c.kubeClient, nodeClaim, terminationTime); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		terminationTimeString := terminationTime.Format(time.RFC3339)
+		log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTimeString).Info("annotated nodeclaim")
+		c.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, terminationTimeString))
 	}
-
-	return nil
-}
-
-func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.Context, nodeClaim *v1.NodeClaim, terminationTime string) error {
-	stored := nodeClaim.DeepCopy()
-	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
-
-	// We use client.MergeFromWithOptimisticLock because patching a terminationGracePeriod annotation
-	// can cause races with the health controller, as that controller sets the current time as the terminationGracePeriod annotation
-	// Here, We want to resolve any conflict and not overwrite the terminationGracePeriod annotation
-	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
-	c.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, terminationTime))
 
 	return nil
 }

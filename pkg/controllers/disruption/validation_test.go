@@ -20,20 +20,85 @@ import (
 	"context"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
+var _ = Describe("Repair Method Registration", func() {
+	var enabledCtx, disabledCtx context.Context
+
+	BeforeEach(func() {
+		enabledCtx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}}))
+		disabledCtx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
+	})
+
+	It("registers repair when the feature gate is enabled", func() {
+		methods := disruption.NewMethods(enabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		Expect(repairMethodCount(methods)).To(Equal(1))
+	})
+
+	It("panics when repair is enabled on cluster state built without a matcher", func() {
+		withoutMatcher := state.NewCluster(env.Clock, env.Client, cloudProvider)
+		Expect(func() {
+			disruption.NewMethods(enabledCtx, env.Clock, withoutMatcher, env.Client, prov, cloudProvider, recorder, queue)
+		}).To(PanicWith("node repair requires cluster state built with a repair policy matcher"))
+	})
+
+	It("does not register repair when the feature gate is disabled", func() {
+		methods := disruption.NewMethods(disabledCtx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		Expect(repairMethodCount(methods)).To(BeZero())
+	})
+
+	It("builds no matcher when the feature gate is disabled", func() {
+		cloudProvider.RepairPolicy = nil
+		Expect(health.NewRepairPolicyMatcher(disabledCtx, cloudProvider)).To(BeNil())
+	})
+
+	It("builds a matcher when the feature gate is enabled and policies are valid", func() {
+		Expect(health.NewRepairPolicyMatcher(enabledCtx, cloudProvider)).NotTo(BeNil())
+	})
+
+	It("fails when repair is enabled without any policies", func() {
+		cloudProvider.RepairPolicy = nil
+		_, err := health.NewRepairPolicyMatcher(enabledCtx, cloudProvider)
+		Expect(err).To(MatchError("node repair requires the cloud provider to define RepairPolicies, but it defines none"))
+	})
+
+	It("fails when the complete policy set is invalid", func() {
+		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "[", Action: cloudprovider.ReplaceNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, Action: cloudprovider.ReplaceNode},
+		}
+		_, err := health.NewRepairPolicyMatcher(enabledCtx, cloudProvider)
+		Expect(err).To(MatchError(ContainSubstring("node repair requires valid RepairPolicies")))
+	})
+})
+
+func repairMethodCount(methods []disruption.Method) int {
+	count := 0
+	for _, method := range methods {
+		if _, ok := method.(*disruption.Repair); ok {
+			count++
+		}
+	}
+	return count
+}
+
 func NewMethodsWithRealValidator() []disruption.Method {
-	return disruption.NewMethods(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+	return disruption.NewMethods(ctx, env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue)
 }
 
 type NopValidator struct{}
@@ -48,7 +113,7 @@ func NewMethodsWithNopValidator() []disruption.Method {
 	multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	return []disruption.Method{
-		disruption.NewStaticDrift(cluster, prov, cloudProvider),
+		disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder),
 		disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
 		emptiness,
 		multiNodeConsolidation,

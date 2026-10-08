@@ -93,6 +93,7 @@ var (
 			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, whether the pod is scheduled, nodepool name, zone, architecture, capacity type, instance type, pod phase, pod readiness, and whether the node is Karpenter-managed.",
 		},
 		labelNames(),
+		opmetrics.Beta,
 	)
 	PodStartupDurationSeconds = opmetrics.NewPrometheusSummary(
 		crmetrics.Registry,
@@ -104,6 +105,7 @@ var (
 			Objectives: metrics.SummaryObjectives(),
 		},
 		[]opmetrics.Label{},
+		opmetrics.GA,
 	)
 	PodUnstartedTimeSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -114,6 +116,7 @@ var (
 			Help:      "The time from pod creation until the pod is running.",
 		},
 		[]opmetrics.Label{podNameLabel, podNamespaceLabel},
+		opmetrics.Alpha,
 	)
 	PodBoundDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
@@ -125,6 +128,7 @@ var (
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]opmetrics.Label{podDynamicResourcesLabel},
+		opmetrics.Alpha,
 	)
 	PodUnboundTimeSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -135,6 +139,7 @@ var (
 			Help:      "The time from pod creation until the pod is bound.",
 		},
 		[]opmetrics.Label{podNameLabel, podNamespaceLabel, podDynamicResourcesLabel},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodProvisioningBoundDurationSeconds = opmetrics.NewPrometheusHistogram(
@@ -147,6 +152,7 @@ var (
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]opmetrics.Label{podDynamicResourcesLabel},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodProvisioningUnboundTimeSeconds = opmetrics.NewPrometheusGauge(
@@ -158,6 +164,7 @@ var (
 			Help:      "The time from when Karpenter first thinks the pod can schedule until it binds. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]opmetrics.Label{podNameLabel, podNamespaceLabel, podDynamicResourcesLabel},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodProvisioningStartupDurationSeconds = opmetrics.NewPrometheusHistogram(
@@ -170,6 +177,7 @@ var (
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]opmetrics.Label{},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodProvisioningUnstartedTimeSeconds = opmetrics.NewPrometheusGauge(
@@ -181,6 +189,7 @@ var (
 			Help:      "The time from when Karpenter first thinks the pod can schedule until the pod is running. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]opmetrics.Label{podNameLabel, podNamespaceLabel},
+		opmetrics.Alpha,
 	)
 	// Stage: alpha
 	PodSchedulingUndecidedTimeSeconds = opmetrics.NewPrometheusGauge(
@@ -192,6 +201,7 @@ var (
 			Help:      "The time from when Karpenter has seen a pod without making a scheduling decision for the pod. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]opmetrics.Label{podNameLabel, podNamespaceLabel},
+		opmetrics.Alpha,
 	)
 )
 

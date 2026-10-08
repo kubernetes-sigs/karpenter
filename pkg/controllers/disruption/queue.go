@@ -233,6 +233,32 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// then the termination controller will handle the eventual deletion of the nodes.
 	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
+		// A candidate may carry an explicit drain bound (repair sets one). After any required replacements are ready,
+		// stamp the absolute termination deadline immediately before requesting deletion so replacement-launch latency
+		// doesn't erode the grace window. The candidate bound may tighten an existing deadline but never extend it.
+		if tgp := cmd.Candidates[i].TerminationGracePeriod; tgp != nil {
+			deadline := q.clock.Now().Add(*tgp)
+			if err := retry.OnError(retry.DefaultBackoff, errors.IsConflict, func() error {
+				stored := &v1.NodeClaim{}
+				if err := q.kubeClient.Get(ctx, client.ObjectKeyFromObject(cmd.Candidates[i].NodeClaim), stored); err != nil {
+					return client.IgnoreNotFound(err)
+				}
+				if value, ok := stored.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; ok {
+					if existing, err := time.Parse(time.RFC3339, value); err == nil && !existing.After(deadline) {
+						cmd.Candidates[i].NodeClaim = stored
+						return nil
+					}
+				}
+				if err := nodeclaimutils.PatchTerminationTimestampAnnotation(ctx, q.kubeClient, stored, deadline); err != nil {
+					return err
+				}
+				cmd.Candidates[i].NodeClaim = stored
+				return nil
+			}); err != nil {
+				errs[i] = err
+				return
+			}
+		}
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
 			return q.kubeClient.Delete(ctx, cmd.Candidates[i].NodeClaim)
 		}); err != nil {
@@ -240,24 +266,48 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			return
 		}
 		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()))...)
-		// Drift also flows through this queue, so only report a policy for consolidation.
-		consolidationPolicy := ""
-		if cmd.ConsolidationType() != "" {
-			consolidationPolicy = pretty.ToSnakeCase(string(cmd.Candidates[i].NodePool.Spec.Disruption.ConsolidationPolicy))
-		}
-		labels := map[string]string{
-			metrics.ReasonLabel:              strings.ToLower(string(cmd.Reason())),
-			metrics.NodePoolLabel:            cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel:        cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-			metrics.ConsolidationPolicyLabel: consolidationPolicy,
-			metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(cmd.Candidates[i].NodeClaim),
-		}
-		metrics.NodeClaimsDisruptedTotal.Inc(labels)
-		metrics.PodsDisruptionInitiatedTotal.Add(float64(len(cmd.Candidates[i].reschedulablePods)), labels)
+		recordCandidateDisrupted(cmd, cmd.Candidates[i])
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
 	return multierr.Combine(errs...)
+}
+
+// recordCandidateDisrupted records the per-NodeClaim and per-pod disruption metrics for a candidate the command is
+// disrupting.
+func recordCandidateDisrupted(cmd *Command, candidate *Candidate) {
+	// Drift also flows through this queue, so only report a policy for consolidation.
+	consolidationPolicy := ""
+	if cmd.ConsolidationType() != "" {
+		consolidationPolicy = pretty.ToSnakeCase(string(candidate.NodePool.Spec.Disruption.ConsolidationPolicy))
+	}
+	labels := map[string]string{
+		metrics.ReasonLabel:              strings.ToLower(string(cmd.Reason())),
+		metrics.NodePoolLabel:            candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel:        candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
+		metrics.ConsolidationPolicyLabel: consolidationPolicy,
+		metrics.TerminationModeLabel:     nodeclaimutils.DisruptionTerminationMode(candidate.NodeClaim),
+	}
+	metrics.NodeClaimsDisruptedTotal.Inc(labels)
+	metrics.PodsDisruptionInitiatedTotal.Add(float64(len(candidate.reschedulablePods)), labels)
+	// Repair records the policy result on the candidate; emit the per-condition/per-image unhealthy-disrupted metric
+	// when the disruption is carried out, not at command production, so an abandoned command doesn't over-count.
+	if condition := candidate.RepairPolicyResult.Condition; cmd.Reason() == v1.DisruptionReasonUnhealthy && condition != "" {
+		// Termination mode reflects the drain bound repair actually applied (candidate.TerminationGracePeriod),
+		// not the NodeClaim's own Spec.TGP — a forceful (0) or bounded policy overrides it. nil means repair
+		// inherited the NodeClaim's mode.
+		mode := nodeclaimutils.DisruptionTerminationMode(candidate.NodeClaim)
+		if tgp := candidate.TerminationGracePeriod; tgp != nil {
+			mode = lo.Ternary(*tgp <= 0, metrics.TerminationModeForceful, metrics.TerminationModeEventual)
+		}
+		NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
+			conditionLabel:               pretty.ToSnakeCase(string(condition)),
+			metrics.NodePoolLabel:        candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel:    candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
+			imageIDLabel:                 candidate.NodeClaim.Status.ImageID,
+			metrics.TerminationModeLabel: mode,
+		})
+	}
 }
 
 // markDisrupted taints the node and adds the Disrupted condition to the NodeClaim for a candidate that is about to be disrupted
@@ -319,6 +369,20 @@ func (q *Queue) createReplacementNodeClaims(ctx context.Context, cmd *Command) e
 // 2. Spin up replacement nodes
 // 3. Add Command to the queue to wait to delete the candidates.
 func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
+	queueOwnsStaticReservation := true
+	defer func() {
+		if !queueOwnsStaticReservation {
+			return
+		}
+		staticReplacements := lo.Filter(cmd.Replacements, func(replacement *Replacement, _ int) bool {
+			return replacement.IsStaticNodeClaim
+		})
+		for nodePoolName, replacements := range lo.GroupBy(staticReplacements, func(replacement *Replacement) string {
+			return replacement.NodePoolName
+		}) {
+			q.cluster.NodePoolState.ReleaseNodeCount(nodePoolName, int64(len(replacements)))
+		}
+	}()
 	// First check if we can add the command.
 	providerIDs := lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
 		return c.ProviderID()
@@ -331,6 +395,15 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		"command", cmd.String(),
 	}, cmd.LogValues()...)...).Info("disrupting node(s)")
 
+	// Reboot is already handed off to its controller, so only record metrics here.
+	if cmd.Decision() == RebootDecision {
+		for _, candidate := range cmd.Candidates {
+			recordCandidateDisrupted(cmd, candidate)
+		}
+		q.recordDecisionPerformed(cmd)
+		return nil
+	}
+
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
 	markedCandidates, markDisruptedErr := q.markDisrupted(ctx, cmd)
 	// If we get a failure marking some nodes as disrupted, if we are launching replacements, we shouldn't continue
@@ -342,6 +415,8 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	// Update the command to only consider the successfully MarkDisrupted candidates
 	cmd.Candidates = markedCandidates
 
+	// From this point onward the provisioner releases static reservations whether creation succeeds or fails.
+	queueOwnsStaticReservation = false
 	if err := q.createReplacementNodeClaims(ctx, cmd); err != nil {
 		// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 		// we don't want to disrupt workloads with no way to provision new nodes for them.
@@ -377,6 +452,11 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	q.Unlock()
 
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
+	q.recordDecisionPerformed(cmd)
+	return nil
+}
+
+func (q *Queue) recordDecisionPerformed(cmd *Command) {
 	nodePools := lo.Uniq(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
 		return c.NodePool.Name
 	}))
@@ -393,7 +473,6 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
 		ConsolidationTypeLabel: cmd.ConsolidationType(),
 	})
-	return nil
 }
 
 // HasAny checks to see if the candidate is part of an currently executing command.

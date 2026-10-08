@@ -189,6 +189,77 @@ func (env *Environment) ExpectCreatedOrUpdated(objects ...client.Object) {
 	}
 }
 
+// ExpectRepairFaultInjected makes a node repair-eligible by injecting env.RepairCondition(), backdated past any
+// RepairPolicy toleration so repair can act on it immediately.
+func (env *Environment) ExpectRepairFaultInjected(node *corev1.Node) {
+	GinkgoHelper()
+	cond, ok := env.RepairCondition()
+	Expect(ok).To(BeTrue(), "no repair condition for this provider, pass --repair-condition")
+	env.expectNodeConditionsPatched(node.Name, func(n *corev1.Node) {
+		env.ReplaceNodeConditions(n, corev1.NodeCondition{
+			Type:               cond.Type,
+			Status:             cond.Status,
+			LastTransitionTime: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
+			Reason:             lo.CoalesceOrEmpty(cond.Reason, "E2ETest"),
+			Message:            "injected repair-eligible fault",
+		})
+	})
+}
+
+// ExpectRepairFaultCleared removes the condition ExpectRepairFaultInjected injected, healing the node.
+func (env *Environment) ExpectRepairFaultCleared(node *corev1.Node) {
+	GinkgoHelper()
+	cond, ok := env.RepairCondition()
+	Expect(ok).To(BeTrue(), "no repair condition for this provider, pass --repair-condition")
+	env.expectNodeConditionsPatched(node.Name, func(n *corev1.Node) {
+		n.Status.Conditions = lo.Reject(n.Status.Conditions, func(c corev1.NodeCondition, _ int) bool { return c.Type == cond.Type })
+	})
+}
+
+// expectNodeConditionsPatched applies mutate to the node's status conditions with a strategic-merge patch, so only
+// the changed conditions are sent. A full status Update would send the whole object, and the Node status subresource
+// persists metadata: a stale read from the test's cache would silently revert a just-written label or annotation
+// (e.g. do-not-repair). The patch carries the read's resourceVersion, so a write that lands between the Get and the
+// Patch conflicts and the next attempt re-reads, rather than the conditions list being computed from a stale read.
+func (env *Environment) expectNodeConditionsPatched(name string, mutate func(*corev1.Node)) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) {
+		n := &corev1.Node{}
+		g.Expect(env.Client.Get(env.Context, types.NamespacedName{Name: name}, n)).To(Succeed())
+		stored := n.DeepCopy()
+		mutate(n)
+		g.Expect(env.Client.Status().Patch(env.Context, n, client.StrategicMergeFrom(stored, client.MergeFromWithOptimisticLock{}))).To(Succeed())
+	}).WithTimeout(time.Second * 10).Should(Succeed())
+}
+
+// ExpectRebootFaultInjected makes repair reboot a node by injecting env.RebootCondition(). Unlike a repair fault, it's
+// backdated only 11 minutes: past a reboot policy's toleration, but before a longer-toleration replace policy on the
+// same condition is also eligible, since repair takes the most disruptive eligible action.
+func (env *Environment) ExpectRebootFaultInjected(node *corev1.Node) {
+	GinkgoHelper()
+	cond, ok := env.RebootCondition()
+	Expect(ok).To(BeTrue(), "no reboot condition for this provider, pass --reboot-condition")
+	env.expectNodeConditionsPatched(node.Name, func(n *corev1.Node) {
+		env.ReplaceNodeConditions(n, corev1.NodeCondition{
+			Type:               cond.Type,
+			Status:             cond.Status,
+			LastTransitionTime: metav1.NewTime(time.Now().Add(-11 * time.Minute)),
+			Reason:             lo.CoalesceOrEmpty(cond.Reason, "E2ETest"),
+			Message:            "injected reboot-clearable fault",
+		})
+	})
+}
+
+// ExpectRebootFaultCleared removes the condition ExpectRebootFaultInjected injected, as a reboot that cleared the fault would.
+func (env *Environment) ExpectRebootFaultCleared(node *corev1.Node) {
+	GinkgoHelper()
+	cond, ok := env.RebootCondition()
+	Expect(ok).To(BeTrue(), "no reboot condition for this provider, pass --reboot-condition")
+	env.expectNodeConditionsPatched(node.Name, func(n *corev1.Node) {
+		n.Status.Conditions = lo.Reject(n.Status.Conditions, func(c corev1.NodeCondition, _ int) bool { return c.Type == cond.Type })
+	})
+}
+
 func (env *Environment) ReplaceNodeConditions(node *corev1.Node, conds ...corev1.NodeCondition) *corev1.Node {
 	keys := sets.New[string](lo.Map(conds, func(c corev1.NodeCondition, _ int) string { return string(c.Type) })...)
 	node.Status.Conditions = lo.Reject(node.Status.Conditions, func(c corev1.NodeCondition, _ int) bool {
@@ -295,7 +366,11 @@ func (env *Environment) eventuallyExpectTerminatingWithTimeout(timeout time.Dura
 	GinkgoHelper()
 	Eventually(func(g Gomega) {
 		for _, pod := range pods {
-			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			err := env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)
+			if errors.IsNotFound(err) {
+				continue
+			}
+			g.Expect(err).To(Succeed())
 			g.Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 		}
 	}).WithTimeout(timeout).Should(Succeed())
@@ -1077,7 +1152,7 @@ func (env *Environment) ExpectNoCrashes() {
 	GinkgoHelper()
 	for k, v := range env.Monitor.RestartCount("kube-system") {
 		if strings.Contains(k, "karpenter") && v > 0 {
-			Fail("expected karpenter containers to not crash")
+			Fail(fmt.Sprintf("expected karpenter containers to not crash, but %q restarted %d time(s)", k, v))
 		}
 	}
 }

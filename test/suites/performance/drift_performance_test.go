@@ -60,8 +60,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// Performance assertions for initial deployment
 			Expect(initialReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("drift/initial", 5*time.Minute)),
 				"Initial deployment should complete within 5 minutes")
-			Expect(initialReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("drift/initial", 425)),
-				"Karpenter controller P95 memory should be less than 425 MB during scale-out")
+			Expect(initialReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("drift/initial", 190)),
+				"Karpenter controller P95 live heap should be less than 190 MB during initial deployment")
 			Expect(initialReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("drift/initial", 0.70)),
 				"Karpenter controller avg CPU should be less than 0.70 cores during scale-out")
 
@@ -91,8 +91,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// Drift performance assertions
 			Expect(driftReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("drift/drift", 50*time.Minute)),
 				"Drift should complete within 50 minutes")
-			Expect(driftReport.KarpenterP95MemoryMB).To(BeNumerically("<", MemoryThreshold("drift/drift", 470)),
-				"Karpenter controller P95 memory should be less than 470 MB during drift")
+			Expect(driftReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("drift/drift", 250)),
+				"Karpenter controller P95 live heap should be less than 250 MB during drift")
 			Expect(driftReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("drift/drift", 1.05)),
 				"Karpenter controller avg CPU should be less than 1.05 cores during drift")
 

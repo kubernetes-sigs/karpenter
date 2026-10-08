@@ -43,6 +43,7 @@ var (
 			NodePool,
 			MinValuesRelaxed,
 		},
+		opmetrics.GA,
 	)
 	NodeClaimsTerminatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -57,6 +58,7 @@ var (
 			CapacityType,
 			Zone,
 		},
+		opmetrics.GA,
 	)
 	NodeClaimsDisruptedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -73,6 +75,7 @@ var (
 			ConsolidationPolicy,
 			TerminationMode,
 		},
+		opmetrics.Alpha,
 	)
 	PodsDisruptionInitiatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -89,6 +92,7 @@ var (
 			ConsolidationPolicy,
 			TerminationMode,
 		},
+		opmetrics.Alpha,
 	)
 	NodesCreatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -102,6 +106,7 @@ var (
 			NodePool,
 			Zone,
 		},
+		opmetrics.GA,
 	)
 	NodesTerminatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -115,5 +120,6 @@ var (
 			NodePool,
 			Zone,
 		},
+		opmetrics.GA,
 	)
 )

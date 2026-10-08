@@ -204,7 +204,7 @@ func (c *Controller) awaitDrain(
 	if nodeClaim != nil && nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained) == nil {
 		nodeClaim.StatusConditions(status.WithClock(c.clock)).SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
 	}
-	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
+	if err := c.terminator.Drain(ctx, node, nodeTerminationTime, terminator.ForceDelete); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}

@@ -95,11 +95,10 @@ type Queue struct {
 	sync.Mutex
 
 	source chan event.TypedGenericEvent[*corev1.Pod]
-	// items maps each enqueued pod to its node's terminationGracePeriod deadline.
-	// The reconciler decides evict vs force-delete per reconcile from that deadline
-	// plus the pod's own grace period — no upfront per-pod mode. A nil value means
-	// "no deadline; always evict".
-	items map[QueueKey]*time.Time
+	// items maps each enqueued pod to its drain deadline. For a force-delete deadline, the reconciler decides evict vs
+	// force-delete per reconcile from that deadline plus the pod's own grace period; a nil deadline means "always evict".
+	// A timeout deadline only ever evicts, and drops the pod from the queue once it passes.
+	items map[QueueKey]queueItem
 
 	clock      clock.Clock
 	kubeClient client.Client
@@ -109,7 +108,7 @@ type Queue struct {
 func NewQueue(clk clock.Clock, kubeClient client.Client, recorder events.Recorder) *Queue {
 	return &Queue{
 		source:     make(chan event.TypedGenericEvent[*corev1.Pod], 10000),
-		items:      map[QueueKey]*time.Time{},
+		items:      map[QueueKey]queueItem{},
 		clock:      clk,
 		kubeClient: kubeClient,
 		recorder:   recorder,
@@ -150,17 +149,44 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 // existing and new deadlines — a later Add can tighten the deadline but never
 // push it out or clear it, so an in-flight force-delete cannot be downgraded.
 func (q *Queue) Add(nodeTerminationTime *time.Time, pods ...*corev1.Pod) {
+	q.add(queueItem{deadline: nodeTerminationTime}, pods...)
+}
+
+// AddWithTimeout enqueues pods for eviction until deadline. Pods are never force-deleted, and a pod still on the node
+// once the deadline passes is dropped from the queue and left in place.
+func (q *Queue) AddWithTimeout(deadline time.Time, pods ...*corev1.Pod) {
+	q.add(queueItem{deadline: &deadline, timeout: true}, pods...)
+}
+
+type queueItem struct {
+	deadline *time.Time
+	timeout  bool
+}
+
+func (q *Queue) add(item queueItem, pods ...*corev1.Pod) {
 	q.Lock()
 	defer q.Unlock()
 
 	for _, pod := range pods {
 		qk := NewQueueKey(pod)
 		existing, enqueued := q.items[qk]
-		q.items[qk] = earlier(existing, nodeTerminationTime)
+		q.items[qk] = merge(existing, enqueued, item)
 		if !enqueued {
 			q.source <- event.TypedGenericEvent[*corev1.Pod]{Object: pod}
 		}
 	}
+}
+
+// merge combines a pod's queued item with a new one. A force-delete deadline replaces a timeout and is never replaced
+// by one; items of the same kind keep the earlier deadline.
+func merge(existing queueItem, enqueued bool, item queueItem) queueItem {
+	if !enqueued {
+		return item
+	}
+	if existing.timeout != item.timeout {
+		return lo.Ternary(item.timeout, existing, item)
+	}
+	return queueItem{deadline: earlier(existing.deadline, item.deadline), timeout: item.timeout}
 }
 
 // earlier returns the earlier of a and b, treating nil as "no deadline" (+∞).
@@ -190,7 +216,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	ctx = injection.WithControllerName(ctx, q.Name())
 
 	q.Lock()
-	nodeTerminationTime, ok := q.items[NewQueueKey(pod)]
+	item, ok := q.items[NewQueueKey(pod)]
 	q.Unlock()
 	if !ok {
 		//This is a different pod than the one the queue, we should exit without evicting
@@ -200,8 +226,12 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		return reconcile.Result{}, nil
 	}
 
-	if needsForceDelete(pod, nodeTerminationTime, q.clock) {
-		return q.forceDelete(ctx, pod, nodeTerminationTime)
+	if item.timeout && q.clock.Now().After(*item.deadline) {
+		q.complete(pod)
+		return reconcile.Result{}, nil
+	}
+	if !item.timeout && needsForceDelete(pod, item.deadline, q.clock) {
+		return q.forceDelete(ctx, pod, item.deadline)
 	}
 	// Pod is terminal (Failed/Succeeded) or terminating so drop the queue entry.
 	// Reconcile won't fire again once the pod is gone, so this is our only chance to clean up.
@@ -273,6 +303,10 @@ func (q *Queue) evict(ctx context.Context, pod *corev1.Pod) (reconcile.Result, e
 		if apierrors.IsTooManyRequests(err) || message == multiplePodDisruptionBudgetsError {
 			node, err2 := podutils.NodeForPod(ctx, q.kubeClient, pod)
 			if err2 != nil {
+				// If the pod has no node, we should exit without evicting
+				if apierrors.IsNotFound(err2) {
+					return reconcile.Result{}, nil
+				}
 				return reconcile.Result{}, err2
 			}
 			errorMessage := lo.Ternary(message == multiplePodDisruptionBudgetsError, "eviction does not support multiple PDBs", "evicting pod violates a PDB")
