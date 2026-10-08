@@ -89,7 +89,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cluster: cluster, cache: cache.New(time.Hour, time.Minute), recorder: recorder, clock: clk},
 		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, npState: nodePoolState, registrationHooks: registrationHooks, clock: clk},
 		initialization: &Initialization{kubeClient: kubeClient, clock: clk},
-		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, npState: nodePoolState},
+		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, cluster: cluster, recorder: recorder, npState: nodePoolState},
 	}
 }
 
@@ -199,6 +199,12 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
+	if err := c.ensureUnhealthyRepairTerminationTimeAnnotation(ctx, nodeClaim); err != nil {
+		if errors.IsConflict(err) {
+			return reconcile.Result{Requeue: true}, nil
+		}
+		return reconcile.Result{}, fmt.Errorf("adding nodeclaim unhealthy repair termination annotation, %w", err)
+	}
 	if err := c.ensureTerminationGracePeriodTerminationTimeAnnotation(ctx, nodeClaim); err != nil {
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
@@ -284,6 +290,25 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 	}
 	return reconcile.Result{}, nil
 
+}
+
+// ensureUnhealthyRepairTerminationTimeAnnotation forces the drain of a NodeClaim liveness is replacing as unhealthy, as
+// v1.14 node repair did, by tightening its termination deadline to now. It never extends an earlier deadline.
+func (c *Controller) ensureUnhealthyRepairTerminationTimeAnnotation(ctx context.Context, nodeClaim *v1.NodeClaim) error {
+	if !repairingUnhealthy(nodeClaim) {
+		return nil
+	}
+	deadline := c.clock.Now()
+	if value, ok := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; ok {
+		if existing, err := time.Parse(time.RFC3339, value); err == nil && !existing.After(deadline) {
+			return nil
+		}
+	}
+	if err := nodeclaimutils.PatchTerminationTimestampAnnotation(ctx, c.kubeClient, nodeClaim, deadline); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, deadline.Format(time.RFC3339)).Info("annotated nodeclaim")
+	return nil
 }
 
 func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx context.Context, nodeClaim *v1.NodeClaim) error {

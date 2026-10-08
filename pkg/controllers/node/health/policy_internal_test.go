@@ -642,4 +642,67 @@ var _ = Describe("Repair Policies", func() {
 		}, false),
 		Entry("detects a creation timestamp change", func(n *corev1.Node) { n.CreationTimestamp = metav1.NewTime(time.Unix(30, 0)) }, false),
 	)
+	Context("ResolveSince", func() {
+		now := time.Unix(10_000, 0)
+		matcher := func() *RepairPolicyMatcher {
+			return lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
+				{ConditionType: corev1.NodeReady, ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+				{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, ReasonRegex: ".*", TolerationDuration: 10 * time.Minute, Priority: 1, Action: cloudprovider.ReplaceNode},
+			}, supportedActions))
+		}
+		nodeWith := func(conditions ...corev1.NodeCondition) *corev1.Node {
+			return &corev1.Node{Status: corev1.NodeStatus{Conditions: conditions}}
+		}
+		It("matches Resolve when notBefore is zero or predates every condition", func() {
+			node := nodeWith(
+				corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-time.Hour))},
+				corev1.NodeCondition{Type: "AcceleratorReady", Status: corev1.ConditionFalse, Reason: "XID", LastTransitionTime: metav1.NewTime(now.Add(-20 * time.Minute))},
+			)
+			matches := matcher().Match(node)
+			Expect(ResolveSince(matches, now, time.Time{})).To(Equal(Resolve(matches, now)))
+			Expect(ResolveSince(matches, now, now.Add(-2*time.Hour))).To(Equal(Resolve(matches, now)))
+		})
+		It("measures each toleration from notBefore when the condition predates it", func() {
+			node := nodeWith(corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-time.Hour))})
+			matches := matcher().Match(node)
+			Expect(Resolve(matches, now).Action).To(Equal(cloudprovider.ReplaceNode))
+
+			Expect(ResolveSince(matches, now, now.Add(-29*time.Minute)).Action).To(BeEmpty())
+			result := ResolveSince(matches, now, now.Add(-31*time.Minute))
+			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+			Expect(result.SelectedEligibleAt).To(BeTemporally("==", now.Add(-time.Minute)))
+			Expect(result.Score).To(BeNumerically("~", Resolve(matches, now.Add(-29*time.Minute)).Score, 1e-9))
+		})
+		It("keeps a condition's own eligibility when it starts after notBefore", func() {
+			node := nodeWith(
+				corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-time.Hour))},
+				corev1.NodeCondition{Type: "AcceleratorReady", Status: corev1.ConditionFalse, Reason: "XID", LastTransitionTime: metav1.NewTime(now.Add(-11 * time.Minute))},
+			)
+			result := ResolveSince(matcher().Match(node), now, now.Add(-15*time.Minute))
+			Expect(result.Condition).To(Equal(corev1.NodeConditionType("AcceleratorReady")))
+			Expect(result.SelectedEligibleAt).To(BeTemporally("==", now.Add(-time.Minute)))
+		})
+		It("returns the earliest future eligibility, measured from notBefore", func() {
+			node := nodeWith(
+				corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-20 * time.Minute))},
+				corev1.NodeCondition{Type: "AcceleratorReady", Status: corev1.ConditionFalse, Reason: "XID", LastTransitionTime: metav1.NewTime(now.Add(-5 * time.Minute))},
+			)
+			matches := matcher().Match(node)
+
+			next, ok := NextEligibleAt(matches, now, time.Time{})
+			Expect(ok).To(BeTrue())
+			Expect(next).To(BeTemporally("==", now.Add(5*time.Minute)))
+
+			next, ok = NextEligibleAt(matches, now, now.Add(-time.Minute))
+			Expect(ok).To(BeTrue())
+			Expect(next).To(BeTemporally("==", now.Add(9*time.Minute)))
+		})
+		It("returns false when every match is already eligible or there are none", func() {
+			node := nodeWith(corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-time.Hour))})
+			_, ok := NextEligibleAt(matcher().Match(node), now, time.Time{})
+			Expect(ok).To(BeFalse())
+			_, ok = NextEligibleAt(nil, now, time.Time{})
+			Expect(ok).To(BeFalse())
+		})
+	})
 })

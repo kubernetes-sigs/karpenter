@@ -175,9 +175,8 @@ func NewControllers(
 		)
 	}
 
-	// Register the reboot controller alongside node repair. The repair disruption method itself is
-	// registered in the disruption controller; the standalone node/health controller was removed by #3311.
-	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
+	// The repair disruption method itself is registered in the disruption controller.
+	if options.FromContext(ctx).FeatureGates.NodeRepair {
 		controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
 	}
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {

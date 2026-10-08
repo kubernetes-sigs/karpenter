@@ -335,11 +335,35 @@ func (p *RepairPolicyMatcher) newMatch(policy compiledPolicy, condition corev1.N
 
 // Resolve merges the matches that are eligible at now into one repair decision.
 func Resolve(matches []RepairPolicyMatch, now time.Time) RepairResult {
+	return ResolveSince(matches, now, time.Time{})
+}
+
+// ResolveSince is Resolve with each toleration measured from no earlier than notBefore.
+func ResolveSince(matches []RepairPolicyMatch, now, notBefore time.Time) RepairResult {
 	result := RepairResult{}
 	for _, match := range matches {
-		result.mergePolicy(match.policy, match.rank, match.eligibleAt, now)
+		result.mergePolicy(match.policy, match.rank, match.eligibleAtSince(notBefore), now)
 	}
 	return result
+}
+
+// NextEligibleAt returns the earliest time after now that a match, measured from no earlier than notBefore, becomes
+// eligible. It returns false when no match becomes eligible after now.
+func NextEligibleAt(matches []RepairPolicyMatch, now, notBefore time.Time) (time.Time, bool) {
+	var next time.Time
+	for _, match := range matches {
+		if eligibleAt := match.eligibleAtSince(notBefore); eligibleAt.After(now) && (next.IsZero() || eligibleAt.Before(next)) {
+			next = eligibleAt
+		}
+	}
+	return next, !next.IsZero()
+}
+
+func (m RepairPolicyMatch) eligibleAtSince(notBefore time.Time) time.Time {
+	if earliest := notBefore.Add(m.policy.TolerationDuration); m.eligibleAt.Before(earliest) {
+		return earliest
+	}
+	return m.eligibleAt
 }
 
 // Matches returns true when the condition is covered by the provider policy set, regardless of toleration.
