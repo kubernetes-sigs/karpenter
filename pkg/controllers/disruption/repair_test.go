@@ -507,6 +507,55 @@ var _ = Describe("Repair", func() {
 
 		ExpectSingletonReconciled(ctx, repairController)
 		Expect(queue.GetCommands()).To(HaveLen(0))
+		// The veto is reported on both the Node and the NodeClaim, and again on the next pass, so it stays visible.
+		vetoEvents := lo.Filter(recorder.Events(), func(e karpenterevents.Event, _ int) bool {
+			return e.Reason == karpenterevents.DisruptionBlocked && e.Message == `repair is blocked through the "karpenter.sh/do-not-repair" annotation`
+		})
+		Expect(lo.Map(vetoEvents, func(e karpenterevents.Event, _ int) string {
+			return string(e.InvolvedObject.(metav1.Object).GetUID())
+		})).To(ConsistOf(string(node.UID), string(nodeClaim.UID)))
+		recorder.Reset()
+		ExpectSingletonReconciled(ctx, repairController)
+		Expect(recorder.DetectedEvent(`repair is blocked through the "karpenter.sh/do-not-repair" annotation`)).To(BeTrue())
+	})
+
+	It("should not reboot a node carrying the do-not-repair annotation", func() {
+		useRepairPolicies([]cloudprovider.RepairPolicy{
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "RebootMe", TolerationDuration: 10 * time.Minute, Action: cloudprovider.RebootNode},
+			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
+		})
+		newRepairController()
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "true"})
+		initNode(nodeClaim, node)
+		markUnhealthyWithReason(node, "BadNode", "RebootMe")
+		env.Clock.Step(11 * time.Minute) // only the reboot policy is eligible
+
+		ExpectSingletonReconciled(ctx, repairController)
+		Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).IsTrue()).To(BeFalse())
+		Expect(recorder.DetectedEvent(`repair is blocked through the "karpenter.sh/do-not-repair" annotation`)).To(BeTrue())
+	})
+
+	It("should report the do-not-repair veto ahead of an unbounded drain", func() {
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "true"})
+		initNode(nodeClaim, node)
+		bindBlockingPod(node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		Expect(queue.GetCommands()).To(HaveLen(0))
+		Expect(recorder.DetectedEvent(`repair is blocked through the "karpenter.sh/do-not-repair" annotation`)).To(BeTrue())
+		Expect(recorder.DetectedEvent("repair requires a termination grace period to bypass blocking pods")).To(BeFalse())
+	})
+
+	It("should not report the do-not-repair veto while the node is still within its policy's toleration", func() {
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "true"})
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+
+		ExpectSingletonReconciled(ctx, repairController)
+		Expect(queue.GetCommands()).To(HaveLen(0))
+		Expect(recorder.Calls(karpenterevents.DisruptionBlocked)).To(Equal(0))
 	})
 
 	It("should still repair a node carrying only the do-not-disrupt annotation", func() {
