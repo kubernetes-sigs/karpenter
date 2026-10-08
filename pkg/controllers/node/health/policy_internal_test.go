@@ -670,7 +670,6 @@ var _ = Describe("Repair Policies", func() {
 			Expect(ResolveSince(matches, now, now.Add(-29*time.Minute)).Action).To(BeEmpty())
 			result := ResolveSince(matches, now, now.Add(-31*time.Minute))
 			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
-			// Eligibility, and the score's age, restart from notBefore.
 			Expect(result.SelectedEligibleAt).To(BeTemporally("==", now.Add(-time.Minute)))
 			Expect(result.Score).To(BeNumerically("~", Resolve(matches, now.Add(-29*time.Minute)).Score, 1e-9))
 		})
@@ -679,7 +678,6 @@ var _ = Describe("Repair Policies", func() {
 				corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(now.Add(-time.Hour))},
 				corev1.NodeCondition{Type: "AcceleratorReady", Status: corev1.ConditionFalse, Reason: "XID", LastTransitionTime: metav1.NewTime(now.Add(-11 * time.Minute))},
 			)
-			// Ready predates notBefore and is still tolerated; AcceleratorReady started after it and is eligible.
 			result := ResolveSince(matcher().Match(node), now, now.Add(-15*time.Minute))
 			Expect(result.Condition).To(Equal(corev1.NodeConditionType("AcceleratorReady")))
 			Expect(result.SelectedEligibleAt).To(BeTemporally("==", now.Add(-time.Minute)))

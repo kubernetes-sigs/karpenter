@@ -51,43 +51,27 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
-// pollInterval is how often the controller re-evaluates unhealthy nodes. It bounds how long past its toleration an
-// eligible node waits to be repaired.
 const pollInterval = 15 * time.Second
 
-// deletedTTL is how long a NodeClaim this controller deleted stays eligible for a termination deadline retry. It only
-// needs to outlast the delete-to-stamp gap; the NodeClaim is terminating the whole time.
+// deletedTTL bounds how long a failed termination deadline stamp is retried.
 const deletedTTL = 10 * time.Minute
 
-// Controller repairs registered nodes that are unhealthy before they initialize. The repair disruption method only
-// considers initialized nodes and the NodeClaim liveness controller only considers unregistered ones, so without this
-// controller a node that registers but never becomes healthy is stranded.
-//
-// Each pass re-evaluates the unhealthy nodes indexed in cluster state rather than reacting to Node and NodeClaim
-// events. Eligibility depends on both objects, and several transitions change only one of them (registration labels the
-// Node before it marks the NodeClaim Registered, and a reboot reaches its terminal outcome on the NodeClaim alone), so
-// polling a consistent view avoids depending on which object's event arrives last.
-//
-// Disruption budgets don't apply: they exist to protect running workload, and they already exclude uninitialized nodes
-// from both the node count and the in-flight disruptions. Repair still halts for a NodePool once more than
-// health.UnhealthyThreshold of its nodes are unhealthy, so a correlated failure (e.g. a bad image) doesn't churn the pool.
+// Controller replaces registered nodes that are unhealthy and never initialized, which neither the repair disruption
+// method (initialized nodes) nor NodeClaim liveness (unregistered nodes) handles. It polls cluster state because
+// eligibility spans the Node and NodeClaim, which change independently. Disruption budgets don't apply, since they
+// exclude uninitialized nodes; the unhealthy-node circuit breaker does.
 type Controller struct {
 	clock      clock.Clock
 	kubeClient client.Client
 	cluster    *state.Cluster
 	recorder   events.Recorder
 	matcher    *health.RepairPolicyMatcher
-	// deleted holds the UIDs of NodeClaims this controller deleted, so it only stamps termination deadlines it owes.
-	// Process-local: after a restart a missed stamp is not retried, which is safer than forcing a drain someone else owns.
+	// deleted holds the UIDs of NodeClaims this controller deleted, so it never forces a drain something else started.
 	deleted *cache.Cache
 }
 
-// NewController constructs the controller around the matcher cluster state matches Nodes with, so cluster state, the
-// repair disruption method, and this controller all use one compiled policy set. It panics when cluster state has none,
-// since health.NewRepairPolicyMatcher only returns nil when node repair is disabled. Whatever action a matching policy
-// selects, this controller terminates: the reboot controller bounds recovery from the Initialized condition's transition
-// to Unknown, which never happens on a node that never initialized, so a reboot here would immediately time out and
-// escalate to replacement anyway.
+// NewController panics if cluster state has no repair policy matcher. Every policy action is treated as a replacement: a
+// reboot times out against the Initialized transition, which a node that never initialized doesn't have.
 func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, recorder events.Recorder) *Controller {
 	matcher := cluster.RepairPolicyMatcher()
 	if matcher == nil {
@@ -114,28 +98,22 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
-// Reconcile never returns an error. operatorpkg's reconciler drops RequeueAfter whenever one is returned, so the
-// singleton would fall back to the default exponential rate limiter (up to ~17m) and one persistently failing node would
-// stall repair for every other node. Each pass is idempotent and self-correcting, so failures are logged and retried on
-// the next tick instead.
+// Reconcile logs per-node errors instead of returning them, since returning one drops RequeueAfter and backs off the
+// whole loop.
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 	if !options.FromContext(ctx).FeatureGates.NodeRepair {
 		return reconciler.Result{RequeueAfter: pollInterval}, nil
 	}
-	// This doesn't wait for cluster state to sync: Synced is false while any NodeClaim is launching, so gating on it would
-	// let launch churn, including the replacements repair itself causes, starve this controller. Every check is per node
-	// and holds on a partial view: a Node whose NodeClaim isn't in state yet isn't Managed and is skipped, the delete is
-	// preconditioned on the NodeClaim's ResourceVersion, and the breaker lists Nodes from the API server's cache.
+	// Don't wait on cluster.Synced: it's false while any NodeClaim launches, and every check here is per node.
 	now := c.clock.Now()
 	var tripped map[string]bool
 	for _, node := range c.unhealthyNodes(now) {
-		// A cheap pre-filter on cluster state's copy; repair re-reads and re-evaluates before acting on it.
 		if _, ok := c.evaluate(node, now); !ok {
 			continue
 		}
 		nodePoolName := node.NodeClaim.Labels[v1.NodePoolLabelKey]
-		// The breaker lists every Node, so it only runs once per pass and only when a node is eligible.
+		// The breaker lists every Node, so compute it at most once per pass.
 		if tripped == nil {
 			var err error
 			if tripped, err = health.TrippedNodePools(ctx, c.kubeClient, c.matcher); err != nil {
@@ -155,10 +133,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: pollInterval}, nil
 }
 
-// unhealthyNodes returns copies of the state nodes with a repair policy past its toleration at now. That is a superset of
-// the nodes this controller acts on, since the reboot anchor only delays eligibility. Nodes holds cluster state's read
-// lock while it yields, so this only copies inside the loop and leaves all API calls to the caller: calling back into
-// cluster state mid-iteration could deadlock behind a waiting writer.
+// unhealthyNodes copies the nodes with a repair policy past its toleration. Nodes holds cluster state's read lock, so
+// nothing else is done inside the loop.
 func (c *Controller) unhealthyNodes(now time.Time) state.StateNodes {
 	var unhealthy state.StateNodes
 	for node := range c.cluster.Nodes() {
@@ -169,13 +145,8 @@ func (c *Controller) unhealthyNodes(now time.Time) state.StateNodes {
 	return unhealthy
 }
 
-// evaluate returns the node's repair decision and whether this controller should act on it: the node is NodePool-owned,
-// registered but not initialized, not rebooting, not vetoed by do-not-repair, and has a policy past its toleration.
-//
-// A node counts as initialized when either the NodeClaim condition or the Node label says so: the initialization
-// controller writes the label before the condition, and the repair disruption method keys off the label, so requiring
-// both to be unset keeps the two repair paths disjoint. Rebooting nodes are left to the reboot controller, whose
-// recovery deadline escalates to replacement. do-not-disrupt is deliberately ignored, as in the disruption method.
+// evaluate returns the node's repair decision and whether this controller owns it. The initialized label and condition
+// are both checked because initialization writes the label first, and the repair disruption method reads the label.
 func (c *Controller) evaluate(node *state.StateNode, now time.Time) (health.RepairResult, bool) {
 	if !node.Managed() || node.Node == nil || node.NodeClaim.Labels[v1.NodePoolLabelKey] == "" {
 		return health.RepairResult{}, false
@@ -194,12 +165,7 @@ func (c *Controller) evaluate(node *state.StateNode, now time.Time) (health.Repa
 	return result, result.Action != ""
 }
 
-// rebootFinishedAt returns when the NodeClaim's most recent reboot reached a terminal outcome, or zero if it was never
-// rebooted. The reboot controller's terminal write flips Rebooting from True to False, which stamps its transition time;
-// evaluate excludes NodeClaims that are still rebooting, so any Rebooting condition seen here is terminal. Unhealthy time
-// is only counted from then: a condition reported before or during the reboot (e.g. by an agent that hasn't re-reported
-// since the node came back) says nothing about the rebooted node, so the node gets a full toleration to re-initialize,
-// and return to the repair disruption method's reboot escalation, or clear the condition.
+// rebootFinishedAt returns when the last reboot finished, so unhealthy time from before or during it isn't counted.
 func rebootFinishedAt(nodeClaim *v1.NodeClaim) time.Time {
 	rebooting := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeRebooting)
 	if rebooting == nil {
@@ -208,7 +174,6 @@ func rebootFinishedAt(nodeClaim *v1.NodeClaim) time.Time {
 	return rebooting.LastTransitionTime.Time
 }
 
-// publishBlocked records that the circuit breaker is withholding repair from the node.
 func (c *Controller) publishBlocked(ctx context.Context, node *state.StateNode, nodePoolName string) {
 	nodePool := &v1.NodePool{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
@@ -218,10 +183,8 @@ func (c *Controller) publishBlocked(ctx context.Context, node *state.StateNode, 
 		fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", health.UnhealthyThreshold, nodePoolName))...)
 }
 
-// repair re-reads the node and acts on it. Every decision is made on the fresh objects, because cluster state's copy can
-// be stale and the Node half of the eligibility check is not covered by the delete precondition below: initialization
-// labels the Node before it marks the NodeClaim Initialized, and that label write does not bump the NodeClaim's
-// ResourceVersion.
+// repair decides on freshly read objects, since cluster state can be stale and the delete precondition only covers the
+// NodeClaim.
 func (c *Controller) repair(ctx context.Context, node *state.StateNode) error {
 	fresh, ok, err := c.refresh(ctx, node)
 	if err != nil || !ok {
@@ -231,9 +194,7 @@ func (c *Controller) repair(ctx context.Context, node *state.StateNode) error {
 	if !eligible {
 		return nil
 	}
-	// Retry a termination deadline this controller already owes, when its delete succeeded but the stamp didn't. Only
-	// deletions this controller initiated are stamped: tightening the deadline of a NodeClaim that something else is
-	// deleting would convert its graceful drain into a forceful one.
+	// Retry a stamp that failed after our own delete.
 	if !fresh.NodeClaim.DeletionTimestamp.IsZero() {
 		if _, deletedHere := c.deleted.Get(string(fresh.NodeClaim.UID)); deletedHere {
 			return c.stampTerminationDeadline(ctx, fresh.NodeClaim)
@@ -243,8 +204,7 @@ func (c *Controller) repair(ctx context.Context, node *state.StateNode) error {
 	return c.delete(ctx, fresh, result)
 }
 
-// refresh re-reads the state node's Node and NodeClaim from the API, returning false when either is gone or when the
-// Node's repair-policy inputs changed since cluster state matched them, so the cached matches can't be stale.
+// refresh re-reads the Node and NodeClaim, returning false if either is gone or the cached policy matches are stale.
 func (c *Controller) refresh(ctx context.Context, node *state.StateNode) (*state.StateNode, bool, error) {
 	nodeClaim := &v1.NodeClaim{}
 	if err := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(node.NodeClaim), nodeClaim); err != nil {
@@ -263,23 +223,16 @@ func (c *Controller) refresh(ctx context.Context, node *state.StateNode) (*state
 	return fresh, true, nil
 }
 
-// delete requests NodeClaim deletion, preconditioned on the ResourceVersion just read so a NodeClaim that changed in the
-// meantime is re-evaluated on a later pass instead of deleted. Termination is forceful, matching v1.14 node repair:
-// drainable pods are force-deleted with a minimal grace period, bypassing PDBs and do-not-disrupt. That includes workload
-// pods, which can be present on a node that never initialized (e.g. one that is Ready but whose requested extended
-// resource never registers, or one that stalls re-initializing after a reboot). The deadline is stamped only after the
-// delete succeeds: stamping first would bump the ResourceVersion the delete is preconditioned on, and would leave a stale
-// deadline on a NodeClaim that escapes repair.
+// delete forcefully terminates the NodeClaim, as v1.14 node repair did. The deadline is stamped after the delete so a
+// failed delete never leaves one behind.
 func (c *Controller) delete(ctx context.Context, fresh *state.StateNode, result health.RepairResult) error {
 	nodeClaim := fresh.NodeClaim
 	if err := c.kubeClient.Delete(ctx, nodeClaim, client.Preconditions{ResourceVersion: lo.ToPtr(nodeClaim.ResourceVersion)}); err != nil {
-		// A conflict means cluster state is behind; the next pass re-evaluates the current object.
 		if errors.IsConflict(err) || errors.IsNotFound(err) {
 			return nil
 		}
 		return serrors.Wrap(fmt.Errorf("deleting nodeclaim, %w", err), "NodeClaim", klog.KObj(nodeClaim))
 	}
-	// Recorded before the stamp, so a failed stamp is retried on a later pass.
 	c.deleted.SetDefault(string(nodeClaim.UID), struct{}{})
 	log.FromContext(ctx).WithValues(
 		"condition", result.Condition,
@@ -295,7 +248,6 @@ func (c *Controller) delete(ctx context.Context, fresh *state.StateNode, result 
 		metrics.TerminationModeLabel:     metrics.TerminationModeForceful,
 	}
 	metrics.NodeClaimsDisruptedTotal.Inc(labels)
-	// Errors don't fail the pass; the metric reports 0.
 	reschedulablePods, err := nodeutils.ReschedulablePods(ctx, c.kubeClient, fresh.Node.Name)
 	if err != nil {
 		log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", err.Error())
@@ -311,7 +263,7 @@ func (c *Controller) delete(ctx context.Context, fresh *state.StateNode, result 
 	return c.stampTerminationDeadline(ctx, nodeClaim)
 }
 
-// stampTerminationDeadline tightens the NodeClaim's termination deadline to now. It never extends an earlier deadline.
+// stampTerminationDeadline tightens the termination deadline to now, never extending an earlier one.
 func (c *Controller) stampTerminationDeadline(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	deadline := c.clock.Now()
 	return retry.OnError(retry.DefaultBackoff, errors.IsConflict, func() error {

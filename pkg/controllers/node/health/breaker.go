@@ -27,14 +27,11 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// UnhealthyThreshold stops repair for a NodePool when a correlated failure makes more than this fraction of its nodes
-// unhealthy. It is shared by every repair path so they agree on when a NodePool is too unhealthy to repair.
+// UnhealthyThreshold is the fraction of a NodePool's nodes that can be unhealthy before repair stops for it.
 const UnhealthyThreshold = "20%"
 
-// TrippedNodePools returns the NodePools whose unhealthy-node fraction exceeds UnhealthyThreshold, considering the
-// nodes selected by opts. A node counts as unhealthy as soon as one of its current conditions matches the provider
-// policy set, regardless of policy toleration or initialization. The threshold rounds up so one unhealthy node does not
-// halt repair in small pools.
+// TrippedNodePools returns the NodePools over UnhealthyThreshold. A node is unhealthy if any condition matches a policy,
+// regardless of toleration. The threshold rounds up so one unhealthy node doesn't halt repair in a small pool.
 func TrippedNodePools(ctx context.Context, kubeClient client.Client, matcher *RepairPolicyMatcher, opts ...client.ListOption) (map[string]bool, error) {
 	// TODO: cache unhealthy node counts by NodePool from Node updates instead of recalculating them on every repair pass.
 	nodeList := &corev1.NodeList{}

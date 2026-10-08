@@ -342,8 +342,7 @@ func Resolve(matches []RepairPolicyMatch, now time.Time) RepairResult {
 	return result
 }
 
-// ResolveSince is Resolve with every match's toleration measured from no earlier than notBefore, so time a condition
-// held before notBefore (e.g. while the node was rebooting) doesn't count toward its toleration or its score.
+// ResolveSince is Resolve with each toleration measured from no earlier than notBefore.
 func ResolveSince(matches []RepairPolicyMatch, now, notBefore time.Time) RepairResult {
 	result := RepairResult{}
 	for _, match := range matches {

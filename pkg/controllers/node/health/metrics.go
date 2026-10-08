@@ -38,10 +38,8 @@ var (
 		Name: ImageIDLabel,
 		Help: "The image ID of the node that was disrupted.",
 	}
-	// NodeClaimsUnhealthyDisruptedTotal preserves the per-condition/per-image breakdown the retired node.health
-	// controller emitted, which the reason-labeled karpenter_nodeclaims_disrupted_total loses. Labeled by the repair
-	// condition, the owning NodePool, the capacity type, and the image ID. Both repair paths (the disruption method for
-	// initialized nodes and the uninitialized-node controller) emit it.
+	// NodeClaimsUnhealthyDisruptedTotal breaks down repairs by condition and image, which karpenter_nodeclaims_disrupted_total
+	// doesn't.
 	NodeClaimsUnhealthyDisruptedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{

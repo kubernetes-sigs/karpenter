@@ -67,9 +67,7 @@ var _ = BeforeSuite(func() {
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 })
 
-// useRepairPolicies installs the provider's repair policies and rebuilds cluster state and the controller around one
-// matcher compiled from them, as the operator does once at startup. Specs must call it before any Node reaches cluster
-// state, since matches are computed as Nodes enter it.
+// useRepairPolicies rebuilds cluster state around the policies, so it must run before any Node enters cluster state.
 func useRepairPolicies(policies []cloudprovider.RepairPolicy) {
 	cloudProvider.RepairPolicy = policies
 	repairPolicyMatcher := lo.Must(health.NewRepairPolicyMatcher(ctx, cloudProvider))

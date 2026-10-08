@@ -42,7 +42,6 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-// defaultOwnerRefs makes a pod reschedulable, so it counts toward the disrupted-pods metric.
 var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890", Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}
 
 var _ = Describe("Uninitialized Node Repair", func() {
@@ -50,13 +49,11 @@ var _ = Describe("Uninitialized Node Repair", func() {
 	var nodeClaim *v1.NodeClaim
 	var node *corev1.Node
 
-	// syncState feeds the objects' current API state into cluster state, as the informers would.
 	syncState := func(nc *v1.NodeClaim, n *corev1.Node) {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nc))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(n))
 	}
-	// newNodeClaimAndNode returns a NodePool-owned NodeClaim/Node pair whose finalizers keep a deleted NodeClaim
-	// observable. Cluster state only tracks an uninitialized managed Node once it has an instance type label.
+	// Cluster state only tracks an uninitialized Node with an instance type label.
 	newNodeClaimAndNode := func() (*v1.NodeClaim, *corev1.Node) {
 		return test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
@@ -66,8 +63,7 @@ var _ = Describe("Uninitialized Node Repair", func() {
 			Finalizers: []string{v1.TerminationFinalizer},
 		}})
 	}
-	// apply writes a NodeClaim/Node pair that has launched, keeping the fake clock at or past the Node's creation: the
-	// API server stamps creation with real time, and a condition can't predate it.
+	// The API server stamps creation with real time, so keep the fake clock at or past it.
 	apply := func(nc *v1.NodeClaim, n *corev1.Node) {
 		n.Spec.Taints = lo.Reject(n.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
 		nc.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
@@ -76,8 +72,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 			env.Clock.SetTime(n.CreationTimestamp.Time)
 		}
 	}
-	// register applies a NodeClaim/Node pair that registered but never initialized because the Node went NotReady at
-	// the current clock time, then syncs cluster state.
 	register := func(nc *v1.NodeClaim, n *corev1.Node) {
 		n.Labels[v1.NodeRegisteredLabelKey] = "true"
 		nc.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
@@ -85,7 +79,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, n)
 		syncState(nc, n)
 	}
-	// initialize applies an initialized, healthy NodeClaim/Node pair and syncs cluster state.
 	initialize := func(nc *v1.NodeClaim, n *corev1.Node) {
 		n.Labels[v1.NodeRegisteredLabelKey] = "true"
 		n.Labels[v1.NodeInitializedLabelKey] = "true"
@@ -95,14 +88,12 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		ExpectMakeNodesReady(ctx, env.Client, env.Clock, n)
 		syncState(nc, n)
 	}
-	// updateNodeClaim applies a change to the stored NodeClaim and syncs cluster state.
 	updateNodeClaim := func(mutate func(nc *v1.NodeClaim)) {
 		stored := ExpectExists(ctx, env.Client, nodeClaim)
 		mutate(stored)
 		ExpectApplied(ctx, env.Client, stored)
 		syncState(stored, node)
 	}
-	// markDeleting deletes the NodeClaim out from under the controller; its finalizer keeps it observable.
 	markDeleting := func(nc *v1.NodeClaim) {
 		Expect(env.Client.Delete(ctx, nc)).To(Succeed())
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nc))
@@ -150,7 +141,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		register(nodeClaim, node)
 		env.Clock.Step(31 * time.Minute)
 
-		// Two reschedulable pods ride the node, so the disrupted-pod metric has something to count.
 		pods := test.Pods(2, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 		for _, pod := range pods {
 			ExpectApplied(ctx, env.Client, pod)
@@ -200,7 +190,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		})
 	})
 	It("should skip a Node whose NodeClaim cluster state hasn't observed yet", func() {
-		// The index admits a Node with no NodeClaim; eligibility reads NodeClaim fields, so it must be skipped.
 		node.Labels[v1.NodeRegisteredLabelKey] = "true"
 		apply(nodeClaim, node)
 		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, node)
@@ -224,7 +213,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		failing := &failDeleteClient{Client: env.Client, name: nodeClaim.Name}
 		erroring := NewController(env.Clock, failing, cluster, recorder)
 
-		// The pass reports no error, so a failing node can't push the loop into exponential backoff.
 		result := ExpectSingletonReconciled(ctx, erroring)
 
 		Expect(result.RequeueAfter).To(Equal(15 * time.Second))
@@ -232,7 +220,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		expectDeleted(otherNodeClaim)
 	})
 	It("should repair an eligible node alongside an ineligible unhealthy node", func() {
-		// The ineligible node is unhealthy and indexed, but hasn't registered.
 		ineligibleClaim, ineligibleNode := newNodeClaimAndNode()
 		apply(ineligibleClaim, ineligibleNode)
 		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, ineligibleNode)
@@ -252,7 +239,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		register(nodeClaim, node)
 		otherNodeClaim, otherNode := newNodeClaimAndNode()
 		register(otherNodeClaim, otherNode)
-		// Keep the pool under the circuit breaker's threshold.
 		for range 8 {
 			initialize(newNodeClaimAndNode())
 		}
@@ -276,7 +262,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		ExpectMakeNodesReady(ctx, env.Client, env.Clock, node)
 		syncState(nodeClaim, node)
 		env.Clock.Step(31 * time.Minute)
-		// A healthy node leaves the index entirely, so this asserts the controller never sees it.
 		Expect(controller.unhealthyNodes(env.Clock.Now())).To(BeEmpty())
 
 		ExpectSingletonReconciled(ctx, controller)
@@ -294,7 +279,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		expectNotDeleted(nodeClaim)
 	})
 	It("should delete once the NodeClaim is marked Registered after the Node was labeled registered", func() {
-		// Registration labels the Node first; the NodeClaim's Registered condition lands in a later status patch.
 		node.Labels[v1.NodeRegisteredLabelKey] = "true"
 		apply(nodeClaim, node)
 		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, node)
@@ -336,7 +320,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		expectNotDeleted(nodeClaim)
 	})
 	It("should only count unhealthy time after a reboot completes", func() {
-		// The condition predates the reboot, e.g. an agent hasn't re-reported it since the node came back.
 		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonIssued, "rebooting")
 		register(nodeClaim, node)
 		env.Clock.Step(31 * time.Minute)
@@ -416,7 +399,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		})
 		register(nodeClaim, node)
 		env.Clock.Step(31 * time.Minute)
-		// Guard the premise: the matching policy selects a reboot.
 		Expect(controller.unhealthyNodes(env.Clock.Now())).To(HaveLen(1))
 		Expect(controller.unhealthyNodes(env.Clock.Now())[0].GetRepairResult(env.Clock.Now()).Action).To(Equal(cloudprovider.RebootNode))
 
@@ -438,8 +420,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		expectDeadline(nodeClaim, earlier)
 	})
 	It("should not delete a node labeled initialized after cluster state observed it", func() {
-		// Initialization labels the Node before it marks the NodeClaim Initialized, and that label write does not bump the
-		// NodeClaim's ResourceVersion, so the delete precondition alone cannot catch this.
 		register(nodeClaim, node)
 		env.Clock.Step(31 * time.Minute)
 		stored := ExpectExists(ctx, env.Client, node)
@@ -475,8 +455,7 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		expectNoDeadline(nodeClaim)
 	})
 	It("should not race cluster state updates", func() {
-		// Run with -race. A pass reads cluster state's nodes only through copies taken under its read lock, so concurrent
-		// Node updates can't race it, even if cluster state later starts mutating StateNodes in place.
+		// Meaningful under -race.
 		register(nodeClaim, node)
 		for range 8 {
 			initialize(newNodeClaimAndNode())
@@ -500,7 +479,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 	It("should not delete a NodeClaim that initialized after cluster state observed it", func() {
 		register(nodeClaim, node)
 		env.Clock.Step(31 * time.Minute)
-		// Initialize the NodeClaim without syncing cluster state, so the controller acts on a stale ResourceVersion.
 		stored := ExpectExists(ctx, env.Client, nodeClaim)
 		stored.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, env.Client, stored)
@@ -514,8 +492,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 	})
 	Context("Deleting NodeClaims", func() {
 		It("should not stamp a deadline on an eligible NodeClaim that something else is deleting", func() {
-			// Tightening the deadline here would turn an operator's or the disruption queue's graceful drain into a
-			// forceful one.
 			register(nodeClaim, node)
 			env.Clock.Step(31 * time.Minute)
 			markDeleting(nodeClaim)
@@ -523,7 +499,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 			ExpectSingletonReconciled(ctx, controller)
 
 			expectNoDeadline(nodeClaim)
-			// Only this controller's own delete counts as a disruption.
 			_, found := FindMetricWithLabelValues(ExpectMetricName(metrics.NodeClaimsDisruptedTotal.(*opmetrics.PrometheusCounter)), disruptedLabels())
 			Expect(found).To(BeFalse())
 		})
@@ -533,7 +508,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 			failing := &failPatchClient{Client: env.Client, failures: 1}
 			retrying := NewController(env.Clock, failing, cluster, recorder)
 
-			// The pass reports no error, so one bad node can't push the loop into exponential backoff.
 			result := ExpectSingletonReconciled(ctx, retrying)
 			Expect(result.RequeueAfter).To(Equal(pollInterval))
 			expectDeleted(nodeClaim)
@@ -566,7 +540,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		})
 	})
 	Context("Circuit Breaker", func() {
-		// pool builds a ten-node NodePool with the given number of registered-but-unhealthy nodes, all past toleration.
 		pool := func(unhealthy int) {
 			for range 10 - unhealthy {
 				initialize(newNodeClaimAndNode())
@@ -613,7 +586,6 @@ var _ = Describe("Uninitialized Node Repair", func() {
 	})
 })
 
-// beforeDeleteClient runs beforeDelete ahead of each Delete so tests can race a write against the controller's delete.
 type beforeDeleteClient struct {
 	client.Client
 	beforeDelete func()
@@ -624,7 +596,6 @@ func (c *beforeDeleteClient) Delete(ctx context.Context, obj client.Object, opts
 	return c.Client.Delete(ctx, obj, opts...)
 }
 
-// failDeleteClient fails Delete for one named NodeClaim so tests can check the pass continues past it.
 type failDeleteClient struct {
 	client.Client
 	name string
@@ -637,8 +608,6 @@ func (c *failDeleteClient) Delete(ctx context.Context, obj client.Object, opts .
 	return c.Client.Delete(ctx, obj, opts...)
 }
 
-// failPatchClient fails its first `failures` Patch calls so tests can fail the termination deadline stamp after a
-// successful delete, then observe the retry.
 type failPatchClient struct {
 	client.Client
 	failures int
