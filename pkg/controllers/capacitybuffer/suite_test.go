@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -54,7 +55,9 @@ func TestCapacityBuffer(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
+		return indexFields(ctx, c)
+	}))
 	cbController = NewController(env.Client, &fakeTrigger{}, virtualpods.NewVirtualPodCache(env.Client))
 })
 
@@ -743,6 +746,61 @@ var _ = Describe("CapacityBuffer Controller", func() {
 			ExpectApplied(ctx, env.Client, cb)
 			reqs := cbController.podTemplateToBuffers(ctx, pt)
 			Expect(reqs).To(BeEmpty())
+		})
+	})
+
+	Context("scalableRefToBuffers mapping", func() {
+		It("should return only buffers referencing the workload's kind and name", func() {
+			deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"}}
+			buffers := []*autoscalingv1beta1.CapacityBuffer{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "match", Namespace: "default"},
+					Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("app"), Replicas: lo.ToPtr(int32(1))},
+				},
+				{
+					// An empty APIGroup defaults to apps when resolved.
+					ObjectMeta: metav1.ObjectMeta{Name: "match-default-group", Namespace: "default"},
+					Spec: autoscalingv1beta1.CapacityBufferSpec{
+						ScalableRef: &autoscalingv1beta1.ScalableRef{Kind: autoscalingv1beta1.KindDeployment, Name: "app"},
+						Replicas:    lo.ToPtr(int32(1)),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "other-kind", Namespace: "default"},
+					Spec: autoscalingv1beta1.CapacityBufferSpec{
+						ScalableRef: &autoscalingv1beta1.ScalableRef{APIGroup: "apps", Kind: autoscalingv1beta1.KindStatefulSet, Name: "app"},
+						Replicas:    lo.ToPtr(int32(1)),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "other-name", Namespace: "default"},
+					Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("other"), Replicas: lo.ToPtr(int32(1))},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-template", Namespace: "default"},
+					Spec: autoscalingv1beta1.CapacityBufferSpec{
+						PodTemplateRef: &autoscalingv1beta1.LocalObjectRef{Name: "app"},
+						Replicas:       lo.ToPtr(int32(1)),
+					},
+				},
+			}
+			for _, cb := range buffers {
+				ExpectApplied(ctx, env.Client, cb)
+			}
+			reqs := cbController.scalableRefToBuffers(autoscalingv1beta1.KindDeployment)(ctx, deploy)
+			Expect(lo.Map(reqs, func(r reconcile.Request, _ int) string { return r.Name })).To(ConsistOf("match", "match-default-group"))
+		})
+
+		It("should not return buffers in other namespaces", func() {
+			ExpectApplied(ctx, env.Client, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "scalable-other-ns"}})
+			cb := &autoscalingv1beta1.CapacityBuffer{
+				ObjectMeta: metav1.ObjectMeta{Name: "elsewhere", Namespace: "scalable-other-ns"},
+				Spec:       autoscalingv1beta1.CapacityBufferSpec{ScalableRef: deploymentRef("app"), Replicas: lo.ToPtr(int32(1))},
+			}
+			ExpectApplied(ctx, env.Client, cb)
+			deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"}}
+			Expect(cbController.scalableRefToBuffers(autoscalingv1beta1.KindDeployment)(ctx, deploy)).To(BeEmpty())
+			ExpectDeleted(ctx, env.Client, cb)
 		})
 	})
 })
