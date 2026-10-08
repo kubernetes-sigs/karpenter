@@ -36,6 +36,10 @@ type AllocationTracker struct {
 	// after set during Allocator construction.
 	PreallocatedDevices sets.Set[DeviceID]
 
+	// BlockedDevices represents devices whose consumed-capacity accounting is invalid and must not be allocated on any
+	// path. Immutable after construction.
+	BlockedDevices sets.Set[DeviceID]
+
 	// PreallocatedConsumedCapacity holds the aggregated consumed capacity for multi-allocatable devices
 	// from existing cluster allocations. Multi-allocatable devices appear here instead of PreallocatedDevices.
 	// Immutable after construction. Map: deviceID → dimensionName → consumed quantity.
@@ -96,8 +100,13 @@ func NewAllocationTracker(allocatedState AllocatedDeviceState) *AllocationTracke
 	for id, capacity := range allocatedState.ConsumedCapacity {
 		preallocatedCapacity[DeviceID{DeviceID: id}] = capacity
 	}
+	blockedDevices := make(sets.Set[DeviceID], len(allocatedState.BlockedDevices))
+	for id := range allocatedState.BlockedDevices {
+		blockedDevices.Insert(DeviceID{DeviceID: id})
+	}
 	return &AllocationTracker{
 		PreallocatedDevices:                   preallocatedDevices,
+		BlockedDevices:                        blockedDevices,
 		PreallocatedConsumedCapacity:          preallocatedCapacity,
 		InflightClusterAllocations:            make(map[DeviceID]*InflightAllocationMetadata),
 		InflightClusterAllocationsByNodeClaim: make(map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]),
