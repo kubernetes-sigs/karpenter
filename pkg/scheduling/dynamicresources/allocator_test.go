@@ -205,6 +205,13 @@ func exactRequest(name, className string, count int64) resourcev1.DeviceRequest 
 	}
 }
 
+//nolint:unparam
+func exactAdminRequest(name, className string, count int64) resourcev1.DeviceRequest {
+	req := exactRequest(name, className, count)
+	req.Exactly.AdminAccess = lo.ToPtr(true)
+	return req
+}
+
 func exactRequestWithSelector(name, className string, count int64, expr string) resourcev1.DeviceRequest {
 	return resourcev1.DeviceRequest{
 		Name: name,
@@ -2822,6 +2829,191 @@ var _ = Describe("Allocator", func() {
 			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 2))
 			_, err = alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{claim2})
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Describe("Admin access (KEP-5018)", func() {
+		var inClusterSlices []dynamicresources.ResourceSlice
+
+		BeforeEach(func() {
+			inClusterSlices = []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0")),
+			}
+		})
+
+		It("should bind an admin-access request to an already-allocated device", func() {
+			// The single device is preallocated on the API server. A normal request would fail,
+			// but an admin-access request must still bind to it.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New(deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID),
+			}, nil, env.Client, nil)
+
+			nc := makeNodeClaim("it-1")
+			normal := makeClaim("c-normal", exactRequest("req-1", "gpu", 1))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{normal})
+			Expect(err).To(HaveOccurred())
+
+			admin := makeClaim("c-admin", exactAdminRequest("req-1", "gpu", 1))
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{admin})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should not consume the device, leaving it available for a normal claim after commit", func() {
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client, nil)
+
+			// An admin-access allocation is committed for one NodeClaim.
+			ncA := makeNodeClaimWithID("nc-a", "it-1")
+			admin := makeClaim("c-admin", exactAdminRequest("req-1", "gpu", 1))
+			resultA, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{admin})
+			Expect(err).ToNot(HaveOccurred())
+			resultA.Allocation.Commit(ctx)
+
+			// A different NodeClaim's normal claim must still be able to allocate the same device,
+			// since admin access didn't consume it.
+			ncB := makeNodeClaimWithID("nc-b", "it-1")
+			normal := makeClaim("c-normal", exactRequest("req-1", "gpu", 1))
+			resultB, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{normal})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(resultB).ToNot(BeNil())
+		})
+
+		It("should bind to a device allocated inflight by another NodeClaim in the same loop", func() {
+			// Distinct from the preallocated case: the device becomes allocated via Commit,
+			// exercising the IsAllocated (inflight) path that admin access must also bypass.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client, nil)
+
+			ncA := makeNodeClaimWithID("nc-a", "it-1")
+			normal := makeClaim("c-normal", exactRequest("req-1", "gpu", 1))
+			resultA, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{normal})
+			Expect(err).ToNot(HaveOccurred())
+			resultA.Allocation.Commit(ctx)
+
+			ncB := makeNodeClaimWithID("nc-b", "it-1")
+			admin := makeClaim("c-admin", exactAdminRequest("req-1", "gpu", 1))
+			resultB, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{admin})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(resultB).ToNot(BeNil())
+		})
+
+		It("should still require distinct devices for a multi-count admin request", func() {
+			// Only one physical device exists; the in-DFS dedupe must still prevent an admin
+			// request from satisfying count=2 by reusing the same device.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client, nil)
+
+			nc := makeNodeClaim("it-1")
+			admin := makeClaim("c-admin", exactAdminRequest("req-1", "gpu", 2))
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{admin})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should still enforce selectors for an admin request", func() {
+			// Admin access bypasses allocation state, not device matching: a selector that
+			// matches no device must still fail.
+			alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client, nil)
+
+			nc := makeNodeClaim("it-1")
+			req := exactRequestWithSelector("req-1", "gpu", 1, `device.driver == "nonexistent.example.com"`)
+			req.Exactly.AdminAccess = lo.ToPtr(true)
+			admin := makeClaim("c-admin", req)
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{admin})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should ignore exhausted counter budgets for an admin request", func() {
+			// Budget fits one device; a normal count=2 request fails but an admin one succeeds.
+			counterSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s-counters", "gpu.example.com", "pool-a",
+					withSharedCounters(counterSet("gpu-slices", map[string]resource.Quantity{
+						"memory": resource.MustParse("40Gi"),
+					})),
+					withGeneration(1, 2),
+				),
+				makeAPISlice("s-devices", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 2),
+					withDevicesConsumingCounters(
+						deviceConsumingCounter("gpu-0", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+						deviceConsumingCounter("gpu-1", "gpu-slices", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
+					),
+				),
+			}
+			alloc = dynamicresources.NewAllocator(counterSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+			}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c-normal", exactRequest("req-1", "gpu", 2))})
+			Expect(err).To(HaveOccurred())
+
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c-admin", exactAdminRequest("req-1", "gpu", 2))})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should ignore exhausted multi-alloc capacity for an admin request", func() {
+			multiAllocSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1),
+					func(s *resourcev1.ResourceSlice) {
+						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
+							Name:                     "gpu-0",
+							AllowMultipleAllocations: ptr.To(true),
+							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
+								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
+							},
+						})
+					},
+				),
+			}
+			// gpu-0 has only 10Gi free; a normal 16Gi request fails, an admin one ignores capacity.
+			alloc = dynamicresources.NewAllocator(multiAllocSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
+				ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{
+					deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID: {
+						"gpu.example.com/vram": resource.MustParse("70Gi"),
+					},
+				},
+			}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			capReq := map[resourcev1.QualifiedName]resource.Quantity{"gpu.example.com/vram": resource.MustParse("16Gi")}
+
+			_, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c-normal", exactRequestWithCapacity("req-1", "gpu", 1, capReq))})
+			Expect(err).To(HaveOccurred())
+
+			adminReq := exactRequestWithCapacity("req-1", "gpu", 1, capReq)
+			adminReq.Exactly.AdminAccess = lo.ToPtr(true)
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{makeClaim("c-admin", adminReq)})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
+		})
+
+		It("should allocate a claim mixing a normal and an admin request", func() {
+			twoDeviceSlices := []dynamicresources.ResourceSlice{
+				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
+					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
+			}
+			// gpu-0 is already allocated: the normal request must take gpu-1, while the admin
+			// request may bind the allocated gpu-0.
+			alloc = dynamicresources.NewAllocator(twoDeviceSlices, dynamicresources.AllocatedDeviceState{
+				ExclusiveDevices: sets.New(deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID),
+			}, nil, env.Client, nil)
+			nc := makeNodeClaim("it-1")
+			claim := makeClaim("c-mixed",
+				exactRequest("req-normal", "gpu", 1),
+				exactAdminRequest("req-admin", "gpu", 1),
+			)
+			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).ToNot(BeNil())
 		})
 	})
 
