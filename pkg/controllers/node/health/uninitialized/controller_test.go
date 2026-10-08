@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
-	"sigs.k8s.io/karpenter/pkg/events"
+	karpevents "sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -113,6 +113,18 @@ var _ = Describe("Uninitialized Node Repair", func() {
 	expectNoDeadline := func(nc *v1.NodeClaim) {
 		GinkgoHelper()
 		Expect(ExpectExists(ctx, env.Client, nc).Annotations).ToNot(HaveKey(v1.NodeClaimTerminationTimestampAnnotationKey))
+	}
+	// blockedNames returns the names of the objects a NodeRepairBlocked event was published for.
+	blockedNames := func() []string {
+		var names []string
+		recorder.ForEachEvent(func(evt karpevents.Event) {
+			if evt.Reason == karpevents.NodeRepairBlocked {
+				if o, ok := evt.InvolvedObject.(client.Object); ok {
+					names = append(names, o.GetName())
+				}
+			}
+		})
+		return names
 	}
 	disruptedLabels := func() map[string]string {
 		return map[string]string{metrics.ReasonLabel: metrics.UnhealthyReason, metrics.NodePoolLabel: nodePool.Name}
@@ -431,6 +443,50 @@ var _ = Describe("Uninitialized Node Repair", func() {
 
 		expectDeadline(nodeClaim, earlier)
 	})
+	It("should tighten a later termination deadline", func() {
+		later := env.Clock.Now().Add(time.Hour)
+		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: later.Format(time.RFC3339)})
+		register(nodeClaim, node)
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, controller)
+
+		expectDeadline(nodeClaim, env.Clock.Now())
+	})
+	It("should replace an unparsable termination deadline", func() {
+		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: "not-a-timestamp"})
+		register(nodeClaim, node)
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, controller)
+
+		expectDeadline(nodeClaim, env.Clock.Now())
+	})
+	It("should mark the NodeClaim disrupted for repair before deleting it", func() {
+		register(nodeClaim, node)
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, controller)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason).Reason).To(Equal(string(v1.DisruptionReasonUnhealthy)))
+		Expect(recorder.Calls(karpevents.DisruptionTerminating)).To(BeNumerically(">", 0))
+	})
+	It("should retry the deadline for a NodeClaim it marked, across a restart", func() {
+		// A fresh controller holds no in-process state, so the retry has to come from the NodeClaim itself.
+		register(nodeClaim, node)
+		env.Clock.Step(31 * time.Minute)
+		failing := &failPatchClient{Client: env.Client, failures: 1}
+		ExpectSingletonReconciled(ctx, NewController(env.Clock, failing, cluster, recorder))
+		expectDeleted(nodeClaim)
+		expectNoDeadline(nodeClaim)
+
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectSingletonReconciled(ctx, NewController(env.Clock, env.Client, cluster, recorder))
+
+		expectDeadline(nodeClaim, env.Clock.Now())
+	})
 	It("should not delete a node labeled initialized after cluster state observed it", func() {
 		register(nodeClaim, node)
 		env.Clock.Step(31 * time.Minute)
@@ -467,20 +523,21 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		expectNoDeadline(nodeClaim)
 	})
 	It("should not race cluster state updates", func() {
-		// Meaningful under -race.
+		// Meaningful under -race: MarkForDeletion writes markedForDeletion on the live StateNode, which the copies this
+		// controller takes also read. The clock must pass toleration, or no node reaches that path.
 		register(nodeClaim, node)
 		for range 8 {
 			initialize(newNodeClaimAndNode())
 		}
+		env.Clock.Step(31 * time.Minute)
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
 			defer GinkgoRecover()
 			defer wg.Done()
-			for i := range 50 {
-				stored := ExpectExists(ctx, env.Client, node)
-				stored.Status.Conditions[0].Reason = fmt.Sprintf("NotReady%d", i)
-				Expect(cluster.UpdateNode(ctx, stored)).To(Succeed())
+			for range 200 {
+				cluster.MarkForDeletion(node.Spec.ProviderID)
+				cluster.UnmarkForDeletion(node.Spec.ProviderID)
 			}
 		}()
 		for range 20 {
@@ -576,7 +633,54 @@ var _ = Describe("Uninitialized Node Repair", func() {
 
 			expectNotDeleted(nodeClaim)
 			Expect(result.RequeueAfter).To(Equal(pollInterval))
-			Expect(recorder.Calls(events.NodeRepairBlocked)).To(BeNumerically(">", 0))
+			Expect(recorder.Calls(karpevents.NodeRepairBlocked)).To(BeNumerically(">", 0))
+			Expect(blockedNames()).To(ContainElements(node.Name, nodeClaim.Name, nodePool.Name))
+		})
+		It("should count unhealthy nodes that are still within toleration", func() {
+			// The breaker ignores toleration, so nodes that just went unhealthy still trip it.
+			for range 7 {
+				initialize(newNodeClaimAndNode())
+			}
+			register(nodeClaim, node)
+			var fresh []*corev1.Node
+			for range 2 {
+				nc, n := newNodeClaimAndNode()
+				initialize(nc, n)
+				fresh = append(fresh, n)
+			}
+			env.Clock.Step(31 * time.Minute)
+			// These two go unhealthy only now, so they are nowhere near their toleration.
+			for _, n := range fresh {
+				ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, n)
+			}
+
+			ExpectSingletonReconciled(ctx, controller)
+
+			expectNotDeleted(nodeClaim)
+		})
+		It("should not block a NodePool that is under the threshold", func() {
+			pool(3)
+			otherPool := test.NodePool()
+			ExpectApplied(ctx, env.Client, otherPool)
+			otherClaim, otherNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
+				Labels:     map[string]string{v1.NodePoolLabelKey: otherPool.Name, corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name},
+				Finalizers: []string{v1.TerminationFinalizer},
+			}})
+			register(otherClaim, otherNode)
+			for range 9 {
+				nc, n := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
+					Labels:     map[string]string{v1.NodePoolLabelKey: otherPool.Name, corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name},
+					Finalizers: []string{v1.TerminationFinalizer},
+				}})
+				initialize(nc, n)
+			}
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, controller)
+
+			expectNotDeleted(nodeClaim)
+			expectDeleted(otherClaim)
+			Expect(blockedNames()).ToNot(ContainElement(otherNode.Name))
 		})
 		It("should count initialized unhealthy nodes toward the threshold", func() {
 			for range 7 {

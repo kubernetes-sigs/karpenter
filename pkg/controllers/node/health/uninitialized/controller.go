@@ -25,7 +25,6 @@ import (
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -53,9 +52,6 @@ import (
 
 const pollInterval = 15 * time.Second
 
-// deletedTTL bounds how long a failed termination deadline stamp is retried.
-const deletedTTL = 10 * time.Minute
-
 // Controller replaces registered nodes that are unhealthy and never initialized, which neither the repair disruption
 // method (initialized nodes) nor NodeClaim liveness (unregistered nodes) handles. It polls cluster state because
 // eligibility spans the Node and NodeClaim, which change independently. Disruption budgets don't apply, since they
@@ -66,8 +62,6 @@ type Controller struct {
 	cluster    *state.Cluster
 	recorder   events.Recorder
 	matcher    *health.RepairPolicyMatcher
-	// deleted holds the UIDs of NodeClaims this controller deleted, so it never forces a drain something else started.
-	deleted *cache.Cache
 }
 
 // NewController panics if cluster state has no repair policy matcher. Every policy action is treated as a replacement: a
@@ -83,7 +77,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 		cluster:    cluster,
 		recorder:   recorder,
 		matcher:    matcher,
-		deleted:    cache.New(deletedTTL, time.Minute),
 	}
 }
 
@@ -194,14 +187,23 @@ func (c *Controller) repair(ctx context.Context, node *state.StateNode) error {
 	if !eligible {
 		return nil
 	}
-	// Retry a stamp that failed after our own delete.
+	// DisruptionReason marks the NodeClaims this controller is terminating, so a deadline stamp that failed after the
+	// delete is retried, even across a restart, and a drain something else started is never forced.
 	if !fresh.NodeClaim.DeletionTimestamp.IsZero() {
-		if _, deletedHere := c.deleted.Get(string(fresh.NodeClaim.UID)); deletedHere {
+		if disruptionReason(fresh.NodeClaim) == string(v1.DisruptionReasonUnhealthy) {
 			return c.stampTerminationDeadline(ctx, fresh.NodeClaim)
 		}
 		return nil
 	}
 	return c.delete(ctx, fresh, result)
+}
+
+// disruptionReason returns the reason the NodeClaim is being disrupted for, or "" when it carries none.
+func disruptionReason(nodeClaim *v1.NodeClaim) string {
+	if cond := nodeClaim.StatusConditions(status.WithObservedOnly()).Get(v1.ConditionTypeDisruptionReason); cond.IsTrue() {
+		return cond.Reason
+	}
+	return ""
 }
 
 // refresh re-reads the Node and NodeClaim, returning false if either is gone or the cached policy matches are stale.
@@ -227,13 +229,18 @@ func (c *Controller) refresh(ctx context.Context, node *state.StateNode) (*state
 // failed delete never leaves one behind.
 func (c *Controller) delete(ctx context.Context, fresh *state.StateNode, result health.RepairResult) error {
 	nodeClaim := fresh.NodeClaim
+	// Marked before the delete so a failed deadline stamp is retriable, and so evictions are attributed to repair rather
+	// than to a bare forceful termination. The patch updates nodeClaim's ResourceVersion, which the delete preconditions on.
+	if err := c.markDisrupted(ctx, nodeClaim); err != nil {
+		return err
+	}
 	if err := c.kubeClient.Delete(ctx, nodeClaim, client.Preconditions{ResourceVersion: lo.ToPtr(nodeClaim.ResourceVersion)}); err != nil {
 		if errors.IsConflict(err) || errors.IsNotFound(err) {
 			return nil
 		}
 		return serrors.Wrap(fmt.Errorf("deleting nodeclaim, %w", err), "NodeClaim", klog.KObj(nodeClaim))
 	}
-	c.deleted.SetDefault(string(nodeClaim.UID), struct{}{})
+	c.recorder.Publish(disruptionevents.Terminating(fresh.Node, nodeClaim, string(v1.DisruptionReasonUnhealthy))...)
 	log.FromContext(ctx).WithValues(
 		"condition", result.Condition,
 		"status", result.ConditionStatus,
@@ -261,6 +268,17 @@ func (c *Controller) delete(ctx context.Context, fresh *state.StateNode, result 
 		metrics.TerminationModeLabel: metrics.TerminationModeForceful,
 	})
 	return c.stampTerminationDeadline(ctx, nodeClaim)
+}
+
+// markDisrupted records that repair is terminating the NodeClaim.
+func (c *Controller) markDisrupted(ctx context.Context, nodeClaim *v1.NodeClaim) error {
+	stored := nodeClaim.DeepCopy()
+	nodeClaim.StatusConditions(status.WithClock(c.clock)).SetTrueWithReason(v1.ConditionTypeDisruptionReason,
+		string(v1.DisruptionReasonUnhealthy), string(v1.DisruptionReasonUnhealthy))
+	if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		return serrors.Wrap(fmt.Errorf("marking nodeclaim disrupted, %w", err), "NodeClaim", klog.KObj(nodeClaim))
+	}
+	return nil
 }
 
 // stampTerminationDeadline tightens the termination deadline to now, never extending an earlier one.
