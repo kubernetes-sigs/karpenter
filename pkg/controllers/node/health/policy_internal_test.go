@@ -18,10 +18,12 @@ package health
 
 import (
 	"slices"
+	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -48,7 +50,7 @@ var _ = Describe("Repair Policies", func() {
 
 	DescribeTable("validating complete policy sets",
 		func(policies []cloudprovider.RepairPolicy, actions sets.Set[cloudprovider.RepairAction], errorSubstring string) {
-			_, err := NewRepairPolicyMatcher(policies, actions)
+			_, err := newRepairPolicyMatcher(policies, actions)
 			if errorSubstring == "" {
 				Expect(err).NotTo(HaveOccurred())
 			} else {
@@ -197,7 +199,7 @@ var _ = Describe("Repair Policies", func() {
 			defaultFallback,
 		}
 
-		_, err := NewRepairPolicyMatcher(policies, supportedActions)
+		_, err := newRepairPolicyMatcher(policies, supportedActions)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("ConditionType:AcceleratorReady"))
 		Expect(err.Error()).To(ContainSubstring("ReasonRegex:["))
@@ -210,12 +212,12 @@ var _ = Describe("Repair Policies", func() {
 		var policies []cloudprovider.RepairPolicy
 		var matcher *RepairPolicyMatcher
 		evaluate := func(matcher *RepairPolicyMatcher, now time.Time, conditions ...corev1.NodeCondition) RepairResult {
-			return matcher.Evaluate(&corev1.Node{
+			return Resolve(matcher.Match(&corev1.Node{
 				Status: corev1.NodeStatus{Conditions: conditions},
-			}, now)
+			}), now)
 		}
 		newMatcher := func(policies []cloudprovider.RepairPolicy) *RepairPolicyMatcher {
-			policyMatcher, err := NewRepairPolicyMatcher(policies, supportedActions)
+			policyMatcher, err := newRepairPolicyMatcher(policies, supportedActions)
 			Expect(err).NotTo(HaveOccurred())
 			return policyMatcher
 		}
@@ -419,7 +421,7 @@ var _ = Describe("Repair Policies", func() {
 				},
 			}}}
 
-			result := nodeMatcher.Evaluate(node, now)
+			result := Resolve(nodeMatcher.Match(node), now)
 			Expect(result.Score).To(Equal(float64(6)))
 			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(result.Condition).To(Equal(corev1.NodeConditionType("HighPriority")))
@@ -524,8 +526,8 @@ var _ = Describe("Repair Policies", func() {
 				Status:     corev1.NodeStatus{Conditions: []corev1.NodeCondition{condition}},
 			}
 
-			Expect(matcher.Evaluate(node, now.Add(9*time.Minute)).Action).To(BeEmpty())
-			result := matcher.Evaluate(node, now.Add(10*time.Minute))
+			Expect(Resolve(matcher.Match(node), now.Add(9*time.Minute)).Action).To(BeEmpty())
+			result := Resolve(matcher.Match(node), now.Add(10*time.Minute))
 			Expect(result.Action).To(Equal(cloudprovider.RebootNode))
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 		})
@@ -559,4 +561,85 @@ var _ = Describe("Repair Policies", func() {
 		})
 	})
 
+	It("ranks a fallback-matched condition by the fallback's priority", func() {
+		matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
+			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: time.Minute, Priority: 10, Action: cloudprovider.ReplaceNode},
+			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, ReasonRegex: "^XID$", TolerationDuration: time.Minute, Priority: 0, Action: cloudprovider.ReplaceNode},
+		}, supportedActions))
+		node := func(reason string) *corev1.Node {
+			return &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+				Type: "AcceleratorReady", Status: corev1.ConditionFalse, Reason: reason, LastTransitionTime: metav1.NewTime(time.Unix(0, 0)),
+			}}}}
+		}
+		now := time.Unix(0, 0).Add(time.Hour)
+		Expect(Resolve(matcher.Match(node("Other")), now).Score).To(BeNumerically(">", Resolve(matcher.Match(node("XID")), now).Score))
+	})
+
+	It("describes a match for logging", func() {
+		matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{defaultFallback, validSpecific}, supportedActions))
+		matches := matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type: "AcceleratorReady", Status: corev1.ConditionFalse, Reason: "NvidiaXID48Error", LastTransitionTime: metav1.NewTime(time.Unix(0, 0)),
+		}}}})
+		Expect(matches).To(HaveLen(1))
+		Expect(matches[0].LogValues()).To(Equal([]any{
+			"condition", corev1.NodeConditionType("AcceleratorReady"),
+			"status", corev1.ConditionFalse,
+			"reason", "NvidiaXID48Error",
+			"reason-regex", `^NvidiaXID(48|63|95)Error$`,
+			"fallback", false,
+			"action", cloudprovider.RebootNode,
+			"eligible-at", time.Unix(0, 0).UTC().Add(10 * time.Minute),
+		}))
+	})
+
+	It("compares match inputs without allocating", func() {
+		node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
+			{Type: "AcceleratorReady", Status: corev1.ConditionFalse, Reason: "XID"},
+			{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+		}}}
+		heartbeat := node.DeepCopy()
+		heartbeat.Status.Conditions[1].LastHeartbeatTime = metav1.NewTime(time.Unix(120, 0))
+		Expect(testing.AllocsPerRun(100, func() { MatchInputsEqual(node, heartbeat) })).To(BeZero())
+	})
+
+	It("describes a decision with the condition that set its drain bound", func() {
+		matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
+			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: time.Minute, TerminationGracePeriod: lo.ToPtr(time.Minute), Action: cloudprovider.ReplaceNode},
+		}, supportedActions))
+		result := Resolve(matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type: "AcceleratorReady", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(time.Unix(0, 0)),
+		}}}}), time.Unix(0, 0).Add(time.Hour))
+		Expect(result.LogValues()).To(ContainElements("action", cloudprovider.ReplaceNode, "termination-grace-period", time.Minute,
+			"termination-grace-period-condition", corev1.NodeConditionType("AcceleratorReady")))
+	})
+
+	DescribeTable("comparing match inputs",
+		func(mutate func(*corev1.Node), equal bool) {
+			old := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(time.Unix(0, 0))},
+				Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+					Type: "AcceleratorReady", Status: corev1.ConditionFalse, Reason: "XID", LastTransitionTime: metav1.NewTime(time.Unix(60, 0)),
+				}}},
+			}
+			updated := old.DeepCopy()
+			mutate(updated)
+			Expect(MatchInputsEqual(old, updated)).To(Equal(equal))
+			// Equal inputs must produce equal matches, or a cached match would go stale.
+			if equal {
+				matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{defaultFallback, validSpecific}, supportedActions))
+				Expect(matcher.Match(updated)).To(Equal(matcher.Match(old)))
+			}
+		},
+		Entry("ignores heartbeats", func(n *corev1.Node) { n.Status.Conditions[0].LastHeartbeatTime = metav1.NewTime(time.Unix(120, 0)) }, true),
+		Entry("ignores messages", func(n *corev1.Node) { n.Status.Conditions[0].Message = "changed" }, true),
+		Entry("ignores labels", func(n *corev1.Node) { n.Labels = map[string]string{"updated": "true"} }, true),
+		Entry("detects a type change", func(n *corev1.Node) { n.Status.Conditions[0].Type = "Other" }, false),
+		Entry("detects a status change", func(n *corev1.Node) { n.Status.Conditions[0].Status = corev1.ConditionTrue }, false),
+		Entry("detects a reason change", func(n *corev1.Node) { n.Status.Conditions[0].Reason = "Other" }, false),
+		Entry("detects a transition", func(n *corev1.Node) { n.Status.Conditions[0].LastTransitionTime = metav1.NewTime(time.Unix(90, 0)) }, false),
+		Entry("detects an added condition", func(n *corev1.Node) {
+			n.Status.Conditions = append(n.Status.Conditions, corev1.NodeCondition{Type: "Other", Status: corev1.ConditionTrue})
+		}, false),
+		Entry("detects a creation timestamp change", func(n *corev1.Node) { n.CreationTimestamp = metav1.NewTime(time.Unix(30, 0)) }, false),
+	)
 })

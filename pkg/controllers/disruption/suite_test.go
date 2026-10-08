@@ -53,6 +53,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -99,14 +100,25 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
-	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
-	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	recorder = test.NewEventRecorder()
 	draController = deviceallocation.NewController(env.Client)
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
-	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+	queue = &disruption.Queue{}
+	cloudProvider.Reset() // installs the fake provider's default repair policies
+	useRepairPolicies(cloudProvider.RepairPolicy)
 })
+
+// useRepairPolicies installs the provider's repair policies and rebuilds cluster state around one matcher compiled from
+// them, as the operator does once at startup. Specs must call it before any Node reaches cluster state.
+func useRepairPolicies(policies []cloudprovider.RepairPolicy) {
+	cloudProvider.RepairPolicy = policies
+	repairPolicyMatcher := lo.Must(health.NewRepairPolicyMatcher(
+		options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}})), cloudProvider))
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider, state.WithRepairPolicyMatcher(repairPolicyMatcher))
+	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+}
 
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
@@ -119,6 +131,7 @@ var _ = BeforeEach(func() {
 	ExpectSingletonReconciled(ctx, pricingController)
 
 	recorder.Reset() // Reset the events that we captured during the run
+	useRepairPolicies(cloudProvider.RepairPolicy)
 
 	// Rebuild the DRA device-allocation controller and the provisioner bound to it each test so DRA tracking state
 	// (which the controller accumulates across reconciles and never resets) doesn't leak between specs. This must

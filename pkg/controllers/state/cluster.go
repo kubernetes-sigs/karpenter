@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -44,6 +45,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -64,6 +66,8 @@ type Cluster struct {
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	nodePoolResources         map[string]corev1.ResourceList  // node pool name -> resource list
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
+
+	repairPolicyMatcher *health.RepairPolicyMatcher // nil when node repair is disabled
 
 	NodePoolState *NodePoolState
 
@@ -101,8 +105,22 @@ type Cluster struct {
 	bufferPodCounts   map[string]int
 }
 
-func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
+type ClusterOptions struct {
+	repairPolicyMatcher *health.RepairPolicyMatcher
+}
+
+// WithRepairPolicyMatcher makes cluster state match each Node against the repair policies as it changes. Node repair
+// reads the same matcher back through RepairPolicyMatcher.
+func WithRepairPolicyMatcher(matcher *health.RepairPolicyMatcher) option.Function[ClusterOptions] {
+	return func(o *ClusterOptions) {
+		o.repairPolicyMatcher = matcher
+	}
+}
+
+func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider, opts ...option.Function[ClusterOptions]) *Cluster {
+	o := option.Resolve(opts...)
 	return &Cluster{
+		repairPolicyMatcher:       o.repairPolicyMatcher,
 		clock:                     clk,
 		kubeClient:                client,
 		cloudProvider:             cloudProvider,
@@ -272,6 +290,11 @@ func (c *Cluster) DeepCopyNodes() StateNodes {
 	return lo.Map(lo.Values(c.nodes), func(n *StateNode, _ int) *StateNode {
 		return n.DeepCopy()
 	})
+}
+
+// RepairPolicyMatcher returns the matcher cluster state matches Nodes with, or nil when node repair is disabled.
+func (c *Cluster) RepairPolicyMatcher() *health.RepairPolicyMatcher {
+	return c.repairPolicyMatcher
 }
 
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
@@ -732,6 +755,8 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1.NodeClaim, oldNode *StateN
 		volumeUsage:       oldNode.volumeUsage,
 		markedForDeletion: oldNode.markedForDeletion,
 		nominatedUntil:    oldNode.nominatedUntil,
+
+		repairPolicyMatches: oldNode.repairPolicyMatches,
 	}
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
@@ -781,6 +806,7 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNo
 		markedForDeletion: oldNode.markedForDeletion,
 		nominatedUntil:    oldNode.nominatedUntil,
 	}
+	n.repairPolicyMatches = c.matchRepairPolicies(ctx, node, oldNode)
 	if err := multierr.Combine(
 		c.populateResourceRequests(ctx, n),
 		c.populateVolumeLimits(ctx, n),
@@ -811,6 +837,29 @@ func (c *Cluster) cleanupNode(name string) {
 		delete(c.nodeNameToProviderID, name)
 		c.MarkUnconsolidated()
 	}
+}
+
+// matchRepairPolicies matches the Node against the repair policies, reusing the old matches when the inputs to matching
+// are unchanged. It logs when the Node starts, changes, or stops matching, which records when and how repair will act.
+func (c *Cluster) matchRepairPolicies(ctx context.Context, node *corev1.Node, oldNode *StateNode) []health.RepairPolicyMatch {
+	if c.repairPolicyMatcher == nil {
+		return nil
+	}
+	if oldNode.Node != nil && health.MatchInputsEqual(oldNode.Node, node) {
+		return oldNode.repairPolicyMatches
+	}
+	matches := c.repairPolicyMatcher.Match(node)
+	// Guard on Enabled so a disabled V(1) logger doesn't pay for building the key/value pairs.
+	if logger := log.FromContext(ctx).V(1); logger.Enabled() {
+		logger = logger.WithValues("Node", klog.KObj(node))
+		for _, m := range matches {
+			logger.WithValues(m.LogValues()...).Info("matched repair policy")
+		}
+		if len(matches) == 0 && len(oldNode.repairPolicyMatches) > 0 {
+			logger.Info("no longer matches any repair policy")
+		}
+	}
+	return matches
 }
 
 // nolint:gocyclo
