@@ -73,7 +73,8 @@ func NewRepair(c consolidation) *Repair {
 }
 
 // ShouldDisrupt is a predicate that filters candidates to nodes that have an unhealthy condition matching a
-// RepairPolicy, have waited past that policy's toleration, and are not vetoed by the do-not-repair annotation.
+// RepairPolicy, have waited past that policy's toleration, and are not vetoed by the do-not-repair annotation. A vetoed
+// node that repair would otherwise act on (a RepairPolicy is eligible) is reported with a Blocked event.
 func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	// Repair is behind the NodeRepair feature gate, matching the old node.health controller's gating.
 	if !options.FromContext(ctx).FeatureGates.NodeRepair {
@@ -83,15 +84,19 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	if c.Node == nil {
 		panic(fmt.Sprintf("repair candidate has no Node: %#v", c))
 	}
-	// do-not-repair is the operator's escape hatch: it blocks all repair on this node, whatever the drain bound.
-	// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424).
-	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
-		return false
-	}
 	// Cluster state matches the Node against the repair policies as it changes; only the toleration is resolved here.
 	c.RepairPolicyResult = c.GetRepairResult(r.clock.Now())
 	// Resolve rejects an empty Action, so this also skips healthy Nodes and those still within toleration.
 	if !r.rebootHistory.Resolve(c) {
+		return false
+	}
+	// do-not-repair is the operator's escape hatch: it blocks all repair on this node, whatever the drain bound. It's
+	// checked once a policy is eligible (its toleration has elapsed), so the veto is reported only from then on, and
+	// ahead of the drain-bound check, which it overrides.
+	// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424).
+	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
+		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
+			fmt.Sprintf("repair is blocked through the %q annotation", v1.DoNotRepairAnnotationKey))...)
 		return false
 	}
 	if c.hasPodBlockers && c.RepairPolicyResult.TerminationGracePeriod == nil && c.NodeClaim.Spec.TerminationGracePeriod == nil {
