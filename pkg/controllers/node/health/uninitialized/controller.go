@@ -109,9 +109,6 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	now := c.clock.Now()
 	var tripped map[string]bool
 	for _, node := range c.unhealthyNodes(now) {
-		if _, ok := c.evaluate(node, now); !ok {
-			continue
-		}
 		nodePoolName := node.NodeClaim.Labels[v1.NodePoolLabelKey]
 		// The breaker lists every Node, so compute it at most once per pass.
 		if tripped == nil {
@@ -133,12 +130,15 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	return reconciler.Result{RequeueAfter: pollInterval}, nil
 }
 
-// unhealthyNodes copies the nodes with a repair policy past its toleration. Nodes holds cluster state's read lock, so
-// nothing else is done inside the loop.
+// unhealthyNodes copies the nodes this controller would act on. Nodes holds cluster state's read lock, so only nodes
+// that pass the read-only checks are copied, and nothing else is done inside the loop.
 func (c *Controller) unhealthyNodes(now time.Time) state.StateNodes {
 	var unhealthy state.StateNodes
 	for node := range c.cluster.Nodes() {
-		if node.GetRepairResult(now).Action != "" {
+		if node.GetRepairResult(now).Action == "" {
+			continue
+		}
+		if _, ok := c.evaluate(node, now); ok {
 			unhealthy = append(unhealthy, node.DeepCopy())
 		}
 	}

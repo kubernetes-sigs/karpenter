@@ -195,12 +195,24 @@ var _ = Describe("Uninitialized Node Repair", func() {
 		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		env.Clock.Step(31 * time.Minute)
-		Expect(controller.unhealthyNodes(env.Clock.Now())).To(HaveLen(1))
-		Expect(controller.unhealthyNodes(env.Clock.Now())[0].Managed()).To(BeFalse())
+		Expect(controller.unhealthyNodes(env.Clock.Now())).To(BeEmpty())
 
 		Expect(func() { ExpectSingletonReconciled(ctx, controller) }).ToNot(Panic())
 
 		expectNotDeleted(nodeClaim)
+	})
+	It("should not copy unhealthy nodes owned by the repair disruption method", func() {
+		nc, n := newNodeClaimAndNode()
+		initialize(nc, n)
+		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, n)
+		syncState(nc, n)
+		register(nodeClaim, node)
+		env.Clock.Step(31 * time.Minute)
+
+		nodes := controller.unhealthyNodes(env.Clock.Now())
+
+		Expect(nodes).To(HaveLen(1))
+		Expect(nodes[0].NodeClaim.Name).To(Equal(nodeClaim.Name))
 	})
 	It("should keep repairing other nodes when one node's delete fails", func() {
 		register(nodeClaim, node)
