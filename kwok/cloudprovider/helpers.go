@@ -212,3 +212,9 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		},
 	}
 }
+
+func reservedResources(resources map[string]string) corev1.ResourceList {
+	return lo.MapEntries(resources, func(k string, v string) (corev1.ResourceName, resource.Quantity) {
+		return corev1.ResourceName(k), resource.MustParse(v)
+	})
+}
