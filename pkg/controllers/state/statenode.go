@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
@@ -170,6 +171,9 @@ type StateNode struct {
 	// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 	markedForDeletion bool
 	nominatedUntil    metav1.Time
+
+	// repairPolicyMatches are the repair policies matching the Node's conditions, recomputed when they change.
+	repairPolicyMatches []health.RepairPolicyMatch
 }
 
 func NewNode() *StateNode {
@@ -186,18 +190,28 @@ func NewNode() *StateNode {
 
 func (in *StateNode) ShallowCopy() *StateNode {
 	return &StateNode{
-		Node:               in.Node,
-		NodeClaim:          in.NodeClaim,
-		daemonSetRequests:  in.daemonSetRequests,
-		daemonSetLimits:    in.daemonSetLimits,
-		podRequests:        in.podRequests,
-		podLimits:          in.podLimits,
-		podDisruptionCosts: in.podDisruptionCosts,
-		hostPortUsage:      in.hostPortUsage,
-		volumeUsage:        in.volumeUsage,
-		markedForDeletion:  in.markedForDeletion,
-		nominatedUntil:     in.nominatedUntil,
+		Node:                in.Node,
+		NodeClaim:           in.NodeClaim,
+		daemonSetRequests:   in.daemonSetRequests,
+		daemonSetLimits:     in.daemonSetLimits,
+		podRequests:         in.podRequests,
+		podLimits:           in.podLimits,
+		podDisruptionCosts:  in.podDisruptionCosts,
+		hostPortUsage:       in.hostPortUsage,
+		volumeUsage:         in.volumeUsage,
+		markedForDeletion:   in.markedForDeletion,
+		nominatedUntil:      in.nominatedUntil,
+		repairPolicyMatches: in.repairPolicyMatches,
 	}
+}
+
+// GetRepairResult returns the repair decision for the Node at now, from the policy matches the Node informer keeps
+// current. An empty Action means no policy applies or none has waited out its toleration yet.
+func (in *StateNode) GetRepairResult(now time.Time) health.RepairResult {
+	if in.Node == nil {
+		return health.RepairResult{}
+	}
+	return health.Resolve(in.repairPolicyMatches, now)
 }
 
 func (in *StateNode) Name() string {

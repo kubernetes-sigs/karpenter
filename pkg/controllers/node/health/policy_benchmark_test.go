@@ -30,7 +30,7 @@ import (
 
 var benchmarkRepairPolicyResult RepairResult
 
-func BenchmarkRepairPolicyMatcherEvaluate(b *testing.B) {
+func BenchmarkRepairPolicyMatcherMatchAndResolve(b *testing.B) {
 	for _, policyCount := range []int{1, 10, 100} {
 		for _, matching := range []bool{false, true} {
 			b.Run(fmt.Sprintf("SpecificPolicies=%d/Matching=%t", policyCount, matching), func(b *testing.B) {
@@ -54,7 +54,7 @@ func BenchmarkRepairPolicyMatcherEvaluate(b *testing.B) {
 					TolerationDuration: time.Minute,
 					Action:             cloudprovider.ReplaceNode,
 				})
-				matcher, err := NewRepairPolicyMatcher(policies, sets.New(cloudprovider.ReplaceNode))
+				matcher, err := newRepairPolicyMatcher(policies, sets.New(cloudprovider.ReplaceNode))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -70,7 +70,7 @@ func BenchmarkRepairPolicyMatcherEvaluate(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					benchmarkRepairPolicyResult = matcher.Evaluate(node, now)
+					benchmarkRepairPolicyResult = Resolve(matcher.Match(node), now)
 				}
 			})
 		}
