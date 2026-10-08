@@ -336,6 +336,16 @@ from "every pass" to "at most one disruption-budget's worth per back-off window.
   lazily garbage-collected (drop entries whose NodePool no longer appears in the
   candidate set for some interval). Stale entries are otherwise inert because state is
   keyed by UID; a recreated NodePool with the same name does not inherit them.
+- **Stale failure after a reset.** Outcomes are recorded when each command completes,
+  not in the order the commands started. Suppose replacements for drifted nodes A and B
+  are launched, and later a replacement for node C is launched. A fails (pool backs
+  off), then C succeeds (`Reset` deletes the entry, including `lastFailure`), then B
+  fails. B started before C succeeded, but with `lastFailure` gone it is not treated as
+  stale, so it re-arms back-off at `level=1`. It doesn't escalate past `level=1`
+  because `Reset` already cleared the level, so the cost is at most one base-delay
+  window. The next successful replacement resets the pool again. Ignoring B would
+  require `Reset` to remember when the last successful attempt started; this RFC accepts
+  the extra window instead of tracking that state.
 - **HA / multiple replicas.** Karpenter runs a single active disruption reconciler
   (singleton); there is no cross-replica coordination concern.
 
