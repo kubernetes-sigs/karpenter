@@ -35,7 +35,13 @@ type Cache struct {
 	// capacityBufferToPods maps a CapacityBuffer's namespace/name -> to a list of
 	// virtual pods corresponding to that CapacityBuffer
 	capacityBufferToPods map[types.NamespacedName][]*corev1.Pod
-	// mutex guards capacityBufferToPods and warmed
+	// terminal records one-shot buffers the provisioner has latched terminal (Fulfilled or
+	// Expired), keyed by namespace/name with the UID seen at latch time. UpdateEntry refuses to
+	// rebuild pods for a buffer whose UID matches, closing the window in which the buffer
+	// controller reconciles a copy that predates the terminal status patch and would otherwise
+	// resurrect the virtual pods. A different UID means the buffer was deleted and recreated.
+	terminal map[types.NamespacedName]types.UID
+	// mutex guards capacityBufferToPods, terminal and warmed
 	mutex sync.Mutex
 	// warmed signals that capacityBufferToPods has been populated from the kube api state
 	warmed bool
@@ -45,6 +51,7 @@ func NewVirtualPodCache(kubeClient client.Client) *Cache {
 	return &Cache{
 		kubeClient:           kubeClient,
 		capacityBufferToPods: map[types.NamespacedName][]*corev1.Pod{},
+		terminal:             map[types.NamespacedName]types.UID{},
 	}
 }
 
@@ -53,20 +60,86 @@ func NewVirtualPodCache(kubeClient client.Client) *Cache {
 // the spec once to compute replicas and status, then passes it here so the cache
 // doesn't re-fetch the same PodTemplate/workload
 func (v *Cache) UpdateEntry(cb *autoscalingv1beta1.CapacityBuffer, spec corev1.PodTemplateSpec) {
-	if !isBufferReadyForProvisioning(cb) {
-		v.RemoveEntry(client.ObjectKeyFromObject(cb))
-		return
-	}
-	podCache := BuildVirtualPods(cb, spec)
+	key := client.ObjectKeyFromObject(cb)
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
-	v.capacityBufferToPods[client.ObjectKeyFromObject(cb)] = podCache
+	if uid, latched := v.terminal[key]; latched {
+		if uid == cb.UID {
+			// Terminal buffer: ignore this (possibly stale) copy and keep the entry evicted.
+			delete(v.capacityBufferToPods, key)
+			return
+		}
+		// Same name, new UID: the buffer was recreated, so the latch no longer applies.
+		delete(v.terminal, key)
+	}
+	if !isBufferReadyForProvisioning(cb) {
+		delete(v.capacityBufferToPods, key)
+		return
+	}
+	v.capacityBufferToPods[key] = BuildVirtualPods(cb, spec)
 }
 
+// RemoveEntry drops a buffer's virtual pods and any terminal latch for it. Used when the buffer
+// is deleted or can no longer be resolved.
 func (v *Cache) RemoveEntry(key types.NamespacedName) {
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
 	delete(v.capacityBufferToPods, key)
+	delete(v.terminal, key)
+}
+
+// MarkTerminal evicts a one-shot buffer's virtual pods and latches the buffer (by UID) so that a
+// subsequent UpdateEntry from a stale copy cannot rebuild them. The latch is released by
+// RemoveEntry, or automatically when a buffer with the same name but a new UID appears.
+func (v *Cache) MarkTerminal(cb *autoscalingv1beta1.CapacityBuffer) {
+	key := client.ObjectKeyFromObject(cb)
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	delete(v.capacityBufferToPods, key)
+	v.terminal[key] = cb.UID
+}
+
+// Truncate keeps at most n of the buffer's cached virtual pods. The provisioner calls this when
+// it advances a one-shot buffer's consumed count so the same scheduling cycle sees the shrunken
+// remainder, without waiting for the buffer controller to observe the status patch and rebuild.
+func (v *Cache) Truncate(key types.NamespacedName, n int) {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	pods, ok := v.capacityBufferToPods[key]
+	if !ok || len(pods) <= n {
+		return
+	}
+	if n <= 0 {
+		delete(v.capacityBufferToPods, key)
+		return
+	}
+	v.capacityBufferToPods[key] = pods[:n]
+}
+
+// Get returns the cached virtual pods for a single buffer, hydrating the cache on first use.
+// Like GetAll, the pods are not deep copied and MUST be treated as read-only.
+func (v *Cache) Get(ctx context.Context, key types.NamespacedName) []*corev1.Pod {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	if err := v.ensureWarmed(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "failed to hydrate virtual pod cache")
+		return nil
+	}
+	return v.capacityBufferToPods[key]
+}
+
+// ensureWarmed hydrates the cache once. The caller MUST hold v.mutex.
+func (v *Cache) ensureWarmed(ctx context.Context) error {
+	if v.warmed {
+		return nil
+	}
+	if err := v.hydrateCache(ctx); err != nil {
+		return err
+	}
+	// Only mark warmed after the cache is populated so a failed hydration retries on the next
+	// call rather than serving an empty cache forever.
+	v.warmed = true
+	return nil
 }
 
 // hydrateCache performs the one-time lazy hydration of the cache. The caller
@@ -96,14 +169,9 @@ func (v *Cache) hydrateCache(ctx context.Context) error {
 func (v *Cache) GetAll(ctx context.Context) []*corev1.Pod {
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
-	if !v.warmed {
-		if err := v.hydrateCache(ctx); err != nil {
-			log.FromContext(ctx).Error(err, "failed to hydrate virtual pod cache")
-			return nil
-		}
-		// Only mark warmed after the cache is populated so a failed hydration
-		// retries on the next call rather than serving an empty cache forever
-		v.warmed = true
+	if err := v.ensureWarmed(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "failed to hydrate virtual pod cache")
+		return nil
 	}
 	ans := make([]*corev1.Pod, 0)
 	for _, pods := range v.capacityBufferToPods {
