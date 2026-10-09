@@ -102,8 +102,8 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		}
 		if _, err = s.validator.Validate(ctx, cmd, commandValidationDelay); err != nil {
 			if IsValidationError(err) {
-				reason := getValidationFailureReason(err)
-				cmd.EmitRejectedEvents(s.recorder, reason)
+				log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt, command failed validation", "failure_reason", validationFailureReason(err), "error", err)
+				cmd.EmitRejectedEvents(s.recorder, getValidationFailureReason(err))
 				return []Command{}, nil
 			}
 			return []Command{}, fmt.Errorf("validating consolidation, %w", err)
