@@ -492,11 +492,27 @@ func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string 
 }
 
 type InstanceTypeFilterError struct {
-	// Each of these three flags indicates if that particular criteria was met by at least one instance type
+	// Each of these three flags indicates if that particular criteria was met by at least one instance type.
+	// The criteria are independent: an instance type can have room for the pod without having a compatible
+	// offering, and vice versa.
 	requirementsMet bool
 	fits            bool
-	hasOffering     bool
+	// hasOffering only considers available offerings because unavailable offerings are filtered out by
+	// AllocatableOfferingsList(). A false value therefore mixes a permanent
+	// cause (no offering satisfies this combination of requirements) with a transient one (every offering
+	// that does is currently unavailable), and the two can't be separated here: Offering.Available is a
+	// single bool covering both kinds of cause, so consulting the unfiltered offerings doesn't distinguish
+	// them either.
+	hasOffering bool
 
+	// These three flags select between error messages; they are not feasibility verdicts. Each pairs a
+	// per-key requirements test with a per-instance-type resource test, so a set flag says nothing concrete
+	// about whether the failure can resolve on its own.
+	//
+	// requirementsAndFits in particular is set both when an
+	// offering is temporarily unavailable and when no offering satisfies the requested combination of
+	// zone and capacity type at all.
+	//
 	// requirementsAndFits indicates if a single instance type met the scheduling requirements and had enough resources
 	requirementsAndFits bool
 	// requirementsAndOffering indicates if a single instance type met the scheduling requirements and was a required offering
@@ -636,21 +652,21 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			// the tradeoff to not short-circuiting on the filtering is that we can report much better error messages
 			// about why scheduling failed
 			itCompat := compatible(it, requirements)
-			itFits, itHasOffering := fits(it, totalRequestsForInstanceType, requirements)
+			itLaunchable, itHasOffering, itResourceFits := fits(it, totalRequestsForInstanceType, requirements)
 
 			// track if any single instance type met a single criteria
 			err.requirementsMet = err.requirementsMet || itCompat
-			err.fits = err.fits || itFits
+			err.fits = err.fits || itResourceFits
 			err.hasOffering = err.hasOffering || itHasOffering
 
 			// track if any single instance type met the three pairs of criteria
-			err.requirementsAndFits = err.requirementsAndFits || (itCompat && itFits && !itHasOffering)
-			err.requirementsAndOffering = err.requirementsAndOffering || (itCompat && itHasOffering && !itFits)
-			err.fitsAndOffering = err.fitsAndOffering || (itFits && itHasOffering && !itCompat)
+			err.requirementsAndFits = err.requirementsAndFits || (itCompat && itResourceFits && !itHasOffering)
+			err.requirementsAndOffering = err.requirementsAndOffering || (itCompat && itHasOffering && !itResourceFits)
+			err.fitsAndOffering = err.fitsAndOffering || (itResourceFits && itHasOffering && !itCompat)
 
 			// and if it met all criteria, we keep the instance type and continue filtering.  We now won't be reporting
-			// any errors.
-			if itCompat && itFits && itHasOffering {
+			// any errors. Launchable already implies a compatible offering, so it subsumes the offering check.
+			if itCompat && itLaunchable {
 				remaining = append(remaining, it)
 			}
 		}
@@ -678,20 +694,31 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 	return instanceType.Requirements.Intersects(requirements) == nil
 }
 
-func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList, requirements scheduling.Requirements) (itFits bool, hasOffering bool) {
+// fits reports three independent facts about an instance type:
+//   - launchable: a SINGLE allocatable group both has room for the requests and has a compatible
+//     offering. This is the launch-eligibility test: room and offering must come from the same
+//     group, since offering-level capacity overlays make allocatable vary per offering.
+//   - hasOffering: some offering is compatible with the requirements, regardless of room.
+//   - resourceFits: some allocatable group has room for the requests, regardless of offerings.
+//
+// hasOffering and resourceFits are tracked independently of launchable so that error reporting can
+// distinguish "no instance type is big enough" from "big enough, but the requirements exclude every
+// offering it has".
+func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList, requirements scheduling.Requirements) (launchable bool, hasOffering bool, resourceFits bool) {
 	for _, group := range instanceType.AllocatableOfferingsList() {
 		resourceFit := resources.Fits(requests, group.Allocatable)
+		resourceFits = resourceFits || resourceFit
 		for _, of := range group.Offerings {
 			if requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 				hasOffering = true
 				if resourceFit {
-					return true, true
+					return true, true, true
 				}
 				break
 			}
 		}
 	}
-	return false, hasOffering
+	return false, hasOffering, resourceFits
 }
 
 // filterInstanceTypesByVolumeAttachmentLimits returns the instance types which can support the given volumes. Instance types
