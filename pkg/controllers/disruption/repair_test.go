@@ -851,7 +851,7 @@ var _ = Describe("Repair", func() {
 		})
 		injectedErr := errors.New("injected termination timestamp patch failure")
 		failingClient := &terminationTimestampPatchErrorClient{Client: env.Client, err: injectedErr, failNext: true}
-		failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, prov)
+		failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, prov, nodePoolBackoff)
 		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, failingClient, prov, cloudProvider, recorder, failingQueue))
 		failingController := disruption.NewController(ctx, env.Clock, failingClient, prov, cloudProvider, recorder, cluster, failingQueue, clusterCost,
 			disruption.WithMethods(failingRepair))

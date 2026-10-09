@@ -69,6 +69,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
 )
@@ -114,7 +115,8 @@ func NewControllers(
 	virtualPodCache := virtualpods.NewVirtualPodCache(kubeClient)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache)
 	evictionQueue := terminator.NewQueue(clock, kubeClient, recorder)
-	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
+	driftBackoff := nodepoolbackoff.NewState(clock)
+	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p, driftBackoff)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
 	controllers := []controller.Controller{
@@ -152,7 +154,7 @@ func NewControllers(
 	if !options.FromContext(ctx).DisableClusterStateObservability {
 		controllers = append(controllers,
 			metricspod.NewController(kubeClient, cluster),
-			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost),
+			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost, driftBackoff),
 			metricsnode.NewController(cluster),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,

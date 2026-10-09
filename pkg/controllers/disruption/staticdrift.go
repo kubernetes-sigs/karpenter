@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -40,14 +41,16 @@ type StaticDrift struct {
 	provisioner   *provisioning.Provisioner
 	cloudprovider cloudprovider.CloudProvider
 	recorder      events.Recorder
+	backoff       *nodepoolbackoff.State
 }
 
-func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider, recorder events.Recorder) *StaticDrift {
+func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider, recorder events.Recorder, backoff *nodepoolbackoff.State) *StaticDrift {
 	return &StaticDrift{
 		cluster:       cluster,
 		provisioner:   provisioner,
 		cloudprovider: cloudprovider,
 		recorder:      recorder,
+		backoff:       backoff,
 	}
 }
 
@@ -61,12 +64,15 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 	candidatesByNodePool := lo.GroupBy(candidates, func(candidate *Candidate) string {
 		return candidate.NodePool.Name
 	})
-
+	initDriftBackoffMetrics(ctx, d.backoff, lo.Keys(candidatesByNodePool)...)
 	var cmds []Command
 	for npName, npCandidates := range candidatesByNodePool {
 		np := npCandidates[0].NodePool
 
 		if disruptionBudgetMapping[npName] == 0 {
+			continue
+		}
+		if isDriftBackedOff(ctx, d.backoff, d.recorder, np) {
 			continue
 		}
 
