@@ -43,6 +43,7 @@ import (
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
 	nodehydration "sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/legacyrepair"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	nodeclaimconsistency "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
@@ -176,9 +177,13 @@ func NewControllers(
 	}
 
 	// Register the reboot controller alongside node repair. The repair disruption method itself is
-	// registered in the disruption controller; the standalone node/health controller was removed by #3311.
+	// registered in the disruption controller. --legacy-node-repair instead runs the legacy node.health controller.
 	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
-		controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+		if options.FromContext(ctx).LegacyNodeRepair {
+			controllers = append(controllers, legacyrepair.NewController(kubeClient, cloudProvider, clock, recorder))
+		} else {
+			controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+		}
 	}
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))
