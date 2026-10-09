@@ -1145,6 +1145,16 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 	})
 
+	It("should not repair when --legacy-node-repair is set", func() {
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{LegacyNodeRepair: lo.ToPtr(true), FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}}))
+		initNode(nodeClaim, node)
+		markUnhealthy(node, "BadNode")
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+		Expect(queue.GetCommands()).To(HaveLen(0))
+	})
+
 	Context("uninitialized nodes", func() {
 		// registerNode applies a node/nodeclaim that registered but never initialized and syncs cluster state. Cluster
 		// state skips an uninitialized node until registration syncs its instance type label.

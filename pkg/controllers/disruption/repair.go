@@ -59,7 +59,7 @@ type Repair struct {
 }
 
 // NewRepair constructs the repair method around the matcher cluster state matches Nodes with. It panics when cluster
-// state has none, since health.NewRepairPolicyMatcher only returns nil when node repair is disabled.
+// state has none, since health.NewRepairPolicyMatcher only returns nil when node repair is disabled or replaced by --legacy-node-repair.
 func NewRepair(c consolidation) *Repair {
 	policyMatcher := c.cluster.RepairPolicyMatcher()
 	if policyMatcher == nil {
@@ -76,8 +76,8 @@ func NewRepair(c consolidation) *Repair {
 // RepairPolicy, have waited past that policy's toleration, and are not vetoed by the do-not-repair annotation. A vetoed
 // node that repair would otherwise act on (a RepairPolicy is eligible) is reported with a Blocked event.
 func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
-	// Repair is behind the NodeRepair feature gate, matching the old node.health controller's gating.
-	if !options.FromContext(ctx).FeatureGates.NodeRepair {
+	// Repair is behind the NodeRepair feature gate, and --legacy-node-repair replaces it with the node.health controller.
+	if !options.FromContext(ctx).FeatureGates.NodeRepair || options.FromContext(ctx).LegacyNodeRepair {
 		return false
 	}
 	// A disruption candidate always has a registered Node; a nil here is an invariant violation, so fail loud.

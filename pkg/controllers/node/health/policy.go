@@ -80,10 +80,10 @@ type RepairResult struct {
 }
 
 // NewRepairPolicyMatcher compiles the cloud provider's repair policies once, for cluster state and node repair to
-// share. It returns nil when node repair is disabled, and an error when node repair is enabled but the provider defines
-// no policies or an invalid set.
+// share. It returns nil when node repair is disabled or --legacy-node-repair runs the legacy controller instead, and an
+// error when node repair is enabled but the provider defines no policies or an invalid set.
 func NewRepairPolicyMatcher(ctx context.Context, cloudProvider cloudprovider.CloudProvider) (*RepairPolicyMatcher, error) {
-	if !options.FromContext(ctx).FeatureGates.NodeRepair {
+	if !options.FromContext(ctx).FeatureGates.NodeRepair || options.FromContext(ctx).LegacyNodeRepair {
 		return nil, nil
 	}
 	policies := cloudProvider.RepairPolicies()
