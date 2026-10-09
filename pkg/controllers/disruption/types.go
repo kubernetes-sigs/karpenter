@@ -142,10 +142,6 @@ func (c *Candidate) OwnedByStaticNodePool() bool {
 	return c.NodePool.Spec.Replicas != nil
 }
 
-// IsEmpty reports that no pod contributes positive reschedule disruption cost.
-// A node with running pods whose eviction costs all clamp to zero is Empty under
-// this definition; the Empty disruption reason and Empty budgets govern its
-// deletion through the Emptiness method.
 // reservationID returns the ID of the capacity reservation the candidate holds a slot in, or "" if it holds none (it
 // isn't reserved, or it was demoted to on-demand after its reservation ended).
 func (c *Candidate) reservationID() string {
@@ -155,6 +151,10 @@ func (c *Candidate) reservationID() string {
 	return c.Labels()[cloudprovider.ReservationIDLabel]
 }
 
+// IsEmpty reports that no pod contributes positive reschedule disruption cost.
+// A node with running pods whose eviction costs all clamp to zero is Empty under
+// this definition; the Empty disruption reason and Empty budgets govern its
+// deletion through the Emptiness method.
 func (c *Candidate) IsEmpty() bool {
 	return c.RescheduleDisruptionCost <= disruptionutils.PerNodeBaseDisruptionCost
 }
