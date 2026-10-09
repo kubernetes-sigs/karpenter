@@ -521,6 +521,47 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(recorder.Calls(events.RebootFailed)).To(Equal(1))
 		})
 
+		It("stamps the reboot drain bound as the termination deadline when escalating to replacement", func() {
+			nodeClaim.Annotations[v1.RebootTerminationGracePeriodAnnotationKey] = "5m0s"
+			nodeClaim.Finalizers = append(nodeClaim.Finalizers, "test.karpenter.sh/hold")
+			env.Clock.Step(21 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			expectReplaced(nodeClaim, "recovery_timeout")
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, env.Clock.Now().Add(5*time.Minute).Format(time.RFC3339)))
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		})
+
+		It("does not extend an earlier termination deadline when escalating to replacement", func() {
+			env.Clock.Step(21 * time.Minute)
+			earlier := env.Clock.Now().Add(time.Minute).Format(time.RFC3339)
+			nodeClaim.Annotations[v1.RebootTerminationGracePeriodAnnotationKey] = "5m0s"
+			nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey] = earlier
+			nodeClaim.Finalizers = append(nodeClaim.Finalizers, "test.karpenter.sh/hold")
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			expectReplaced(nodeClaim, "recovery_timeout")
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, earlier))
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		})
+
+		It("stamps no termination deadline when escalating an unbounded reboot", func() {
+			delete(nodeClaim.Annotations, v1.RebootTerminationGracePeriodAnnotationKey)
+			nodeClaim.Finalizers = append(nodeClaim.Finalizers, "test.karpenter.sh/hold")
+			env.Clock.Step(21 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+			expectReplaced(nodeClaim, "recovery_timeout")
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.Annotations).ToNot(HaveKey(v1.NodeClaimTerminationTimestampAnnotationKey))
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		})
+
 		It("fails when the node is gone and the deadline has elapsed", func() {
 			env.Clock.Step(21 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
