@@ -1176,6 +1176,20 @@ var _ = Describe("Repair", func() {
 			})
 		})
 
+		It("should not repair a node that never registered", func() {
+			node.Labels = lo.Assign(node.Labels, map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"})
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+			markUnhealthy(node, "BadNode")
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(recorder.DetectedEvent("Node isn't initialized nor registered")).To(BeTrue())
+		})
+
 		It("should not repair before the toleration duration elapses", func() {
 			registerNode(nodeClaim, node)
 			markUnhealthy(node, "BadNode")

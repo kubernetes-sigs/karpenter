@@ -1891,7 +1891,28 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized (NodeClaim=%s)`, nodeClaim.Name)))
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized nor registered (NodeClaim=%s)`, nodeClaim.Name)))
+	})
+	It("should not consider candidates that registered but aren't yet initialized", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized (Node=%s)`, node.Name)))
 	})
 	It("should not consider candidates that are not owned by a NodePool (no karpenter.sh/nodepool label)", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
