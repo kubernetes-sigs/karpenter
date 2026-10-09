@@ -233,10 +233,10 @@ func (e *balancedEvaluator) ApproveCommand(ctx context.Context, cmd Command) (bo
 		if scored && !result.Approved() {
 			moveDecision = string(RejectedDecision)
 		}
-		ConsolidationMovesTotal.Inc(map[string]string{decisionLabel: moveDecision, metrics.NodePoolLabel: poolName, policyLabel: policy})
+		ConsolidationMovesTotal.Inc(map[string]string{decisionLabel: moveDecision, metrics.NodePoolLabel: poolName, PolicyLabel: policy})
 
 		if scored {
-			ConsolidationScoreHistogram.Observe(result.Score(), map[string]string{decisionLabel: moveDecision, metrics.NodePoolLabel: poolName, policyLabel: policy})
+			ConsolidationScoreHistogram.Observe(result.Score(), map[string]string{decisionLabel: moveDecision, metrics.NodePoolLabel: poolName, PolicyLabel: policy})
 			if result.Approved() {
 				e.recorder.Publish(disruptionevents.ConsolidationApproved(
 					candidate.Node, candidate.NodeClaim,
@@ -261,7 +261,7 @@ func (e *balancedEvaluator) EmitMultiNodeEvents(ctx context.Context, cmd Command
 	for poolName, poolCandidates := range byPool {
 		nodePool := poolCandidates[0].NodePool
 		policy := string(nodePool.Spec.Disruption.ConsolidationPolicy)
-		ConsolidationMovesTotal.Inc(map[string]string{decisionLabel: moveDecision, metrics.NodePoolLabel: poolName, policyLabel: policy})
+		ConsolidationMovesTotal.Inc(map[string]string{decisionLabel: moveDecision, metrics.NodePoolLabel: poolName, PolicyLabel: policy})
 
 		result, scored := perPoolResults[poolName]
 		if !scored {
@@ -271,7 +271,7 @@ func (e *balancedEvaluator) EmitMultiNodeEvents(ctx context.Context, cmd Command
 		if !result.Approved() {
 			poolDecision = string(RejectedDecision)
 		}
-		ConsolidationScoreHistogram.Observe(result.Score(), map[string]string{decisionLabel: poolDecision, metrics.NodePoolLabel: poolName, policyLabel: policy})
+		ConsolidationScoreHistogram.Observe(result.Score(), map[string]string{decisionLabel: poolDecision, metrics.NodePoolLabel: poolName, PolicyLabel: policy})
 
 		if result.Approved() {
 			e.recorder.Publish(disruptionevents.ConsolidationApprovedMultiNode(
