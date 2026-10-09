@@ -96,10 +96,10 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 			// Delete-only (no Replacements): carry the Results so existing nodes that can absorb the freed pods get
 			// nominated. Reactive provisioning handles the rest.
 			return []Command{{
-				Candidates:          []*Candidate{candidate},
-				Results:             results,
-				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-				TerminateFirst:      true,
+				Candidates:           []*Candidate{candidate},
+				Results:              results,
+				PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+				TerminateFirstReason: TerminateFirstNoReservedCapacity,
 			}}, nil
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.

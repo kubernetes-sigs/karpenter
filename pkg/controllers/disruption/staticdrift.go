@@ -98,7 +98,7 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 				// first and is the only one that can terminate first; the rest can't be replaced either way.
 				holdsSlot := func(c *Candidate) bool { return holdsOfferedReservation(c, offered) }
 				eligible, rest := lo.FilterReject(npCandidates, func(c *Candidate, _ int) bool { return holdsSlot(c) })
-				cmds = append(cmds, d.unreplaceableCommands(ctx, np, append(eligible, rest...)[:maxDrifts], holdsSlot,
+				cmds = append(cmds, d.unreplaceableCommands(ctx, np, append(eligible, rest...)[:maxDrifts], holdsSlot, TerminateFirstNoReservedCapacity,
 					"static NodePool's capacity reservations are full and cannot stage a replacement")...)
 				continue
 			}
@@ -117,7 +117,7 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		// no-op in that case (it reserved nothing).
 		// We will not get a negative value here
 		if maxAllowedDrifts == 0 {
-			cmds = append(cmds, d.unreplaceableCommands(ctx, np, npCandidates[:maxDrifts], func(*Candidate) bool { return true },
+			cmds = append(cmds, d.unreplaceableCommands(ctx, np, npCandidates[:maxDrifts], func(*Candidate) bool { return true }, TerminateFirstStaticAtLimit,
 				"static NodePool is at its node limit and cannot stage a replacement")...)
 			continue
 		}
@@ -140,7 +140,8 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 
 // unreplaceableCommands handles a NodePool's candidates when it can't stage a replacement: with TerminateFirstDrift, each
 // candidate that canTerminateFirst gets a delete-only command; every other candidate is reported blocked.
-func (d *StaticDrift) unreplaceableCommands(ctx context.Context, np *v1.NodePool, candidates []*Candidate, canTerminateFirst func(*Candidate) bool, blockedReason string) []Command {
+func (d *StaticDrift) unreplaceableCommands(ctx context.Context, np *v1.NodePool, candidates []*Candidate, canTerminateFirst func(*Candidate) bool,
+	reason TerminateFirstReason, blockedReason string) []Command {
 	// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand the workload
 	// with no replacement.
 	terminateFirst := options.FromContext(ctx).FeatureGates.TerminateFirstDrift && np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
@@ -148,9 +149,9 @@ func (d *StaticDrift) unreplaceableCommands(ctx context.Context, np *v1.NodePool
 	for _, c := range candidates {
 		if terminateFirst && canTerminateFirst(c) {
 			cmds = append(cmds, Command{
-				Candidates:          []*Candidate{c},
-				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{c}),
-				TerminateFirst:      true,
+				Candidates:           []*Candidate{c},
+				PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{c}),
+				TerminateFirstReason: reason,
 			})
 			continue
 		}

@@ -190,6 +190,7 @@ var _ = AfterEach(func() {
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
 	disruption.NodepoolDecisionsPerformed.Reset()
+	disruption.TerminateFirstDecisionsTotal.Reset()
 	disruption.NodeClaimsUnhealthyDisruptedTotal.Reset()
 })
 
