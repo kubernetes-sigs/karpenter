@@ -624,6 +624,43 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 		})
 
+		// One NodePool's lookup failure must not stop repair for the rest of the cluster.
+		It("should still repair other candidates when a static NodePool's instance types can't be resolved", func() {
+			withReservation(0)
+			staticPool := reservedStaticNodePool(v1.CapacityTypeReserved)
+			staticNodeClaim, staticNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:              staticPool.Name,
+				corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				cloudprovider.ReservationIDLabel: reservationID,
+			}}})
+			dynamicPool := test.NodePool()
+			dynamicNodeClaim, dynamicNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            dynamicPool.Name,
+				corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+			}}})
+			ExpectApplied(ctx, env.Client, staticPool, staticNodeClaim, staticNode, dynamicPool, dynamicNodeClaim, dynamicNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{staticNode, dynamicNode}, []*v1.NodeClaim{staticNodeClaim, dynamicNodeClaim})
+			// The static node has been unhealthy longer, so it scores higher and is evaluated first.
+			markUnhealthy(staticNode)
+			env.Clock.Step(10 * time.Minute)
+			markUnhealthy(dynamicNode)
+			env.Clock.Step(31 * time.Minute)
+			erroring := &instanceTypesErrorCloudProvider{CloudProvider: cloudProvider, nodePools: []string{staticPool.Name}}
+			repairController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+				disruption.WithMethods(disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, erroring, recorder, queue))))
+
+			ExpectSingletonReconciled(ctx, repairController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(dynamicNodeClaim.Name))
+		})
+
 		It("should block with the full-reservations reason when the static NodePool is NotReady", func() {
 			withReservation(0)
 			nodePool := reservedStaticNodePool(v1.CapacityTypeReserved)
