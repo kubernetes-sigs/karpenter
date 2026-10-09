@@ -548,6 +548,12 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 }
 
 func (s *Scheduler) trySchedule(ctx context.Context, p *corev1.Pod) error {
+	// kube-scheduler honors every required node affinity term when filtering nodes for topology spread, so topology
+	// must keep seeing the terms that relaxation removes
+	var requiredNodeAffinity *corev1.NodeSelector
+	if p.Spec.Affinity != nil && p.Spec.Affinity.NodeAffinity != nil {
+		requiredNodeAffinity = p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.DeepCopy()
+	}
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -572,7 +578,12 @@ func (s *Scheduler) trySchedule(ctx context.Context, p *corev1.Pod) error {
 		if relaxed := s.preferences.Relax(ctx, p); !relaxed {
 			return err
 		}
-		if e := s.topology.Update(ctx, p); e != nil && !errors.Is(e, context.DeadlineExceeded) {
+		topologyPod := p
+		if requiredNodeAffinity != nil {
+			topologyPod = p.DeepCopy()
+			topologyPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = requiredNodeAffinity
+		}
+		if e := s.topology.Update(ctx, topologyPod); e != nil && !errors.Is(e, context.DeadlineExceeded) {
 			log.FromContext(ctx).Error(e, "failed updating topology")
 		}
 		// Update the cached podData since the pod was relaxed, and it could have changed its requirement set
