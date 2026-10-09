@@ -235,7 +235,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
 	fs.BoolVarWithEnv(&o.LegacyNodeRepair, "legacy-node-repair", "LEGACY_NODE_REPAIR", false, "When set with the NodeRepair feature gate, Karpenter runs the legacy node repair controller instead of node repair as a disruption method. The legacy controller only replaces nodes: it does not support terminate-first repair, reboot, repair policy priority or termination grace periods, or the karpenter.sh/do-not-repair annotation. NOTE: The legacy node repair controller is planned for deprecation. If you use it because the new one does not work for you, please open an issue with your use case or problem.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", featureGatesDefault()), featureGatesHelp())
-	fs.StringVar(&o.schedulerConfigRaw, "scheduler-config", env.WithDefaultString("SCHEDULER_CONFIG", ""), "A YAML/JSON document configuring the parts of the cluster's kube-scheduler behavior that Karpenter must mirror during scheduling simulation, currently only podTopologySpread.defaultConstraints. Empty means no scheduler-config overrides.")
+	fs.StringVar(&o.schedulerConfigRaw, "scheduler-config", env.WithDefaultString("SCHEDULER_CONFIG", ""), "A YAML/JSON document configuring the parts of the cluster's kube-scheduler behavior that Karpenter must mirror during scheduling simulation: podTopologySpread.defaultConstraints and nodeResourcesFit.scoringStrategy. Empty means no scheduler-config overrides.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -339,7 +339,40 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 // upstream KubeSchedulerConfiguration schema; Karpenter takes no dependency on that versioned API.
 type SchedulerConfiguration struct {
 	PodTopologySpread *PodTopologySpreadConfig `json:"podTopologySpread,omitempty"`
+	NodeResourcesFit  *NodeResourcesFitConfig  `json:"nodeResourcesFit,omitempty"`
 }
+
+// NodeResourcesFitConfig mirrors the relevant fields of kube-scheduler's NodeResourcesFit plugin args.
+type NodeResourcesFitConfig struct {
+	// ScoringStrategy mirrors kube-scheduler's NodeResourcesFit `scoringStrategy`. During scheduling simulation,
+	// existing nodes are tried in the order this strategy ranks them, so that Karpenter predicts the node kube-scheduler
+	// would bind each pod to. When unset, existing nodes are tried in name order.
+	ScoringStrategy *ScoringStrategy `json:"scoringStrategy,omitempty"`
+}
+
+type ScoringStrategyType string
+
+const (
+	LeastAllocated ScoringStrategyType = "LeastAllocated"
+	MostAllocated  ScoringStrategyType = "MostAllocated"
+)
+
+// ScoringStrategy mirrors kube-scheduler's ScoringStrategy. RequestedToCapacityRatio is not supported.
+type ScoringStrategy struct {
+	Type ScoringStrategyType `json:"type"`
+	// Resources are the resources scored and their weights. As in kube-scheduler, an empty list means cpu and memory
+	// with a weight of 1 each, and a weight of 0 means 1.
+	Resources []ResourceSpec `json:"resources,omitempty"`
+}
+
+// ResourceSpec mirrors kube-scheduler's ResourceSpec.
+type ResourceSpec struct {
+	Name   string `json:"name"`
+	Weight int64  `json:"weight,omitempty"`
+}
+
+// DefaultScoringResources mirrors the resources kube-scheduler scores when a scoring strategy lists none.
+var DefaultScoringResources = []ResourceSpec{{Name: string(corev1.ResourceCPU), Weight: 1}, {Name: string(corev1.ResourceMemory), Weight: 1}}
 
 // PodTopologySpreadConfig mirrors the relevant fields of kube-scheduler's PodTopologySpread plugin args.
 type PodTopologySpreadConfig struct {
@@ -366,12 +399,32 @@ func ParseSchedulerConfiguration(raw string) (*SchedulerConfiguration, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
+	config.setDefaults()
 	return config, nil
 }
 
-// Validate mirrors kube-scheduler's ValidatePodTopologySpreadArgs so that a config accepted here is one kube-scheduler
-// would also accept, and vice versa.
+// setDefaults mirrors kube-scheduler's SetDefaults_NodeResourcesFitArgs for an explicitly configured scoring strategy.
+func (c *SchedulerConfiguration) setDefaults() {
+	if c.NodeResourcesFit == nil || c.NodeResourcesFit.ScoringStrategy == nil {
+		return
+	}
+	strategy := c.NodeResourcesFit.ScoringStrategy
+	if len(strategy.Resources) == 0 {
+		strategy.Resources = append([]ResourceSpec{}, DefaultScoringResources...)
+	}
+	for i := range strategy.Resources {
+		if strategy.Resources[i].Weight == 0 {
+			strategy.Resources[i].Weight = 1
+		}
+	}
+}
+
+// Validate mirrors kube-scheduler's ValidatePodTopologySpreadArgs and ValidateNodeResourcesFitArgs so that a config
+// accepted here is one kube-scheduler would also accept, and vice versa.
 func (c *SchedulerConfiguration) Validate() error {
+	if err := c.NodeResourcesFit.validate(); err != nil {
+		return err
+	}
 	if c.PodTopologySpread == nil {
 		return nil
 	}
@@ -386,6 +439,24 @@ func (c *SchedulerConfiguration) Validate() error {
 				return fmt.Errorf("validating scheduler config, podTopologySpread.defaultConstraints[%d] is a duplicate of [%d], {%v, %v}",
 					i, j, constraints[i].TopologyKey, constraints[i].WhenUnsatisfiable)
 			}
+		}
+	}
+	return nil
+}
+
+// validate mirrors the scoringStrategy part of kube-scheduler's ValidateNodeResourcesFitArgs. Weights are checked
+// before defaulting, so 0 is accepted here and defaulted to 1, as kube-scheduler does.
+func (c *NodeResourcesFitConfig) validate() error {
+	if c == nil || c.ScoringStrategy == nil {
+		return nil
+	}
+	strategy := c.ScoringStrategy
+	if strategy.Type != LeastAllocated && strategy.Type != MostAllocated {
+		return fmt.Errorf("validating scheduler config, nodeResourcesFit.scoringStrategy.type %q must be one of %q or %q", strategy.Type, LeastAllocated, MostAllocated)
+	}
+	for i, r := range strategy.Resources {
+		if r.Weight < 0 || r.Weight > 100 {
+			return fmt.Errorf("validating scheduler config, nodeResourcesFit.scoringStrategy.resources[%d].weight of %s not in valid range [0, 100]", i, r.Name)
 		}
 	}
 	return nil
