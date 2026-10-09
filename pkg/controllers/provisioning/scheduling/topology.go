@@ -109,6 +109,16 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 	domainGroups := map[string]TopologyDomainGroup{}
 	for npName, its := range instanceTypes {
 		np := nodePoolIndex[npName]
+		// Construct the scheduling metadata for the NodePool once, shared by pointer across every domain it can
+		// produce. The karpenter.sh/nodepool label is applied at NodeClaim creation rather than in the NodePool
+		// template, so it must be added here for pods that select on it to filter domains correctly.
+		nodePoolRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
+		nodePoolRequirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
+		nodePoolRequirements.Add(scheduling.NewRequirement(v1.NodePoolLabelKey, corev1.NodeSelectorOpIn, np.Name))
+		source := &topologyNodePool{
+			requirements: nodePoolRequirements,
+			taints:       np.Spec.Template.Spec.Taints,
+		}
 		for _, it := range its {
 			// We need to intersect the instance type requirements with the current nodePool requirements.  This
 			// ensures that something like zones from an instance type don't expand the universe of valid domains.
@@ -121,7 +131,7 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 					domainGroups[topologyKey] = NewTopologyDomainGroup()
 				}
 				for _, domain := range requirement.Values() {
-					domainGroups[topologyKey].Insert(domain, np.Spec.Template.Spec.Taints...)
+					domainGroups[topologyKey].Insert(domain, source)
 				}
 			}
 		}
@@ -134,7 +144,7 @@ func buildDomainGroups(nodePools []*v1.NodePool, instanceTypes map[string][]*clo
 					domainGroups[key] = NewTopologyDomainGroup()
 				}
 				for _, value := range requirement.Values() {
-					domainGroups[key].Insert(value, np.Spec.Template.Spec.Taints...)
+					domainGroups[key].Insert(value, source)
 				}
 			}
 		}
