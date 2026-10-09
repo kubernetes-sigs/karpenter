@@ -124,7 +124,8 @@ var _ = Describe("Reboot", func() {
 
 		// The fault never clears. Repair's escalation is reboot, reboot, then replace: each reboot gives the node a
 		// new boot, so record every boot until the node is replaced. A boot stays visible for at least minDrainTime
-		// before the next reboot can issue, so polling every second doesn't miss one.
+		// before the next reboot can issue, so polling every second doesn't miss one. Two real reboots plus the
+		// replacement take about 16 minutes on a cloud provider, past the default timeout.
 		env.ExpectRebootFaultInjected(node)
 		boots := map[string]bool{}
 		Eventually(func(g Gomega) {
@@ -135,7 +136,7 @@ var _ = Describe("Reboot", func() {
 				}
 				g.Expect(n.DeletionTimestamp.IsZero()).To(BeFalse(), "node not yet replaced")
 			}
-		}).WithPolling(time.Second).Should(Succeed())
+		}).WithPolling(time.Second).WithTimeout(30 * time.Minute).Should(Succeed())
 		Expect(boots).To(HaveLen(2), "expected exactly two reboots before replacement")
 
 		env.EventuallyExpectNotFound(nodeClaim, node)
