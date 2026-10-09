@@ -304,7 +304,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			applyNodes(np, "r-1")
 			ExpectSingletonReconciled(ctx, staticDriftController)
 			expectTerminateFirst(0)
-			Expect(blockedWith("not ready to provision a replacement")).To(Equal(1))
+			Expect(blockedWith("at its node limit and cannot stage a replacement")).To(Equal(1))
 		})
 	})
 

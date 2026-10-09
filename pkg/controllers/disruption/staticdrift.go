@@ -22,7 +22,6 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -36,32 +35,25 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-const staticNoRefillMessage = "static NodePool is at its node limit and has no launchable capacity to refill this node (e.g. its capacity reservation is gone or full), so it is not terminated first"
+const staticNoRefillMessage = "static NodePool is at its node limit and has no launchable capacity to refill this node; it is not terminated first"
 
 // staticRefill tracks whether a static NodePool at its node limit can refill the nodes it terminates first.
 type staticRefill struct {
-	// unbounded is true when a compatible, available non-reserved offering (on-demand, spot) exists.
-	unbounded bool
-	// free is the free capacity across compatible reservations, less refills the NodePool is already waiting on.
-	free int
-	// reservations are the compatible, healthy reservations. Terminating a node that holds a slot in one frees the slot
-	// its refill needs, even if the reservation is full.
-	reservations sets.Set[string]
+	unbounded    bool           // a compatible, available non-reserved offering (on-demand, spot) exists
+	reservations map[string]int // compatible, healthy reservation ID -> free capacity
+	free         int            // free reserved capacity not yet claimed by a refill
 }
 
 // newStaticRefill evaluates the NodePool's template against its already-resolved instance types. pendingRefills is the
 // number of nodes the NodePool is already short of its replicas; those refills claim free reserved capacity first.
 func newStaticRefill(np *v1.NodePool, instanceTypes map[string]*cloudprovider.InstanceType, pendingRefills int) *staticRefill {
 	reqs := scheduling.NewNodeClaimTemplate(np).Requirements
-	// Reject on instance type and capacity type (allocation-free) before IsCompatible, which allocates an error per
-	// mismatch and would otherwise dominate the cost of scanning a full catalog.
 	instanceTypeReq, capacityTypeReq := reqs.Get(corev1.LabelInstanceTypeStable), reqs.Get(v1.CapacityTypeLabelKey)
-	compatible := func(r pscheduling.Requirements) bool {
-		ct, ok := r[v1.CapacityTypeLabelKey]
-		return (!ok || capacityTypeReq.HasIntersection(ct)) && reqs.IsCompatible(r, pscheduling.AllowUndefinedWellKnownLabels)
+	compatible := func(req pscheduling.Requirements) bool {
+		capacityType, ok := req[v1.CapacityTypeLabelKey]
+		return (!ok || capacityTypeReq.HasIntersection(capacityType)) && reqs.IsCompatible(req, pscheduling.AllowUndefinedWellKnownLabels)
 	}
-	r := &staticRefill{free: -pendingRefills, reservations: sets.New[string]()}
-	free := map[string]int{}
+	r := &staticRefill{reservations: map[string]int{}}
 	for _, it := range instanceTypes {
 		if !instanceTypeReq.Has(it.Name) || !compatible(it.Requirements) {
 			continue
@@ -70,25 +62,21 @@ func newStaticRefill(np *v1.NodePool, instanceTypes map[string]*cloudprovider.In
 			if !o.Available || !compatible(o.Requirements) {
 				continue
 			}
-			if ct, ok := o.Requirements[v1.CapacityTypeLabelKey]; !ok || !ct.Has(v1.CapacityTypeReserved) {
+			if capacityType, ok := o.Requirements[v1.CapacityTypeLabelKey]; !ok || !capacityType.Has(v1.CapacityTypeReserved) {
 				r.unbounded = true
 				return r
 			}
-			// A reservation is exposed as one offering per instance type it covers; count its capacity once.
-			id := o.ReservationID()
-			r.reservations.Insert(id)
-			free[id] = max(free[id], o.ReservationCapacity)
+			r.reservations[o.ReservationID()] = o.ReservationCapacity
 		}
 	}
-	for _, n := range free {
-		r.free += n
-	}
+	r.free = lo.Sum(lo.Values(r.reservations)) - pendingRefills
 	return r
 }
 
-// claim reports whether the NodePool can refill c once it is terminated, and claims the capacity for it.
+// claim reports whether the NodePool can refill c once it is terminated, and claims the capacity for it. A node holding
+// a slot in a healthy reservation frees the slot its own refill needs, even if the reservation is full.
 func (r *staticRefill) claim(c *Candidate) bool {
-	if id := c.reservationID(); r.unbounded || (id != "" && r.reservations.Has(id)) {
+	if _, ok := r.reservations[c.reservationID()]; r.unbounded || ok {
 		return true
 	}
 	if r.free > 0 {
@@ -164,10 +152,9 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		// Terminating first only helps if the freed slot can be refilled, so only terminate candidates the NodePool can
 		// refill and block the rest.
 		if options.FromContext(ctx).FeatureGates.TerminateFirstDrift && maxAllowedDrifts == 0 {
-			// Static provisioning refuses NotReady or deleting NodePools, so nothing would refill the freed slot.
 			if !np.StatusConditions().Root().IsTrue() || !np.DeletionTimestamp.IsZero() {
 				for _, c := range npCandidates[:maxDrifts] {
-					d.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim, "static NodePool is at its node limit and is not ready to provision a replacement")...)
+					d.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim, "static NodePool is at its node limit and cannot stage a replacement")...)
 				}
 				continue
 			}
