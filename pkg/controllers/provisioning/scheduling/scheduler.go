@@ -757,7 +757,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode, s.creditReservationCapacity)
 		r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
 		if err != nil {
-			errs[i] = err
+			errs[i] = serrors.Wrap(err, "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 
 			// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
 			// with a lower weight. We could consider allowing "fallback" to NodePools with equal weight if they also have
@@ -815,7 +815,73 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil
 	}
+	sortSchedulingErrors(errs)
 	return multierr.Combine(errs...)
+}
+
+func sortSchedulingErrors(errs []error) {
+	sort.SliceStable(errs, func(i, j int) bool {
+		return schedulingErrorRank(errs[i]) < schedulingErrorRank(errs[j])
+	})
+}
+
+var schedulingErrorRankRules = []struct {
+	rank    int
+	matches func(string) bool
+}{
+	{rank: 0, matches: isResourceConstraintError},
+	{rank: 0, matches: containsSchedulingError("exhausted")},
+	{rank: 10, matches: containsSchedulingError("incompatible requirements")},
+	{rank: 20, matches: containsSchedulingError("offering")},
+	{rank: 30, matches: hasHostPortOrVolumeError},
+	{rank: 40, matches: containsSchedulingError("did not tolerate taint")},
+}
+
+func schedulingErrorRank(err error) int {
+	if err == nil {
+		return 100
+	}
+	var instanceTypeFilterError InstanceTypeFilterError
+	if errors.As(err, &instanceTypeFilterError) {
+		return instanceTypeFilterErrorRank(instanceTypeFilterError)
+	}
+	errString := err.Error()
+	for _, rule := range schedulingErrorRankRules {
+		if rule.matches(errString) {
+			return rule.rank
+		}
+	}
+	return 50
+}
+
+func containsSchedulingError(substr string) func(string) bool {
+	return func(errString string) bool {
+		return strings.Contains(errString, substr)
+	}
+}
+
+func isResourceConstraintError(errString string) bool {
+	if !strings.Contains(errString, "exceed") {
+		return false
+	}
+	return strings.Contains(errString, "resources") || strings.Contains(errString, "limits")
+}
+
+func hasHostPortOrVolumeError(errString string) bool {
+	return strings.Contains(errString, "host port") || strings.Contains(errString, "volume")
+}
+
+func instanceTypeFilterErrorRank(e InstanceTypeFilterError) int {
+	if !e.fits {
+		return 0
+	}
+	if !e.requirementsMet {
+		return 10
+	}
+	if !e.hasOffering {
+		return 20
+	}
+	return 30
 }
 
 func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod, nodePoolMap map[string]*v1.NodePool, enforceConsolidateAfter bool) {
