@@ -180,17 +180,36 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 				continue
 			}
 
+			nct := pscheduling.NewNodeClaimTemplate(np)
+			// Only a candidate holding a slot in a still-offered reservation frees a slot the refill can use, so only it can
+			// terminate first on full reservations; any other candidate can't be replaced either way, so it's blocked.
+			// Checked only with terminate-first enabled, since without it there's nothing to do but replace first.
+			var reservationsFull bool
+			if terminateFirstEnabled {
+				full, offered, err := staticReservations(ctx, r.cloudProvider, np, nct)
+				if err != nil {
+					return []Command{}, err
+				}
+				if full && !holdsOfferedReservation(candidate, offered) {
+					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool's capacity reservations are full and cannot stage a replacement")...)
+					continue
+				}
+				reservationsFull = full
+			}
 			limit, ok := np.Spec.Limits[resources.Node]
 			nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
 			// Atomic accounting, not a naive count: deleting/already-reserved nodes would otherwise let repair burst
 			// past limits.nodes when commands race. A zero result reserves nothing, so the delete-only path leaks no
-			// reservation; a non-zero result's slot is consumed by the replacement staged below.
-			if r.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, 1) == 0 {
+			// reservation; a non-zero result's slot is consumed by the replacement staged below. Full reservations are
+			// checked first so the delete-only path never takes a slot.
+			if reservationsFull || r.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, 1) == 0 {
 				// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand
 				// the workload with no replacement.
 				refillable := np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
 				if !terminateFirstEnabled || !refillable {
-					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool is at its node limit and cannot stage a replacement")...)
+					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, lo.Ternary(reservationsFull,
+						"static NodePool's capacity reservations are full and cannot stage a replacement",
+						"static NodePool is at its node limit and cannot stage a replacement"))...)
 					continue
 				}
 				return []Command{{
@@ -199,7 +218,6 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 					TerminateFirst:      true,
 				}}, nil
 			}
-			nct := pscheduling.NewNodeClaimTemplate(np)
 			result := pscheduling.Results{NewNodeClaims: []*pscheduling.NodeClaim{{NodeClaimTemplate: *nct}}}
 			return []Command{{
 				Candidates:          []*Candidate{candidate},

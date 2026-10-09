@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
+	pkgscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
@@ -426,4 +428,38 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 	return lo.Filter(current, func(c *Candidate, _ int) bool {
 		return proposedNames.Has(c.Name())
 	})
+}
+
+// staticReservations reports whether a static NodePool's replacement can only land in full capacity reservations, so
+// pre-spinning it would fail to launch until a reserved node frees its slot, and which compatible reservations are still
+// offered (Available, even if full). A compatible non-reserved offering, even an unavailable one, means the replacement
+// doesn't depend on a reservation slot, so the NodePool waits for that capacity rather than terminating first. A static
+// replacement is the bare NodePool template, so this is an offering lookup rather than a scheduling simulation.
+// GetInstanceTypes is NodeClass-scoped, so offerings are filtered by the template's requirements.
+func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudProvider, np *v1.NodePool, nct *scheduling.NodeClaimTemplate) (bool, sets.Set[string], error) {
+	its, err := cloudProvider.GetInstanceTypes(ctx, np)
+	if err != nil {
+		return false, nil, serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(np))
+	}
+	offered := sets.New[string]()
+	for _, it := range its {
+		if !nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) {
+			continue
+		}
+		for _, o := range it.Offerings.Compatible(nct.Requirements) {
+			if o.CapacityType() != v1.CapacityTypeReserved || o.Launchable() {
+				return false, nil, nil
+			}
+			if o.Available {
+				offered.Insert(o.ReservationID())
+			}
+		}
+	}
+	return true, offered, nil
+}
+
+// holdsOfferedReservation reports whether the candidate holds a slot in a reservation that's still offered, so
+// terminating it frees a slot its refill can launch into.
+func holdsOfferedReservation(c *Candidate, offered sets.Set[string]) bool {
+	return c.capacityType == v1.CapacityTypeReserved && offered.Has(c.Labels()[cloudprovider.ReservationIDLabel])
 }
