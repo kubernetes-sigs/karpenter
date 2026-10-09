@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"maps"
 	"math"
 
 	"github.com/samber/lo"
@@ -96,8 +97,34 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		// drain still honors PDBs and is bounded by TGP. When the pool has room under its limit, fall through to the
 		// normal replace-first path below. No replacement is reserved for terminate-first, so the reservation above is a
 		// no-op in that case (it reserved nothing).
+		//
+		// Terminating first only helps if the freed slot can be refilled, so only terminate candidates the NodePool can
+		// relaunch (see staticRefillCapacity) and Block the rest: a node that is still serving is never traded for a slot
+		// that can't be refilled (e.g. its capacity reservation was cancelled or expired, so it now runs as on-demand
+		// while the template is reserved-only).
 		if options.FromContext(ctx).FeatureGates.TerminateFirstDrift && maxAllowedDrifts == 0 {
-			for _, c := range npCandidates[:maxDrifts] {
+			refill, reason := staticRefillCapacity(np, npCandidates[0], int(lo.FromPtr(np.Spec.Replicas))-runningNodes-nodesPendingDisruptionCount)
+			if refill == nil {
+				for _, c := range npCandidates[:maxDrifts] {
+					d.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim, reason)...)
+				}
+				continue
+			}
+			// Scan past candidates that can't be refilled (bounded by the budget for Blocked events) so a candidate whose
+			// own reservation slot can be reused isn't starved by ones that can't.
+			terminating, blocked := int64(0), int64(0)
+			for _, c := range npCandidates {
+				if terminating == maxDrifts {
+					break
+				}
+				if !refill.ClaimRefill(c.reservationID()) {
+					if blocked < maxDrifts {
+						d.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim, staticNoRefillMessage)...)
+						blocked++
+					}
+					continue
+				}
+				terminating++
 				cmds = append(cmds, Command{
 					Candidates:          []*Candidate{c},
 					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{c}),
@@ -130,6 +157,27 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		}
 	}
 	return cmds, nil
+}
+
+// staticNoRefillMessage explains why a static candidate wasn't terminated first: no capacity is left to refill it.
+const staticNoRefillMessage = "static NodePool is at its node limit and has no launchable capacity to refill this node (e.g. its capacity reservation is gone or full), so it is not terminated first"
+
+// staticRefillCapacity returns the capacity a static NodePool at its node limit has to refill nodes it terminates
+// first, or nil and a Blocked reason when it can't refill at all. It is evaluated once per NodePool per pass, from the
+// instance types already resolved for the candidates (no cloud provider call), so its cost doesn't grow with the number
+// of nodes. owed is the number of nodes the NodePool is already short of its replicas (e.g. still being refilled after
+// earlier terminate-first commands); those refills claim reserved capacity first.
+func staticRefillCapacity(np *v1.NodePool, c *Candidate, owed int) (*scheduling.LaunchCapacity, string) {
+	// Static provisioning refuses NotReady or deleting NodePools, so nothing would refill the freed slot.
+	if !np.StatusConditions().Root().IsTrue() || !np.DeletionTimestamp.IsZero() {
+		return nil, "static NodePool is at its node limit and is not ready to provision a replacement"
+	}
+	refill := scheduling.NewLaunchCapacity(np, maps.Values(c.nodePoolInstanceTypes))
+	refill.Consume(owed)
+	if !refill.CanRefill() {
+		return nil, staticNoRefillMessage
+	}
+	return refill, ""
 }
 
 func (d *StaticDrift) Reason() v1.DisruptionReason {

@@ -104,6 +104,10 @@ type Candidate struct {
 	RepairPolicyResult health.RepairResult
 	// RebootEscalated reports that recent reboot history converted a reboot decision to replacement.
 	RebootEscalated bool
+
+	// nodePoolInstanceTypes are the NodePool's instance types resolved once for this pass (BuildNodePoolMap). The map
+	// is shared by every candidate of the NodePool and must be treated as read-only.
+	nodePoolInstanceTypes map[string]*cloudprovider.InstanceType
 }
 
 // ScoreResult holds the three values needed to decide whether a move passes.
@@ -142,6 +146,15 @@ func (c *Candidate) OwnedByStaticNodePool() bool {
 // A node with running pods whose eviction costs all clamp to zero is Empty under
 // this definition; the Empty disruption reason and Empty budgets govern its
 // deletion through the Emptiness method.
+// reservationID returns the ID of the capacity reservation the candidate holds a slot in, or "" if it holds none (it
+// isn't reserved, or it was demoted to on-demand after its reservation ended).
+func (c *Candidate) reservationID() string {
+	if c.capacityType != v1.CapacityTypeReserved {
+		return ""
+	}
+	return c.Labels()[cloudprovider.ReservationIDLabel]
+}
+
 func (c *Candidate) IsEmpty() bool {
 	return c.RescheduleDisruptionCost <= disruptionutils.PerNodeBaseDisruptionCost
 }
@@ -221,6 +234,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		DisruptionCost:           disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 		Price:                    disruptionutils.ResolveOfferingPrice(node.Labels(), instanceType),
 		RescheduleDisruptionCost: disruptionutils.ComputeRescheduleDisruptionCost(ctx, reschedulable),
+		nodePoolInstanceTypes:    instanceTypeMap,
 	}, nil
 }
 
