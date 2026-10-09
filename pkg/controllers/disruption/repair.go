@@ -187,8 +187,10 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			var reservationsFull bool
 			if terminateFirstEnabled {
 				full, offered, err := staticReservations(ctx, r.cloudProvider, np, nct)
+				// Other candidates don't depend on this one, so one NodePool's failure doesn't stop repair for the rest.
 				if err != nil {
-					return []Command{}, err
+					log.FromContext(ctx).Error(err, "skipping repair candidate, failed checking capacity reservations")
+					continue
 				}
 				if full && !holdsOfferedReservation(candidate, offered) {
 					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool's capacity reservations are full and cannot stage a replacement")...)

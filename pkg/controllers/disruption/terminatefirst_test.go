@@ -17,6 +17,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
 	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -37,6 +38,20 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
+
+// instanceTypesErrorCloudProvider fails GetInstanceTypes for the named NodePools, so a disruption method given it hits a
+// lookup error that candidate construction, which uses the unwrapped provider, doesn't.
+type instanceTypesErrorCloudProvider struct {
+	cloudprovider.CloudProvider
+	nodePools []string
+}
+
+func (c *instanceTypesErrorCloudProvider) GetInstanceTypes(ctx context.Context, np *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	if np != nil && lo.Contains(c.nodePools, np.Name) {
+		return nil, fmt.Errorf("injected instance type error")
+	}
+	return c.CloudProvider.GetInstanceTypes(ctx, np)
+}
 
 // Terminate-First Disruption (RFC kubernetes-sigs/karpenter#3203) end-to-end. A voluntary disruption of a
 // capacity-constrained pool (a static NodePool at its replica count, or a reserved candidate whose reservation is
@@ -214,6 +229,40 @@ var _ = Describe("TerminateFirstDrift", func() {
 				Expect(cmds[0].Replacements).To(HaveLen(0))
 				// The delete-only path must not hold the limits.nodes slot it never uses.
 				Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 2, 1)).To(BeEquivalentTo(int64(1)))
+			})
+
+			// One NodePool's lookup failure must neither stop drift for the others nor leak the limits.nodes slots they reserve.
+			It("still drifts other static NodePools when one NodePool's instance types can't be resolved", func() {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				withReservation(0)
+				healthyPool := test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
+					Replicas:   lo.ToPtr(int64(1)),
+					Limits:     v1.Limits{resources.Node: resource.MustParse("2")},
+					Disruption: v1.Disruption{Budgets: []v1.Budget{{Nodes: "100%"}}},
+				}})
+				healthyNodeClaim, healthyNode := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey:            healthyPool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					}},
+					Status: v1.NodeClaimStatus{ProviderID: test.RandomProviderID()},
+				})
+				healthyNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, healthyPool, healthyNodeClaim, healthyNode)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+					[]*corev1.Node{node, healthyNode}, []*v1.NodeClaim{nodeClaim, healthyNodeClaim})
+				erroring := &instanceTypesErrorCloudProvider{CloudProvider: cloudProvider, nodePools: []string{nodePool.Name}}
+				staticDriftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+					disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, erroring, recorder)))
+
+				ExpectSingletonReconciled(ctx, staticDriftController)
+
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+				Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(healthyNodeClaim.Name))
 			})
 
 			// The on-demand fallback is only temporarily unavailable, so the NodePool waits for it instead of terminating first.

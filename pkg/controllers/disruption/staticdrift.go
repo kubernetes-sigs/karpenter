@@ -21,6 +21,7 @@ import (
 	"math"
 
 	"github.com/samber/lo"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -90,8 +91,11 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		nct := scheduling.NewNodeClaimTemplate(np)
 		if options.FromContext(ctx).FeatureGates.TerminateFirstDrift {
 			reservationsFull, offered, err := staticReservations(ctx, d.cloudprovider, np, nct)
+			// Other NodePools don't depend on this one, and returning here would discard their commands while keeping the
+			// limits.nodes slots they reserved.
 			if err != nil {
-				return []Command{}, err
+				log.FromContext(ctx).Error(err, "skipping static nodepool, failed checking capacity reservations")
+				continue
 			}
 			if reservationsFull {
 				// Only a candidate holding a slot in a still-offered reservation frees a slot the refill can use, so it goes
