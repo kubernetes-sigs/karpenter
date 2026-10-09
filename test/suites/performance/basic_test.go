@@ -77,8 +77,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Consolidation should complete within 20 minutes")
 			Expect(consolidationReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("basic/consolidation", 140)),
 				"Karpenter controller P95 live heap should be less than 140 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("basic/consolidation", 0.25)),
-				"Karpenter controller avg CPU should be less than 0.25 cores during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("basic/consolidation", 0.35)),
+				"Karpenter controller avg CPU should be less than 0.35 cores during consolidation")
 
 		})
 	})

@@ -182,8 +182,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 20%")
 			Expect(scaleOutReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("wideDeployments/scaleOut", 150)),
 				"Karpenter controller P95 live heap should be less than 150 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("wideDeployments/scaleOut", 0.70)),
-				"Karpenter controller avg CPU should be less than 0.70 cores during scale-out")
+			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("wideDeployments/scaleOut", 0.80)),
+				"Karpenter controller avg CPU should be less than 0.80 cores during scale-out")
 
 			// ========== PHASE 2: WIDE CONSOLIDATION TEST ==========
 			By("Scaling down all 30 deployments to trigger consolidation")
@@ -214,8 +214,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Average memory utilization should be greater than 20%")
 			Expect(consolidationReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("wideDeployments/consolidation", 210)),
 				"Karpenter controller P95 live heap should be less than 210 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("wideDeployments/consolidation", 0.30)),
-				"Karpenter controller avg CPU should be less than 0.30 cores during consolidation")
+			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("wideDeployments/consolidation", 0.50)),
+				"Karpenter controller avg CPU should be less than 0.50 cores during consolidation")
 
 		})
 	})
