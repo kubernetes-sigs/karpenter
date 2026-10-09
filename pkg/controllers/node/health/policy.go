@@ -333,11 +333,16 @@ func (p *RepairPolicyMatcher) newMatch(policy compiledPolicy, condition corev1.N
 	return RepairPolicyMatch{policy: policy, rank: p.ranks[policy.Priority], eligibleAt: transitionTime.Add(policy.TolerationDuration)}
 }
 
-// Resolve merges the matches that are eligible at now into one repair decision.
-func Resolve(matches []RepairPolicyMatch, now time.Time) RepairResult {
+// Resolve merges the matches that are eligible at now into one repair decision, measuring each toleration from no
+// earlier than notBefore.
+func Resolve(matches []RepairPolicyMatch, now, notBefore time.Time) RepairResult {
 	result := RepairResult{}
 	for _, match := range matches {
-		result.mergePolicy(match.policy, match.rank, match.eligibleAt, now)
+		eligibleAt := match.eligibleAt
+		if earliest := notBefore.Add(match.policy.TolerationDuration); eligibleAt.Before(earliest) {
+			eligibleAt = earliest
+		}
+		result.mergePolicy(match.policy, match.rank, eligibleAt, now)
 	}
 	return result
 }

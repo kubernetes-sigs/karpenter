@@ -145,7 +145,9 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", repairUnhealthyThreshold, candidate.NodePool.Name))...)
 			continue
 		}
-		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
+		// Budgets only count initialized nodes, since an uninitialized node runs no workload to protect, so repairing one
+		// neither needs nor consumes budget.
+		if candidate.Initialized() && disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 			continue
 		}
 		// Repair admits nodes with blocking (PDB / do-not-disrupt) pods only on the promise of this drain bound, so it

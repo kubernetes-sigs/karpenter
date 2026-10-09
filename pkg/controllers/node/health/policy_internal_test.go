@@ -214,7 +214,7 @@ var _ = Describe("Repair Policies", func() {
 		evaluate := func(matcher *RepairPolicyMatcher, now time.Time, conditions ...corev1.NodeCondition) RepairResult {
 			return Resolve(matcher.Match(&corev1.Node{
 				Status: corev1.NodeStatus{Conditions: conditions},
-			}), now)
+			}), now, time.Time{})
 		}
 		newMatcher := func(policies []cloudprovider.RepairPolicy) *RepairPolicyMatcher {
 			policyMatcher, err := newRepairPolicyMatcher(policies, supportedActions)
@@ -421,7 +421,7 @@ var _ = Describe("Repair Policies", func() {
 				},
 			}}}
 
-			result := Resolve(nodeMatcher.Match(node), now)
+			result := Resolve(nodeMatcher.Match(node), now, time.Time{})
 			Expect(result.Score).To(Equal(float64(6)))
 			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(result.Condition).To(Equal(corev1.NodeConditionType("HighPriority")))
@@ -526,8 +526,8 @@ var _ = Describe("Repair Policies", func() {
 				Status:     corev1.NodeStatus{Conditions: []corev1.NodeCondition{condition}},
 			}
 
-			Expect(Resolve(matcher.Match(node), now.Add(9*time.Minute)).Action).To(BeEmpty())
-			result := Resolve(matcher.Match(node), now.Add(10*time.Minute))
+			Expect(Resolve(matcher.Match(node), now.Add(9*time.Minute), time.Time{}).Action).To(BeEmpty())
+			result := Resolve(matcher.Match(node), now.Add(10*time.Minute), time.Time{})
 			Expect(result.Action).To(Equal(cloudprovider.RebootNode))
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(10 * time.Minute)))
 		})
@@ -572,7 +572,7 @@ var _ = Describe("Repair Policies", func() {
 			}}}}
 		}
 		now := time.Unix(0, 0).Add(time.Hour)
-		Expect(Resolve(matcher.Match(node("Other")), now).Score).To(BeNumerically(">", Resolve(matcher.Match(node("XID")), now).Score))
+		Expect(Resolve(matcher.Match(node("Other")), now, time.Time{}).Score).To(BeNumerically(">", Resolve(matcher.Match(node("XID")), now, time.Time{}).Score))
 	})
 
 	It("describes a match for logging", func() {
@@ -608,9 +608,23 @@ var _ = Describe("Repair Policies", func() {
 		}, supportedActions))
 		result := Resolve(matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
 			Type: "AcceleratorReady", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(time.Unix(0, 0)),
-		}}}}), time.Unix(0, 0).Add(time.Hour))
+		}}}}), time.Unix(0, 0).Add(time.Hour), time.Time{})
 		Expect(result.LogValues()).To(ContainElements("action", cloudprovider.ReplaceNode, "termination-grace-period", time.Minute,
 			"termination-grace-period-condition", corev1.NodeConditionType("AcceleratorReady")))
+	})
+
+	It("measures toleration from no earlier than notBefore", func() {
+		matcher := lo.Must(newRepairPolicyMatcher([]cloudprovider.RepairPolicy{
+			{ConditionType: "AcceleratorReady", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 10 * time.Minute, Action: cloudprovider.ReplaceNode},
+		}, supportedActions))
+		matches := matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type: "AcceleratorReady", Status: corev1.ConditionFalse, LastTransitionTime: metav1.NewTime(time.Unix(0, 0)),
+		}}}})
+		notBefore := time.Unix(0, 0).Add(time.Hour)
+		Expect(Resolve(matches, notBefore.Add(9*time.Minute), notBefore).Action).To(BeEmpty())
+		result := Resolve(matches, notBefore.Add(10*time.Minute), notBefore)
+		Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
+		Expect(result.SelectedEligibleAt).To(Equal(notBefore.Add(10 * time.Minute)))
 	})
 
 	DescribeTable("comparing match inputs",
