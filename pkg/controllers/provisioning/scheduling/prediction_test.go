@@ -24,7 +24,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
@@ -51,7 +53,7 @@ var _ = Describe("PredictedRequests", func() {
 	})
 
 	It("should return currentRequests when pod has no owner", func() {
-		store.Set(types.NamespacedName{Name: "dummy"}, types.UID("unrelated"), &prediction.Prediction{
+		store.Set(types.NamespacedName{Name: "dummy"}, prediction.TargetKey{NamespacedName: types.NamespacedName{Name: "unrelated"}}, &prediction.Prediction{
 			Containers: map[string]corev1.ResourceList{"c": {corev1.ResourceCPU: resource.MustParse("1")}},
 		}, env.Clock.Now())
 		pod := test.UnschedulablePod(test.PodOptions{
@@ -64,7 +66,7 @@ var _ = Describe("PredictedRequests", func() {
 	})
 
 	It("should return currentRequests when owner exists but no prediction is stored", func() {
-		store.Set(types.NamespacedName{Name: "dummy"}, types.UID("unrelated"), &prediction.Prediction{
+		store.Set(types.NamespacedName{Name: "dummy"}, prediction.TargetKey{NamespacedName: types.NamespacedName{Name: "unrelated"}}, &prediction.Prediction{
 			Containers: map[string]corev1.ResourceList{"c": {corev1.ResourceCPU: resource.MustParse("1")}},
 		}, env.Clock.Now())
 		dep := test.Deployment()
@@ -115,7 +117,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-web"},
-			dep.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: client.ObjectKeyFromObject(dep)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {
 					corev1.ResourceCPU:    resource.MustParse("500m"),
@@ -128,6 +130,30 @@ var _ = Describe("PredictedRequests", func() {
 		Expect(result.Cpu().Cmp(resource.MustParse("600m"))).To(Equal(0))
 		Expect(result.Memory().Cmp(resource.MustParse("256Mi"))).To(Equal(0))
 		Expect(result.Pods().Cmp(resource.MustParse("1"))).To(Equal(0))
+	})
+
+	It("should match a prediction by workload name regardless of the workload's UID", func() {
+		ss := test.StatefulSet()
+		ExpectApplied(ctx, env.Client, ss)
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "StatefulSet", Name: ss.Name, UID: "recreated-uid", Controller: lo.ToPtr(true),
+			}}},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
+			},
+		})
+		store.Set(
+			types.NamespacedName{Namespace: "default", Name: "vpa-db"},
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "StatefulSet"}, NamespacedName: client.ObjectKeyFromObject(ss)},
+			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
+				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("750m")},
+			}},
+			env.Clock.Now(),
+		)
+		result := scheduling.PredictedRequests(ctx, env.Client, store, pod, nil)
+		Expect(result.Cpu().Cmp(resource.MustParse("750m"))).To(Equal(0))
 	})
 
 	It("should resolve pod to statefulset directly", func() {
@@ -145,7 +171,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-db"},
-			ss.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "StatefulSet"}, NamespacedName: client.ObjectKeyFromObject(ss)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceMemory: resource.MustParse("1Gi")},
 			}},
@@ -170,7 +196,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-fluentd"},
-			ds.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "DaemonSet"}, NamespacedName: client.ObjectKeyFromObject(ds)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("250m")},
 			}},
@@ -206,7 +232,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-etl"},
-			types.UID("cronjob-uid"),
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "batch", Kind: "CronJob"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "etl"}},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("2")},
 			}},
@@ -237,7 +263,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-migration"},
-			job.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "batch", Kind: "Job"}, NamespacedName: client.ObjectKeyFromObject(job)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceMemory: resource.MustParse("4Gi")},
 			}},
@@ -262,7 +288,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-legacy"},
-			rs.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("300m")},
 			}},
@@ -273,7 +299,7 @@ var _ = Describe("PredictedRequests", func() {
 	})
 
 	It("should return currentRequests when ReplicaSet owner is not found", func() {
-		store.Set(types.NamespacedName{Name: "dummy"}, types.UID("unrelated"), &prediction.Prediction{
+		store.Set(types.NamespacedName{Name: "dummy"}, prediction.TargetKey{NamespacedName: types.NamespacedName{Name: "unrelated"}}, &prediction.Prediction{
 			Containers: map[string]corev1.ResourceList{"c": {corev1.ResourceCPU: resource.MustParse("1")}},
 		}, env.Clock.Now())
 		pod := test.UnschedulablePod(test.PodOptions{
@@ -327,7 +353,7 @@ var _ = Describe("PredictedRequests", func() {
 		// Only predict "sidecar", leave main unpredicted
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-multi"},
-			dep.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: client.ObjectKeyFromObject(dep)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				"sidecar": {corev1.ResourceCPU: resource.MustParse("200m")},
 			}},
@@ -363,7 +389,7 @@ var _ = Describe("PredictedRequests", func() {
 		// Prediction includes memory even though container doesn't request it
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-newres"},
-			dep.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: client.ObjectKeyFromObject(dep)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {
 					corev1.ResourceCPU:    resource.MustParse("200m"),
@@ -376,4 +402,5 @@ var _ = Describe("PredictedRequests", func() {
 		Expect(result.Cpu().Cmp(resource.MustParse("200m"))).To(Equal(0))
 		Expect(result.Memory().Cmp(resource.MustParse("128Mi"))).To(Equal(0))
 	})
+
 })

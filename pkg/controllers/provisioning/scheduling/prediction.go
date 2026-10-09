@@ -21,12 +21,14 @@ import (
 	"maps"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	resourcehelper "k8s.io/component-helpers/resource"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -36,74 +38,66 @@ var podCountOne = resource.MustParse("1")
 
 // ownerResolution stores the result of a resolveTarget call for caching.
 type ownerResolution struct {
-	uid   types.UID
-	found bool
+	target prediction.TargetKey
+	found  bool
 }
 
+// resolveTarget resolves a pod to the workload its prediction is stored under, which is always one of
+// prediction.SupportedTargets. Keep the two in sync.
+//
 //nolint:gocyclo
-func resolveTarget(ctx context.Context, c client.Client, pod *corev1.Pod, cachedOwnerResolutions map[types.UID]ownerResolution) (types.UID, bool) {
-	for _, ref := range pod.OwnerReferences {
-		if ref.Controller == nil || !*ref.Controller {
-			continue
-		}
-		if cachedOwnerResolutions != nil {
-			if entry, ok := cachedOwnerResolutions[ref.UID]; ok {
-				return entry.uid, entry.found
-			}
-		}
-		var targetUID types.UID
-		var found bool
-		switch ref.Kind {
-		case "ReplicaSet":
-			rs := &metav1.PartialObjectMetadata{}
-			rs.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "ReplicaSet"})
-			if err := c.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: ref.Name}, rs); err != nil {
-				break
-			}
-			for _, rsRef := range rs.OwnerReferences {
-				if rsRef.Controller != nil && *rsRef.Controller && rsRef.Kind == "Deployment" {
-					targetUID = rsRef.UID
-					found = true
-					break
-				}
-			}
-			if !found {
-				targetUID = ref.UID
-				found = true
-			}
-		case "StatefulSet":
-			targetUID = ref.UID
-			found = true
-		case "DaemonSet":
-			targetUID = ref.UID
-			found = true
-		case "Job":
-			job := &metav1.PartialObjectMetadata{}
-			job.SetGroupVersionKind(schema.GroupVersionKind{Group: "batch", Version: "v1", Kind: "Job"})
-			if err := c.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: ref.Name}, job); err != nil {
-				break
-			}
-			for _, jobRef := range job.OwnerReferences {
-				if jobRef.Controller != nil && *jobRef.Controller && jobRef.Kind == "CronJob" {
-					targetUID = jobRef.UID
-					found = true
-					break
-				}
-			}
-			if !found {
-				targetUID = ref.UID
-				found = true
-			}
-		case "ReplicationController":
-			targetUID = ref.UID
-			found = true
-		}
-		if cachedOwnerResolutions != nil {
-			cachedOwnerResolutions[ref.UID] = ownerResolution{uid: targetUID, found: found}
-		}
-		return targetUID, found
+func resolveTarget(ctx context.Context, c client.Client, pod *corev1.Pod, cachedOwnerResolutions map[types.UID]ownerResolution) (prediction.TargetKey, bool) {
+	ref := metav1.GetControllerOfNoCopy(pod)
+	if ref == nil {
+		return prediction.TargetKey{}, false
 	}
-	return "", false
+	if cachedOwnerResolutions != nil {
+		if entry, ok := cachedOwnerResolutions[ref.UID]; ok {
+			return entry.target, entry.found
+		}
+	}
+	var target *metav1.OwnerReference
+	switch ref.Kind {
+	case "ReplicaSet":
+		rs := &metav1.PartialObjectMetadata{}
+		rs.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "ReplicaSet"})
+		if err := c.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: ref.Name}, rs); err != nil {
+			if !apierrors.IsNotFound(err) {
+				log.FromContext(ctx).WithValues("Pod", klog.KObj(pod), "ReplicaSet", klog.KRef(pod.Namespace, ref.Name)).V(1).Info("failed resolving pod owner, skipping prediction", "error", err)
+			}
+			break
+		}
+		target = ref
+		if owner := metav1.GetControllerOfNoCopy(rs); owner != nil && owner.Kind == "Deployment" {
+			target = owner
+		}
+	case "StatefulSet", "DaemonSet", "ReplicationController":
+		target = ref
+	case "Job":
+		job := &metav1.PartialObjectMetadata{}
+		job.SetGroupVersionKind(schema.GroupVersionKind{Group: "batch", Version: "v1", Kind: "Job"})
+		if err := c.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: ref.Name}, job); err != nil {
+			if !apierrors.IsNotFound(err) {
+				log.FromContext(ctx).WithValues("Pod", klog.KObj(pod), "Job", klog.KRef(pod.Namespace, ref.Name)).V(1).Info("failed resolving pod owner, skipping prediction", "error", err)
+			}
+			break
+		}
+		target = ref
+		if owner := metav1.GetControllerOfNoCopy(job); owner != nil && owner.Kind == "CronJob" {
+			target = owner
+		}
+	}
+	resolution := ownerResolution{found: target != nil}
+	if target != nil {
+		resolution.target = prediction.TargetKey{
+			GroupKind:      schema.FromAPIVersionAndKind(target.APIVersion, target.Kind).GroupKind(),
+			NamespacedName: types.NamespacedName{Namespace: pod.Namespace, Name: target.Name},
+		}
+	}
+	if cachedOwnerResolutions != nil {
+		cachedOwnerResolutions[ref.UID] = resolution
+	}
+	return resolution.target, resolution.found
 }
 
 // PredictedRequests returns the pod's resource requests with VPA predictions applied.
@@ -115,11 +109,11 @@ func PredictedRequests(ctx context.Context, c client.Client, store *prediction.S
 	if store == nil || store.Len() == 0 {
 		return resources.RequestsForPods(pod)
 	}
-	targetUID, ok := resolveTarget(ctx, c, pod, cachedOwnerResolutions)
+	target, ok := resolveTarget(ctx, c, pod, cachedOwnerResolutions)
 	if !ok {
 		return resources.RequestsForPods(pod)
 	}
-	pred, ok := store.Get(targetUID)
+	pred, ok := store.Get(target)
 	if !ok {
 		return resources.RequestsForPods(pod)
 	}
@@ -128,20 +122,13 @@ func PredictedRequests(ctx context.Context, c client.Client, store *prediction.S
 	return result
 }
 
-// computePredictedRequests computes effective pod resource requests with VPA predictions applied.
-// It applies predictions to container specs and delegates to resourcehelper.PodRequests which
-// implements the full Kubernetes scheduling semantics (init container sidecar handling,
-// pod-level resources, overhead).
 func computePredictedRequests(pod *corev1.Pod, pred *prediction.Prediction) corev1.ResourceList {
-	modifiedPod := &corev1.Pod{
-		Spec: corev1.PodSpec{
-			Containers:     applyPredictions(pod.Spec.Containers, pred),
-			InitContainers: applyPredictions(pod.Spec.InitContainers, pred),
-			Overhead:       pod.Spec.Overhead,
-			Resources:      pod.Spec.Resources,
-		},
-	}
-	return resourcehelper.PodRequests(modifiedPod, resourcehelper.PodResourcesOptions{})
+	return resources.RequestsForSpec(&corev1.PodSpec{
+		Containers:     applyPredictions(pod.Spec.Containers, pred),
+		InitContainers: applyPredictions(pod.Spec.InitContainers, pred),
+		Overhead:       pod.Spec.Overhead,
+		Resources:      pod.Spec.Resources,
+	})
 }
 
 // applyPredictions returns a copy of the containers slice with predicted resource requests

@@ -151,10 +151,11 @@ var (
 	}
 	PredictionEnabledFeatureGate = FeatureGate{
 		Name:    "PredictionEnabled",
-		Default: true,
+		Default: false,
 		Stage:   docs.Alpha,
 		Help: "Karpenter sizes nodes during provisioning and disruption using the post-recreation resource requests " +
-			"predicted by a registered prediction source, and waits for that source to hydrate before scheduling.",
+			"predicted by a registered prediction source, and waits for that source to hydrate before scheduling. " +
+			"Requires a registered prediction source.",
 	}
 )
 

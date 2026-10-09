@@ -226,6 +226,34 @@ var _ = Describe("Provisioning", func() {
 			wg.Wait()
 		})
 	})
+	It("should wait for the prediction store to hydrate before provisioning when the PredictionEnabled feature gate is enabled", func() {
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: lo.ToPtr(true)}}))
+		pod := test.UnschedulablePod()
+		ExpectApplied(ctx, env.Client, test.NodePool(), pod)
+		prov.Trigger(pod.UID)
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			ExpectSingletonReconciled(ctx, prov)
+		}()
+		Eventually(func() bool { return env.Clock.HasWaiters() }, time.Second).Should(BeTrue())
+		env.Clock.Step(11 * time.Second)
+
+		nodeClaims := &v1.NodeClaimList{}
+		Consistently(func(g Gomega) {
+			g.Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			g.Expect(nodeClaims.Items).To(BeEmpty())
+		}, 200*time.Millisecond).Should(Succeed())
+
+		predictionStore.MarkHydrated()
+		wg.Wait()
+
+		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+		Expect(nodeClaims.Items).To(HaveLen(1))
+	})
 	It("should provision nodes", func() {
 		ExpectApplied(ctx, env.Client, test.NodePool())
 		pod := test.UnschedulablePod()

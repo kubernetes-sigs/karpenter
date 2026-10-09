@@ -17,12 +17,17 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
+	"sync"
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -30,8 +35,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -42,6 +50,8 @@ var _ = Describe("Prediction", func() {
 	var node *corev1.Node
 
 	BeforeEach(func() {
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: lo.ToPtr(true)}}))
+		store.MarkHydrated()
 
 		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType("expensive",
@@ -101,44 +111,54 @@ var _ = Describe("Prediction", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 	})
 
-	It("should not consolidate to a cheaper node when predicted workload requests exceed its capacity", func() {
-		// Pod currently requests 1 CPU, VPA predicts 3 CPU
-		// Cheap node (2 CPU): predicted 3 > 2 won't fit
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+	DescribeTable("should consolidate based on predicted workload requests only when the PredictionEnabled feature gate is enabled",
+		func(predictionEnabled bool, expectConsolidation bool) {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: lo.ToPtr(predictionEnabled)}}))
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
-		pod := test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{"app": "test"},
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "test"},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
+						Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					}},
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+				},
+			})
+
+			store.Set(
+				types.NamespacedName{Namespace: "default", Name: "vpa-app"},
+				prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
+				&prediction.Prediction{Containers: map[string]corev1.ResourceList{
+					pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("3")},
 				}},
-			},
-			ResourceRequirements: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
-			},
-		})
+				env.Clock.Now(),
+			)
 
-		store.Set(
-			types.NamespacedName{Namespace: "default", Name: "vpa-app"},
-			rs.UID,
-			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
-				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("3")},
-			}},
-			env.Clock.Now(),
-		)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
 
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
+			dc := disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, dc)
 
-		dc := disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, dc)
-
-		Expect(queue.GetCommands()).To(BeEmpty())
-	})
+			if !expectConsolidation {
+				Expect(queue.GetCommands()).To(BeEmpty())
+				return
+			}
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+			Expect(cmds[0].Replacements[0].InstanceTypeOptions).To(ContainElement(HaveField("Name", "cheap")))
+		},
+		Entry("gate enabled: predicted 3 CPU doesn't fit on the cheap node", true, false),
+		Entry("gate disabled: prediction ignored, current 1 CPU fits on the cheap node", false, true),
+	)
 
 	It("should consolidate to a cheaper node when both workload and daemon predictions fit within capacity", func() {
 		// Workload pod: current 1 CPU, VPA predicts 800m
@@ -166,7 +186,7 @@ var _ = Describe("Prediction", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-ds"},
-			ds.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "DaemonSet"}, NamespacedName: client.ObjectKeyFromObject(ds)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				ds.Spec.Template.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("500m")},
 			}},
@@ -192,7 +212,7 @@ var _ = Describe("Prediction", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-app"},
-			rs.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				workloadPod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("800m")},
 			}},
@@ -236,7 +256,7 @@ var _ = Describe("Prediction", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-app"},
-			rs.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("1")},
 			}},
@@ -297,7 +317,7 @@ var _ = Describe("Prediction", func() {
 		// Only podA has a VPA prediction
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-a"},
-			rsA.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rsA)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				podA.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("1500m")},
 			}},
@@ -340,7 +360,7 @@ var _ = Describe("Prediction", func() {
 		// VPA predicts 3 CPU — fits on expensive (4 CPU) but not cheap (2 CPU)
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-app"},
-			rs.UID,
+			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("3")},
 			}},
@@ -359,5 +379,73 @@ var _ = Describe("Prediction", func() {
 		Expect(cmds).To(HaveLen(1))
 		Expect(cmds[0].Replacements).To(HaveLen(1))
 		Expect(cmds[0].Replacements[0].InstanceTypeOptions).To(ContainElement(HaveField("Name", "expensive")))
+	})
+
+	It("should wait for the prediction store to hydrate before disrupting when the PredictionEnabled feature gate is enabled", func() {
+		hydrationStore := prediction.NewStore()
+		hydrationProv := provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), hydrationStore)
+
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
+					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+				}},
+			},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		dc := disruption.NewController(ctx, env.Clock, env.Client, hydrationProv, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			ExpectSingletonReconciled(ctx, dc)
+		}()
+		Consistently(func() []*disruption.Command { return queue.GetCommands() }, 200*time.Millisecond).Should(BeEmpty())
+
+		hydrationStore.MarkHydrated()
+		wg.Wait()
+
+		Expect(queue.GetCommands()).To(HaveLen(1))
+	})
+
+	It("should remove taints left by a previous disruption action while waiting for the prediction store to hydrate", func() {
+		hydrationStore := prediction.NewStore()
+		hydrationProv := provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), hydrationStore)
+
+		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDisruptionReason)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		dc := disruption.NewController(ctx, env.Clock, env.Client, hydrationProv, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+		reconcileCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			ExpectSingletonReconciled(reconcileCtx, dc)
+		}()
+		Eventually(func(g Gomega) {
+			g.Expect(ExpectNodeExists(ctx, env.Client, node.Name).Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+			g.Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeDisruptionReason)).To(BeNil())
+		}).Should(Succeed())
+
+		cancel()
+		wg.Wait()
+		Expect(queue.GetCommands()).To(BeEmpty())
 	})
 })

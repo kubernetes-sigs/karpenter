@@ -23,11 +23,9 @@ import (
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -37,6 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
@@ -47,19 +47,21 @@ import (
 // pattern rather than an informer to gracefully tolerate VPA CRD not being installed.
 type VPAController struct {
 	kubeClient client.Client
-	apiReader  client.Reader
 	store      *prediction.Store
+	cluster    *state.Cluster
+	recorder   events.Recorder
 	// lastSeen tracks the resourceVersion of each VPA we've processed,
 	// so we skip recomputation when nothing changed.
 	lastSeen map[types.NamespacedName]string
 }
 
-func NewVPAController(kubeClient client.Client, apiReader client.Reader, store *prediction.Store) *VPAController {
+func NewVPAController(kubeClient client.Client, store *prediction.Store, cluster *state.Cluster, recorder events.Recorder) *VPAController {
 	utilruntime.Must(vpav1.AddToScheme(scheme.Scheme))
 	return &VPAController{
 		kubeClient: kubeClient,
-		apiReader:  apiReader,
 		store:      store,
+		cluster:    cluster,
+		recorder:   recorder,
 		lastSeen:   make(map[types.NamespacedName]string),
 	}
 }
@@ -70,7 +72,9 @@ func (c *VPAController) Reconcile(ctx context.Context) (reconciler.Result, error
 	var vpaList vpav1.VerticalPodAutoscalerList
 	if err := c.kubeClient.List(ctx, &vpaList); err != nil {
 		if meta.IsNoMatchError(err) {
-			c.store.Reset()
+			if c.store.Reset() {
+				c.cluster.MarkUnconsolidated()
+			}
 			c.lastSeen = make(map[types.NamespacedName]string)
 			c.store.MarkHydrated()
 			return reconciler.Result{RequeueAfter: 1 * time.Minute}, nil
@@ -79,56 +83,56 @@ func (c *VPAController) Reconcile(ctx context.Context) (reconciler.Result, error
 	}
 
 	seen := make(map[types.NamespacedName]bool, len(vpaList.Items))
-	allResolved := true
-
+	changed := false
 	for i := range vpaList.Items {
 		vpa := &vpaList.Items[i]
 		key := client.ObjectKeyFromObject(vpa)
 		seen[key] = true
-
 		if c.lastSeen[key] == vpa.ResourceVersion {
 			continue
 		}
-		if !c.processVPA(ctx, vpa, key) {
-			allResolved = false
-		}
+		changed = c.processVPA(vpa, key) || changed
 	}
-
-	for key := range c.lastSeen {
-		if !seen[key] {
-			c.store.Delete(key)
-			delete(c.lastSeen, key)
-		}
+	changed = c.deleteUnseen(seen) || changed
+	// A prediction change can make a node consolidatable, but isn't a cluster state change consolidation watches for
+	if changed {
+		c.cluster.MarkUnconsolidated()
 	}
-
-	if allResolved {
-		c.store.MarkHydrated()
-	}
-
+	c.store.MarkHydrated()
 	return reconciler.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
-func (c *VPAController) processVPA(ctx context.Context, vpa *vpav1.VerticalPodAutoscaler, key types.NamespacedName) bool {
+// deleteUnseen removes predictions of VPAs that no longer exist and reports whether the store's predictions changed.
+func (c *VPAController) deleteUnseen(seen map[types.NamespacedName]bool) bool {
+	changed := false
+	for key := range c.lastSeen {
+		if !seen[key] {
+			changed = c.store.Delete(key) || changed
+			delete(c.lastSeen, key)
+		}
+	}
+	return changed
+}
+
+// processVPA reports whether the store's predictions changed.
+func (c *VPAController) processVPA(vpa *vpav1.VerticalPodAutoscaler, key types.NamespacedName) bool {
+	c.lastSeen[key] = vpa.ResourceVersion
 	var p *prediction.Prediction
 	if vpa.Spec.TargetRef != nil {
 		p = computePrediction(vpa)
 	}
 	if p == nil {
-		c.store.Delete(key)
-		c.lastSeen[key] = vpa.ResourceVersion
-		return true
+		return c.store.Delete(key)
 	}
-	// Resolve the target workload's UID via the uncached API reader to avoid
-	// lazily starting cluster-wide informers for arbitrary target GVKs.
-	targetObj := &unstructured.Unstructured{}
-	targetObj.SetGroupVersionKind(schema.FromAPIVersionAndKind(vpa.Spec.TargetRef.APIVersion, vpa.Spec.TargetRef.Kind))
-	if err := c.apiReader.Get(ctx, types.NamespacedName{Namespace: vpa.Namespace, Name: vpa.Spec.TargetRef.Name}, targetObj); err != nil {
-		c.store.Delete(key)
-		return apierrors.IsNotFound(err)
+	target := prediction.TargetKey{
+		GroupKind:      schema.FromAPIVersionAndKind(vpa.Spec.TargetRef.APIVersion, vpa.Spec.TargetRef.Kind).GroupKind(),
+		NamespacedName: types.NamespacedName{Namespace: vpa.Namespace, Name: vpa.Spec.TargetRef.Name},
 	}
-	c.store.Set(key, targetObj.GetUID(), p, vpa.CreationTimestamp.Time)
-	c.lastSeen[key] = vpa.ResourceVersion
-	return true
+	if !prediction.SupportedTargets.Has(target.GroupKind) {
+		c.recorder.Publish(PredictionTargetUnsupportedEvent(vpa))
+		return c.store.Delete(key)
+	}
+	return c.store.Set(key, target, p, vpa.CreationTimestamp.Time)
 }
 
 func (c *VPAController) Name() string {

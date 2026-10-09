@@ -29,18 +29,11 @@ func PodForDaemonSet(daemonSet *appsv1.DaemonSet) *corev1.Pod {
 	if daemonSet == nil {
 		return nil
 	}
-	controller := true
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      daemonSet.Name,
-			Namespace: daemonSet.Namespace,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1",
-				Kind:       "DaemonSet",
-				Name:       daemonSet.Name,
-				UID:        daemonSet.UID,
-				Controller: &controller,
-			}},
+			Name:            daemonSet.Name,
+			Namespace:       daemonSet.Namespace,
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(daemonSet, appsv1.SchemeGroupVersion.WithKind("DaemonSet"))},
 		},
 		Spec: daemonSet.Spec.Template.Spec,
 	}

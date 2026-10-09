@@ -81,7 +81,11 @@ type ControllerOptions struct {
 
 // WithVPAPrediction enables the VPA prediction controller as the prediction source.
 // When enabled alongside the PredictionEnabled feature gate, Karpenter uses VPA
-// recommendations to size nodes during provisioning and disruption.
+// recommendations to size nodes during provisioning and disruption. With the gate
+// enabled, a prediction source must be registered to mark the prediction store
+// hydrated, or provisioning and disruption wait indefinitely. Only VPAs targeting
+// built-in workloads (Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
+// ReplicationController) are applied.
 func WithVPAPrediction() option.Function[ControllerOptions] {
 	return func(o *ControllerOptions) {
 		o.enableVPAPrediction = true
@@ -221,7 +225,7 @@ func NewControllers(
 		)
 	}
 	if o.enableVPAPrediction && options.FromContext(ctx).FeatureGates.PredictionEnabled {
-		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
+		controllers = append(controllers, informer.NewVPAController(kubeClient, predictionStore, cluster, recorder))
 	}
 
 	return controllers

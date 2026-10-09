@@ -293,7 +293,7 @@ type Scheduler struct {
 	// cachedResourceClaims memoizes ResourceClaim lookups for the duration of a single scheduling loop.
 	cachedResourceClaims   map[types.NamespacedName]*resourcev1.ResourceClaim
 	cachedOwnerResolutions map[types.UID]ownerResolution
-	predictForPodUIDs      sets.Set[types.UID] // if non-nil, only apply predictions for these pods
+	predictForPodUIDs      sets.Set[types.UID] // only apply predictions for these pods
 	predictionStore        *prediction.Store
 }
 
@@ -604,7 +604,7 @@ func (s *Scheduler) updateCachedPodData(ctx context.Context, p *corev1.Pod) {
 		strictRequirements = scheduling.NewStrictPodRequirements(p)
 	}
 	store := s.predictionStore
-	if s.predictForPodUIDs != nil && !s.predictForPodUIDs.Has(p.UID) {
+	if !s.predictForPodUIDs.Has(p.UID) {
 		store = nil
 	}
 	data := &PodData{
@@ -1015,11 +1015,9 @@ func predictedRequestsForDaemons(ctx context.Context, c client.Client, store *pr
 	if store == nil || len(pods) == 0 {
 		return resources.RequestsForPods(pods...)
 	}
-	cache := map[types.UID]ownerResolution{}
-
 	var allRequests []corev1.ResourceList
 	for _, p := range pods {
-		allRequests = append(allRequests, PredictedRequests(ctx, c, store, p, cache))
+		allRequests = append(allRequests, PredictedRequests(ctx, c, store, p, nil))
 	}
 	return resources.Merge(allRequests...)
 }
