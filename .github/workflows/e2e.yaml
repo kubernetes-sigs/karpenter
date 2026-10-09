@@ -16,12 +16,34 @@ on:
         type: string
         required: false
         description: "Human-readable test name for job identification"
+      iteration:
+        type: number
+        required: false
+        default: 1
+        description: >-
+          Index of the sample this job produces. A caller wanting a batch fans
+          out over this input, one job per sample.
+      git_ref:
+        type: string
+        required: false
+        description: >-
+          Commit to test. Empty leaves actions/checkout at its default, which is
+          what push and workflow_dispatch want. A workflow_run caller must pass
+          the reviewed commit, because a workflow_run checkout defaults to the
+          default branch no matter which pull request triggered the run.
 jobs:
   e2e:
+    # contents: read and nothing else. This job runs the checked-out tree, and
+    # with git_ref set by a workflow_run caller that tree is a pull request's,
+    # so every write scope here is a write scope a pull request can reach.
+    # issues: write was on this job before and nothing used it: no step and no
+    # action under .github/actions touches the issues API, gh, or GITHUB_TOKEN.
+    # kind-e2e.yaml still grants issues: write at the call site, which is now an
+    # upper bound with nothing under it.
     permissions:
-      issues: write
+      contents: read
     runs-on: ubuntu-latest
-    name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}
+    name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}${{ inputs.iteration > 1 && format(' iter {0}', inputs.iteration) || '' }}
     steps:
     - name: Debug workflow_run trigger
       run: |
@@ -29,6 +51,24 @@ jobs:
         echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
         echo "Workflow run name: ${{ github.event.workflow_run.name }}"
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: ${{ inputs.git_ref }}
+    # Both values, because they answer different questions. The requested ref says
+    # what the caller asked for, HEAD says what was measured. A reader confirming
+    # that /karpenter perf tested the pull request rather than main greps the job
+    # log for "commit under test" and compares it with the review's commit; the
+    # same line lands in the job summary so it survives the log.
+    - name: Record the commit under test
+      env:
+        GIT_REF: ${{ inputs.git_ref }}
+        JOB_LABEL: ${{ inputs.test_name || inputs.suite }}
+        ITERATION: ${{ inputs.iteration }}
+      shell: bash
+      run: |
+        sha="$(git rev-parse HEAD)"
+        echo "requested ref: ${GIT_REF:-<checkout default>}"
+        echo "commit under test: $sha"
+        echo "$JOB_LABEL iteration $ITERATION measured $sha" >> "$GITHUB_STEP_SUMMARY"
     - name: Set up Python 3.10
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
@@ -81,13 +121,16 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         TEST_SUITE="$SUITE" make e2etests
+    # The name carries the sample index because upload-artifact requires names to
+    # be unique within a run, so without it the samples of a batch would collide.
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
+        name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-iter-${{ inputs.iteration }}-${{ github.run_id }}
         path: |
           ${{ env.OUTPUT_DIR }}/*_performance_report.json
+          ${{ env.OUTPUT_DIR }}/*_latency.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
         retention-days: 30
