@@ -18,6 +18,7 @@ package disruption_test
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -101,6 +102,33 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(cmds[0].Candidates).To(HaveLen(1))
 		Expect(lo.FromPtr(cmds[0].Candidates[0].TerminationGracePeriod)).To(Equal(repairTGP))
 		Expect(cmds[0].Candidates[0].RepairPolicyResult.Condition).To(Equal(corev1.NodeConditionType("BadNode")))
+	})
+
+	It("does not terminate-first a static NodePool at its limit that has no capacity to refill the node", func() {
+		// Reserved-only pool whose reservation is gone: the node was demoted to on-demand and nothing can relaunch it.
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
+		nodePool := staticNodePoolAtLimit(1)
+		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+			{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved}},
+		}
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name, v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"},
+		}})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		markUnhealthy(node)
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		Expect(queue.GetCommands()).To(HaveLen(0))
+		blocked := 0
+		recorder.ForEachEvent(func(evt events.Event) {
+			if _, ok := evt.InvolvedObject.(*v1.NodeClaim); ok && evt.Reason == events.DisruptionBlocked && strings.Contains(evt.Message, "no launchable capacity to refill this node") {
+				blocked++
+			}
+		})
+		Expect(blocked).To(Equal(1))
 	})
 
 	// Below the limit there's room to stage a replacement, so repair replaces-first even with the gate on.

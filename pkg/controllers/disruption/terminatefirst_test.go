@@ -17,6 +17,9 @@ limitations under the License.
 package disruption_test
 
 import (
+	"fmt"
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -150,6 +153,158 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
 			Expect(cmds[0].Replacements).To(HaveLen(1))
+		})
+	})
+
+	// A static NodePool at its node limit only terminates first the nodes it can refill. The motivating case is a
+	// reserved-only pool whose reservation was cancelled or expired: its nodes were demoted to on-demand and drifted,
+	// and terminating them would trade working nodes for slots that can never be refilled.
+	Context("StaticDrift/Refill", func() {
+		const noRefill = "no launchable capacity to refill this node"
+		var staticDriftController *disruption.Controller
+
+		BeforeEach(func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			staticDriftController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+				disruption.WithMethods(disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder)))
+		})
+
+		// blockedWith counts candidates (one event per NodeClaim) Blocked with a message containing substr.
+		blockedWith := func(substr string) int {
+			n := 0
+			recorder.ForEachEvent(func(evt events.Event) {
+				if _, ok := evt.InvolvedObject.(*v1.NodeClaim); ok && evt.Reason == events.DisruptionBlocked && strings.Contains(evt.Message, substr) {
+					n++
+				}
+			})
+			return n
+		}
+		// addReservation appends a reserved offering for mostExpensiveInstance in the first offering's zone.
+		addReservation := func(id string, capacity int, available bool) {
+			mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, id))
+			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+				Price:               mostExpensiveOffering.Price / 1_000_000.0,
+				Available:           available,
+				ReservationCapacity: capacity,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+					corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					cloudprovider.ReservationIDLabel: id,
+				}),
+			})
+			ExpectSingletonReconciled(ctx, pricingController)
+		}
+		// reservedPool returns a reserved-only static NodePool at its node limit, pinned to mostExpensiveInstance.
+		reservedPool := func(replicas int64) *v1.NodePool {
+			return test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
+				Replicas:   lo.ToPtr(replicas),
+				Limits:     v1.Limits{resources.Node: resource.MustParse(fmt.Sprint(replicas))},
+				Disruption: v1.Disruption{Budgets: []v1.Budget{{Nodes: "100%"}}},
+				Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{mostExpensiveInstance.Name}},
+					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved}},
+				}}},
+			}})
+		}
+		// applyNodes creates a drifted node of np per entry: a reservation ID for a node holding a slot in it, or "" for a
+		// node demoted to on-demand after its reservation ended.
+		applyNodes := func(np *v1.NodePool, reservationIDs ...string) []*v1.NodeClaim {
+			ExpectApplied(ctx, env.Client, np)
+			var ncs []*v1.NodeClaim
+			var nodes []*corev1.Node
+			for _, id := range reservationIDs {
+				labels := map[string]string{
+					v1.NodePoolLabelKey:            np.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        lo.Ternary(id == "", v1.CapacityTypeOnDemand, v1.CapacityTypeReserved),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				}
+				if id != "" {
+					labels[cloudprovider.ReservationIDLabel] = id
+				}
+				nc, n := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					Status:     v1.NodeClaimStatus{ProviderID: test.RandomProviderID(), Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("32"), corev1.ResourcePods: resource.MustParse("100")}},
+				})
+				nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+				ExpectApplied(ctx, env.Client, nc, n)
+				ncs, nodes = append(ncs, nc), append(nodes, n)
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, ncs)
+			return ncs
+		}
+		expectTerminateFirst := func(n int) []*disruption.Command {
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(n))
+			for _, cmd := range cmds {
+				Expect(cmd.Decision()).To(Equal(disruption.TerminateFirstDecision))
+			}
+			return cmds
+		}
+
+		It("does not terminate first demoted nodes once the reservation is gone", func() {
+			applyNodes(reservedPool(2), "", "")
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			expectTerminateFirst(0)
+			Expect(blockedWith(noRefill)).To(Equal(2))
+		})
+		It("does not terminate first demoted nodes while the ended reservation is still listed as full", func() {
+			// The demoted nodes hold no slot in it, so terminating them frees nothing a refill could use.
+			addReservation("r-1", 0, true)
+			applyNodes(reservedPool(2), "", "")
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			expectTerminateFirst(0)
+			Expect(blockedWith(noRefill)).To(Equal(2))
+		})
+		It("does not terminate first a node whose reservation is unavailable", func() {
+			addReservation("r-1", 0, false)
+			applyNodes(reservedPool(1), "r-1")
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			expectTerminateFirst(0)
+			Expect(blockedWith(noRefill)).To(Equal(1))
+		})
+		It("terminates first nodes that each free a slot in their own full reservation", func() {
+			addReservation("r-1", 0, true)
+			applyNodes(reservedPool(2), "r-1", "r-1")
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			expectTerminateFirst(2)
+		})
+		It("terminates first only as many demoted nodes as a new reservation has free slots", func() {
+			addReservation("r-new", 1, true)
+			applyNodes(reservedPool(2), "", "")
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			expectTerminateFirst(1)
+			Expect(blockedWith(noRefill)).To(Equal(1))
+		})
+		It("counts refills already owed to the NodePool against free reserved slots", func() {
+			// One of two nodes is already deleting; its owed refill takes the only free slot.
+			addReservation("r-new", 1, true)
+			ncs := applyNodes(reservedPool(2), "", "")
+			ncs[1].Finalizers = []string{v1.TerminationFinalizer}
+			ExpectApplied(ctx, env.Client, ncs[1])
+			Expect(env.Client.Delete(ctx, ncs[1])).To(Succeed())
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(ncs[1]))
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			expectTerminateFirst(0)
+			Expect(blockedWith(noRefill)).To(BeNumerically(">", 0))
+		})
+		It("does not let candidates that can't be refilled starve one that can", func() {
+			addReservation("r-1", 0, true)
+			np := reservedPool(2)
+			np.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+			ncs := applyNodes(np, "", "r-1")
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			Expect(expectTerminateFirst(1)[0].Candidates[0].NodeClaim.Name).To(Equal(ncs[1].Name))
+		})
+		It("does not terminate first when the NodePool is NotReady", func() {
+			addReservation("r-1", 0, true)
+			np := reservedPool(1)
+			np.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "NotReady", "NotReady")
+			applyNodes(np, "r-1")
+			ExpectSingletonReconciled(ctx, staticDriftController)
+			expectTerminateFirst(0)
+			Expect(blockedWith("not ready to provision a replacement")).To(Equal(1))
 		})
 	})
 
