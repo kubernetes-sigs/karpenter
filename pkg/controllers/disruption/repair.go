@@ -215,9 +215,9 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 					continue
 				}
 				return []Command{{
-					Candidates:          []*Candidate{candidate},
-					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-					TerminateFirst:      true,
+					Candidates:           []*Candidate{candidate},
+					PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+					TerminateFirstReason: lo.Ternary(reservationsFull, TerminateFirstNoReservedCapacity, TerminateFirstStaticAtLimit),
 				}}, nil
 			}
 			result := pscheduling.Results{NewNodeClaims: []*pscheduling.NodeClaim{{NodeClaimTemplate: *nct}}}
@@ -240,10 +240,10 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 		if terminateFirst {
 			// Carry the Results (no Replacements) so nodes that can absorb the freed pods get nominated.
 			return []Command{{
-				Candidates:          []*Candidate{candidate},
-				Results:             results,
-				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-				TerminateFirst:      true,
+				Candidates:           []*Candidate{candidate},
+				Results:              results,
+				PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+				TerminateFirstReason: TerminateFirstNoReservedCapacity,
 			}}, nil
 		}
 		if !results.AllNonPendingPodsScheduled() {

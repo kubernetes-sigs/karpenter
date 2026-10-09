@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -137,6 +138,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			ExpectMetricCounterValue(disruption.TerminateFirstDecisionsTotal, 1, map[string]string{metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: "drifted", disruption.TerminateFirstReasonDim.Name: string(disruption.TerminateFirstStaticAtLimit)})
 			Expect(cmds[0].Replacements).To(HaveLen(0))
 		})
 
@@ -226,6 +228,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 				cmds := queue.GetCommands()
 				Expect(cmds).To(HaveLen(1))
 				Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+				ExpectMetricCounterValue(disruption.TerminateFirstDecisionsTotal, 1, map[string]string{metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: "drifted", disruption.TerminateFirstReasonDim.Name: string(disruption.TerminateFirstNoReservedCapacity)})
 				Expect(cmds[0].Replacements).To(HaveLen(0))
 				// The delete-only path must not hold the limits.nodes slot it never uses.
 				Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 2, 1)).To(BeEquivalentTo(int64(1)))
@@ -500,6 +503,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
 			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			ExpectMetricCounterValue(disruption.TerminateFirstDecisionsTotal, 1, map[string]string{metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: "drifted", disruption.TerminateFirstReasonDim.Name: string(disruption.TerminateFirstNoReservedCapacity)})
 			Expect(cmds[0].Replacements).To(HaveLen(0))
 			// The delete-only command must carry the pass-2 (credit-back) Results — that's what Record uses to nominate
 			// existing nodes for the freed pods. Pin the payload (kills the "drop Results" / "return pass-1" mutations):

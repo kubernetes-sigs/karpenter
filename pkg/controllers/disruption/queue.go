@@ -467,6 +467,13 @@ func (q *Queue) recordDecisionPerformed(cmd *Command) {
 			metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
 			ConsolidationTypeLabel: cmd.ConsolidationType(),
 		})
+		if cmd.TerminateFirstReason != "" {
+			TerminateFirstDecisionsTotal.Inc(map[string]string{
+				metrics.NodePoolLabel:     nodePool,
+				metrics.ReasonLabel:       strings.ToLower(string(cmd.Reason())),
+				terminateFirstReasonLabel: string(cmd.TerminateFirstReason),
+			})
+		}
 	}
 	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
