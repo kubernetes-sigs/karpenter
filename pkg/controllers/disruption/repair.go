@@ -124,8 +124,12 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 
 //nolint:gocyclo // Static and dynamic replacement flows are intentionally kept inline.
 func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
+	// We use a fixed value for now so all candidates get the same value
+	// This is important for repair since it scores candidates based on their current age (calculated as now - eligibleAt).
+	// We don't want the order in which candidates are evaluated to affect their age.
+	now := r.clock.Now()
 	sort.SliceStable(candidates, func(i, j int) bool {
-		si, sj := candidates[i].RepairPolicyResult.Score, candidates[j].RepairPolicyResult.Score
+		si, sj := candidates[i].RepairPolicyResult.ScoreAt(now), candidates[j].RepairPolicyResult.ScoreAt(now)
 		if si != sj {
 			return si > sj // higher score repairs first
 		}

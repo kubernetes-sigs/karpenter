@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
@@ -280,9 +281,14 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	if err != nil {
 		return nil, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
+	// We use a clock which has a fixed value for now so all candidates get the same value.
+	// now is used in the calculation of DisruptionCost.
+	// Using a fixed value is important for repair which tie-breaks candidates based on their DisruptionCost.
+	// We don't want the order in which candidates are evaluated to affect their DisruptionCost.
+	var fixedNowClk clock.Clock = fixedNowClock{Clock: clk, now: clk.Now()}
 	allNodes := cluster.DeepCopyNodes()
 	allCandidates := lo.FilterMap(allNodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, fixedNowClk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil
 	})
 	// Compute totals using ALL nodes for disruption cost denominator (RFC requirement:
@@ -291,6 +297,15 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	filtered := lo.Filter(allCandidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) })
 	return filtered, nodePoolTotals, nil
 }
+
+// fixedNowClock is a clock that has a fixed value for now.
+type fixedNowClock struct {
+	clock.Clock
+	now time.Time
+}
+
+func (c fixedNowClock) Now() time.Time                  { return c.now }
+func (c fixedNowClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
 func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {

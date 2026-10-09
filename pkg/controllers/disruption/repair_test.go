@@ -19,6 +19,7 @@ package disruption_test
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -73,6 +75,18 @@ func (c *terminationTimestampPatchErrorClient) Patch(ctx context.Context, obj cl
 	}
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
+
+// tickingClock is a fake clock that moves on a millisecond every time it is read.
+type tickingClock struct {
+	*clocktesting.FakeClock
+}
+
+func (c tickingClock) Now() time.Time {
+	c.Step(time.Millisecond)
+	return c.FakeClock.Now()
+}
+
+func (c tickingClock) Since(t time.Time) time.Duration { return c.Now().Sub(t) }
 
 // These tests exercise end-user behavior of voluntary node repair. The disruption controller is built with only the
 // Repair method so the behavior under test is isolated from consolidation/drift.
@@ -681,6 +695,69 @@ var _ = Describe("Repair", func() {
 		Expect(cmds).To(HaveLen(1))
 		// The budget allows one; ordering must pick the high-priority node.
 		Expect(cmds[0].Candidates[0].Node.Name).To(Equal(highNode.Name))
+	})
+
+	// Two nodes that broke at the same moment have equal repair scores, so repair should pick the one whose name sorts
+	// first. Repair checks each node at a slightly different time, so it must score both at one time before choosing.
+	// Otherwise the node checked last would look more overdue and win.
+	It("should break a tie by node name between candidates resolved at different times", func() {
+		// Repair stops when more than 20% of a pool's nodes are unhealthy, so break only 2 of 10 nodes.
+		nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+		for i := range nodes {
+			initNode(nodeClaims[i], nodes[i])
+		}
+		// Break both nodes at the same moment, after all nodes exist, so they're equally overdue.
+		env.Clock.SetTime(time.Now())
+		markUnhealthy(nodes[0], "BadNode")
+		markUnhealthy(nodes[1], "BadNode")
+		// Wait past the 30 minute toleration, so repair can act on both.
+		env.Clock.Step(31 * time.Minute)
+
+		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, repair.ShouldDisrupt, disruption.RepairDisruptionClass, queue)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(candidates).To(HaveLen(2))
+		// candidates[0] has the name that sorts first, so it should win the tie.
+		sort.Slice(candidates, func(i, j int) bool { return candidates[i].Name() < candidates[j].Name() })
+		// Check the winner, then the other node one second later. If repair kept the score from when each node was
+		// checked, the node checked later would look more overdue and win.
+		Expect(repair.ShouldDisrupt(ctx, candidates[0])).To(BeTrue())
+		env.Clock.Step(time.Second)
+		Expect(repair.ShouldDisrupt(ctx, candidates[1])).To(BeTrue())
+
+		// Pass the other node first, so repair has to compare the two to pick the winner.
+		cmds, err := repair.ComputeCommands(ctx, map[string]int{nodePool.Name: 1}, candidates[1], candidates[0])
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cmds).To(HaveLen(1))
+		Expect(cmds[0].Candidates[0].Name()).To(Equal(candidates[0].Name()))
+	})
+
+	// Repair breaks score ties on disruption cost, and a node's cost depends on how much of its lifetime is left. So
+	// every node's cost must be worked out as of the same time. Otherwise two identical nodes would get slightly
+	// different costs, and the node checked last would look cheaper and win.
+	It("should build every candidate of a pass as of one time", func() {
+		// Give the nodes a lifetime (expireAfter), so their cost changes as time passes.
+		nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}, Spec: v1.NodeClaimSpec{ExpireAfter: v1.MustParseNillableDuration("720h")}})
+		for i := range nodes {
+			initNode(nodeClaims[i], nodes[i])
+			// A pod gives the node a cost above zero. With no pods, both costs would be zero whatever the time.
+			bindReschedulablePod(nodes[i])
+			markUnhealthy(nodes[i], "BadNode")
+		}
+		// Wait past the 30 minute toleration, so repair can act on both.
+		env.Clock.Step(31 * time.Minute)
+		// Make both nodes the same age, so at any one moment they have the same time left and the same cost.
+		stored := ExpectExists(ctx, env.Client, nodeClaims[1])
+		stored.CreationTimestamp = ExpectExists(ctx, env.Client, nodeClaims[0]).CreationTimestamp
+		cluster.UpdateNodeClaim(stored)
+		// Use a clock that moves forward every time it's read, like a real clock does.
+		clk := tickingClock{FakeClock: clocktesting.NewFakeClock(env.Clock.Now())}
+
+		candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, clk, cloudProvider, repair.ShouldDisrupt, disruption.RepairDisruptionClass, queue)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(candidates).To(HaveLen(2))
+		// Both nodes must get the same cost, even though the clock moved on between them.
+		Expect(candidates[0].DisruptionCost).To(BeNumerically(">", 0))
+		Expect(candidates[0].DisruptionCost).To(Equal(candidates[1].DisruptionCost))
 	})
 
 	It("should not score a node using a reason-specific policy that does not match", func() {

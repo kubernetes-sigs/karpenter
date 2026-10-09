@@ -65,7 +65,6 @@ type RepairPolicyMatcher struct {
 // and SelectedEligibleAt identify the deterministic source of the selected Action, while TerminationGracePeriod is
 // the shortest bound and TerminationGracePeriodCondition identifies the condition that supplied it.
 type RepairResult struct {
-	Score                            float64
 	Action                           cloudprovider.RepairAction
 	Condition                        corev1.NodeConditionType
 	ConditionStatus                  corev1.ConditionStatus
@@ -77,6 +76,21 @@ type RepairResult struct {
 	TerminationGracePeriodCondition  corev1.NodeConditionType
 	selectedPriority                 int
 	terminationGracePeriodEligibleAt time.Time
+	// scoreRank and scoreEligibleAt hold the rank and eligibility time of the eligible policy with the highest score,
+	// so ScoreAt can work out the score at any time. Keeping just this policy is enough: every policy's score grows at
+	// the same rate, so the highest one stays the highest.
+	scoreRank       int
+	scoreEligibleAt time.Time
+}
+
+// ScoreAt returns the result's repair score as of now: the highest rank + age/agingConstant across its eligible
+// policies, where age is the time since the policy became eligible. Scoring every candidate as of the same time keeps
+// equally ranked and aged candidates tied, however far apart they were resolved. It is 0 when no policy is eligible.
+func (r RepairResult) ScoreAt(now time.Time) float64 {
+	if r.Action == "" {
+		return 0
+	}
+	return float64(r.scoreRank) + now.Sub(r.scoreEligibleAt).Minutes()/agingConstant.Minutes()
 }
 
 // NewRepairPolicyMatcher compiles the cloud provider's repair policies once, for cluster state and node repair to
@@ -358,15 +372,16 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, eligibleAt, 
 	if eligibleAt.After(now) {
 		return
 	}
-	age := now.Sub(eligibleAt)
-	r.Score = max(r.Score, float64(rank)+age.Minutes()/agingConstant.Minutes())
+	// Read this before anything below changes the result: no Action yet means no eligible policy has been merged.
+	isFirstEligiblePolicy := r.Action == ""
+	r.mergeScore(rank, eligibleAt, now, isFirstEligiblePolicy)
 	if policy.TerminationGracePeriod != nil && r.shorterTerminationGracePeriod(*policy.TerminationGracePeriod, condition.Type, eligibleAt) {
 		r.TerminationGracePeriod = policy.TerminationGracePeriod
 		r.TerminationGracePeriodCondition = condition.Type
 		r.terminationGracePeriodEligibleAt = eligibleAt
 	}
 
-	selected := r.Action == "" || policy.Action.IsMoreDisruptiveThan(r.Action)
+	selected := isFirstEligiblePolicy || policy.Action.IsMoreDisruptiveThan(r.Action)
 	if policy.Action == r.Action {
 		switch {
 		case policy.Priority != r.selectedPriority:
@@ -386,6 +401,16 @@ func (r *RepairResult) mergePolicy(policy compiledPolicy, rank int, eligibleAt, 
 		r.Fallback = policy.ReasonRegex == ""
 		r.SelectedEligibleAt = eligibleAt
 		r.selectedPriority = policy.Priority
+	}
+}
+
+// mergeScore keeps the eligible policy that scores highest as of now. The first eligible policy is always kept, even if
+// it scores 0.
+func (r *RepairResult) mergeScore(rank int, eligibleAt, now time.Time, isFirstEligiblePolicy bool) {
+	score := float64(rank) + now.Sub(eligibleAt).Minutes()/agingConstant.Minutes()
+	if isFirstEligiblePolicy || score > r.ScoreAt(now) {
+		r.scoreRank = rank
+		r.scoreEligibleAt = eligibleAt
 	}
 }
 
