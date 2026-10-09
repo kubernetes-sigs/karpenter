@@ -227,6 +227,18 @@ func SimulateSchedulingWithReservedFallback(
 	return results, false, nil
 }
 
+// virtualPodPlacement returns whether virtual pods landed on existing nodes, on new NodeClaims, or failed to schedule.
+func virtualPodPlacement(results scheduling.Results) (onExistingNodes, onNewNodeClaims, failed bool) {
+	onExistingNodes = lo.SomeBy(results.ExistingNodes, func(n *scheduling.ExistingNode) bool {
+		return lo.SomeBy(n.Pods, provisioning.IsVirtualPod)
+	})
+	onNewNodeClaims = lo.SomeBy(results.NewNodeClaims, func(n *scheduling.NodeClaim) bool {
+		return lo.SomeBy(n.Pods, provisioning.IsVirtualPod)
+	})
+	failed = lo.SomeBy(lo.Keys(results.PodErrors), provisioning.IsVirtualPod)
+	return onExistingNodes, onNewNodeClaims, failed
+}
+
 // UninitializedNodeError tracks a special pod error for disruption where pods schedule to a node
 // that hasn't been initialized yet, meaning that we can't be confident to make a disruption decision based off of it
 type UninitializedNodeError struct {
