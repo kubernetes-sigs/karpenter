@@ -75,12 +75,19 @@ func NewTopology(
 	pods []*corev1.Pod,
 	opts ...Options,
 ) (*Topology, error) {
+	resolvedOptions := option.Resolve(opts...)
+	var domainGroups map[string]TopologyDomainGroup
+	if resolvedOptions.preparedSchedulerInputs == nil {
+		domainGroups = buildDomainGroups(nodePools, instanceTypes)
+	} else {
+		domainGroups = resolvedOptions.preparedSchedulerInputs.domainGroups
+	}
 	t := &Topology{
 		kubeClient:            kubeClient,
-		preferencePolicy:      option.Resolve(opts...).preferencePolicy,
+		preferencePolicy:      resolvedOptions.preferencePolicy,
 		cluster:               cluster,
 		stateNodes:            stateNodes,
-		domainGroups:          buildDomainGroups(nodePools, instanceTypes),
+		domainGroups:          domainGroups,
 		topologyGroups:        map[uint64]*TopologyGroup{},
 		inverseTopologyGroups: map[uint64]*TopologyGroup{},
 		excludedPods:          sets.New[string](),
