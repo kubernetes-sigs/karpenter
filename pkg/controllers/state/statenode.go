@@ -101,6 +101,31 @@ func IgnoreNodeDoNotDisruptError(err error) error {
 	return err
 }
 
+// NodeUninitializedError is returned when a registered node hasn't initialized. Repair ignores it, since a node that
+// never initializes is otherwise only replaced by a human.
+type NodeUninitializedError struct {
+	error
+}
+
+func NewNodeUninitializedError(err error) *NodeUninitializedError {
+	return &NodeUninitializedError{error: err}
+}
+
+func IsNodeUninitializedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nodeUninitializedError *NodeUninitializedError
+	return stderrors.As(err, &nodeUninitializedError)
+}
+
+func IgnoreNodeUninitializedError(err error) error {
+	if IsNodeUninitializedError(err) {
+		return nil
+	}
+	return err
+}
+
 //go:generate go tool -modfile=../../../go.tools.mod controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
 
 // StateNodes is a typed version of a list of *Node
@@ -206,12 +231,20 @@ func (in *StateNode) ShallowCopy() *StateNode {
 }
 
 // GetRepairResult returns the repair decision for the Node at now, from the policy matches the Node informer keeps
-// current. An empty Action means no policy applies or none has waited out its toleration yet.
+// current. An empty Action means no policy applies or none has waited out its toleration yet. Tolerations are measured
+// from no earlier than the end of the last reboot, since a node rejoins uninitialized after a successful reboot and its
+// conditions may not have caught up yet.
 func (in *StateNode) GetRepairResult(now time.Time) health.RepairResult {
 	if in.Node == nil {
 		return health.RepairResult{}
 	}
-	return health.Resolve(in.repairPolicyMatches, now)
+	var rebootFinishedAt time.Time
+	if in.NodeClaim != nil {
+		if rebooting := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting); rebooting != nil && rebooting.IsFalse() {
+			rebootFinishedAt = rebooting.LastTransitionTime.Time
+		}
+	}
+	return health.Resolve(in.repairPolicyMatches, now, rebootFinishedAt)
 }
 
 func (in *StateNode) Name() string {
@@ -257,9 +290,6 @@ func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 	if in.Node == nil {
 		return fmt.Errorf("nodeclaim does not have an associated node")
 	}
-	if !in.Initialized() {
-		return fmt.Errorf("node isn't initialized")
-	}
 	// A rebooting node must not be picked up by other disruption methods. This covers the drain window
 	// too, where the node is still Initialized but a reboot is already committed.
 	if in.RebootInProgress() {
@@ -267,6 +297,10 @@ func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 	}
 	if in.MarkedForDeletion() {
 		return fmt.Errorf("node is deleting or marked for deletion")
+	}
+	// Checked ahead of nomination, which provisioning keeps renewing on an uninitialized node while pods wait for it.
+	if !in.Initialized() {
+		return NewNodeUninitializedError(fmt.Errorf("node isn't initialized"))
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if in.Nominated(clk) {

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/singleton"
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -1144,4 +1145,139 @@ var _ = Describe("Repair", func() {
 		Expect(queue.GetCommands()).To(HaveLen(0))
 	})
 
+	Context("uninitialized nodes", func() {
+		// registerNode applies a node/nodeclaim that registered but never initialized and syncs cluster state. Cluster
+		// state skips an uninitialized node until registration syncs its instance type label.
+		registerNode := func(nc *v1.NodeClaim, n *corev1.Node) {
+			n.Labels = lo.Assign(n.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true", corev1.LabelInstanceTypeStable: "default-instance-type"})
+			nc.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+			nc.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+			ExpectApplied(ctx, env.Client, nc, n)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+		}
+
+		It("should repair an unhealthy node that never initialized", func() {
+			registerNode(nodeClaim, node)
+			markUnhealthy(node, "BadNode")
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.DeleteDecision))
+
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+			ExpectMetricCounterValue(disruption.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+				"condition":           "bad_node",
+				metrics.NodePoolLabel: nodePool.Name,
+			})
+		})
+
+		It("should not repair before the toleration duration elapses", func() {
+			registerNode(nodeClaim, node)
+			markUnhealthy(node, "BadNode")
+			env.Clock.Step(29 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+		})
+
+		It("should repair without disruption budget", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0"}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			registerNode(nodeClaim, node)
+			markUnhealthy(node, "BadNode")
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
+		})
+
+		It("should not consume disruption budget for initialized nodes", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			registerNode(nodeClaim, node)
+			markUnhealthy(node, "BadNode")
+			env.Clock.Step(31 * time.Minute)
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
+
+			// Five healthy nodes keep the second repair under the 20% circuit breaker.
+			nodeClaims, nodes := test.NodeClaimsAndNodes(5, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+			for i := range nodes {
+				initNode(nodeClaims[i], nodes[i])
+			}
+			markUnhealthy(nodes[0], "BadNode")
+			env.Clock.Step(31 * time.Minute)
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(HaveLen(2))
+		})
+
+		It("should measure the toleration from when the last reboot finished", func() {
+			registerNode(nodeClaim, node)
+			markUnhealthy(node, "BadNode")
+			env.Clock.Step(40 * time.Minute)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim.StatusConditions(status.WithClock(env.Clock)).SetFalse(v1.ConditionTypeRebooting, v1.RebootReasonSucceeded, "node rebooted and rejoined the cluster")
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+			env.Clock.Step(29 * time.Minute)
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+
+			env.Clock.Step(2 * time.Minute)
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
+		})
+
+		It("should not repair a rebooting node", func() {
+			registerNode(nodeClaim, node)
+			markUnhealthy(node, "BadNode")
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonIssued, "rebooting")
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+		})
+
+		It("should repair a node nominated for pending pods", func() {
+			registerNode(nodeClaim, node)
+			markUnhealthy(node, "BadNode")
+			env.Clock.Step(31 * time.Minute)
+			cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
+		})
+
+		It("should not repair a node carrying the do-not-repair annotation", func() {
+			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotRepairAnnotationKey: "true"})
+			registerNode(nodeClaim, node)
+			markUnhealthy(node, "BadNode")
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+		})
+
+		It("should stop repairing a NodePool when more than 20% of its nodes are unhealthy", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels()}})
+			for i := range nodes {
+				registerNode(nodeClaims[i], nodes[i])
+			}
+			markUnhealthy(nodes[0], "BadNode")
+			markUnhealthy(nodes[1], "BadNode")
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+		})
+	})
 })
