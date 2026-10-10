@@ -18,7 +18,6 @@ package informer_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -30,13 +29,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	vpav1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
 	"sigs.k8s.io/karpenter/pkg/test"
 	testcrds "sigs.k8s.io/karpenter/pkg/test/crds"
@@ -47,8 +50,10 @@ import (
 var ctx context.Context
 var env *test.Environment
 var store *prediction.Store
+var cluster *state.Cluster
+var recorder *test.EventRecorder
 var controller *informer.VPAController
-var targetUID types.UID
+var target prediction.TargetKey
 var targetRef autoscalingv1.CrossVersionObjectReference
 var dep *appsv1.Deployment
 
@@ -68,15 +73,18 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	store = prediction.NewStore()
-	controller = informer.NewVPAController(env.Client, env.Client, store)
+	cluster = state.NewCluster(env.Clock, env.Client, fake.NewCloudProvider())
+	recorder = test.NewEventRecorder()
+	controller = informer.NewVPAController(env.Client, store, cluster, recorder)
 
 	dep = test.Deployment(test.DeploymentOptions{
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
 	})
 	ExpectApplied(ctx, env.Client, dep)
-	fetched := &appsv1.Deployment{}
-	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(dep), fetched)).To(Succeed())
-	targetUID = fetched.UID
+	target = prediction.TargetKey{
+		GroupKind:      schema.GroupKind{Group: "apps", Kind: "Deployment"},
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"},
+	}
 	targetRef = autoscalingv1.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "app"}
 })
 
@@ -90,16 +98,6 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 })
 
-type transientErrorReader func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error
-
-func (f transientErrorReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	return f(ctx, key, obj, opts...)
-}
-
-func (f transientErrorReader) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
-	return fmt.Errorf("not implemented")
-}
-
 var _ = Describe("VPA Controller", func() {
 	DescribeTable("should compute predictions correctly",
 		func(opts test.VerticalPodAutoscalerOptions, recommendation map[string]corev1.ResourceList, expectFound bool, expected map[string]corev1.ResourceList) {
@@ -109,7 +107,7 @@ var _ = Describe("VPA Controller", func() {
 			test.UpdateVPARecommendation(ctx, env.Client, vpa, recommendation)
 			ExpectSingletonReconciled(ctx, controller)
 
-			pred, ok := store.Get(targetUID)
+			pred, ok := store.Get(target)
 			Expect(ok).To(Equal(expectFound))
 			if expectFound {
 				for container, resources := range expected {
@@ -256,7 +254,7 @@ var _ = Describe("VPA Controller", func() {
 		})
 		ExpectSingletonReconciled(ctx, controller)
 
-		pred, ok := store.Get(targetUID)
+		pred, ok := store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers).NotTo(HaveKey("main"))
 		Expect(pred.Containers).To(HaveKey("sidecar"))
@@ -278,7 +276,7 @@ var _ = Describe("VPA Controller", func() {
 		})
 		ExpectSingletonReconciled(ctx, controller)
 
-		pred, ok := store.Get(targetUID)
+		pred, ok := store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"]).To(HaveKey(corev1.ResourceMemory))
 		Expect(pred.Containers["main"]).NotTo(HaveKey(corev1.ResourceCPU))
@@ -289,7 +287,7 @@ var _ = Describe("VPA Controller", func() {
 		ExpectApplied(ctx, env.Client, vpa)
 		ExpectSingletonReconciled(ctx, controller)
 
-		_, ok := store.Get(targetUID)
+		_, ok := store.Get(target)
 		Expect(ok).To(BeFalse())
 
 		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
@@ -297,7 +295,7 @@ var _ = Describe("VPA Controller", func() {
 		})
 		ExpectSingletonReconciled(ctx, controller)
 
-		pred, ok := store.Get(targetUID)
+		pred, ok := store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
 		Expect(store.Hydrated(ctx)).To(BeTrue())
@@ -311,36 +309,69 @@ var _ = Describe("VPA Controller", func() {
 		})
 		ExpectSingletonReconciled(ctx, controller)
 
-		_, ok := store.Get(targetUID)
+		_, ok := store.Get(target)
 		Expect(ok).To(BeTrue())
 
 		ExpectDeleted(ctx, env.Client, vpa)
 		ExpectSingletonReconciled(ctx, controller)
 
-		_, ok = store.Get(targetUID)
+		_, ok = store.Get(target)
 		Expect(ok).To(BeFalse())
 	})
 
-	It("should retry target resolution on transient failure", func() {
+	It("should mark the cluster unconsolidated when a prediction is added, changed, or removed", func() {
+		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
+		ExpectApplied(ctx, env.Client, vpa)
+
+		for _, cpu := range []string{"500m", "1"} {
+			consolidationState := cluster.ConsolidationState()
+			env.Clock.Step(time.Second)
+			test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
+				"main": {corev1.ResourceCPU: resource.MustParse(cpu)},
+			})
+			ExpectSingletonReconciled(ctx, controller)
+			Expect(cluster.ConsolidationState()).ToNot(Equal(consolidationState))
+		}
+
+		consolidationState := cluster.ConsolidationState()
+		env.Clock.Step(time.Second)
+		ExpectDeleted(ctx, env.Client, vpa)
+		ExpectSingletonReconciled(ctx, controller)
+		Expect(cluster.ConsolidationState()).ToNot(Equal(consolidationState))
+	})
+
+	It("should not mark the cluster unconsolidated when a VPA update leaves its prediction unchanged", func() {
 		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
 		ExpectApplied(ctx, env.Client, vpa)
 		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
 			"main": {corev1.ResourceCPU: resource.MustParse("500m")},
 		})
+		ExpectSingletonReconciled(ctx, controller)
+
+		consolidationState := cluster.ConsolidationState()
+		env.Clock.Step(time.Second)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(vpa), vpa)).To(Succeed())
+		vpa.Labels = map[string]string{"updated": "true"}
+		ExpectApplied(ctx, env.Client, vpa)
+		ExpectSingletonReconciled(ctx, controller)
+		Expect(cluster.ConsolidationState()).To(Equal(consolidationState))
+	})
+
+	It("should keep a prediction for a target that's deleted and recreated with the same name", func() {
+		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
+		ExpectApplied(ctx, env.Client, vpa)
+		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
+			"main": {corev1.ResourceCPU: resource.MustParse("500m")},
+		})
+		ExpectSingletonReconciled(ctx, controller)
 
 		ExpectDeleted(ctx, env.Client, dep)
-		ExpectSingletonReconciled(ctx, controller)
-		_, ok := store.Get(targetUID)
-		Expect(ok).To(BeFalse())
-
-		newDep := test.Deployment(test.DeploymentOptions{
+		ExpectApplied(ctx, env.Client, test.Deployment(test.DeploymentOptions{
 			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
-		})
-		ExpectApplied(ctx, env.Client, newDep)
-		fetched := &appsv1.Deployment{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(dep), fetched)).To(Succeed())
+		}))
 		ExpectSingletonReconciled(ctx, controller)
-		pred, ok := store.Get(fetched.UID)
+
+		pred, ok := store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
 	})
@@ -366,33 +397,47 @@ var _ = Describe("VPA Controller", func() {
 
 		ExpectSingletonReconciled(ctx, controller)
 
-		pred, ok := store.Get(targetUID)
+		pred, ok := store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("200m")))
 
 		ExpectDeleted(ctx, env.Client, olderVPA)
 		ExpectSingletonReconciled(ctx, controller)
 
-		pred, ok = store.Get(targetUID)
+		pred, ok = store.Get(target)
 		Expect(ok).To(BeTrue())
 		Expect(pred.Containers["main"][corev1.ResourceCPU]).To(Equal(resource.MustParse("800m")))
 	})
 
-	It("should not hydrate on transient errors", func() {
-		failingReader := transientErrorReader(func(_ context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
-			return fmt.Errorf("connection refused")
+	It("should not store a prediction for an unsupported target kind and publish an event", func() {
+		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{
+			TargetRef: autoscalingv1.CrossVersionObjectReference{APIVersion: "argoproj.io/v1alpha1", Kind: "Rollout", Name: "app"},
 		})
-		failingController := informer.NewVPAController(env.Client, failingReader, store)
+		ExpectApplied(ctx, env.Client, vpa)
+		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
+			"main": {corev1.ResourceCPU: resource.MustParse("500m")},
+		})
+		ExpectSingletonReconciled(ctx, controller)
 
+		Expect(store.Len()).To(Equal(0))
+		Expect(recorder.Calls(events.PredictionTargetUnsupported)).To(Equal(1))
+		Expect(store.Hydrated(ctx)).To(BeTrue())
+	})
+
+	It("should remove a VPA's prediction when it's retargeted to an unsupported kind", func() {
 		vpa := test.VerticalPodAutoscaler(test.VerticalPodAutoscalerOptions{TargetRef: targetRef})
 		ExpectApplied(ctx, env.Client, vpa)
 		test.UpdateVPARecommendation(ctx, env.Client, vpa, map[string]corev1.ResourceList{
 			"main": {corev1.ResourceCPU: resource.MustParse("500m")},
 		})
+		ExpectSingletonReconciled(ctx, controller)
+		_, ok := store.Get(target)
+		Expect(ok).To(BeTrue())
 
-		ExpectSingletonReconciled(ctx, failingController)
-		checkCtx, cancel := context.WithTimeout(ctx, time.Millisecond)
-		defer cancel()
-		Expect(store.Hydrated(checkCtx)).To(BeFalse())
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(vpa), vpa)).To(Succeed())
+		vpa.Spec.TargetRef = &autoscalingv1.CrossVersionObjectReference{APIVersion: "argoproj.io/v1alpha1", Kind: "Rollout", Name: "app"}
+		ExpectApplied(ctx, env.Client, vpa)
+		ExpectSingletonReconciled(ctx, controller)
+		Expect(store.Len()).To(Equal(0))
 	})
 })

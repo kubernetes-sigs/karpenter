@@ -215,6 +215,8 @@ func newSchedulerFromScenario(f *ScenarioFixture) *scheduling.Scheduler {
 		f.clk,
 		nil, // volumeReqsByPod
 		nil, // allocator
+		nil, // predictForPodUIDs
+		nil, // predictionStore
 		scheduling.NumConcurrentReconciles(5),
 	)
 }

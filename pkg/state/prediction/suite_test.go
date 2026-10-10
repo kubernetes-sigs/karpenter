@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -39,9 +40,18 @@ var _ = Describe("Store", func() {
 		store = NewStore()
 	})
 
+	It("should keep targets with the same kind and name in different groups apart", func() {
+		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
+		other := TargetKey{GroupKind: schema.GroupKind{Group: "example.com", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+		store.Set(source, TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}, &Prediction{}, time.Now())
+
+		_, ok := store.Get(other)
+		Expect(ok).To(BeFalse())
+	})
+
 	It("should store and update a prediction by target key", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target := types.UID("uid-app")
+		target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 		pred1 := &Prediction{Containers: map[string]corev1.ResourceList{
 			"container1": {
 				corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -65,8 +75,8 @@ var _ = Describe("Store", func() {
 
 	It("should delete previous target when source is retargeted", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target1 := types.UID("uid-app1")
-		target2 := types.UID("uid-app2")
+		target1 := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app1"}}
+		target2 := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app2"}}
 		pred1 := &Prediction{Containers: map[string]corev1.ResourceList{
 			"container1": {corev1.ResourceCPU: resource.MustParse("100m")},
 		}}
@@ -87,7 +97,7 @@ var _ = Describe("Store", func() {
 
 	It("should delete a prediction and be idempotent", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target := types.UID("uid-app")
+		target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 		pred := &Prediction{Containers: map[string]corev1.ResourceList{
 			"c": {corev1.ResourceCPU: resource.MustParse("100m")},
 		}}
@@ -101,9 +111,31 @@ var _ = Describe("Store", func() {
 		Expect(func() { store.Delete(source) }).NotTo(Panic())
 	})
 
+	It("should report whether the active prediction changed", func() {
+		target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+		older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
+		newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
+		cpu := func(q string) *Prediction {
+			return &Prediction{Containers: map[string]corev1.ResourceList{"c": {corev1.ResourceCPU: resource.MustParse(q)}}}
+		}
+		t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+		t2 := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+
+		Expect(store.Set(older, target, cpu("500m"), t1)).To(BeTrue())
+		Expect(store.Set(older, target, cpu("500m"), t1)).To(BeFalse())
+		Expect(store.Set(older, target, cpu("1"), t1)).To(BeTrue())
+		Expect(store.Set(newer, target, cpu("2"), t2)).To(BeFalse())
+		Expect(store.Delete(newer)).To(BeFalse())
+		Expect(store.Set(newer, target, cpu("2"), t2)).To(BeFalse())
+		Expect(store.Delete(older)).To(BeTrue())
+		Expect(store.Delete(older)).To(BeFalse())
+		Expect(store.Reset()).To(BeTrue())
+		Expect(store.Reset()).To(BeFalse())
+	})
+
 	Context("Tie-Breaking", func() {
 		It("should use the earliest-created source's prediction", func() {
-			target := types.UID("uid-app")
+			target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 			older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
 			newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
 			predOlder := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -126,7 +158,7 @@ var _ = Describe("Store", func() {
 		})
 
 		It("should break ties by lexicographically smallest name when timestamps are equal", func() {
-			target := types.UID("uid-app")
+			target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 			sourceA := types.NamespacedName{Namespace: "default", Name: "vpa-alpha"}
 			sourceB := types.NamespacedName{Namespace: "default", Name: "vpa-beta"}
 			predA := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -147,7 +179,7 @@ var _ = Describe("Store", func() {
 		})
 
 		It("should promote next-strongest on delete of the winner", func() {
-			target := types.UID("uid-app")
+			target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 			older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
 			newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
 			predOlder := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -176,7 +208,7 @@ var _ = Describe("Store", func() {
 		})
 
 		It("should remove target entirely when all contenders are deleted", func() {
-			target := types.UID("uid-app")
+			target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 			source1 := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
 			source2 := types.NamespacedName{Namespace: "default", Name: "vpa-2"}
 			pred := &Prediction{Containers: map[string]corev1.ResourceList{

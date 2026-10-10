@@ -51,5 +51,6 @@ func main() {
 			clusterState,
 			op.InstanceTypeStore,
 			op.PredictionStore,
+			controllers.WithVPAPrediction(),
 		)...).Start(ctx)
 }

@@ -1170,6 +1170,7 @@ var _ = Describe("Repair", func() {
 			env.Clock,
 			deviceallocation.NewController(failingClient),
 			virtualpods.NewVirtualPodCache(failingClient),
+			store,
 		)
 		failingRepair := disruption.NewRepair(disruption.MakeConsolidation(
 			env.Clock,
