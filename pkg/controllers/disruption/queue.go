@@ -243,13 +243,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 				if err := q.kubeClient.Get(ctx, client.ObjectKeyFromObject(cmd.Candidates[i].NodeClaim), stored); err != nil {
 					return client.IgnoreNotFound(err)
 				}
-				if value, ok := stored.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; ok {
-					if existing, err := time.Parse(time.RFC3339, value); err == nil && !existing.After(deadline) {
-						cmd.Candidates[i].NodeClaim = stored
-						return nil
-					}
-				}
-				if err := nodeclaimutils.PatchTerminationTimestampAnnotation(ctx, q.kubeClient, stored, deadline); err != nil {
+				if err := nodeclaimutils.TightenTerminationTimestampAnnotation(ctx, q.kubeClient, stored, deadline); err != nil {
 					return err
 				}
 				cmd.Candidates[i].NodeClaim = stored

@@ -343,8 +343,11 @@ func (c *Controller) transitionToFailed(ctx context.Context, nodeClaim *v1.NodeC
 		}
 	} else {
 		// Reboot failures after disruption escalate to NodeClaim replacement.
-		if err := c.ensureTerminationTimestamp(ctx, nodeClaim); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
+		// The replacement inherits the reboot's committed drain bound, so failure cleanup can't block indefinitely.
+		if tgp, err := rebootTerminationGracePeriod(nodeClaim); err == nil && tgp != nil {
+			if err := nodeclaimutils.TightenTerminationTimestampAnnotation(ctx, c.kubeClient, nodeClaim, c.clock.Now().Add(*tgp)); err != nil {
+				return reconcile.Result{}, client.IgnoreNotFound(err)
+			}
 		}
 		if err := c.kubeClient.Delete(ctx, nodeClaim, client.Preconditions{ResourceVersion: lo.ToPtr(nodeClaim.ResourceVersion)}); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -356,21 +359,6 @@ func (c *Controller) transitionToFailed(ctx context.Context, nodeClaim *v1.NodeC
 	c.recorder.Publish(rebootevents.RebootFailed(nodeClaim, msg))
 	recordTerminalMetrics(result, duration)
 	return reconcile.Result{}, nil
-}
-
-// ensureTerminationTimestamp carries the committed drain bound into termination, tightening but never extending an existing deadline.
-func (c *Controller) ensureTerminationTimestamp(ctx context.Context, nodeClaim *v1.NodeClaim) error {
-	tgp, err := rebootTerminationGracePeriod(nodeClaim)
-	if err != nil || tgp == nil {
-		return nil
-	}
-	deadline := c.clock.Now().Add(*tgp)
-	if value, ok := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; ok {
-		if existing, err := time.Parse(time.RFC3339, value); err == nil && !existing.After(deadline) {
-			return nil
-		}
-	}
-	return nodeclaimutils.PatchTerminationTimestampAnnotation(ctx, c.kubeClient, nodeClaim, deadline)
 }
 
 func (c *Controller) setTerminal(ctx context.Context, nodeClaim *v1.NodeClaim, reason, msg string) error {
