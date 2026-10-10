@@ -191,8 +191,10 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 			var reservationsFull bool
 			if terminateFirstEnabled {
 				full, offered, err := staticReservations(ctx, r.cloudProvider, np, nct)
+				// Other candidates don't depend on this one, so one NodePool's failure doesn't stop repair for the rest.
 				if err != nil {
-					return []Command{}, err
+					log.FromContext(ctx).Error(err, "skipping repair candidate, failed checking capacity reservations")
+					continue
 				}
 				if full && !holdsOfferedReservation(candidate, offered) {
 					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool's capacity reservations are full and cannot stage a replacement")...)
@@ -217,9 +219,9 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 					continue
 				}
 				return []Command{{
-					Candidates:          []*Candidate{candidate},
-					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-					TerminateFirst:      true,
+					Candidates:           []*Candidate{candidate},
+					PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+					TerminateFirstReason: lo.Ternary(reservationsFull, TerminateFirstNoReservedCapacity, TerminateFirstStaticAtLimit),
 				}}, nil
 			}
 			result := pscheduling.Results{NewNodeClaims: []*pscheduling.NodeClaim{{NodeClaimTemplate: *nct}}}
@@ -242,10 +244,10 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 		if terminateFirst {
 			// Carry the Results (no Replacements) so nodes that can absorb the freed pods get nominated.
 			return []Command{{
-				Candidates:          []*Candidate{candidate},
-				Results:             results,
-				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-				TerminateFirst:      true,
+				Candidates:           []*Candidate{candidate},
+				Results:              results,
+				PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+				TerminateFirstReason: TerminateFirstNoReservedCapacity,
 			}}, nil
 		}
 		if !results.AllNonPendingPodsScheduled() {

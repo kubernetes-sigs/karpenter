@@ -343,6 +343,12 @@ func (c *Controller) transitionToFailed(ctx context.Context, nodeClaim *v1.NodeC
 		}
 	} else {
 		// Reboot failures after disruption escalate to NodeClaim replacement.
+		// The replacement inherits the reboot's committed drain bound, so failure cleanup can't block indefinitely.
+		if tgp, err := rebootTerminationGracePeriod(nodeClaim); err == nil && tgp != nil {
+			if err := nodeclaimutils.TightenTerminationTimestampAnnotation(ctx, c.kubeClient, nodeClaim, c.clock.Now().Add(*tgp)); err != nil {
+				return reconcile.Result{}, client.IgnoreNotFound(err)
+			}
+		}
 		if err := c.kubeClient.Delete(ctx, nodeClaim, client.Preconditions{ResourceVersion: lo.ToPtr(nodeClaim.ResourceVersion)}); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}

@@ -30,6 +30,7 @@ const (
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
 	policyLabel                  = "policy"
+	terminateFirstReasonLabel    = "terminate_first_reason"
 )
 
 var (
@@ -102,6 +103,20 @@ var (
 		Name: policyLabel,
 		Help: "The NodePool consolidation policy in effect for the move.",
 	}
+	TerminateFirstReasonDim = opmetrics.Label{
+		Name: terminateFirstReasonLabel,
+		Help: "Why the terminate-first command couldn't stage its replacement before terminating the node.",
+		Values: []opmetrics.Value{
+			{
+				Name: string(TerminateFirstNoReservedCapacity),
+				Help: "The replacement has no reserved capacity to launch into except the slot the node holds in a full capacity reservation.",
+			},
+			{
+				Name: string(TerminateFirstStaticAtLimit),
+				Help: "The node's static NodePool is at its node limit, so the replacement can't launch alongside it.",
+			},
+		},
+	}
 )
 
 func init() {
@@ -146,6 +161,17 @@ var (
 			Help:      "Number of disruption decisions performed by nodepool. Labeled by nodepool name, disruption decision, reason, and consolidation type.",
 		},
 		[]opmetrics.Label{metrics.NodePool, DecisionDim, metrics.DisruptionReason, ConsolidationType},
+		opmetrics.Alpha,
+	)
+	TerminateFirstDecisionsTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "terminate_first_decisions_total",
+			Help:      "Number of terminate-first disruption decisions performed. Labeled by nodepool name, reason, and why the replacement couldn't be staged first.",
+		},
+		[]opmetrics.Label{metrics.NodePool, metrics.DisruptionReason, TerminateFirstReasonDim},
 		opmetrics.Alpha,
 	)
 	EligibleNodes = opmetrics.NewPrometheusGauge(
