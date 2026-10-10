@@ -176,14 +176,13 @@ func NewControllers(
 		)
 	}
 
-	// Register the reboot controller alongside node repair. The repair disruption method itself is
-	// registered in the disruption controller. --legacy-node-repair instead runs the legacy node.health controller.
-	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
-		if options.FromContext(ctx).LegacyNodeRepair {
-			controllers = append(controllers, legacyrepair.NewController(kubeClient, cloudProvider, clock, recorder))
-		} else {
-			controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
-		}
+	// The reboot controller only acts on NodeClaims with a committed reboot, so it always runs: a reboot already in flight
+	// finishes even if node repair is disabled or the provider stops selecting reboot.
+	controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+	// The repair disruption method is registered in the disruption controller. --legacy-node-repair instead runs the
+	// legacy node.health controller.
+	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair && options.FromContext(ctx).LegacyNodeRepair {
+		controllers = append(controllers, legacyrepair.NewController(kubeClient, cloudProvider, clock, recorder))
 	}
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))
