@@ -3,6 +3,8 @@ export KWOK_REPO ?= ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.co
 export KARPENTER_NAMESPACE=kube-system
 export KIND_CLUSTER_NAME ?= test-cluster
 
+PREDICTION_ENABLED ?= false
+
 HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.requests.cpu=1 \
 			--set controller.resources.requests.memory=1Gi \
@@ -10,7 +12,8 @@ HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.limits.memory=2Gi \
 			--set settings.featureGates.nodeRepair=true \
 			--set settings.featureGates.capacityBuffer=true \
-			--set settings.featureGates.staticCapacity=true
+			--set settings.featureGates.staticCapacity=true \
+			--set settings.featureGates.predictionEnabled=$(PREDICTION_ENABLED)
 
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
@@ -33,6 +36,11 @@ build: ## Build the Karpenter KWOK controller images using ko build
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
+
+install-vpa: ## Install VPA CRD and admission controller webhook
+	kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/vertical-pod-autoscaler/deploy/vpa-v1-crd-gen.yaml
+	./hack/install-vpa-webhook.sh
+
 
 apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
