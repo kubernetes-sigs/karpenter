@@ -400,6 +400,68 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		Expect(cmds[0].Candidates[0].RepairPolicyResult.Condition).To(Equal(corev1.NodeConditionType("BadNode")))
 	})
 
+	// An offering is unavailable after a launch failure, such as an insufficient capacity error, and comes back on its
+	// own. A launch failure must never flip a NodePool to terminate-first, so repair waits for the on-demand fallback.
+	It("should not terminate-first a reserved NodePool whose reservation is full when the on-demand fallback is only temporarily unavailable", func() {
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
+		// Mark the on-demand and spot offerings unavailable, as after an insufficient capacity error.
+		for _, o := range mostExpensiveInstance.Offerings {
+			o.Available = false
+		}
+		reservationID := "r-" + mostExpensiveInstance.Name
+		mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
+		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+		mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+			Price:               mostExpensiveOffering.Price / 1_000_000.0,
+			Available:           true, // full but healthy
+			ReservationCapacity: 0,
+			Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				cloudprovider.ReservationIDLabel: reservationID,
+			}),
+		})
+		ExpectSingletonReconciled(ctx, pricingController)
+
+		// The NodePool allows an on-demand fallback.
+		nodePool := test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+			Requirements: []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{mostExpensiveInstance.Name}},
+				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved, v1.CapacityTypeOnDemand}},
+			},
+		}}}})
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+			v1.NodePoolLabelKey:              nodePool.Name,
+			corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+			v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+			corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+			cloudprovider.ReservationIDLabel: reservationID,
+		}}, Status: v1.NodeClaimStatus{
+			ProviderID:  test.RandomProviderID(),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32"), corev1.ResourcePods: resource.MustParse("100")},
+		}})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		// A reschedulable pod gives the pre-spin simulation a workload to place.
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+		}}}})
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		markUnhealthy(node)
+		env.Clock.Step(31 * time.Minute)
+
+		ExpectSingletonReconciled(ctx, repairController)
+
+		// Repair can't stage a replacement until the fallback is available again, so it's Blocked.
+		Expect(queue.GetCommands()).To(HaveLen(0))
+		Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+	})
+
 	It("should carry a blocking pod in the terminate-first plan for a reserved NodePool whose reservation is full", func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
 		reservationID := "r-" + mostExpensiveInstance.Name

@@ -579,6 +579,27 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Replacements).To(HaveLen(1))
 		})
 
+		// An offering is unavailable after a launch failure, such as an insufficient capacity error, and comes back on its
+		// own. A launch failure must never flip a NodePool to terminate-first, so drift waits for the on-demand fallback.
+		It("does NOT terminate-first when the reservation is full and the on-demand fallback is only temporarily unavailable", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			// Mark the on-demand and spot offerings unavailable, as after an insufficient capacity error.
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available = false
+			}
+			setupReservedOffering(0, true, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand) // full but healthy, on-demand fallback allowed
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			// Drift can't stage a replacement until the fallback is available again, so it's Blocked.
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+		})
+
 		It("replaces-first when the reservation still has a spare slot", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
 			setupReservedOffering(5, true, v1.CapacityTypeReserved) // spare reservation capacity -> can grow in place
