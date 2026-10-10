@@ -47,6 +47,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -73,6 +74,7 @@ func (c *Controller) Name() string {
 	return "static.provisioning"
 }
 
+//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
@@ -104,6 +106,24 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 	}
 
+	// Static NodeClaims don't go through scheduling, so the CloudProvider only discovers that every compatible offering
+	// is unavailable after the NodeClaim exists, at which point it's deleted and provisioning is immediately retriggered.
+	// Checking availability up-front keeps that failure from becoming an unbounded create/delete loop.
+	available, err := c.hasAvailableOffering(ctx, np)
+	if err != nil || !available {
+		// Only a successful CreateNodeClaims consumes the reservation, so every other path has to hand it back.
+		c.cluster.NodePoolState.ReleaseNodeCount(np.Name, countNodeClaimsToProvision)
+		if cloudprovider.IsUnevaluatedNodePoolError(err) {
+			log.FromContext(ctx).V(1).Info("skipping provisioning, awaiting nodeoverlay evaluation")
+			return reconcile.Result{RequeueAfter: time.Second}, nil
+		}
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("checking offering availability, %w", err)
+		}
+		log.FromContext(ctx).V(1).Info("skipping provisioning, no compatible offering is currently available")
+		return reconcile.Result{RequeueAfter: time.Minute}, nil
+	}
+
 	log.FromContext(ctx).WithValues("current", runningNodeClaims, "desired", desiredReplicas, "provision-count", countNodeClaimsToProvision).
 		Info("provisioning nodeclaims to satisfy replica count")
 
@@ -115,12 +135,29 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		})
 	}
 
-	_, err := c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
-	if err != nil {
+	if _, err = c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason)); err != nil {
 		return reconcile.Result{}, fmt.Errorf("creating nodeclaims, %w", err)
 	}
 
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
+}
+
+// hasAvailableOffering mirrors the offering filter that CloudProviders apply in Create(). It's intentionally more
+// permissive than that filter so that it can only ever accept a superset of what Create() would accept.
+func (c *Controller) hasAvailableOffering(ctx context.Context, np *v1.NodePool) (bool, error) {
+	its, err := c.cloudProvider.GetInstanceTypes(ctx, np)
+	if err != nil {
+		return false, fmt.Errorf("resolving instance types, %w", err)
+	}
+	// Evaluate against the requirements of the NodeClaim that would actually be created, since ToNodeClaim() drops the
+	// requirements that only exist for scheduling simulation.
+	nc := scheduling.NewNodeClaimTemplate(np).ToNodeClaim()
+	reqs := pscheduling.NewNodeSelectorRequirementsWithMinValues(nc.Spec.Requirements...)
+	return lo.ContainsBy(its, func(it *cloudprovider.InstanceType) bool {
+		return it.Requirements.Intersects(reqs) == nil && lo.ContainsBy(it.Offerings, func(o *cloudprovider.Offering) bool {
+			return o.Available && reqs.IsCompatible(o.Requirements, pscheduling.AllowUndefinedWellKnownLabels)
+		})
+	}), nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
