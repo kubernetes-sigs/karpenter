@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/reboot"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -187,6 +188,16 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(node.Labels).ToNot(HaveKey(v1.NodeInitializedLabelKey))
 		})
 
+		It("issues a committed reboot even when node repair is disabled", func() {
+			repairDisabled := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
+			ExpectApplied(repairDisabled, env.Client, nodePool, nodeClaim, node)
+			stepPastDrainFloor()
+			ExpectObjectReconciled(repairDisabled, env.Client, rebootController, nodeClaim)
+
+			Expect(cloudProvider.RebootCalls).To(HaveLen(1))
+			Expect(ExpectExists(ctx, env.Client, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonIssued))
+		})
+
 		It("re-issues on a subsequent reboot of the same NodeClaim (no stale-state false success)", func() {
 			// Episode 1: issue and succeed.
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -235,6 +246,20 @@ var _ = Describe("Reboot Lifecycle", func() {
 			Expect(hasRebootTaint(node)).To(BeFalse())
 			expectReplaced(nodeClaim, "provider_error")
 		})
+
+		DescribeTable("fails with provider_error on the first attempt when the provider rejects the reboot for good",
+			func(err error) {
+				cloudProvider.NextRebootErr = err
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				stepPastDrainFloor()
+				ExpectObjectReconciled(ctx, env.Client, rebootController, nodeClaim)
+
+				Expect(cloudProvider.RebootCalls).To(BeEmpty())
+				expectReplaced(nodeClaim, "provider_error")
+			},
+			Entry("a failed reboot", cloudprovider.NewNodeRebootFailedError(fmt.Errorf("unauthorized"))),
+			Entry("an instance that no longer exists", cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found"))),
+		)
 
 		It("retries on a transient provider error, staying in RebootRequested", func() {
 			cloudProvider.NextRebootErr = fmt.Errorf("throttled")
