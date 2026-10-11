@@ -238,7 +238,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// should fail and we'll just leave the node alone. We don't need to do the same for reserved since the requirements
 	// are injected on by the scheduler.
 	ctReq := results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey)
-	if ctReq.Has(v1.CapacityTypeSpot) && ctReq.Has(v1.CapacityTypeOnDemand) {
+	if cloudprovider.HasCapacityTypeClass(ctReq, cloudprovider.CapacityTypeClassSpot) && cloudprovider.HasCapacityTypeClass(ctReq, cloudprovider.CapacityTypeClassOnDemand) {
 		results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
 	}
 

@@ -33,6 +33,9 @@ const (
 	KwokLabelValue        = "fake"
 	NodeViewerLabelKey    = "eks-node-viewer/instance-price"
 	KwokPartitionLabelKey = "kwok-partition"
+
+	// LaunchPriceAnnotationKey records the hourly price an on-demand-alt NodeClaim launched at.
+	LaunchPriceAnnotationKey = apis.Group + "/launch-price"
 )
 
 func init() {
