@@ -137,7 +137,8 @@ type CloudProvider interface {
 	// operationID identifies a logical reboot operation; providers with native idempotency should
 	// use it to make repeated calls for the same operation replay-safe. Reboot returns once the
 	// provider accepts the request; recovery is observed by the reboot controller. Providers that
-	// do not support in-place reboot must return a *NodeRebootNotImplementedError.
+	// do not support in-place reboot must return a *NodeRebootNotImplementedError, and a reboot that retrying can't
+	// make succeed (e.g. a missing permission) must return a *NodeRebootFailedError.
 	Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) error
 	// RepairPolicies returns the complete static set of provider-supported unhealthy-condition repair policies.
 	RepairPolicies() []RepairPolicy
@@ -739,6 +740,28 @@ func IsNodeRebootNotImplementedError(err error) bool {
 		return false
 	}
 	var rebootErr *NodeRebootNotImplementedError
+	return errors.As(err, &rebootErr)
+}
+
+// NodeRebootFailedError is returned by CloudProviders when the provider rejects a reboot in a way retrying can't fix,
+// e.g. a missing permission. The reboot controller fails the reboot immediately instead of retrying until it times out.
+type NodeRebootFailedError struct {
+	error
+}
+
+func NewNodeRebootFailedError(err error) *NodeRebootFailedError {
+	return &NodeRebootFailedError{error: err}
+}
+
+func (e *NodeRebootFailedError) Unwrap() error {
+	return e.error
+}
+
+func IsNodeRebootFailedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rebootErr *NodeRebootFailedError
 	return errors.As(err, &rebootErr)
 }
 

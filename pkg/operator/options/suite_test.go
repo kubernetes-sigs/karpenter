@@ -67,6 +67,7 @@ var _ = Describe("Options", func() {
 		"MIN_VALUES_POLICY",
 		"FEATURE_GATES",
 		"SCHEDULER_CONFIG",
+		"LEGACY_NODE_REPAIR",
 	}
 
 	BeforeEach(func() {
@@ -377,6 +378,25 @@ var _ = Describe("Options", func() {
 		Entry("implicit false", "", false),
 	)
 
+	Context("LegacyNodeRepair", func() {
+		It("should default to false", func() {
+			Expect(opts.Parse(fs)).To(Succeed())
+			Expect(opts.LegacyNodeRepair).To(BeFalse())
+		})
+		It("should be set by CLI flag", func() {
+			Expect(opts.Parse(fs, "--legacy-node-repair")).To(Succeed())
+			Expect(opts.LegacyNodeRepair).To(BeTrue())
+		})
+		It("should be set by environment variable", func() {
+			os.Setenv("LEGACY_NODE_REPAIR", "true")
+			fs = &options.FlagSet{FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError)}
+			opts = &options.Options{}
+			opts.AddFlags(fs)
+			Expect(opts.Parse(fs)).To(Succeed())
+			Expect(opts.LegacyNodeRepair).To(BeTrue())
+		})
+	})
+
 	Context("Validation", func() {
 		DescribeTable(
 			"should parse valid log levels successfully",
@@ -583,5 +603,6 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.TerminateFirstDrift).To(Equal(optsB.FeatureGates.TerminateFirstDrift))
 	Expect(optsA.FeatureGates.TerminateFirstRepair).To(Equal(optsB.FeatureGates.TerminateFirstRepair))
 	Expect(optsA.IgnoreDRARequests).To(Equal(optsB.IgnoreDRARequests))
+	Expect(optsA.LegacyNodeRepair).To(Equal(optsB.LegacyNodeRepair))
 	Expect(optsA.SchedulerConfig).To(Equal(optsB.SchedulerConfig))
 }

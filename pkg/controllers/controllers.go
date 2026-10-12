@@ -43,6 +43,7 @@ import (
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
 	nodehydration "sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/legacyrepair"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	nodeclaimconsistency "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
@@ -175,10 +176,13 @@ func NewControllers(
 		)
 	}
 
-	// Register the reboot controller alongside node repair. The repair disruption method itself is
-	// registered in the disruption controller; the standalone node/health controller was removed by #3311.
-	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
-		controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+	// The reboot controller only acts on NodeClaims with a committed reboot, so it always runs: a reboot already in flight
+	// finishes even if node repair is disabled or the provider stops selecting reboot.
+	controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+	// The repair disruption method is registered in the disruption controller. --legacy-node-repair instead runs the
+	// legacy node.health controller.
+	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair && options.FromContext(ctx).LegacyNodeRepair {
+		controllers = append(controllers, legacyrepair.NewController(kubeClient, cloudProvider, clock, recorder))
 	}
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))
@@ -213,9 +217,6 @@ func NewControllers(
 			deletionCostQueue,
 			deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, deletionCostQueue),
 		)
-	}
-	if !o.disableVPAPrediction {
-		controllers = append(controllers, informer.NewVPAController(kubeClient, mgr.GetAPIReader(), predictionStore))
 	}
 
 	return controllers

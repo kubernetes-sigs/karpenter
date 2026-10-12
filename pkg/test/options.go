@@ -49,6 +49,7 @@ type OptionsFields struct {
 	BatchMaxDuration                 *time.Duration
 	BatchIdleDuration                *time.Duration
 	IgnoreDRARequests                *bool
+	LegacyNodeRepair                 *bool
 	FeatureGates                     FeatureGates
 	SchedulerConfig                  *options.SchedulerConfiguration
 }
@@ -93,6 +94,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		PreferencePolicy:                 lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
 		MinValuesPolicy:                  lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
 		IgnoreDRARequests:                lo.FromPtrOr(opts.IgnoreDRARequests, true),
+		LegacyNodeRepair:                 lo.FromPtrOr(opts.LegacyNodeRepair, false),
 		SchedulerConfig:                  opts.SchedulerConfig,
 		FeatureGates: options.FeatureGates{
 			NodeRepair:                lo.FromPtrOr(opts.FeatureGates.NodeRepair, options.NodeRepairFeatureGate.Default),

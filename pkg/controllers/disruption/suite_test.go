@@ -53,6 +53,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -99,14 +100,25 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
-	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
-	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	recorder = test.NewEventRecorder()
 	draController = deviceallocation.NewController(env.Client)
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
-	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+	queue = &disruption.Queue{}
+	cloudProvider.Reset() // installs the fake provider's default repair policies
+	useRepairPolicies(cloudProvider.RepairPolicy)
 })
+
+// useRepairPolicies installs the provider's repair policies and rebuilds cluster state around one matcher compiled from
+// them, as the operator does once at startup. Specs must call it before any Node reaches cluster state.
+func useRepairPolicies(policies []cloudprovider.RepairPolicy) {
+	cloudProvider.RepairPolicy = policies
+	repairPolicyMatcher := lo.Must(health.NewRepairPolicyMatcher(
+		options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}})), cloudProvider))
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider, state.WithRepairPolicyMatcher(repairPolicyMatcher))
+	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+}
 
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
@@ -119,6 +131,7 @@ var _ = BeforeEach(func() {
 	ExpectSingletonReconciled(ctx, pricingController)
 
 	recorder.Reset() // Reset the events that we captured during the run
+	useRepairPolicies(cloudProvider.RepairPolicy)
 
 	// Rebuild the DRA device-allocation controller and the provisioner bound to it each test so DRA tracking state
 	// (which the controller accumulates across reconciles and never resets) doesn't leak between specs. This must
@@ -177,6 +190,7 @@ var _ = AfterEach(func() {
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
 	disruption.NodepoolDecisionsPerformed.Reset()
+	disruption.TerminateFirstDecisionsTotal.Reset()
 	disruption.NodeClaimsUnhealthyDisruptedTotal.Reset()
 })
 
@@ -1878,7 +1892,28 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized (NodeClaim=%s)`, nodeClaim.Name)))
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized nor registered (NodeClaim=%s)`, nodeClaim.Name)))
+	})
+	It("should not consider candidates that registered but aren't yet initialized", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized (Node=%s)`, node.Name)))
 	})
 	It("should not consider candidates that are not owned by a NodePool (no karpenter.sh/nodepool label)", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
