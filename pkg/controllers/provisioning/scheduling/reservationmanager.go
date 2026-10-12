@@ -108,3 +108,15 @@ func (rm *ReservationManager) HasReservation(hostname string, offering *cloudpro
 func (rm *ReservationManager) RemainingCapacity(offering *cloudprovider.Offering) int {
 	return rm.capacity[offering.ReservationID()]
 }
+
+// Credit adds capacity back to a reservation, modeling a slot that is about to be freed — e.g. a voluntary-disruption
+// candidate that will be terminated. It lets a scheduling simulation answer "would these pods fit once the candidate's
+// reservation slot is released?" without the candidate actually being gone yet. It only affects reservations already
+// known to the manager (seeded from a compatible reserved offering); crediting an unknown reservation id is a no-op,
+// so a reservation that is unavailable for reasons other than being full stays unschedulable and the simulation
+// correctly reports the pods as unplaceable.
+func (rm *ReservationManager) Credit(reservationID string, count int) {
+	if _, ok := rm.capacity[reservationID]; ok {
+		rm.capacity[reservationID] += count
+	}
+}

@@ -14,11 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package health
+package legacyrepair
 
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
@@ -42,6 +43,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -53,22 +55,49 @@ import (
 
 var allowedUnhealthyPercent = intstr.FromString("20%")
 
-// Controller for the resource
+// Controller is the legacy node.health repair controller, which deletes unhealthy NodeClaims directly instead of
+// repairing them through the disruption controller. It runs in place of the repair disruption method when
+// --legacy-node-repair is set, and is planned for deprecation.
 type Controller struct {
 	clock         clock.Clock
 	recorder      events.Recorder
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	policies      []replacePolicy
+}
+
+// replacePolicy is a ReplaceNode RepairPolicy. The legacy controller can only replace nodes, so it ignores policies with
+// any other action.
+type replacePolicy struct {
+	cloudprovider.RepairPolicy
+	reasonRegex *regexp.Regexp
 }
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clock clock.Clock, recorder events.Recorder) *Controller {
+	var policies []replacePolicy
+	for _, policy := range cloudProvider.RepairPolicies() {
+		if policy.Action != cloudprovider.ReplaceNode {
+			continue
+		}
+		policies = append(policies, replacePolicy{
+			RepairPolicy: policy,
+			reasonRegex:  lo.Ternary(policy.ReasonRegex == "", nil, regexp.MustCompile(policy.ReasonRegex)),
+		})
+	}
 	return &Controller{
 		clock:         clock,
 		recorder:      recorder,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
+		policies:      policies,
 	}
+}
+
+// matches reports whether the node's condition for the policy's type has the policy's status and, for a policy with a
+// ReasonRegex, a matching reason.
+func (p replacePolicy) matches(nodeCondition corev1.NodeCondition) bool {
+	return nodeCondition.Status == p.ConditionStatus && (p.reasonRegex == nil || p.reasonRegex.MatchString(nodeCondition.Reason))
 }
 
 func (c *Controller) Name() string {
@@ -187,11 +216,12 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 		log.FromContext(ctx).V(1).Info("listing reschedulable pods for disruption metric", "error", err.Error())
 	}
 	metrics.PodsDisruptionInitiatedTotal.Add(float64(len(reschedulablePods)), labels)
-	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
-		ConditionLabel:            pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
-		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
-		ImageIDLabel:              nodeClaim.Status.ImageID,
+	disruption.NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
+		disruption.RepairCondition.Name: pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
+		metrics.NodePoolLabel:           node.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel:       node.Labels[v1.CapacityTypeLabelKey],
+		disruption.ImageID.Name:         nodeClaim.Status.ImageID,
+		metrics.TerminationModeLabel:    nodeclaimutils.DisruptionTerminationMode(nodeClaim),
 	})
 	return reconcile.Result{}, nil
 }
@@ -200,10 +230,10 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 // If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration
 func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.NodeCondition, cpTerminationDuration time.Duration) {
 	requeueTime := time.Time{}
-	for _, policy := range c.cloudProvider.RepairPolicies() {
-		// check the status and the type on the condition
+	for _, policy := range c.policies {
+		// check the status, type, and reason on the condition
 		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
-		if nodeCondition.Status == policy.ConditionStatus {
+		if policy.matches(nodeCondition) {
 			terminationTime := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration)
 			// Determine requeue time
 			if requeueTime.IsZero() || requeueTime.After(terminationTime) {
@@ -255,11 +285,9 @@ func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOpt
 		return false, err
 	}
 	unhealthyNodeCount := lo.CountBy(nodeList.Items, func(node corev1.Node) bool {
-		_, found := lo.Find(c.cloudProvider.RepairPolicies(), func(policy cloudprovider.RepairPolicy) bool {
-			nodeCondition := nodeutils.GetCondition(new(node), policy.ConditionType)
-			return nodeCondition.Status == policy.ConditionStatus
+		return lo.ContainsBy(c.policies, func(policy replacePolicy) bool {
+			return policy.matches(nodeutils.GetCondition(new(node), policy.ConditionType))
 		})
-		return found
 	})
 	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(new(allowedUnhealthyPercent), len(nodeList.Items), true))
 	return unhealthyNodeCount <= threshold, nil

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package integration_test
+package disruption_test
 
 import (
 	"fmt"

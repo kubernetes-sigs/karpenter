@@ -17,11 +17,13 @@ limitations under the License.
 package main
 
 import (
+	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
 	"sigs.k8s.io/karpenter/pkg/controllers"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
@@ -35,7 +37,8 @@ func main() {
 
 	overlayUndecoratedCloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
 	cloudProvider := overlay.Decorate(overlayUndecoratedCloudProvider, op.GetClient(), op.InstanceTypeStore)
-	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
+	repairPolicyMatcher := lo.Must(health.NewRepairPolicyMatcher(ctx, cloudProvider))
+	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider, state.WithRepairPolicyMatcher(repairPolicyMatcher))
 	op.
 		WithControllers(ctx, controllers.NewControllers(
 			ctx,

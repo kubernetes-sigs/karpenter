@@ -49,17 +49,21 @@ type OptionsFields struct {
 	BatchMaxDuration                 *time.Duration
 	BatchIdleDuration                *time.Duration
 	IgnoreDRARequests                *bool
+	LegacyNodeRepair                 *bool
 	FeatureGates                     FeatureGates
 	SchedulerConfig                  *options.SchedulerConfiguration
 }
 
 type FeatureGates struct {
-	NodeRepair              *bool
-	ReservedCapacity        *bool
-	SpotToSpotConsolidation *bool
-	NodeOverlay             *bool
-	StaticCapacity          *bool
-	CapacityBuffer          *bool
+	NodeRepair                *bool
+	ReservedCapacity          *bool
+	SpotToSpotConsolidation   *bool
+	NodeOverlay               *bool
+	StaticCapacity            *bool
+	CapacityBuffer            *bool
+	TerminateFirstDrift       *bool
+	TerminateFirstRepair      *bool
+	PodDeletionCostManagement *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -90,14 +94,18 @@ func Options(overrides ...OptionsFields) *options.Options {
 		PreferencePolicy:                 lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
 		MinValuesPolicy:                  lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
 		IgnoreDRARequests:                lo.FromPtrOr(opts.IgnoreDRARequests, true),
+		LegacyNodeRepair:                 lo.FromPtrOr(opts.LegacyNodeRepair, false),
 		SchedulerConfig:                  opts.SchedulerConfig,
 		FeatureGates: options.FeatureGates{
-			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
-			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
-			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
-			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
-			StaticCapacity:          lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
-			CapacityBuffer:          lo.FromPtrOr(opts.FeatureGates.CapacityBuffer, false),
+			NodeRepair:                lo.FromPtrOr(opts.FeatureGates.NodeRepair, options.NodeRepairFeatureGate.Default),
+			ReservedCapacity:          lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, options.ReservedCapacityFeatureGate.Default),
+			SpotToSpotConsolidation:   lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, options.SpotToSpotConsolidationFeatureGate.Default),
+			NodeOverlay:               lo.FromPtrOr(opts.FeatureGates.NodeOverlay, options.NodeOverlayFeatureGate.Default),
+			StaticCapacity:            lo.FromPtrOr(opts.FeatureGates.StaticCapacity, options.StaticCapacityFeatureGate.Default),
+			CapacityBuffer:            lo.FromPtrOr(opts.FeatureGates.CapacityBuffer, options.CapacityBufferFeatureGate.Default),
+			TerminateFirstDrift:       lo.FromPtrOr(opts.FeatureGates.TerminateFirstDrift, options.TerminateFirstDriftFeatureGate.Default),
+			TerminateFirstRepair:      lo.FromPtrOr(opts.FeatureGates.TerminateFirstRepair, options.TerminateFirstRepairFeatureGate.Default),
+			PodDeletionCostManagement: lo.FromPtrOr(opts.FeatureGates.PodDeletionCostManagement, options.PodDeletionCostManagementFeatureGate.Default),
 		},
 	}
 }

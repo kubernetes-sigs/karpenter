@@ -143,6 +143,11 @@ var _ = Describe("NodePoolState", func() {
 			Expect(granted).To(Equal(int64(4)))
 		})
 
+		It("should not panic when the NodePool is untracked", func() {
+			// This scenario can come up if, for example, Cleanup drops the entry between reserve and release.
+			Expect(func() { cluster.NodePoolState.ReleaseNodeCount("does-not-exist", 1) }).ToNot(Panic())
+		})
+
 		It("should handle releasing more than reserved", func() {
 			// Reserve some capacity
 			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 2)

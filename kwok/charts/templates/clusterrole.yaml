@@ -67,11 +67,14 @@ rules:
     resources: ["nodes"]
     verbs: ["create", "patch", "delete", "update"]
   - apiGroups: [""]
+    resources: ["nodes/status"]
+    verbs: ["patch"]
+  - apiGroups: [""]
     resources: ["pods/eviction"]
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["delete"]
+    verbs: ["delete", "patch", "update"]
   {{- with .Values.additionalClusterRoleRules -}}
   {{ toYaml . | nindent 2 }}
   {{- end -}}

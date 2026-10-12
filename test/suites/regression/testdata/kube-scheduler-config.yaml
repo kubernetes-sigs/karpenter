@@ -1,0 +1,34 @@
+# The KubeSchedulerConfiguration that hack/kind/cluster.yaml hands to the cluster's kube-scheduler.
+#
+# This file is the single source of truth for the cluster-level default topology spread constraints the
+# "DefaultTopologySpreadConstraints" specs exercise: the cluster's kube-scheduler reads it, and
+# defaultconstraints_test.go reads the same defaults back out of it to configure Karpenter with
+# --scheduler-config. Neither side can drift from the other.
+#
+# The defaults live on their own profile rather than on default-scheduler so that only the pods that opt in
+# with spec.schedulerName are defaulted, leaving every other spec in the suite scheduled as it was before.
+apiVersion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+clientConnection:
+  kubeconfig: /etc/kubernetes/scheduler.conf
+profiles:
+  - schedulerName: default-scheduler
+  - schedulerName: topology-spread-defaults
+    pluginConfig:
+      - name: PodTopologySpread
+        args:
+          # kube-scheduler only honors defaultConstraints when defaultingType is List; the default, System,
+          # applies its own built-in constraints instead. Karpenter can't represent System defaulting.
+          defaultingType: List
+          # As kube-scheduler requires, these carry no labelSelector - one is deduced per pod from the
+          # Services and the controller that select it.
+          #
+          # There are two of them so the specs can prove every configured constraint is injected rather than
+          # just the first: a defaulted workload has to come up one pod per node *and* one pod per zone.
+          defaultConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: DoNotSchedule
