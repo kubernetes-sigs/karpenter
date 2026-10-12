@@ -841,6 +841,19 @@ func schedulingErrorRank(err error) int {
 	if err == nil {
 		return 100
 	}
+	// Rank the scheduling failure without letting structured metadata affect its priority.
+	// Only unwrap outer metadata; errors.As would also discard scheduling context added by other wrappers.
+	if structuredErr, ok := err.(*serrors.Error); ok { //nolint:errorlint
+		return schedulingErrorRank(structuredErr.Unwrap())
+	}
+	// Combined errors (such as multiple untolerated taints) can contain their own metadata.
+	if errs := multierr.Errors(err); len(errs) > 1 {
+		rank := 100
+		for _, e := range errs {
+			rank = min(rank, schedulingErrorRank(e))
+		}
+		return rank
+	}
 	var instanceTypeFilterError InstanceTypeFilterError
 	if errors.As(err, &instanceTypeFilterError) {
 		return instanceTypeFilterErrorRank(instanceTypeFilterError)
@@ -868,14 +881,15 @@ func isResourceConstraintError(errString string) bool {
 }
 
 func hasHostPortOrVolumeError(errString string) bool {
-	return strings.Contains(errString, "host port") || strings.Contains(errString, "volume")
+	return strings.Contains(errString, "hostport") || strings.Contains(errString, "host port") || strings.Contains(errString, "volume")
 }
 
 func instanceTypeFilterErrorRank(e InstanceTypeFilterError) int {
-	if !e.fits {
+	// fits also requires a compatible offering, so its absence alone does not prove a resource shortage.
+	if !e.fits && e.hasOffering {
 		return 0
 	}
-	if !e.requirementsMet {
+	if !e.requirementsMet || e.minValuesIncompatibleErr != nil {
 		return 10
 	}
 	if !e.hasOffering {
