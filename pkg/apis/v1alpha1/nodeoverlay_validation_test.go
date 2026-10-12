@@ -240,6 +240,35 @@ var _ = Describe("CEL/Validation", func() {
 		nodeOverlay.Spec.PriceAdjustment = new("+10%")
 		Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 	})
+	Context("priceExpression", func() {
+		DescribeTable("rejects multiple price fields at admission", func(price, adjustment, expression *string) {
+			nodeOverlay.Spec.Price = price
+			nodeOverlay.Spec.PriceAdjustment = adjustment
+			nodeOverlay.Spec.PriceExpression = expression
+			Expect(env.Client.Create(ctx, nodeOverlay)).NotTo(Succeed())
+		},
+			Entry("price and expression", new("0.5"), nil, new("price * 0.9")),
+			Entry("adjustment and expression", nil, new("-10%"), new("price * 0.9")),
+			Entry("all three fields", new("0.5"), new("-10%"), new("price * 0.9")),
+		)
+		DescribeTable("validates numeric expressions at runtime", func(expression string, valid bool) {
+			nodeOverlay.Spec.PriceExpression = new(expression)
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+			if valid {
+				Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
+			} else {
+				Expect(nodeOverlay.RuntimeValidate(ctx)).NotTo(Succeed())
+			}
+		},
+			Entry("double", "price * 0.9", true),
+			Entry("integer", "1", true),
+			Entry("unsigned", "1u", true),
+			Entry("syntax", "price *", false),
+			Entry("unknown variable", "self.price", false),
+			Entry("boolean", "price > 0.0", false),
+			Entry("dynamic", "dyn(price)", false),
+		)
+	})
 	Context("priceAdjustment", func() {
 		DescribeTable("Invalid Input",
 			func(input string) {

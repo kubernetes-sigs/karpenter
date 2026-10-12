@@ -109,7 +109,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 				it := fake.NewInstanceType("m5.large")
 				// Use actual requirements string from the generated instance type
 				return map[string]*priceUpdate{
-					it.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
+					it.Offerings[0].Requirements.String(): {evaluator: legacyPriceEvaluator("+0.01"), lowestWeight: new(int32(10))},
 				}
 			}(),
 			&capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
@@ -150,7 +150,7 @@ var _ = Describe("Store Apply Selective Copy", func() {
 			func() map[string]*priceUpdate {
 				it := fake.NewInstanceType("m5.large")
 				return map[string]*priceUpdate{
-					it.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
+					it.Offerings[0].Requirements.String(): {evaluator: legacyPriceEvaluator("+0.01"), lowestWeight: new(int32(10))},
 				}
 			}(),
 			&capacityUpdate{
@@ -198,7 +198,7 @@ var _ = Describe("Store Apply Correctness", func() {
 					instanceType.Name: &instanceTypeUpdate{
 						Price: map[string]*priceUpdate{
 							// Only overlay the first offering
-							instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
+							instanceType.Offerings[0].Requirements.String(): {evaluator: legacyPriceEvaluator("+0.01"), lowestWeight: new(int32(10))},
 						},
 						Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
 					},
@@ -230,7 +230,7 @@ var _ = Describe("Store Apply Correctness", func() {
 				"default": {
 					instanceType.Name: &instanceTypeUpdate{
 						Price: map[string]*priceUpdate{
-							instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("+0.01"), lowestWeight: new(int32(10))},
+							instanceType.Offerings[0].Requirements.String(): {evaluator: legacyPriceEvaluator("+0.01"), lowestWeight: new(int32(10))},
 						},
 						Capacity: &capacityUpdate{
 							OverlayUpdate: corev1.ResourceList{
@@ -311,7 +311,7 @@ var _ = Describe("Store Apply Isolation Between NodePools", func() {
 			"nodepool-a": {
 				instanceType.Name: &instanceTypeUpdate{
 					Price: map[string]*priceUpdate{
-						instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("+10%"), lowestWeight: new(int32(10))},
+						instanceType.Offerings[0].Requirements.String(): {evaluator: legacyPriceEvaluator("+10%"), lowestWeight: new(int32(10))},
 					},
 					Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
 				},
@@ -319,7 +319,7 @@ var _ = Describe("Store Apply Isolation Between NodePools", func() {
 			"nodepool-b": {
 				instanceType.Name: &instanceTypeUpdate{
 					Price: map[string]*priceUpdate{
-						instanceType.Offerings[0].Requirements.String(): {OverlayUpdate: new("-5%"), lowestWeight: new(int32(10))},
+						instanceType.Offerings[0].Requirements.String(): {evaluator: legacyPriceEvaluator("-5%"), lowestWeight: new(int32(10))},
 					},
 					Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}},
 				},
@@ -425,7 +425,7 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 
 		// Simulate what the controller does
 		internalStore.updateInstanceTypeCapacity("default", "m5.large", overlay)
-		internalStore.updateInstanceTypeOffering("default", "m5.large", overlay, instanceTypes[0].Offerings[1:2]) // Only spot offering
+		internalStore.updateInstanceTypeOffering("default", "m5.large", overlay, instanceTypes[0].Offerings[1:2], newPriceEvaluator(overlay.Spec, nil)) // Only spot offering
 
 		publicStore.UpdateStore(internalStore)
 
@@ -446,5 +446,80 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 		// Verify original instance types were not mutated
 		_, ok = instanceTypes[0].Capacity["hugepages-2Mi"]
 		Expect(ok).To(BeFalse(), "original m5.large should not have been mutated")
+	})
+})
+
+var _ = Describe("Price overlay offering lookup", func() {
+	It("isolates NodePools and every concrete offering dimension", func() {
+		internal := newInternalInstanceTypeStore()
+		for _, pool := range []string{"pool-a", "pool-b"} {
+			for _, zone := range []string{"zone-a", "zone-b"} {
+				for _, reservationID := range []string{"res-a", "res-b", ""} {
+					capacityType := "reserved"
+					if reservationID == "" {
+						capacityType = "spot"
+					}
+					requirements := scheduling.NewLabelRequirements(map[string]string{corev1.LabelTopologyZone: zone, v1.CapacityTypeLabelKey: capacityType})
+					if reservationID != "" {
+						requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
+					}
+					overlay := v1alpha1.NodeOverlay{Spec: v1alpha1.NodeOverlaySpec{Price: new("0.5"), Weight: new(int32(10))}}
+					overlay.Name = pool + "-" + zone + "-" + capacityType + "-" + reservationID
+					Expect(internal.updateInstanceTypeOffering(pool, "instance", overlay, cloudprovider.Offerings{&cloudprovider.Offering{Requirements: requirements, Price: 1.0}}, newPriceEvaluator(overlay.Spec, nil))).To(BeTrue())
+				}
+			}
+		}
+		store := NewInstanceTypeStore()
+		store.UpdateStore(internal)
+		for _, pool := range []string{"pool-a", "pool-b"} {
+			for _, zone := range []string{"zone-a", "zone-b"} {
+				for _, reservationID := range []string{"res-a", "res-b", ""} {
+					capacityType := "reserved"
+					if reservationID == "" {
+						capacityType = "spot"
+					}
+					name, ok := store.PriceOverlayForOffering(pool, "instance", zone, capacityType, reservationID)
+					Expect(ok).To(BeTrue())
+					Expect(name).To(Equal(pool + "-" + zone + "-" + capacityType + "-" + reservationID))
+				}
+			}
+		}
+		for _, dimensions := range [][]string{
+			{"missing-pool", "instance", "zone-a", "spot", ""},
+			{"pool-a", "missing-instance", "zone-a", "spot", ""},
+			{"pool-a", "instance", "missing-zone", "spot", ""},
+			{"pool-a", "instance", "zone-a", "on-demand", ""},
+			{"pool-a", "instance", "zone-a", "reserved", "missing-reservation"},
+		} {
+			_, ok := store.PriceOverlayForOffering(dimensions[0], dimensions[1], dimensions[2], dimensions[3], dimensions[4])
+			Expect(ok).To(BeFalse())
+		}
+		store.Reset()
+		_, ok := store.PriceOverlayForOffering("pool-a", "instance", "zone-a", "spot", "")
+		Expect(ok).To(BeFalse())
+	})
+})
+
+var _ = Describe("Price overlay provider offering fields", func() {
+	It("preserves capacity and overhead overrides without mutating the provider offering", func() {
+		offering := &cloudprovider.Offering{
+			Requirements: scheduling.NewLabelRequirements(map[string]string{corev1.LabelTopologyZone: "zone", v1.CapacityTypeLabelKey: "reserved", cloudprovider.ReservationIDLabel: "reservation"}),
+			Price:        2.0, Available: true, ReservationCapacity: 3,
+			CapacityOverride: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")},
+			OverheadOverride: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}},
+		}
+		store := newInternalInstanceTypeStore()
+		updates := map[string]*priceUpdate{offering.Requirements.String(): {evaluator: legacyPriceEvaluator("-10%")}}
+		applied := store.applyPriceOverlays(cloudprovider.Offerings{offering}, updates)
+		Expect(applied[0]).NotTo(BeIdenticalTo(offering))
+		Expect(applied[0].Price).To(Equal(1.8))
+		Expect(applied[0].IsPriceOverlaid()).To(BeTrue())
+		Expect(applied[0].Requirements).To(Equal(offering.Requirements))
+		Expect(applied[0].CapacityOverride).To(Equal(offering.CapacityOverride))
+		Expect(applied[0].OverheadOverride).To(BeIdenticalTo(offering.OverheadOverride))
+		Expect(applied[0].Available).To(BeTrue())
+		Expect(applied[0].ReservationCapacity).To(Equal(3))
+		Expect(offering.Price).To(Equal(2.0))
+		Expect(offering.IsPriceOverlaid()).To(BeFalse())
 	})
 })

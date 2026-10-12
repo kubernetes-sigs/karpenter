@@ -159,8 +159,8 @@ var _ = Describe("Memory Usage Overlay Scenarios", func() {
 				for _, offering := range it.Offerings {
 					if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
 						priceUpdates[offering.Requirements.String()] = &priceUpdate{
-							OverlayUpdate: new("-10%"),
-							lowestWeight:  new(int32(10)),
+							evaluator:    legacyPriceEvaluator("-10%"),
+							lowestWeight: new(int32(10)),
 						}
 					}
 				}
@@ -385,8 +385,8 @@ func createStoreWithOverlays(instanceTypes []*cloudprovider.InstanceType, nodePo
 			for _, offering := range it.Offerings {
 				if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
 					priceUpdates[offering.Requirements.String()] = &priceUpdate{
-						OverlayUpdate: new("-10%"),
-						lowestWeight:  new(int32(10)),
+						evaluator:    legacyPriceEvaluator("-10%"),
+						lowestWeight: new(int32(10)),
 					}
 				}
 			}

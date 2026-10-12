@@ -69,7 +69,17 @@ var (
 	falseValue = strconv.FormatBool(false)
 )
 
+const PriceOverlayAppliedAnnotationKey = apis.Group + "/price-overlay-applied"
+
 var (
+	PriceOverlayAppliedAnnotation = wellknown.Annotation{
+		Name:         PriceOverlayAppliedAnnotationKey,
+		Example:      "on-demand-cost-model",
+		UsedOn:       []runtime.Object{&NodeClaim{}},
+		Help:         "Karpenter sets this after launch to the name of the price NodeOverlay matching the resolved instance type, zone, capacity type, and reservation ID. Lookup uses the current overlay store and is best-effort; the annotation is omitted when no price overlay applies.",
+		Stage:        docs.Alpha,
+		InternalOnly: true,
+	}
 	DoNotDisruptAnnotation = wellknown.Annotation{
 		Name:    DoNotDisruptAnnotationKey,
 		Example: trueValue,
@@ -176,6 +186,7 @@ var (
 
 // KarpenterAnnotations are the well known annotations Karpenter reads or writes.
 var KarpenterAnnotations = []wellknown.Annotation{
+	PriceOverlayAppliedAnnotation,
 	DoNotDisruptAnnotation,
 	DoNotRepairAnnotation,
 	NodePoolHashAnnotation,

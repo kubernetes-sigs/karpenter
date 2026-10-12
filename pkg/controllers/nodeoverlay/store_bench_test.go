@@ -60,8 +60,8 @@ func BenchmarkStoreApply(b *testing.B) {
 		for _, offering := range it.Offerings {
 			if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
 				priceUpdates[offering.Requirements.String()] = &priceUpdate{
-					OverlayUpdate: new("-10%"),
-					lowestWeight:  new(int32(10)),
+					evaluator:    legacyPriceEvaluator("-10%"),
+					lowestWeight: new(int32(10)),
 				}
 			}
 		}
@@ -121,8 +121,8 @@ func BenchmarkStoreApplyPriceOnly(b *testing.B) {
 		priceUpdates := make(map[string]*priceUpdate)
 		for _, offering := range it.Offerings {
 			priceUpdates[offering.Requirements.String()] = &priceUpdate{
-				OverlayUpdate: new("+0.01"),
-				lowestWeight:  new(int32(10)),
+				evaluator:    legacyPriceEvaluator("+0.01"),
+				lowestWeight: new(int32(10)),
 			}
 		}
 		store.updates["default"][it.Name] = &instanceTypeUpdate{
@@ -186,8 +186,8 @@ func BenchmarkStoreApplyBothOverlays(b *testing.B) {
 		priceUpdates := make(map[string]*priceUpdate)
 		for _, offering := range it.Offerings {
 			priceUpdates[offering.Requirements.String()] = &priceUpdate{
-				OverlayUpdate: new("+0.01"),
-				lowestWeight:  new(int32(10)),
+				evaluator:    legacyPriceEvaluator("+0.01"),
+				lowestWeight: new(int32(10)),
 			}
 		}
 		store.updates["default"][it.Name] = &instanceTypeUpdate{
@@ -238,8 +238,8 @@ func BenchmarkStoreApplyAllScenario(b *testing.B) {
 			priceUpdates := make(map[string]*priceUpdate)
 			for _, offering := range it.Offerings {
 				priceUpdates[offering.Requirements.String()] = &priceUpdate{
-					OverlayUpdate: new("-5%"),
-					lowestWeight:  new(int32(10)),
+					evaluator:    legacyPriceEvaluator("-5%"),
+					lowestWeight: new(int32(10)),
 				}
 			}
 			internalStore.updates[np][it.Name] = &instanceTypeUpdate{
@@ -287,7 +287,7 @@ func setupNodeOverlayBenchmarkStore(instanceTypes []*cloudprovider.InstanceType,
 				}
 			}
 			if len(spotOfferings) > 0 {
-				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings)
+				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings, newPriceEvaluator(overlay.Spec, nil))
 			}
 		}
 	}
