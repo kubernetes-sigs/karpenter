@@ -56,6 +56,7 @@ var _ = Describe("Options", func() {
 		"DISABLE_CONTROLLER_WARMUP",
 		"DISABLE_LEADER_ELECTION",
 		"DISABLE_CLUSTER_STATE_OBSERVABILITY",
+		"CLUSTER_STATE_OBSERVABILITY_RESOURCES",
 		"LEADER_ELECTION_NAMESPACE",
 		"MEMORY_LIMIT",
 		"LOG_LEVEL",
@@ -100,9 +101,38 @@ var _ = Describe("Options", func() {
 	})
 
 	Context("Parse", func() {
+		It("should select cluster state metrics by resource type", func() {
+			err := opts.Parse(fs, "--cluster-state-observability-resources=NodePool,NodeClaim")
+			Expect(err).To(Succeed())
+			Expect(opts.ClusterStateObservabilityResources).To(Equal([]options.ClusterStateObservabilityResource{
+				options.ClusterStateObservabilityNodePool,
+				options.ClusterStateObservabilityNodeClaim,
+			}))
+			Expect(opts.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityNodePool)).To(BeTrue())
+			Expect(opts.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityNode)).To(BeFalse())
+		})
+
+		It("should reject unsupported cluster state metric resource types", func() {
+			err := opts.Parse(fs, "--cluster-state-observability-resources=NodePool,PodGroup")
+			Expect(err).To(MatchError(ContainSubstring(`"PodGroup" is not a supported resource type`)))
+		})
+
+		It("should allow the legacy disable flag to override selected resource types", func() {
+			err := opts.Parse(fs, "--disable-cluster-state-observability=true", "--cluster-state-observability-resources=NodePool")
+			Expect(err).To(Succeed())
+			Expect(opts.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityNodePool)).To(BeFalse())
+		})
+
 		It("should use the correct default values", func() {
 			err := opts.Parse(fs)
 			Expect(err).To(BeNil())
+			Expect(opts.ClusterStateObservabilityResources).To(Equal([]options.ClusterStateObservabilityResource{
+				options.ClusterStateObservabilityPod,
+				options.ClusterStateObservabilityNode,
+				options.ClusterStateObservabilityNodeClaim,
+				options.ClusterStateObservabilityNodePool,
+				options.ClusterStateObservabilityCapacityBuffer,
+			}))
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
 				ServiceName:                      new(""),
 				MetricsPort:                      new(8080),
@@ -215,6 +245,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("DISABLE_CONTROLLER_WARMUP", "false")
 			os.Setenv("DISABLE_LEADER_ELECTION", "true")
 			os.Setenv("DISABLE_CLUSTER_STATE_OBSERVABILITY", "true")
+			os.Setenv("CLUSTER_STATE_OBSERVABILITY_RESOURCES", "NodePool,NodeClaim")
 			os.Setenv("LEADER_ELECTION_NAME", "karpenter-controller")
 			os.Setenv("LEADER_ELECTION_NAMESPACE", "karpenter")
 			os.Setenv("MEMORY_LIMIT", "0")
@@ -233,6 +264,10 @@ var _ = Describe("Options", func() {
 			opts.AddFlags(fs)
 			err := opts.Parse(fs)
 			Expect(err).To(BeNil())
+			Expect(opts.ClusterStateObservabilityResources).To(Equal([]options.ClusterStateObservabilityResource{
+				options.ClusterStateObservabilityNodePool,
+				options.ClusterStateObservabilityNodeClaim,
+			}))
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
 				ServiceName:                      new("env"),
 				MetricsPort:                      new(0),

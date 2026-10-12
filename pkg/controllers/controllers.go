@@ -35,6 +35,7 @@ import (
 
 	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	v1alpha1 "sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/capacitybuffer"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -150,11 +151,32 @@ func NewControllers(
 		controllers = append(controllers, deviceAllocationController)
 	}
 
-	if !options.FromContext(ctx).DisableClusterStateObservability {
+	observabilityOptions := options.FromContext(ctx)
+	if observabilityOptions.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityPod) {
+		controllers = append(controllers, metricspod.NewController(kubeClient, cluster))
+	}
+	if observabilityOptions.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityNodePool) {
 		controllers = append(controllers,
-			metricspod.NewController(kubeClient, cluster),
 			metricsnodepool.NewController(kubeClient, cloudProvider, clusterCost),
-			metricsnode.NewController(cluster),
+			status.NewController[*v1.NodePool](
+				kubeClient,
+				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
+				status.EmitDeprecatedMetrics,
+				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
+			),
+		)
+	}
+	if observabilityOptions.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityNode) {
+		controllers = append(controllers, metricsnode.NewController(cluster))
+		controllers = append(controllers, status.NewGenericObjectController[*corev1.Node](
+			kubeClient,
+			mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
+			status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
+			status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey, v1.NodeInitializedLabelKey)...),
+		))
+	}
+	if observabilityOptions.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityNodeClaim) {
+		controllers = append(controllers,
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
 				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
@@ -162,20 +184,8 @@ func NewControllers(
 				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
 				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey)...),
 			),
-			status.NewController[*v1.NodePool](
-				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
-				status.EmitDeprecatedMetrics,
-				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
-			),
-			status.NewGenericObjectController[*corev1.Node](
-				kubeClient,
-				mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
-				status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)), // 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192
-				status.WithLabels(append(lo.Map(cloudProvider.GetSupportedNodeClasses(), func(obj status.Object, _ int) string { return v1.NodeClassLabelKey(object.GVK(obj).GroupKind()) }), v1.NodePoolLabelKey, v1.NodeInitializedLabelKey)...)),
 		)
 	}
-
 	// The reboot controller only acts on NodeClaims with a committed reboot, so it always runs: a reboot already in flight
 	// finishes even if node repair is disabled or the provider stops selecting reboot.
 	controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
@@ -191,11 +201,21 @@ func NewControllers(
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
 		controllers = append(controllers, nodeoverlay.NewController(clock, kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
+		if observabilityOptions.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityNodeOverlay) {
+			controllers = append(controllers,
+				status.NewGenericObjectController[*v1alpha1.NodeOverlay](
+					kubeClient,
+					mgr.GetEventRecorderFor("karpenter"), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once operatorpkg is updated
+					status.EmitDeprecatedMetrics,
+					status.WithHistogramBuckets(prometheus.ExponentialBuckets(0.5, 2, 15)),
+				),
+			)
+		}
 	}
 
 	if options.FromContext(ctx).FeatureGates.CapacityBuffer {
 		controllers = append(controllers, capacitybuffer.NewController(kubeClient, p, virtualPodCache))
-		if !options.FromContext(ctx).DisableClusterStateObservability {
+		if observabilityOptions.ClusterStateObservabilityEnabledFor(options.ClusterStateObservabilityCapacityBuffer) {
 			// Emit the standard operator_status_condition_* metrics for CapacityBuffer.
 			// A GenericObjectController reads status.conditions reflectively, so the
 			// upstream CapacityBuffer type is used as-is without implementing operatorpkg's
