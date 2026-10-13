@@ -930,6 +930,76 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
+		It("should not exceed the node limit within a single scheduling round", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Limits: v1.Limits(corev1.ResourceList{resources.Node: resource.MustParse("2")}),
+				},
+			}))
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "foo"}},
+				PodAntiRequirements: []corev1.PodAffinityTerm{{
+					TopologyKey:   corev1.LabelHostname,
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "foo"}},
+				}},
+			}, 3)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			scheduled := lo.CountBy(pods, func(p *corev1.Pod) bool {
+				return ExpectPodExists(ctx, env.Client, p.Name, p.Namespace).Spec.NodeName != ""
+			})
+			Expect(scheduled).To(Equal(2))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("should not launch a node with less than one node remaining in the limit", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Limits: v1.Limits(corev1.ResourceList{resources.Node: resource.MustParse("1.5")}),
+				},
+			}))
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "foo"}},
+				PodAntiRequirements: []corev1.PodAffinityTerm{{
+					TopologyKey:   corev1.LabelHostname,
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "foo"}},
+				}},
+			}, 2)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			scheduled := lo.CountBy(pods, func(p *corev1.Pod) bool {
+				return ExpectPodExists(ctx, env.Client, p.Name, p.Namespace).Spec.NodeName != ""
+			})
+			Expect(scheduled).To(Equal(1))
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		})
+		It("should fall back to a lower weight NodePool once the node limit is reached within a scheduling round", func() {
+			ExpectApplied(ctx, env.Client,
+				test.NodePool(v1.NodePool{
+					ObjectMeta: metav1.ObjectMeta{Name: "np-a"},
+					Spec: v1.NodePoolSpec{
+						Weight: new(int32(100)),
+						Limits: v1.Limits(corev1.ResourceList{resources.Node: resource.MustParse("1")}),
+					},
+				}),
+				test.NodePool(v1.NodePool{
+					ObjectMeta: metav1.ObjectMeta{Name: "np-b"},
+					Spec: v1.NodePoolSpec{
+						Weight: new(int32(10)),
+						Limits: v1.Limits(corev1.ResourceList{resources.Node: resource.MustParse("1")}),
+					},
+				}),
+			)
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "foo"}},
+				PodAntiRequirements: []corev1.PodAffinityTerm{{
+					TopologyKey:   corev1.LabelHostname,
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "foo"}},
+				}},
+			}, 2)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			nodePools := lo.Map(pods, func(p *corev1.Pod, _ int) string {
+				return ExpectScheduled(ctx, env.Client, p).Labels[v1.NodePoolLabelKey]
+			})
+			Expect(nodePools).To(ConsistOf("np-a", "np-b"))
+		})
 	})
 	Context("Daemonsets", func() {
 		It("should account for daemonsets", func() {
