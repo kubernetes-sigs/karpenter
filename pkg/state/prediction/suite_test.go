@@ -37,13 +37,13 @@ var _ = Describe("Store", func() {
 	var store *Store
 
 	BeforeEach(func() {
-		store = NewStore()
+		store = NewStore(nil)
 	})
 
 	It("should keep targets with the same kind and name in different groups apart", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		other := TargetKey{GroupKind: schema.GroupKind{Group: "example.com", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
-		store.Set(source, TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}, &Prediction{}, time.Now())
+		other := WorkloadReference{GroupKind: schema.GroupKind{Group: "example.com", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+		store.Set(source, WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}, &Prediction{}, time.Now())
 
 		_, ok := store.Get(other)
 		Expect(ok).To(BeFalse())
@@ -51,7 +51,7 @@ var _ = Describe("Store", func() {
 
 	It("should store and update a prediction by target key", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+		target := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 		pred1 := &Prediction{Containers: map[string]corev1.ResourceList{
 			"container1": {
 				corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -75,8 +75,8 @@ var _ = Describe("Store", func() {
 
 	It("should delete previous target when source is retargeted", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target1 := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app1"}}
-		target2 := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app2"}}
+		target1 := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app1"}}
+		target2 := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app2"}}
 		pred1 := &Prediction{Containers: map[string]corev1.ResourceList{
 			"container1": {corev1.ResourceCPU: resource.MustParse("100m")},
 		}}
@@ -97,7 +97,7 @@ var _ = Describe("Store", func() {
 
 	It("should delete a prediction and be idempotent", func() {
 		source := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
-		target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+		target := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 		pred := &Prediction{Containers: map[string]corev1.ResourceList{
 			"c": {corev1.ResourceCPU: resource.MustParse("100m")},
 		}}
@@ -112,7 +112,7 @@ var _ = Describe("Store", func() {
 	})
 
 	It("should report whether the active prediction changed", func() {
-		target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+		target := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 		older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
 		newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
 		cpu := func(q string) *Prediction {
@@ -135,7 +135,7 @@ var _ = Describe("Store", func() {
 
 	Context("Tie-Breaking", func() {
 		It("should use the earliest-created source's prediction", func() {
-			target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+			target := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 			older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
 			newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
 			predOlder := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -158,7 +158,7 @@ var _ = Describe("Store", func() {
 		})
 
 		It("should break ties by lexicographically smallest name when timestamps are equal", func() {
-			target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+			target := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 			sourceA := types.NamespacedName{Namespace: "default", Name: "vpa-alpha"}
 			sourceB := types.NamespacedName{Namespace: "default", Name: "vpa-beta"}
 			predA := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -179,7 +179,7 @@ var _ = Describe("Store", func() {
 		})
 
 		It("should promote next-strongest on delete of the winner", func() {
-			target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+			target := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 			older := types.NamespacedName{Namespace: "default", Name: "vpa-older"}
 			newer := types.NamespacedName{Namespace: "default", Name: "vpa-newer"}
 			predOlder := &Prediction{Containers: map[string]corev1.ResourceList{
@@ -208,7 +208,7 @@ var _ = Describe("Store", func() {
 		})
 
 		It("should remove target entirely when all contenders are deleted", func() {
-			target := TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
+			target := WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"}}
 			source1 := types.NamespacedName{Namespace: "default", Name: "vpa-1"}
 			source2 := types.NamespacedName{Namespace: "default", Name: "vpa-2"}
 			pred := &Prediction{Containers: map[string]corev1.ResourceList{

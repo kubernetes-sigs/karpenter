@@ -53,7 +53,7 @@ var store *prediction.Store
 var cluster *state.Cluster
 var recorder *test.EventRecorder
 var controller *informer.VPAController
-var target prediction.TargetKey
+var target prediction.WorkloadReference
 var targetRef autoscalingv1.CrossVersionObjectReference
 var dep *appsv1.Deployment
 
@@ -72,7 +72,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	store = prediction.NewStore()
+	store = prediction.NewStore(env.Client)
 	cluster = state.NewCluster(env.Clock, env.Client, fake.NewCloudProvider())
 	recorder = test.NewEventRecorder()
 	controller = informer.NewVPAController(env.Client, store, cluster, recorder)
@@ -81,7 +81,7 @@ var _ = BeforeEach(func() {
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
 	})
 	ExpectApplied(ctx, env.Client, dep)
-	target = prediction.TargetKey{
+	target = prediction.WorkloadReference{
 		GroupKind:      schema.GroupKind{Group: "apps", Kind: "Deployment"},
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "app"},
 	}

@@ -133,7 +133,7 @@ var _ = Describe("Prediction", func() {
 
 			store.Set(
 				types.NamespacedName{Namespace: "default", Name: "vpa-app"},
-				prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
+				prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
 				&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 					pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("3")},
 				}},
@@ -186,7 +186,7 @@ var _ = Describe("Prediction", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-ds"},
-			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "DaemonSet"}, NamespacedName: client.ObjectKeyFromObject(ds)},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "DaemonSet"}, NamespacedName: client.ObjectKeyFromObject(ds)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				ds.Spec.Template.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("500m")},
 			}},
@@ -212,7 +212,7 @@ var _ = Describe("Prediction", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-app"},
-			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				workloadPod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("800m")},
 			}},
@@ -256,7 +256,7 @@ var _ = Describe("Prediction", func() {
 
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-app"},
-			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("1")},
 			}},
@@ -317,7 +317,7 @@ var _ = Describe("Prediction", func() {
 		// Only podA has a VPA prediction
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-a"},
-			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rsA)},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rsA)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				podA.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("1500m")},
 			}},
@@ -360,7 +360,7 @@ var _ = Describe("Prediction", func() {
 		// VPA predicts 3 CPU — fits on expensive (4 CPU) but not cheap (2 CPU)
 		store.Set(
 			types.NamespacedName{Namespace: "default", Name: "vpa-app"},
-			prediction.TargetKey{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
 			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
 				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("3")},
 			}},
@@ -382,7 +382,7 @@ var _ = Describe("Prediction", func() {
 	})
 
 	It("should wait for the prediction store to hydrate before disrupting when the PredictionEnabled feature gate is enabled", func() {
-		hydrationStore := prediction.NewStore()
+		hydrationStore := prediction.NewStore(env.Client)
 		hydrationProv := provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), hydrationStore)
 
 		rs := test.ReplicaSet()
@@ -421,7 +421,7 @@ var _ = Describe("Prediction", func() {
 	})
 
 	It("should remove taints left by a previous disruption action while waiting for the prediction store to hydrate", func() {
-		hydrationStore := prediction.NewStore()
+		hydrationStore := prediction.NewStore(env.Client)
 		hydrationProv := provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), hydrationStore)
 
 		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)

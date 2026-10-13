@@ -104,7 +104,7 @@ var _ = BeforeSuite(func() {
 	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 	recorder = test.NewEventRecorder()
 	draController = deviceallocation.NewController(env.Client)
-	store = prediction.NewStore()
+	store = prediction.NewStore(env.Client)
 	queue = &disruption.Queue{}
 	cloudProvider.Reset() // installs the fake provider's default repair policies
 	useRepairPolicies(cloudProvider.RepairPolicy)
@@ -140,7 +140,7 @@ var _ = BeforeEach(func() {
 	// (which the controller accumulates across reconciles and never resets) doesn't leak between specs. This must
 	// happen before the disruptionController and queue below, which capture prov. Mirrors the provisioning suite.
 	draController = deviceallocation.NewController(env.Client)
-	store = prediction.NewStore()
+	store = prediction.NewStore(env.Client)
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), store)
 
 	// Ensure that we reset the disruption controller's methods after each test run

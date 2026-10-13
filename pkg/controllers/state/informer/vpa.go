@@ -124,15 +124,15 @@ func (c *VPAController) processVPA(vpa *vpav1.VerticalPodAutoscaler, key types.N
 	if p == nil {
 		return c.store.Delete(key)
 	}
-	target := prediction.TargetKey{
+	workload := prediction.WorkloadReference{
 		GroupKind:      schema.FromAPIVersionAndKind(vpa.Spec.TargetRef.APIVersion, vpa.Spec.TargetRef.Kind).GroupKind(),
 		NamespacedName: types.NamespacedName{Namespace: vpa.Namespace, Name: vpa.Spec.TargetRef.Name},
 	}
-	if !prediction.SupportedTargets.Has(target.GroupKind) {
+	if !prediction.SupportedTargets.Has(workload.GroupKind) {
 		c.recorder.Publish(PredictionTargetUnsupportedEvent(vpa))
 		return c.store.Delete(key)
 	}
-	return c.store.Set(key, target, p, vpa.CreationTimestamp.Time)
+	return c.store.Set(key, workload, p, vpa.CreationTimestamp.Time)
 }
 
 func (c *VPAController) Name() string {

@@ -257,7 +257,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
 	instanceTypeStore := nodeoverlay.NewInstanceTypeStore()
-	predictionStore := prediction.NewStore()
+	predictionStore := prediction.NewStore(mgr.GetClient())
 
 	return ctx, &Operator{
 		Manager:             mgr,

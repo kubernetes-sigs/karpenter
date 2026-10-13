@@ -104,7 +104,7 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	predictionStore = prediction.NewStore()
+	predictionStore = prediction.NewStore(env.Client)
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client), predictionStore)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
 })
@@ -116,7 +116,7 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	// reset instance types
 	newCP := fake.CloudProvider{}
-	*predictionStore = *prediction.NewStore()
+	*predictionStore = *prediction.NewStore(env.Client)
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
 	scheduling.MaxInstanceTypes = 60
