@@ -31,7 +31,11 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -75,15 +79,20 @@ import (
 )
 
 type ControllerOptions struct {
-	registrationHooks    []cloudprovider.NodeLifecycleHook
-	disableVPAPrediction bool
+	registrationHooks   []cloudprovider.NodeLifecycleHook
+	enableVPAPrediction bool
 }
 
-// WithoutVPAPrediction disables the VPA prediction controller. Use this when
-// a different prediction source is registered separately.
-func WithoutVPAPrediction() option.Function[ControllerOptions] {
+// WithVPAPrediction enables the VPA prediction controller as the prediction source.
+// When enabled alongside the PredictionEnabled feature gate, Karpenter uses VPA
+// recommendations to size nodes during provisioning and disruption. With the gate
+// enabled, a prediction source must be registered to mark the prediction store
+// hydrated, or provisioning and disruption wait indefinitely. Only VPAs targeting
+// built-in workloads (Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
+// ReplicationController) are applied.
+func WithVPAPrediction() option.Function[ControllerOptions] {
 	return func(o *ControllerOptions) {
-		o.disableVPAPrediction = true
+		o.enableVPAPrediction = true
 	}
 }
 
@@ -97,6 +106,7 @@ func WithRegistrationHook(hook cloudprovider.NodeLifecycleHook) option.Function[
 	}
 }
 
+//nolint:gocyclo
 func NewControllers(
 	ctx context.Context,
 	mgr manager.Manager,
@@ -113,7 +123,7 @@ func NewControllers(
 	o := option.Resolve(opts...)
 	deviceAllocationController := deviceallocation.NewController(kubeClient)
 	virtualPodCache := virtualpods.NewVirtualPodCache(kubeClient)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache)
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache, predictionStore)
 	evictionQueue := terminator.NewQueue(clock, kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
@@ -217,6 +227,16 @@ func NewControllers(
 			deletionCostQueue,
 			deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, deletionCostQueue),
 		)
+	}
+	if options.FromContext(ctx).FeatureGates.PredictionEnabled {
+		for _, gvk := range []schema.GroupVersionKind{appsv1.SchemeGroupVersion.WithKind("ReplicaSet"), batchv1.SchemeGroupVersion.WithKind("Job")} {
+			owner := &metav1.PartialObjectMetadata{}
+			owner.SetGroupVersionKind(gvk)
+			lo.Must(mgr.GetCache().GetInformer(ctx, owner))
+		}
+		if o.enableVPAPrediction {
+			controllers = append(controllers, informer.NewVPAController(kubeClient, predictionStore, cluster, recorder))
+		}
 	}
 
 	return controllers
