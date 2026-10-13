@@ -739,12 +739,12 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 			// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
 			nodesRemaining, ok := remaining[resources.Node]
 			if ok && nodesRemaining.IsZero() {
-				errs[i] = serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				errs[i] = serrors.Wrap(NewNodePoolLimitError(fmt.Errorf("node limits have been exhausted for nodepool")), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 				return true
 			}
 			its = filterByRemainingResources(its, remaining)
 			if len(its) == 0 {
-				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				errs[i] = serrors.Wrap(NewNodePoolLimitError(fmt.Errorf("all available instance types exceed limits for nodepool")), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 				return true
 			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
@@ -820,33 +820,31 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 }
 
 func sortSchedulingErrors(errs []error) {
-	sort.SliceStable(errs, func(i, j int) bool {
-		return schedulingErrorRank(errs[i]) < schedulingErrorRank(errs[j])
+	type rankedError struct {
+		err  error
+		rank int
+	}
+	rankedErrors := make([]rankedError, len(errs))
+	for i, err := range errs {
+		rankedErrors[i] = rankedError{err: err, rank: schedulingErrorRank(err)}
+	}
+	sort.SliceStable(rankedErrors, func(i, j int) bool {
+		return rankedErrors[i].rank < rankedErrors[j].rank
 	})
-}
-
-var schedulingErrorRankRules = []struct {
-	rank    int
-	matches func(string) bool
-}{
-	{rank: 0, matches: isResourceConstraintError},
-	{rank: 0, matches: containsSchedulingError("exhausted")},
-	{rank: 10, matches: containsSchedulingError("incompatible requirements")},
-	{rank: 20, matches: containsSchedulingError("offering")},
-	{rank: 30, matches: hasHostPortOrVolumeError},
-	{rank: 40, matches: containsSchedulingError("did not tolerate taint")},
+	for i, err := range rankedErrors {
+		errs[i] = err.err
+	}
 }
 
 func schedulingErrorRank(err error) int {
 	if err == nil {
 		return 100
 	}
-	// Rank the scheduling failure without letting structured metadata affect its priority.
-	// Only unwrap outer metadata; errors.As would also discard scheduling context added by other wrappers.
+	// Unwrap outer metadata so a combined error is ranked across all its failures.
 	if structuredErr, ok := err.(*serrors.Error); ok { //nolint:errorlint
 		return schedulingErrorRank(structuredErr.Unwrap())
 	}
-	// Combined errors (such as multiple untolerated taints) can contain their own metadata.
+	// Combined errors use their highest-priority scheduling failure.
 	if errs := multierr.Errors(err); len(errs) > 1 {
 		rank := 100
 		for _, e := range errs {
@@ -858,30 +856,20 @@ func schedulingErrorRank(err error) int {
 	if errors.As(err, &instanceTypeFilterError) {
 		return instanceTypeFilterErrorRank(instanceTypeFilterError)
 	}
-	errString := err.Error()
-	for _, rule := range schedulingErrorRankRules {
-		if rule.matches(errString) {
-			return rule.rank
-		}
+	switch {
+	case IsNodePoolLimitError(err):
+		return 0
+	case IsIncompatibleRequirementsError(err):
+		return 10
+	case IsOfferingError(err):
+		return 20
+	case IsVolumeConstraintError(err):
+		return 30
+	case IsTaintTolerationError(err):
+		return 40
+	default:
+		return 50
 	}
-	return 50
-}
-
-func containsSchedulingError(substr string) func(string) bool {
-	return func(errString string) bool {
-		return strings.Contains(errString, substr)
-	}
-}
-
-func isResourceConstraintError(errString string) bool {
-	if !strings.Contains(errString, "exceed") {
-		return false
-	}
-	return strings.Contains(errString, "resources") || strings.Contains(errString, "limits")
-}
-
-func hasHostPortOrVolumeError(errString string) bool {
-	return strings.Contains(errString, "hostport") || strings.Contains(errString, "host port") || strings.Contains(errString, "volume")
 }
 
 func instanceTypeFilterErrorRank(e InstanceTypeFilterError) int {
