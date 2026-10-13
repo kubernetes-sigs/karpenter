@@ -31,7 +31,11 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	autoscalingv1beta1 "sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -224,8 +228,15 @@ func NewControllers(
 			deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, deletionCostQueue),
 		)
 	}
-	if o.enableVPAPrediction && options.FromContext(ctx).FeatureGates.PredictionEnabled {
-		controllers = append(controllers, informer.NewVPAController(kubeClient, predictionStore, cluster, recorder))
+	if options.FromContext(ctx).FeatureGates.PredictionEnabled {
+		for _, gvk := range []schema.GroupVersionKind{appsv1.SchemeGroupVersion.WithKind("ReplicaSet"), batchv1.SchemeGroupVersion.WithKind("Job")} {
+			owner := &metav1.PartialObjectMetadata{}
+			owner.SetGroupVersionKind(gvk)
+			lo.Must(mgr.GetCache().GetInformer(ctx, owner))
+		}
+		if o.enableVPAPrediction {
+			controllers = append(controllers, informer.NewVPAController(kubeClient, predictionStore, cluster, recorder))
+		}
 	}
 
 	return controllers

@@ -18,6 +18,7 @@ package prediction
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"sort"
 	"sync"
@@ -101,12 +102,16 @@ func (s *Store) MarkHydrated() {
 	s.hydrationOnce.Do(func() { close(s.hydrationCh) })
 }
 
+var HydrationTimeout = time.Minute
+
 func (s *Store) Hydrated(ctx context.Context) bool {
 	select {
 	case <-s.hydrationCh:
 		return true
 	case <-ctx.Done():
 		return false
+	case <-time.After(HydrationTimeout):
+		panic(fmt.Sprintf("prediction store hasn't hydrated after %s, check that a prediction source is registered and can list its objects", HydrationTimeout))
 	}
 }
 

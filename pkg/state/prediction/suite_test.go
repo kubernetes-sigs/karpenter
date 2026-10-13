@@ -17,6 +17,7 @@ limitations under the License.
 package prediction
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -38,6 +39,12 @@ var _ = Describe("Store", func() {
 
 	BeforeEach(func() {
 		store = NewStore(nil)
+	})
+
+	It("should panic when the store doesn't hydrate within the hydration timeout", func() {
+		HydrationTimeout = 10 * time.Millisecond
+		DeferCleanup(func() { HydrationTimeout = time.Minute })
+		Expect(func() { store.Hydrated(context.Background()) }).To(PanicWith(ContainSubstring("prediction store hasn't hydrated")))
 	})
 
 	It("should keep targets with the same kind and name in different groups apart", func() {
