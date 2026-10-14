@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -63,9 +64,9 @@ var _ = Describe("Repair/TerminateFirst", func() {
 
 	BeforeEach(func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
-		cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+		useRepairPolicies([]cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(repairTGP), Action: cloudprovider.ReplaceNode},
-		}
+		})
 		repairController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
 			disruption.WithMethods(disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, cloudProvider, recorder, queue))))
 	})
@@ -94,6 +95,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
 		Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+		ExpectMetricCounterValue(disruption.TerminateFirstDecisionsTotal, 1, map[string]string{metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: "unhealthy", disruption.TerminateFirstReasonDim.Name: string(disruption.TerminateFirstStaticAtLimit)})
 		Expect(cmds[0].Replacements).To(HaveLen(0))
 		// The drain bound and matched repair condition must be stamped on the terminate-first path too (not only on the
 		// replace-first path) — otherwise a TF drain of PDB/do-not-disrupt pods is unbounded and the per-condition repair
@@ -385,6 +387,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
 		Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+		ExpectMetricCounterValue(disruption.TerminateFirstDecisionsTotal, 1, map[string]string{metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: "unhealthy", disruption.TerminateFirstReasonDim.Name: string(disruption.TerminateFirstNoReservedCapacity)})
 		Expect(cmds[0].Replacements).To(HaveLen(0))
 		// The delete-only command must carry the pass-2 (credit-back) Results, not pass-1's: the credit-back NodeClaim
 		// models the reservation slot the candidate frees on termination, so dropping it or returning pass-1 Results
@@ -539,5 +542,210 @@ var _ = Describe("Repair/TerminateFirst", func() {
 
 		Expect(queue.GetCommands()).To(HaveLen(0))
 		Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+	})
+
+	// A static NodePool whose replacement can only land in a full capacity reservation can't pre-spin even below
+	// limits.nodes: the replacement fails to launch until the candidate frees its own slot, so replace-first retries
+	// forever. Repair reads this from the template's offerings (no simulation) and terminates first.
+	Context("Static Capacity Reservations", func() {
+		var reservationID string
+
+		BeforeEach(func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
+			reservationID = "r-" + mostExpensiveInstance.Name
+			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
+			mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+		})
+
+		withReservation := func(capacity int) {
+			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+				Price:               mostExpensiveOffering.Price / 1_000_000.0,
+				Available:           true,
+				ReservationCapacity: capacity,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+					corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					cloudprovider.ReservationIDLabel: reservationID,
+				}),
+			})
+		}
+
+		// replicas=1, limit=2: limits.nodes leaves headroom, so only the reservation can make the pool full.
+		reservedStaticNodePool := func(capacityTypes ...string) *v1.NodePool {
+			return test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
+				Replicas: lo.ToPtr(int64(1)),
+				Limits:   v1.Limits{resources.Node: resource.MustParse("2")},
+				Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{mostExpensiveInstance.Name}},
+					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: capacityTypes},
+				}}},
+			}})
+		}
+
+		// repairNodeInReservation repairs a node holding a slot in the reservation with the given ID.
+		repairNodeInReservation := func(nodePool *v1.NodePool, id string) {
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:              nodePool.Name,
+				corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				cloudprovider.ReservationIDLabel: id,
+			}}})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			markUnhealthy(node)
+			env.Clock.Step(31 * time.Minute)
+			ExpectSingletonReconciled(ctx, repairController)
+		}
+		repairReservedNode := func(nodePool *v1.NodePool) { repairNodeInReservation(nodePool, reservationID) }
+
+		It("should terminate-first when the reservation is full, even below limits.nodes", func() {
+			withReservation(0)
+			nodePool := reservedStaticNodePool(v1.CapacityTypeReserved)
+			repairReservedNode(nodePool)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			ExpectMetricCounterValue(disruption.TerminateFirstDecisionsTotal, 1, map[string]string{metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: "unhealthy", disruption.TerminateFirstReasonDim.Name: string(disruption.TerminateFirstNoReservedCapacity)})
+			Expect(cmds[0].Replacements).To(HaveLen(0))
+			// The delete-only path must not hold the limits.nodes slot it never uses.
+			Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 2, 1)).To(BeEquivalentTo(int64(1)))
+		})
+
+		// A node whose reservation is no longer offered frees no slot a refill could launch into, so terminating it first
+		// would lose the node; below limits.nodes it's replaced first instead.
+		// The on-demand fallback is only temporarily unavailable, so the NodePool waits for it instead of terminating first.
+		It("should not terminate-first when the template's on-demand offerings are unavailable", func() {
+			for _, o := range mostExpensiveInstance.Offerings {
+				o.Available = false
+			}
+			withReservation(0)
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+		})
+
+		// One NodePool's lookup failure must not stop repair for the rest of the cluster.
+		It("should still repair other candidates when a static NodePool's instance types can't be resolved", func() {
+			withReservation(0)
+			staticPool := reservedStaticNodePool(v1.CapacityTypeReserved)
+			staticNodeClaim, staticNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:              staticPool.Name,
+				corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				cloudprovider.ReservationIDLabel: reservationID,
+			}}})
+			dynamicPool := test.NodePool()
+			dynamicNodeClaim, dynamicNode := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:            dynamicPool.Name,
+				corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+			}}})
+			ExpectApplied(ctx, env.Client, staticPool, staticNodeClaim, staticNode, dynamicPool, dynamicNodeClaim, dynamicNode)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController,
+				[]*corev1.Node{staticNode, dynamicNode}, []*v1.NodeClaim{staticNodeClaim, dynamicNodeClaim})
+			// The static node has been unhealthy longer, so it scores higher and is evaluated first.
+			markUnhealthy(staticNode)
+			env.Clock.Step(10 * time.Minute)
+			markUnhealthy(dynamicNode)
+			env.Clock.Step(31 * time.Minute)
+			erroring := &instanceTypesErrorCloudProvider{CloudProvider: cloudProvider, nodePools: []string{staticPool.Name}}
+			repairController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+				disruption.WithMethods(disruption.NewRepair(disruption.MakeConsolidation(env.Clock, cluster, env.Client, prov, erroring, recorder, queue))))
+
+			ExpectSingletonReconciled(ctx, repairController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(dynamicNodeClaim.Name))
+		})
+
+		It("should block with the full-reservations reason when the static NodePool is NotReady", func() {
+			withReservation(0)
+			nodePool := reservedStaticNodePool(v1.CapacityTypeReserved)
+			nodePool.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "NotReady", "NotReady")
+			repairReservedNode(nodePool)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+		})
+
+		// A node whose reservation is no longer offered frees no slot a refill could launch into, and a pre-spun
+		// replacement can't launch into the full reservations either, so it's blocked.
+		It("should block when the reservation is full and the node's reservation is no longer offered", func() {
+			withReservation(0)
+			repairNodeInReservation(reservedStaticNodePool(v1.CapacityTypeReserved), "r-canceled")
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+		})
+
+		It("should block when the node's full reservation is unavailable", func() {
+			withReservation(0)
+			mostExpensiveInstance.Offerings[len(mostExpensiveInstance.Offerings)-1].Available = false
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved))
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+		})
+
+		// Only a reserved node holds a reservation slot, whatever reservation label it carries.
+		It("should block a non-reserved node carrying a stale reservation label when the reservations are full", func() {
+			withReservation(0)
+			nodePool := reservedStaticNodePool(v1.CapacityTypeReserved)
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:              nodePool.Name,
+				corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeOnDemand,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				cloudprovider.ReservationIDLabel: reservationID,
+			}}})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			markUnhealthy(node)
+			env.Clock.Step(31 * time.Minute)
+			ExpectSingletonReconciled(ctx, repairController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+		})
+
+		It("should replace-first when the reservation has capacity", func() {
+			withReservation(1)
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved))
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+		})
+
+		// GetInstanceTypes is NodeClass-scoped, so the full reservation only blocks a replacement when the template's
+		// requirements exclude every other offering. Allowing on-demand leaves a launchable fallback.
+		It("should replace-first when the template allows a non-reserved fallback", func() {
+			withReservation(0)
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+		})
+
+		It("should replace-first regardless of the reservation when TerminateFirstRepair is disabled", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(false)}}))
+			withReservation(0)
+			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved))
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+		})
 	})
 })

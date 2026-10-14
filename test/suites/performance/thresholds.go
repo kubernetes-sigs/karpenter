@@ -28,14 +28,14 @@ import (
 // Providers can override individual performance thresholds without patching the
 // tests, via per-test-case JSON in the KARPENTER_PERF_THRESHOLDS environment
 // variable, keyed by "<testCase>/<phase>", e.g.
-//   {"basic/scaleOut": {"memory_mb": 400, "cpu_cores": 1.2, "total_time_minutes": 3}}
+//   {"basic/scaleOut": {"heap_mb": 200, "cpu_cores": 1.2, "total_time_minutes": 3}}
 // An override wins for the metric it sets; otherwise the inline base default is
 // used.
 
 // thresholdOverride is the per-test-case, per-metric absolute override. A nil
 // field means "no override for this metric; use the inline base default".
 type thresholdOverride struct {
-	MemoryMB         *float64 `json:"memory_mb,omitempty"`          // peak memory upper bound, MB
+	HeapMB           *float64 `json:"heap_mb,omitempty"`            // P95 Go live heap upper bound, MB
 	CPUCores         *float64 `json:"cpu_cores,omitempty"`          // avg CPU upper bound, cores
 	TotalTimeMinutes *float64 `json:"total_time_minutes,omitempty"` // total time upper bound, minutes
 	CPUUtil          *float64 `json:"cpu_util,omitempty"`           // reserved CPU utilization lower bound, fraction
@@ -79,9 +79,9 @@ func override(key string) (thresholdOverride, bool) {
 	return o, ok
 }
 
-func MemoryThreshold(key string, base float64) float64 {
-	if o, ok := override(key); ok && o.MemoryMB != nil {
-		return *o.MemoryMB
+func HeapThreshold(key string, base float64) float64 {
+	if o, ok := override(key); ok && o.HeapMB != nil {
+		return *o.HeapMB
 	}
 	return base
 }

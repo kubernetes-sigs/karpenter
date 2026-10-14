@@ -41,7 +41,7 @@ spec:
         type: {{ .type | Quote }}
       {{ end }}
       {{ range .status.conditions }}
-      {{ if eq .type "KWOKUnhealthy" }}
+      {{ if or (eq .type "KWOKUnhealthy") (eq .type "KWOKRebootRequired") }}
       - lastHeartbeatTime: {{ $now | Quote }}
         lastTransitionTime: {{ .lastTransitionTime | Quote }}
         message: {{ .message | Quote }}

@@ -29,7 +29,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -55,49 +54,49 @@ const (
 // terminating workload-bearing nodes, orders candidates by rank + age/τ, and is vetoed by do-not-repair.
 type Repair struct {
 	consolidation
-	policyMatcher      *health.RepairPolicyMatcher
-	rebootHistory      *RebootHistory
-	decisionLogMonitor *pretty.ChangeMonitor
+	policyMatcher *health.RepairPolicyMatcher
+	rebootHistory *RebootHistory
 }
 
-// NewRepair validates and compiles the provider's complete repair policy set before constructing the method. It panics
-// when the provider defines no policies or the complete set is invalid.
+// NewRepair constructs the repair method around the matcher cluster state matches Nodes with. It panics when cluster
+// state has none, since health.NewRepairPolicyMatcher only returns nil when node repair is disabled or replaced by --legacy-node-repair.
 func NewRepair(c consolidation) *Repair {
-	policies := c.cloudProvider.RepairPolicies()
-	if len(policies) == 0 {
-		panic("node repair requires the cloud provider to define RepairPolicies, but it defines none")
-	}
-	policyMatcher, err := health.NewRepairPolicyMatcher(policies, sets.New(cloudprovider.ReplaceNode, cloudprovider.RebootNode))
-	if err != nil {
-		panic(fmt.Sprintf("node repair requires valid RepairPolicies: %v", err))
+	policyMatcher := c.cluster.RepairPolicyMatcher()
+	if policyMatcher == nil {
+		panic("node repair requires cluster state built with a repair policy matcher")
 	}
 	return &Repair{
-		consolidation:      c,
-		policyMatcher:      policyMatcher,
-		rebootHistory:      newRebootHistory(c.clock),
-		decisionLogMonitor: pretty.NewChangeMonitor(),
+		consolidation: c,
+		policyMatcher: policyMatcher,
+		rebootHistory: newRebootHistory(c.clock),
 	}
 }
 
 // ShouldDisrupt is a predicate that filters candidates to nodes that have an unhealthy condition matching a
-// RepairPolicy, have waited past that policy's toleration, and are not vetoed by the do-not-repair annotation.
+// RepairPolicy, have waited past that policy's toleration, and are not vetoed by the do-not-repair annotation. A vetoed
+// node that repair would otherwise act on (a RepairPolicy is eligible) is reported with a Blocked event.
 func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
-	// Repair is behind the NodeRepair feature gate, matching the old node.health controller's gating.
-	if !options.FromContext(ctx).FeatureGates.NodeRepair {
+	// Repair is behind the NodeRepair feature gate, and --legacy-node-repair replaces it with the node.health controller.
+	if !options.FromContext(ctx).FeatureGates.NodeRepair || options.FromContext(ctx).LegacyNodeRepair {
 		return false
 	}
 	// A disruption candidate always has a registered Node; a nil here is an invariant violation, so fail loud.
 	if c.Node == nil {
 		panic(fmt.Sprintf("repair candidate has no Node: %#v", c))
 	}
-	// do-not-repair is the operator's escape hatch: it blocks all repair on this node, whatever the drain bound.
-	// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424).
-	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
+	// Cluster state matches the Node against the repair policies as it changes; only the toleration is resolved here.
+	c.RepairPolicyResult = c.GetRepairResult(r.clock.Now())
+	// Resolve rejects an empty Action, so this also skips healthy Nodes and those still within toleration.
+	if !r.rebootHistory.Resolve(c) {
 		return false
 	}
-	now := r.clock.Now()
-	c.RepairPolicyResult = r.evaluate(ctx, c.Node, now)
-	if !r.rebootHistory.Resolve(c) {
+	// do-not-repair is the operator's escape hatch: it blocks all repair on this node, whatever the drain bound. It's
+	// checked once a policy is eligible (its toleration has elapsed), so the veto is reported only from then on, and
+	// ahead of the drain-bound check, which it overrides.
+	// TODO: revisit whether do-not-disrupt should also imply do-not-repair (kubernetes-sigs/karpenter#2424).
+	if c.Annotations()[v1.DoNotRepairAnnotationKey] == "true" {
+		r.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim,
+			fmt.Sprintf("repair is blocked through the %q annotation", v1.DoNotRepairAnnotationKey))...)
 		return false
 	}
 	if c.hasPodBlockers && c.RepairPolicyResult.TerminationGracePeriod == nil && c.NodeClaim.Spec.TerminationGracePeriod == nil {
@@ -108,43 +107,29 @@ func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	return true
 }
 
-func (r *Repair) evaluate(ctx context.Context, node *corev1.Node, now time.Time) health.RepairResult {
-	result := r.policyMatcher.Evaluate(node, now)
-	if result.Action == "" {
-		return result
-	}
-	values := []any{
-		"condition", result.Condition,
-		"status", result.ConditionStatus,
-		"reason", result.Reason,
-		"reason-regex", result.ReasonRegex,
-		"fallback", result.Fallback,
-		"action", result.Action,
-		"eligible-at", result.SelectedEligibleAt,
-	}
-	if result.TerminationGracePeriod != nil {
-		values = append(values,
-			"termination-grace-period", *result.TerminationGracePeriod,
-			"termination-grace-period-condition", result.TerminationGracePeriodCondition,
-		)
-	}
-	if !r.decisionLogMonitor.HasChanged(string(node.UID), values) {
-		return result
-	}
-	log.FromContext(ctx).V(1).WithValues(append([]any{
-		"Node", klog.KObj(node),
-	}, values...)...).Info("evaluated repair policy")
-	return result
-}
-
 // ComputeCommands orders eligible candidates by the repair score and returns one command for the highest-scoring
 // candidate whose NodePool has budget. Workload-bearing candidates verify rescheduling capacity and pre-spin any
 // required replacement; empty candidates may produce a delete-only command. Only one command per pass, mirroring drift.
 //
-//nolint:gocyclo // Static and dynamic replacement flows are intentionally kept inline.
+// It logs the resolved repair decision for each candidate it acts on, which records why that policy and drain bound won.
 func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
+	cmds, err := r.computeCommands(ctx, disruptionBudgetMapping, candidates...)
+	for _, cmd := range cmds {
+		for _, c := range cmd.Candidates {
+			log.FromContext(ctx).WithValues(append([]any{"Node", klog.KObj(c.Node)}, c.RepairPolicyResult.LogValues()...)...).Info("selected repair policy")
+		}
+	}
+	return cmds, err
+}
+
+//nolint:gocyclo // Static and dynamic replacement flows are intentionally kept inline.
+func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
+	// We use a fixed value for now so all candidates get the same value
+	// This is important for repair since it scores candidates based on their current age (calculated as now - eligibleAt).
+	// We don't want the order in which candidates are evaluated to affect their age.
+	now := r.clock.Now()
 	sort.SliceStable(candidates, func(i, j int) bool {
-		si, sj := candidates[i].RepairPolicyResult.Score, candidates[j].RepairPolicyResult.Score
+		si, sj := candidates[i].RepairPolicyResult.ScoreAt(now), candidates[j].RepairPolicyResult.ScoreAt(now)
 		if si != sj {
 			return si > sj // higher score repairs first
 		}
@@ -164,7 +149,9 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 				fmt.Sprintf("more than %s of nodes in nodepool %q are unhealthy", repairUnhealthyThreshold, candidate.NodePool.Name))...)
 			continue
 		}
-		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
+		// Budgets only count initialized nodes, since an uninitialized node runs no workload to protect, so repairing one
+		// neither needs nor consumes budget.
+		if candidate.Initialized() && disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 			continue
 		}
 		// Repair admits nodes with blocking (PDB / do-not-disrupt) pods only on the promise of this drain bound, so it
@@ -197,26 +184,46 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 				continue
 			}
 
+			nct := pscheduling.NewNodeClaimTemplate(np)
+			// Only a candidate holding a slot in a still-offered reservation frees a slot the refill can use, so only it can
+			// terminate first on full reservations; any other candidate can't be replaced either way, so it's blocked.
+			// Checked only with terminate-first enabled, since without it there's nothing to do but replace first.
+			var reservationsFull bool
+			if terminateFirstEnabled {
+				full, offered, err := staticReservations(ctx, r.cloudProvider, np, nct)
+				// Other candidates don't depend on this one, so one NodePool's failure doesn't stop repair for the rest.
+				if err != nil {
+					log.FromContext(ctx).Error(err, "skipping repair candidate, failed checking capacity reservations")
+					continue
+				}
+				if full && !holdsOfferedReservation(candidate, offered) {
+					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool's capacity reservations are full and cannot stage a replacement")...)
+					continue
+				}
+				reservationsFull = full
+			}
 			limit, ok := np.Spec.Limits[resources.Node]
 			nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
 			// Atomic accounting, not a naive count: deleting/already-reserved nodes would otherwise let repair burst
 			// past limits.nodes when commands race. A zero result reserves nothing, so the delete-only path leaks no
-			// reservation; a non-zero result's slot is consumed by the replacement staged below.
-			if r.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, 1) == 0 {
+			// reservation; a non-zero result's slot is consumed by the replacement staged below. Full reservations are
+			// checked first so the delete-only path never takes a slot.
+			if reservationsFull || r.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, 1) == 0 {
 				// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand
 				// the workload with no replacement.
 				refillable := np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
 				if !terminateFirstEnabled || !refillable {
-					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool is at its node limit and cannot stage a replacement")...)
+					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, lo.Ternary(reservationsFull,
+						"static NodePool's capacity reservations are full and cannot stage a replacement",
+						"static NodePool is at its node limit and cannot stage a replacement"))...)
 					continue
 				}
 				return []Command{{
-					Candidates:          []*Candidate{candidate},
-					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-					TerminateFirst:      true,
+					Candidates:           []*Candidate{candidate},
+					PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+					TerminateFirstReason: lo.Ternary(reservationsFull, TerminateFirstNoReservedCapacity, TerminateFirstStaticAtLimit),
 				}}, nil
 			}
-			nct := pscheduling.NewNodeClaimTemplate(np)
 			result := pscheduling.Results{NewNodeClaims: []*pscheduling.NodeClaim{{NodeClaimTemplate: *nct}}}
 			return []Command{{
 				Candidates:          []*Candidate{candidate},
@@ -237,10 +244,10 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 		if terminateFirst {
 			// Carry the Results (no Replacements) so nodes that can absorb the freed pods get nominated.
 			return []Command{{
-				Candidates:          []*Candidate{candidate},
-				Results:             results,
-				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-				TerminateFirst:      true,
+				Candidates:           []*Candidate{candidate},
+				Results:              results,
+				PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+				TerminateFirstReason: TerminateFirstNoReservedCapacity,
 			}}, nil
 		}
 		if !results.AllNonPendingPodsScheduled() {

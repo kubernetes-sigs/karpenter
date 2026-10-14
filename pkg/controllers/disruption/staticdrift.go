@@ -21,6 +21,7 @@ import (
 	"math"
 
 	"github.com/samber/lo"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -85,6 +86,28 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 			int64(len(npCandidates)),
 		})
 
+		// Full reservations are checked before reserving limits.nodes so the delete-only path never takes a slot. Checked
+		// only with terminate-first enabled, since without it there's nothing to do but replace first.
+		nct := scheduling.NewNodeClaimTemplate(np)
+		if options.FromContext(ctx).FeatureGates.TerminateFirstDrift {
+			reservationsFull, offered, err := staticReservations(ctx, d.cloudprovider, np, nct)
+			// Other NodePools don't depend on this one, and returning here would discard their commands while keeping the
+			// limits.nodes slots they reserved.
+			if err != nil {
+				log.FromContext(ctx).Error(err, "skipping static nodepool, failed checking capacity reservations")
+				continue
+			}
+			if reservationsFull {
+				// Only a candidate holding a slot in a still-offered reservation frees a slot the refill can use, so it goes
+				// first and is the only one that can terminate first; the rest can't be replaced either way.
+				holdsSlot := func(c *Candidate) bool { return holdsOfferedReservation(c, offered) }
+				eligible, rest := lo.FilterReject(npCandidates, func(c *Candidate, _ int) bool { return holdsSlot(c) })
+				cmds = append(cmds, d.unreplaceableCommands(ctx, np, append(eligible, rest...)[:maxDrifts], holdsSlot, TerminateFirstNoReservedCapacity,
+					"static NodePool's capacity reservations are full and cannot stage a replacement")...)
+				continue
+			}
+		}
+
 		// Acquire limits from cluster state without bursting over. maxAllowedDrifts is how many candidates we can drift
 		// while staging a replacement for each without exceeding the NodePool's node limit; 0 means the pool is at its
 		// limit and can't stage any replacement.
@@ -96,28 +119,15 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		// drain still honors PDBs and is bounded by TGP. When the pool has room under its limit, fall through to the
 		// normal replace-first path below. No replacement is reserved for terminate-first, so the reservation above is a
 		// no-op in that case (it reserved nothing).
-		if options.FromContext(ctx).FeatureGates.TerminateFirstDrift && maxAllowedDrifts == 0 {
-			for _, c := range npCandidates[:maxDrifts] {
-				cmds = append(cmds, Command{
-					Candidates:          []*Candidate{c},
-					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{c}),
-					TerminateFirst:      true,
-				})
-			}
-			continue
-		}
-
 		// We will not get a negative value here
 		if maxAllowedDrifts == 0 {
-			for _, c := range npCandidates[:maxDrifts] {
-				d.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim, "static NodePool is at its node limit and cannot stage a replacement")...)
-			}
+			cmds = append(cmds, d.unreplaceableCommands(ctx, np, npCandidates[:maxDrifts], func(*Candidate) bool { return true }, TerminateFirstStaticAtLimit,
+				"static NodePool is at its node limit and cannot stage a replacement")...)
 			continue
 		}
 
 		// Select candidates up to maxAllowedDrifts
 		for _, c := range npCandidates[:maxAllowedDrifts] {
-			nct := scheduling.NewNodeClaimTemplate(np)
 			result := scheduling.Results{
 				NewNodeClaims: []*scheduling.NodeClaim{{NodeClaimTemplate: *nct}},
 			}
@@ -130,6 +140,28 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		}
 	}
 	return cmds, nil
+}
+
+// unreplaceableCommands handles a NodePool's candidates when it can't stage a replacement: with TerminateFirstDrift, each
+// candidate that canTerminateFirst gets a delete-only command; every other candidate is reported blocked.
+func (d *StaticDrift) unreplaceableCommands(ctx context.Context, np *v1.NodePool, candidates []*Candidate, canTerminateFirst func(*Candidate) bool,
+	reason TerminateFirstReason, blockedReason string) []Command {
+	// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand the workload
+	// with no replacement.
+	terminateFirst := options.FromContext(ctx).FeatureGates.TerminateFirstDrift && np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
+	var cmds []Command
+	for _, c := range candidates {
+		if terminateFirst && canTerminateFirst(c) {
+			cmds = append(cmds, Command{
+				Candidates:           []*Candidate{c},
+				PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{c}),
+				TerminateFirstReason: reason,
+			})
+			continue
+		}
+		d.recorder.Publish(disruptionevents.Blocked(c.Node, c.NodeClaim, blockedReason)...)
+	}
+	return cmds
 }
 
 func (d *StaticDrift) Reason() v1.DisruptionReason {

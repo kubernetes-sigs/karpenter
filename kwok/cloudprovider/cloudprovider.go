@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -149,9 +150,24 @@ func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	return "", nil
 }
 
+// Reboot simulates an in-place restart. KWOK has no instance to restart, so it gives the Node a new boot ID,
+// which is what the reboot controller observes as proof of a new boot; the simulated kubelet never goes NotReady,
+// so the node rejoins as soon as the new boot is observed. The boot ID derives from the operationID, so a retried
+// request for the same reboot is idempotent.
 func (c CloudProvider) Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) error {
-	// KWOK simulates nodes as Kubernetes Node objects; there is no real instance to restart.
-	return cloudprovider.NewNodeRebootNotImplementedError()
+	if nodeClaim.Status.NodeName == "" {
+		return serrors.Wrap(fmt.Errorf("rebooting nodeclaim, node is not registered"), "NodeClaim", klog.KObj(nodeClaim))
+	}
+	node := &corev1.Node{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClaim.Status.NodeName}, node); err != nil {
+		return fmt.Errorf("rebooting node, %w", err)
+	}
+	stored := node.DeepCopy()
+	node.Status.NodeInfo.BootID = fmt.Sprintf("kwok-%s", operationID)
+	if err := c.kubeClient.Status().Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+		return fmt.Errorf("rebooting node, %w", err)
+	}
+	return nil
 }
 
 func (c CloudProvider) Name() string {
@@ -171,6 +187,13 @@ func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 // hack/kwok/stages/node-heartbeat-with-lease.yaml stage template.
 const KWOKUnhealthyCondition corev1.NodeConditionType = "KWOKUnhealthy"
 
+// KWOKRebootRequiredCondition is a simulated reboot-clearable fault that KWOK's repair policies remediate with a
+// reboot, so the reboot action can be exercised end-to-end on KWOK. Like KWOKUnhealthyCondition, the
+// node-heartbeat-with-lease stage re-emits it while present. It's a separate condition type rather than a
+// KWOKUnhealthy reason because, when several policies are eligible for one condition, repair takes the most
+// disruptive action, so a reboot reason would always lose to KWOKUnhealthy's replace policy.
+const KWOKRebootRequiredCondition corev1.NodeConditionType = "KWOKRebootRequired"
+
 func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{
 		// Supported Kubelet Node Conditions
@@ -189,8 +212,9 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
 			Action:                 cloudprovider.ReplaceNode,
 		},
-		// Simulated unhealthy condition (see KWOKUnhealthyCondition). A short toleration and an explicit termination
-		// grace period keep e2e repair tests fast and let them exercise the drain/TGP path deterministically.
+		// Simulated faults (see KWOKUnhealthyCondition and KWOKRebootRequiredCondition). A short toleration and an explicit
+		// termination grace period keep e2e repair tests fast and let them exercise the drain/TGP path deterministically.
+		// Ready=False is the policy set's single default fallback, so these carry a ReasonRegex and an explicit Action.
 		{
 			ConditionType:          KWOKUnhealthyCondition,
 			ConditionStatus:        corev1.ConditionTrue,
@@ -198,6 +222,14 @@ func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 			TolerationDuration:     30 * time.Second,
 			TerminationGracePeriod: lo.ToPtr(45 * time.Second),
 			Action:                 cloudprovider.ReplaceNode,
+		},
+		{
+			ConditionType:          KWOKRebootRequiredCondition,
+			ConditionStatus:        corev1.ConditionTrue,
+			ReasonRegex:            ".*",
+			TolerationDuration:     30 * time.Second,
+			TerminationGracePeriod: lo.ToPtr(time.Minute),
+			Action:                 cloudprovider.RebootNode,
 		},
 	}
 }

@@ -54,4 +54,7 @@ const (
 	InsufficientCapacityError = "InsufficientCapacityError"
 	UnregisteredTaintMissing  = "UnregisteredTaintMissing"
 	NodeClassNotReady         = "NodeClassNotReady"
+
+	// state/informer/vpa
+	PredictionTargetUnsupported = "PredictionTargetUnsupported"
 )
