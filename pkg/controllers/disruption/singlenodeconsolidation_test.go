@@ -211,6 +211,31 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeTrue())
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool3.Name)).To(BeTrue())
 		})
+
+		It("should abandon a candidate whose scheduling simulation exceeds the timeout", func() {
+			// The fake clock never advances, so the between-candidate wall-clock check can't fire; only the
+			// context deadline on the scheduling simulation can stop this pass.
+			disruption.SingleNodeConsolidationTimeoutDuration = time.Nanosecond
+			candidates, err := createCandidates(1.0, 3)
+			Expect(err).To(BeNil())
+
+			budgetMapping := map[string]int{
+				nodePool1.Name: 30,
+				nodePool2.Name: 30,
+				nodePool3.Name: 30,
+			}
+
+			cmds, err := consolidation.ComputeCommands(ctx, budgetMapping, candidates...)
+			Expect(err).To(BeNil())
+			Expect(cmds).To(BeEmpty())
+
+			// a timed-out pass must not mark the cluster consolidated, and since the first candidate's simulation
+			// timed out, no nodepool was actually evaluated
+			Expect(consolidation.IsConsolidated()).To(BeFalse())
+			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool1.Name)).To(BeTrue())
+			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeTrue())
+			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool3.Name)).To(BeTrue())
+		})
 	})
 })
 
