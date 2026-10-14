@@ -42,9 +42,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
@@ -141,6 +143,9 @@ var _ = BeforeEach(func() {
 	// happen before the disruptionController and queue below, which capture prov. Mirrors the provisioning suite.
 	draController = deviceallocation.NewController(env.Client)
 	store = prediction.NewStore(env.Client)
+	metaScheme := runtime.NewScheme()
+	Expect(metav1.AddMetaToScheme(metaScheme)).To(Succeed())
+	Expect(store.RegisterTargetKinds(ctx, &informertest.FakeInformers{Scheme: metaScheme}, prediction.SupportedTargets.UnsortedList()...)).To(Succeed())
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), store)
 
 	// Ensure that we reset the disruption controller's methods after each test run

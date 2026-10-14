@@ -18,19 +18,14 @@ package informer
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
-	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
-	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -145,12 +140,8 @@ func (c *VPAController) Name() string {
 }
 
 func (c *VPAController) Register(ctx context.Context, m manager.Manager) error {
-	for _, gvk := range []schema.GroupVersionKind{appsv1.SchemeGroupVersion.WithKind("ReplicaSet"), batchv1.SchemeGroupVersion.WithKind("Job")} {
-		owner := &metav1.PartialObjectMetadata{}
-		owner.SetGroupVersionKind(gvk)
-		if _, err := m.GetCache().GetInformer(ctx, owner); err != nil {
-			return serrors.Wrap(fmt.Errorf("registering owner informer, %w", err), "kind", gvk.Kind)
-		}
+	if err := c.store.RegisterTargetKinds(ctx, m.GetCache(), prediction.SupportedTargets.UnsortedList()...); err != nil {
+		return err
 	}
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
