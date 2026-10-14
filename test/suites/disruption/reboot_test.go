@@ -160,7 +160,9 @@ var _ = Describe("Reboot", func() {
 		Expect(env.Client.Patch(env, node, client.MergeFrom(stored))).To(Succeed())
 		env.ExpectRebootFaultInjected(node)
 		Eventually(func(g Gomega) {
-			g.Expect(rebooting(g, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting).Reason).To(Equal(v1.RebootReasonIssued))
+			cond := rebooting(g, nodeClaim).StatusConditions().Get(v1.ConditionTypeRebooting)
+			g.Expect(cond).ToNot(BeNil())
+			g.Expect(cond.Reason).To(Equal(v1.RebootReasonIssued))
 		}).Should(Succeed())
 
 		// The node never shows a new boot, so the reboot fails once the 20m observation window from issuance elapses,
