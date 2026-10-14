@@ -301,7 +301,7 @@ func (s *Store) resolveWorkload(ctx context.Context, pod *corev1.Pod, cachedOwne
 		return WorkloadReference{}, false
 	}
 	if workload, ok := cachedOwnerResolutions[ref.UID]; ok {
-		return workload, true
+		return workload, workload != WorkloadReference{}
 	}
 	var workloadRef *metav1.OwnerReference
 	switch ref.Kind {
@@ -350,6 +350,9 @@ func (s *Store) resolveWorkload(ctx context.Context, pod *corev1.Pod, cachedOwne
 		}
 	}
 	if !s.targetKinds.Has(workload.GroupKind) {
+		if cachedOwnerResolutions != nil {
+			cachedOwnerResolutions[ref.UID] = WorkloadReference{}
+		}
 		return WorkloadReference{}, false
 	}
 	if cachedOwnerResolutions != nil {

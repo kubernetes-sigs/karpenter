@@ -401,19 +401,30 @@ var _ = Describe("PredictedRequests", func() {
 		Expect(result.Cpu().Cmp(resource.MustParse("300m"))).To(Equal(0))
 	})
 
-	It("should return currentRequests when ReplicaSet owner is not found", func() {
-		store.Set(types.NamespacedName{Name: "dummy"}, prediction.WorkloadReference{NamespacedName: types.NamespacedName{Name: "unrelated"}}, &prediction.Prediction{
-			Containers: map[string]corev1.ResourceList{"c": {corev1.ResourceCPU: resource.MustParse("1")}},
-		}, env.Clock.Now())
+	It("should return currentRequests when ReplicaSet owner is not found and keep them for the run", func() {
+		rs := test.ReplicaSet()
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "ghost-rs-deleted", Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: "rs-uid", Controller: lo.ToPtr(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
 			},
 		})
-		result := store.PredictedRequests(ctx, nil, pod)
+		store.Set(
+			types.NamespacedName{Namespace: "default", Name: "vpa-web"},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
+			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
+				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("500m")},
+			}},
+			env.Clock.Now(),
+		)
+		cachedOwnerResolutions := prediction.OwnerResolutions{}
+		result := store.PredictedRequests(ctx, cachedOwnerResolutions, pod)
+		Expect(result.Cpu().Cmp(resource.MustParse("100m"))).To(Equal(0))
+
+		ExpectApplied(ctx, env.Client, rs)
+		result = store.PredictedRequests(ctx, cachedOwnerResolutions, pod)
 		Expect(result.Cpu().Cmp(resource.MustParse("100m"))).To(Equal(0))
 	})
 
