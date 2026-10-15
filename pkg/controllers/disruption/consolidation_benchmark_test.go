@@ -52,31 +52,8 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
-// Benchmarks target the N-candidate iteration inside
-// SingleNodeConsolidation.ComputeCommands and the binary search inside
-// MultiNodeConsolidation.ComputeCommands. These are the pathological loops
-// identified in kubernetes-sigs/karpenter#2972.
-//
-// This file uses controller-runtime's in-memory fake client with an index
-// on spec.nodeName so that cluster.populateResourceRequests scans only pods
-// for the target node instead of the full pod list. That keeps setup at 1000
-// nodes in the sub-minute range instead of the tens of minutes an envtest
-// apiserver + etcd round-trip per object costs.
-//
-// The maximum cluster size across all benches is populated once and all sub-
-// sizes are prefix-slices of the same candidate list, amortizing setup cost.
-//
-// To run locally:
-//   go test -tags=test_performance -run='^$' \
-//       -bench='BenchmarkSingleNodeConsolidation|BenchmarkMultiNodeConsolidation' \
-//       -benchtime=1x -count=1 ./pkg/controllers/disruption/...
-
 const benchMaxNodes = 1000
 
-// Package-scoped bench context distinct from the ginkgo suite variables in
-// suite_test.go so a `go test -tags=test_performance -bench=. -run=1` invocation
-// runs only the benches, does not fire Ginkgo's BeforeSuite, and does not depend
-// on envtest.
 var (
 	benchOnce       sync.Once
 	benchCtx        context.Context
@@ -103,13 +80,10 @@ func setupBenchOnce(b *testing.B) {
 	b.Helper()
 	log.SetLogger(logging.NopLogger)
 	benchClock = clocktesting.NewFakeClock(time.Now())
-	// Bench context lives for the whole test binary; no cancel needed.
 	benchCtx = TestContextWithLogger(b)
 	benchCtx = injection.WithControllerName(benchCtx, "disruption-bench")
 	benchCtx = options.ToContext(benchCtx, test.Options())
 
-	// karpenter/v1 and test/v1alpha1 register themselves with scheme.Scheme
-	// in their init() functions (blank-imported above).
 	benchClient = fakecr.NewClientBuilder().
 		WithScheme(scheme.Scheme).
 		WithStatusSubresource(&v1.NodeClaim{}, &v1.NodePool{}).
@@ -130,15 +104,6 @@ func setupBenchOnce(b *testing.B) {
 	benchInstType = pickExpensiveOnDemand(benchCP.InstanceTypes)
 	off := benchInstType.Offerings.Available()[0]
 
-	// Force computeConsolidation to return NoOp for every candidate by
-	// restricting the CloudProvider to the single instance type that every
-	// bench node already runs on. With no cheaper (or same-priced, different)
-	// type in the catalog, filterByPrice yields an empty set and consolidation
-	// short-circuits to NoOp. SingleNodeConsolidation then hits its NoOp
-	// continue branch in ComputeCommands and iterates through all N
-	// candidates, which is the pathological loop this bench measures.
-	// MultiNodeConsolidation still exercises firstNConsolidationOption's
-	// log2(N) binary search: each NoOp result contracts the window.
 	benchCP.InstanceTypes = []*cloudprovider.InstanceType{benchInstType}
 
 	benchNodePools = createBenchNodePools(b, 3)
@@ -150,8 +115,6 @@ func setupBenchOnce(b *testing.B) {
 	benchNodeClaims, benchNodes = createBenchClusterState(b, benchMaxNodes, benchNodePools, benchInstType, off, rs)
 }
 
-// pickExpensiveOnDemand keeps consolidation's filterByPrice from ever returning
-// empty by handing it the highest-priced on-demand type as the starting point.
 func pickExpensiveOnDemand(its []*cloudprovider.InstanceType) *cloudprovider.InstanceType {
 	ods := lo.Filter(its, func(it *cloudprovider.InstanceType, _ int) bool {
 		return lo.ContainsBy(it.Offerings.Available(), func(o *cloudprovider.Offering) bool {
@@ -277,13 +240,6 @@ func buildBenchPod(idx int, nodeName string, rs client.Object, antiSel metav1.La
 			LabelSelector: &antiSel,
 			TopologyKey:   corev1.LabelHostname,
 		}},
-		// Request just under the full node allocatable so exactly one pod fits
-		// per node. This starves the consolidation scheduler of room on any
-		// existing node, forcing SimulateScheduling to propose a new NodeClaim
-		// for every single-node consolidation candidate. Combined with the
-		// single-instance-type CP above, filterByPrice then removes the sole
-		// (same-priced) replacement option and computeConsolidation returns
-		// NoOp per candidate, which is the loop shape this bench measures.
 		ResourceRequirements: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("30")},
 		},
@@ -292,8 +248,6 @@ func buildBenchPod(idx int, nodeName string, rs client.Object, antiSel metav1.La
 	return pod
 }
 
-// candidatesForBench resets cluster.consolidated so GetCandidates re-emits
-// the shared cluster's nodes every iteration; caller times only ComputeCommands.
 func candidatesForBench(b *testing.B, m disruption.Method, numNodes int) (map[string]int, []*disruption.Candidate) {
 	b.Helper()
 	benchCluster.MarkUnconsolidated()
@@ -338,10 +292,6 @@ func benchmarkSingleNodeConsolidation(b *testing.B, numNodes int) {
 	}
 }
 
-// BenchmarkMultiNodeConsolidation_ComputeCommands is table-driven to surface
-// the log2(N) shape of firstNConsolidationOption's binary search across a
-// range of candidate counts. The MultiNode ComputeCommands path caps its
-// batch at 100 (maxParallel), so counts above 100 exercise the same window.
 func BenchmarkMultiNodeConsolidation_ComputeCommands(b *testing.B) {
 	for _, numNodes := range []int{10, 50, 100} {
 		b.Run(fmt.Sprintf("%d", numNodes), func(sub *testing.B) {
