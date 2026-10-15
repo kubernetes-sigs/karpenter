@@ -18,6 +18,7 @@ package scheduling
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
@@ -107,6 +108,10 @@ func (i *NodeClaimTemplate) resolveCustomLabelsFromRequirements() map[string]str
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
+	// This internal annotation is derived from offerings, never inherited from the NodePool template.
+	// Templates may share annotation maps when replacement claims are created in parallel.
+	i.Annotations = lo.Assign(i.Annotations)
+	delete(i.Annotations, v1.CapacityTypeTransitionsAnnotationKey)
 	// Inject instanceType requirements for NodeClaims belonging to dynamic NodePool
 	// For static we let cloudprovider.Create()
 	if !i.IsStaticNodeClaim {
@@ -116,17 +121,26 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 			return i.Name
 		})...))
 
-		// Collect launchable capacity types from the selected instance types. Use Launchable (not Available) so a
+		// Collect launchable capacity types and their possible post-launch transitions. Use Launchable (not Available) so a
 		// full-but-healthy reservation (Available, ReservationCapacity=0) doesn't contribute `reserved` to the
 		// capacity-type requirement — otherwise we could build a NodeClaim that includes `reserved` and then can't
 		// launch into it.
+		transitions := sets.New[string]()
 		capacityTypes := lo.Uniq(lo.FlatMap(instanceTypes, func(it *cloudprovider.InstanceType, _ int) []string {
-			return lo.Map(it.Offerings.Launchable().Compatible(i.Requirements), func(o *cloudprovider.Offering, _ int) string {
-				return o.CapacityType()
+			return lo.FlatMap(it.Offerings.Launchable().Compatible(i.Requirements), func(o *cloudprovider.Offering, _ int) []string {
+				if len(o.CapacityTypeTransitions) > 0 {
+					transitions.Insert(o.CapacityTypes()...)
+				}
+				return o.CapacityTypes()
 			})
 		}))
 		if len(capacityTypes) > 0 {
 			i.Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityTypes...))
+		}
+		if transitions.Len() > 0 {
+			i.Annotations = lo.Assign(i.Annotations, map[string]string{
+				v1.CapacityTypeTransitionsAnnotationKey: strings.Join(sets.List(transitions), ","),
+			})
 		}
 
 		if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {

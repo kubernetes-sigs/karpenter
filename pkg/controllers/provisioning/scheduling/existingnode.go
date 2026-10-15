@@ -19,9 +19,11 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -105,6 +107,9 @@ func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData
 	if err = n.requirements.Compatible(podData.Requirements); err != nil {
 		return nil, nil, err
 	}
+	if !cloudprovider.CapacityTypeTransitionsCompatible(podData.Requirements, n.capacityTypeTransitions()) {
+		return nil, nil, fmt.Errorf("pod requirements do not tolerate capacity-type transitions")
+	}
 	// avoid creating our temp set of requirements until after we've ensured that at least
 	// the pod is compatible
 	baseRequirements := scheduling.NewRequirements(n.requirements.Values()...)
@@ -152,6 +157,9 @@ func (n *ExistingNode) tryVolumeAlternative(pod *v1.Pod, podData *PodData, baseR
 	// This ensures the existing node satisfies the selected volume topology constraints,
 	// while TSC counting uses pod's original affinity.
 	if volReqs != nil {
+		if !cloudprovider.CapacityTypeTransitionsCompatible(volReqs, n.capacityTypeTransitions()) {
+			return nil, fmt.Errorf("volume requirements do not tolerate capacity-type transitions")
+		}
 		if err := nodeRequirements.Compatible(volReqs); err != nil {
 			return nil, fmt.Errorf("incompatible volume requirements, %w", err)
 		}
@@ -161,15 +169,30 @@ func (n *ExistingNode) tryVolumeAlternative(pod *v1.Pod, podData *PodData, baseR
 	// Check Topology Requirements
 	// NOTE: podData.StrictRequirements does NOT include volume requirements,
 	// ensuring TSC counting uses pod's original affinity.
-	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
+	topologyNodeRequirements := nodeRequirements
+	if capacityTypes := n.capacityTypeTransitions(); len(capacityTypes) > 0 {
+		topologyNodeRequirements = scheduling.NewRequirements(nodeRequirements.Values()...)
+		topologyNodeRequirements[karpv1.CapacityTypeLabelKey] = scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, capacityTypes...)
+	}
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, topologyNodeRequirements)
 	if err != nil {
 		return nil, err
+	}
+	if !cloudprovider.CapacityTypeTransitionsCompatible(scheduling.NewRequirements(topologyRequirements.Get(karpv1.CapacityTypeLabelKey)), n.capacityTypeTransitions()) {
+		return nil, fmt.Errorf("topology requirements do not tolerate capacity-type transitions")
 	}
 	if err = nodeRequirements.Compatible(topologyRequirements); err != nil {
 		return nil, err
 	}
 	nodeRequirements.Add(topologyRequirements.Values()...)
 	return nodeRequirements, nil
+}
+
+func (n *ExistingNode) capacityTypeTransitions() []string {
+	if value := n.Annotations()[karpv1.CapacityTypeTransitionsAnnotationKey]; value != "" {
+		return strings.Split(value, ",")
+	}
+	return nil
 }
 
 // Add updates the ExistingNode to schedule the pod to this ExistingNode, updating

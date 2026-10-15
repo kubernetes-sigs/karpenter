@@ -162,7 +162,7 @@ type NodeLifecycleHookResult struct {
 type NodeLifecycleHook interface {
 	// Name for the hook.
 	Name() string
-	// Registered returns true if this hook's preconditions are satisfied and can proceed.
+	// Registered returns an empty result and nil error when this hook's preconditions are satisfied.
 	Registered(context.Context, *v1.NodeClaim) (NodeLifecycleHookResult, error)
 }
 
@@ -400,12 +400,12 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 		jPrice := math.MaxFloat64
 
 		for _, of := range its[i].Offerings {
-			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
+			if of.Launchable() && of.IsCompatible(reqs) && of.Price < iPrice {
 				iPrice = of.Price
 			}
 		}
 		for _, of := range its[j].Offerings {
-			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
+			if of.Launchable() && of.IsCompatible(reqs) && of.Price < jPrice {
 				jPrice = of.Price
 			}
 		}
@@ -538,6 +538,12 @@ type Offering struct {
 	Available           bool
 	ReservationCapacity int
 
+	// CapacityTypeTransitions lists additional capacity-type label values the provider may observe after launch.
+	// Requirements still describe the launch market, and Price is the launch price. Transitions neither advertise
+	// launchable reserved capacity nor grant reservation slot credit. Workloads must tolerate every listed value.
+	// For example, a group-targeted On-Demand offering may transition to reserved and back to On-Demand.
+	CapacityTypeTransitions []string
+
 	// CapacityOverride specifies resource overrides for this offering's capacity.
 	// Values are merged with the instance type's base capacity — new keys are added,
 	// existing keys are replaced. If nil, the offering uses the base capacity as-is.
@@ -597,6 +603,36 @@ func (o *Offering) CapacityType() string {
 	return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
 }
 
+// CapacityTypes returns the possible capacity-type labels, including the launch market.
+func (o *Offering) CapacityTypes() []string {
+	return lo.Uniq(append([]string{o.CapacityType()}, o.CapacityTypeTransitions...))
+}
+
+// IsCompatible checks both the launch requirements and all possible post-launch capacity types.
+func (o *Offering) IsCompatible(reqs scheduling.Requirements) bool {
+	return reqs.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) &&
+		CapacityTypeTransitionsCompatible(reqs, o.CapacityTypeTransitions)
+}
+
+// CapacityTypeTransitionsCompatible reports whether requirements tolerate mutable capacity-type labels.
+// Reservation metadata is also mutable and cannot be constrained on these offerings.
+func CapacityTypeTransitionsCompatible(reqs scheduling.Requirements, capacityTypes []string) bool {
+	if len(capacityTypes) == 0 {
+		return true
+	}
+	for _, capacityType := range capacityTypes {
+		if !reqs.Get(v1.CapacityTypeLabelKey).Has(capacityType) {
+			return false
+		}
+	}
+	for label := range ReservedCapacityLabels {
+		if reqs.Has(label) {
+			return false
+		}
+	}
+	return true
+}
+
 func (o *Offering) Zone() string {
 	return o.Requirements.Get(corev1.LabelTopologyZone).Any()
 }
@@ -644,14 +680,14 @@ func (ofs Offerings) Launchable() Offerings {
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering *Offering, _ int) bool {
-		return reqs.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels)
+		return offering.IsCompatible(reqs)
 	})
 }
 
 // HasCompatible returns whether there is a compatible offering based on the passed requirements
 func (ofs Offerings) HasCompatible(reqs scheduling.Requirements) bool {
 	for _, of := range ofs {
-		if reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+		if of.IsCompatible(reqs) {
 			return true
 		}
 	}
@@ -676,12 +712,18 @@ func (ofs Offerings) MostExpensive() *Offering {
 // offerings for the capacity type we will launch with are considered. The following precedence order is used to
 // determine which capacity type is used: reserved, spot, on-demand.
 func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
+	compatible := ofs.Compatible(reqs)
 	for _, ctReqs := range []scheduling.Requirements{
 		ReservedRequirement,
 		SpotRequirement,
 		OnDemandRequirement,
 	} {
-		if compatOfs := ofs.Compatible(reqs).Compatible(ctReqs); len(compatOfs) != 0 {
+		// Capacity-type precedence selects a launch market after workload compatibility has been established.
+		// It must not interpret the market preference as a workload constraint on post-launch transitions.
+		compatOfs := lo.Filter(compatible, func(o *Offering, _ int) bool {
+			return ctReqs.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels)
+		})
+		if len(compatOfs) != 0 {
 			return compatOfs.MostExpensive().Price
 		}
 	}
