@@ -18,7 +18,11 @@ package overlay
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
+
+	"github.com/samber/lo"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"k8s.io/klog/v2"
@@ -54,4 +58,34 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool)
 		}
 	}
 	return its, nil
+}
+
+func (d *decorator) RefreshNodeClaimStates(ctx context.Context, claims []*v1.NodeClaim) (map[string]cloudprovider.NodeClaimState, error) {
+	states, err := cloudprovider.RefreshNodeClaimStates(ctx, d.CloudProvider, claims)
+	states = maps.Clone(states)
+	if !options.FromContext(ctx).FeatureGates.NodeOverlay {
+		return states, err
+	}
+	for _, nc := range claims {
+		s, ok := states[nc.Status.ProviderID]
+		if !ok || s.ObservedAt.IsZero() {
+			continue
+		}
+		labels := lo.Assign(nc.Labels)
+		// Observed absence clears the previous reservation tuple before matching
+		// overlays. A stale reservation-ID label must not price an uncovered node.
+		for key := range cloudprovider.ReservedCapacityLabels {
+			delete(labels, key)
+		}
+		maps.Copy(labels, s.Labels)
+		price, overlayErr := d.store.ApplyNodeClaimPrice(labels, s.Price)
+		if overlayErr != nil {
+			states[nc.Status.ProviderID] = cloudprovider.NodeClaimState{Scope: s.Scope}
+			err = errors.Join(err, overlayErr)
+			continue
+		}
+		s.Price = price
+		states[nc.Status.ProviderID] = s
+	}
+	return states, err
 }

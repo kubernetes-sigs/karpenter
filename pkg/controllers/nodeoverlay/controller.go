@@ -177,6 +177,9 @@ func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *inte
 		c.storeUpdatesForInstanceTypeOverride(temporaryStore, nodePoolList[i], nodePoolToInstanceTypes[nodePoolList[i].Name], overlay)
 	}
 
+	if overlay.Spec.Price != nil || overlay.Spec.PriceAdjustment != nil {
+		temporaryStore.priceOverlays = append(temporaryStore.priceOverlays, *overlay.DeepCopy())
+	}
 	return true
 }
 
@@ -241,7 +244,11 @@ func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, 
 	if !instanceTypeRequirements.IsCompatible(overlayReq) {
 		return nil
 	}
-	return it.Offerings.Compatible(overlayReq)
+	// An overlay selects the offering's launch market, not a workload's allowed
+	// lifetime capacity types. The compatibility check for pods remains strict.
+	return lo.Filter(it.Offerings, func(o *cloudprovider.Offering, _ int) bool {
+		return overlayReq.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels)
+	})
 }
 
 func (c *Controller) isPriceUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) bool {

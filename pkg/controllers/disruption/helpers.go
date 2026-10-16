@@ -287,13 +287,32 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	// We don't want the order in which candidates are evaluated to affect their DisruptionCost.
 	var fixedNowClk clock.Clock = fixedNowClock{Clock: clk, now: clk.Now()}
 	allNodes := cluster.DeepCopyNodes()
+	priceSnapshot := &nodeClaimPriceSnapshot{}
+	// Drift and repair must not wait for mutable cost observations.
+	if disruptionClass == GracefulDisruptionClass {
+		priceSnapshot = refreshNodeClaimPrices(ctx, cluster, cloudProvider)
+	}
+	unavailablePools := priceSnapshot.unavailablePools()
+	if clusterCost != nil {
+		for id, observation := range priceSnapshot.states {
+			clusterCost.UpdateNodeClaimState(priceSnapshot.claims[id], observation)
+		}
+	}
 	allCandidates := lo.FilterMap(allNodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, fixedNowClk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
+		if e == nil {
+			cn.priceSnapshot = priceSnapshot
+			cn.priceUnavailable = unavailablePools.Has(cn.NodePool.Name)
+			if observation, ok := priceSnapshot.states[cn.ProviderID()]; ok {
+				cn.Price = observation.Price
+			}
+		}
 		return cn, e == nil
 	})
 	// Compute totals using ALL nodes for disruption cost denominator (RFC requirement:
 	// "Non-candidate nodes still contribute to the denominators").
 	nodePoolTotals := computeNodePoolTotals(ctx, allCandidates, []*state.StateNode(allNodes), clusterCost)
+	priceSnapshot.updateTotals(nodePoolTotals, allNodes, nodePoolToInstanceTypesMap)
 	filtered := lo.Filter(allCandidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) })
 	return filtered, nodePoolTotals, nil
 }
