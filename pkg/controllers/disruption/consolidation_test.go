@@ -332,6 +332,68 @@ var _ = Describe("Consolidation", func() {
 			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
 			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination()),
 		)
+		It("should correctly report invalidated commands when the scheduling simulation changes during validation", func() {
+			disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithRealValidator()...))
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			podOpts := test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
+						},
+					},
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("1"),
+					},
+				},
+			}
+			pod := test.Pod(podOpts)
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			finished := atomic.Bool{}
+			ExpectParallelized(
+				func() {
+					defer finished.Store(true)
+					ExpectSingletonReconciled(ctx, disruptionController)
+				},
+				func() {
+					// wait for the disruptionController to block on the validation timeout
+					Eventually(env.Clock.HasWaiters, time.Second*10).Should(BeTrue())
+					// controller should be blocking during the timeout
+					Expect(finished.Load()).To(BeFalse())
+
+					// add an additional pod to the node so that the re-simulated scheduling produces a different result
+					pod2 := test.Pod(podOpts)
+					ExpectApplied(ctx, env.Client, pod2)
+					ExpectManualBinding(ctx, env.Client, pod2, node)
+					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+					// advance the clock so that the timeout expires
+					env.Clock.Step(31 * time.Second)
+					// controller should finish
+					Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+				},
+			)
+
+			// the command should have been rejected for scheduling reasons and counted as a failed validation
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(recorder.Calls(events.ConsolidationRejected)).ToNot(BeZero())
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: disruption.SingleNodeConsolidationType.Name})
+		})
 	})
 	Context("Budgets", func() {
 		var numNodes = 10
