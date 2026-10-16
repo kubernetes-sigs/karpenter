@@ -911,6 +911,13 @@ func ExpectMetricHistogramSampleCountValue(metricName string, expectedValue uint
 	Expect(lo.FromPtr(metric.Histogram.SampleCount)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
 }
 
+func ExpectMetricHistogramSampleSumValue(metricName string, expectedValue float64, labels map[string]string) {
+	GinkgoHelper()
+	metric, ok := FindMetricWithLabelValues(metricName, labels)
+	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
+	Expect(lo.FromPtr(metric.Histogram.SampleSum)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
+}
+
 func ExpectManualBinding(ctx context.Context, c client.Client, pod *corev1.Pod, node *corev1.Node) {
 	GinkgoHelper()
 	Expect(c.Create(ctx, &corev1.Binding{
