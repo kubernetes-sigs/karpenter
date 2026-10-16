@@ -755,12 +755,12 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 			// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
 			nodesRemaining, ok := remaining[resources.Node]
 			if ok && nodesRemaining.IsZero() {
-				errs[i] = serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				errs[i] = serrors.Wrap(NewNodePoolLimitError(fmt.Errorf("node limits have been exhausted for nodepool")), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 				return true
 			}
 			its = filterByRemainingResources(its, remaining)
 			if len(its) == 0 {
-				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				errs[i] = serrors.Wrap(NewNodePoolLimitError(fmt.Errorf("all available instance types exceed limits for nodepool")), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 				return true
 			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
@@ -773,7 +773,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverheadGroups[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode, s.creditReservationCapacity)
 		r, its, ofs, result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.allocator)
 		if err != nil {
-			errs[i] = err
+			errs[i] = serrors.Wrap(err, "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 
 			// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
 			// with a lower weight. We could consider allowing "fallback" to NodePools with equal weight if they also have
@@ -831,7 +831,75 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil
 	}
+	sortSchedulingErrors(errs)
 	return multierr.Combine(errs...)
+}
+
+func sortSchedulingErrors(errs []error) {
+	type rankedError struct {
+		err  error
+		rank int
+	}
+	rankedErrors := make([]rankedError, len(errs))
+	for i, err := range errs {
+		rankedErrors[i] = rankedError{err: err, rank: schedulingErrorRank(err)}
+	}
+	sort.SliceStable(rankedErrors, func(i, j int) bool {
+		return rankedErrors[i].rank < rankedErrors[j].rank
+	})
+	for i, err := range rankedErrors {
+		errs[i] = err.err
+	}
+}
+
+func schedulingErrorRank(err error) int {
+	if err == nil {
+		return 100
+	}
+	// Unwrap outer metadata so a combined error is ranked across all its failures.
+	if structuredErr, ok := err.(*serrors.Error); ok { //nolint:errorlint
+		return schedulingErrorRank(structuredErr.Unwrap())
+	}
+	// Combined errors use their highest-priority scheduling failure.
+	if errs := multierr.Errors(err); len(errs) > 1 {
+		rank := 100
+		for _, e := range errs {
+			rank = min(rank, schedulingErrorRank(e))
+		}
+		return rank
+	}
+	var instanceTypeFilterError InstanceTypeFilterError
+	if errors.As(err, &instanceTypeFilterError) {
+		return instanceTypeFilterErrorRank(instanceTypeFilterError)
+	}
+	switch {
+	case IsNodePoolLimitError(err):
+		return 0
+	case IsIncompatibleRequirementsError(err):
+		return 10
+	case IsOfferingError(err):
+		return 20
+	case IsVolumeConstraintError(err):
+		return 30
+	case IsTaintTolerationError(err):
+		return 40
+	default:
+		return 50
+	}
+}
+
+func instanceTypeFilterErrorRank(e InstanceTypeFilterError) int {
+	// fits also requires a compatible offering, so its absence alone does not prove a resource shortage.
+	if !e.fits && e.hasOffering {
+		return 0
+	}
+	if !e.requirementsMet || e.minValuesIncompatibleErr != nil {
+		return 10
+	}
+	if !e.hasOffering {
+		return 20
+	}
+	return 30
 }
 
 func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod, nodePoolMap map[string]*v1.NodePool, enforceConsolidateAfter bool) {
