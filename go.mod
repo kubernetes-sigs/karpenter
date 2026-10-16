@@ -10,6 +10,7 @@ require (
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936
 	github.com/google/uuid v1.6.0
 	github.com/imdario/mergo v0.3.16
+	github.com/leanovate/gopter v0.2.12-0.20260420070124-967a5004fb70
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/montanaflynn/stats v0.9.0
 	github.com/onsi/ginkgo/v2 v2.28.3
