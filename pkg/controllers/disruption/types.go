@@ -90,7 +90,9 @@ type Candidate struct {
 
 	// Price is the cheapest compatible offering price for this candidate.
 	// Precomputed at creation to avoid repeated offering lookups.
-	Price float64
+	Price            float64
+	priceUnavailable bool
+	priceSnapshot    *nodeClaimPriceSnapshot
 	// RescheduleDisruptionCost is 1.0 (base) + sum of positive pod eviction costs
 	// for reschedulable pods. Used by balanced scoring.
 	RescheduleDisruptionCost float64
@@ -251,6 +253,7 @@ type Command struct {
 	Candidates          []*Candidate
 	Replacements        []*Replacement
 	PoolDisruptionCosts map[string]float64
+	validatePrices      func(context.Context) error
 	// TerminateFirstReason marks a delete-only terminate-first command (RFC #3203) with why its replacement couldn't be
 	// staged first; Decision() surfaces it as TerminateFirstDecision.
 	TerminateFirstReason TerminateFirstReason

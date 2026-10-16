@@ -239,6 +239,14 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		cmd.ID = uuid.New()
 		cmd.Method = disruption
 
+		// Validate immediately before launch and again after replacements become
+		// ready. The closure retains the original immutable pricing snapshot.
+		if cmd.Reason() == v1.DisruptionReasonUnderutilized {
+			original := cmd
+			cmd.validatePrices = func(ctx context.Context) error {
+				return validateCommandPrices(ctx, original, c.cluster, c.cloudProvider, c.kubeClient)
+			}
+		}
 		// Attempt to disrupt
 		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
 			errs[i] = fmt.Errorf("disrupting candidates, %w", err)

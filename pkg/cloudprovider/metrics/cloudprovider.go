@@ -254,3 +254,13 @@ func GetErrorTypeLabelValue(err error) string {
 		return MetricLabelErrorDefaultVal
 	}
 }
+
+func (d *decorator) RefreshNodeClaimStates(ctx context.Context, claims []*v1.NodeClaim) (map[string]cloudprovider.NodeClaimState, error) {
+	const method = "RefreshNodeClaimStates"
+	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
+	states, err := cloudprovider.RefreshNodeClaimStates(ctx, d.CloudProvider, claims)
+	if err != nil {
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, "", err))
+	}
+	return states, err
+}

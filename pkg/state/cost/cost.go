@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/serrors"
@@ -68,7 +69,8 @@ var (
 // All operations are thread-safe through internal locking mechanisms.
 type ClusterCost struct {
 	sync.RWMutex
-	npCostMap map[string]*NodePoolCost // nodepool.Name -> NodePoolCost
+	observedCosts map[types.NamespacedName]observedCost
+	npCostMap     map[string]*NodePoolCost // nodepool.Name -> NodePoolCost
 	// nodeClaimMap tracks which NodeClaims are currently being monitored for cost
 	nodeClaimMap map[types.NamespacedName]NodeClaimMetaData // nodeClaim object key -> NodeClaimMetaData
 
@@ -97,6 +99,12 @@ type OfferingCount struct {
 	Price float64 // Price of the offering, not Price * count
 }
 
+type observedCost struct {
+	ObservedAt   time.Time
+	NodePoolName string
+	Price        float64
+}
+
 type NodeClaimMetaData struct {
 	NodePoolName string
 	NodeClaimKey OfferingKey
@@ -107,6 +115,7 @@ type NodeClaimMetaData struct {
 // instance type and pricing information, and a Kubernetes client for NodePool lookups.
 func NewClusterCost(ctx context.Context, cloudProvider cloudprovider.CloudProvider, client client.Client) *ClusterCost {
 	return &ClusterCost{
+		observedCosts: make(map[types.NamespacedName]observedCost),
 		npCostMap:     make(map[string]*NodePoolCost),
 		nodeClaimMap:  make(map[types.NamespacedName]NodeClaimMetaData),
 		cloudProvider: cloudProvider,
@@ -162,6 +171,9 @@ func (cc *ClusterCost) internalUpdateOfferings(np *v1.NodePool, instanceTypes []
 func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	cc.Lock()
 	defer cc.Unlock()
+	if _, exists := cc.observedCosts[client.ObjectKeyFromObject(nodeClaim)]; exists {
+		return nil
+	}
 	if _, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim)]; exists {
 		return nil
 	}
@@ -185,6 +197,11 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	nodePoolName := nodeClaim.Labels[v1.NodePoolLabelKey]
 	offeringKey := OfferingKey{CapacityType: nodeClaim.Labels[v1.CapacityTypeLabelKey], Zone: nodeClaim.Labels[corev1.LabelTopologyZone], InstanceName: nodeClaim.Labels[corev1.LabelInstanceTypeStable]}
 
+	// Until the first fresh observation, account mutable nodes conservatively at
+	// their launch market. A reserved label alone does not establish current coverage.
+	if nodeClaim.Annotations[v1.CapacityTypeTransitionsAnnotationKey] != "" {
+		offeringKey.CapacityType = v1.CapacityTypeOnDemand
+	}
 	err := cc.internalAddOffering(ctx, nodePoolName, offeringKey)
 	if err != nil {
 		failed = true
@@ -202,6 +219,7 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nn types.NamespacedName) error {
 	cc.Lock()
 	defer cc.Unlock()
+	delete(cc.observedCosts, nn)
 	metadata, exists := cc.nodeClaimMap[nn]
 
 	if !exists {
@@ -235,6 +253,11 @@ func (cc *ClusterCost) DeleteNodePool(ctx context.Context, npName string) {
 	cc.nodeClaimMap = lo.PickBy(cc.nodeClaimMap, func(_ types.NamespacedName, metadata NodeClaimMetaData) bool {
 		return metadata.NodePoolName != npName
 	})
+	for key, cost := range cc.observedCosts {
+		if cost.NodePoolName == npName {
+			delete(cc.observedCosts, key)
+		}
+	}
 	delete(cc.npCostMap, npName)
 }
 
@@ -299,6 +322,7 @@ func (cc *ClusterCost) internalRemoveOffering(npName string, offeringKey Offerin
 func (cc *ClusterCost) Reset() {
 	cc.Lock()
 	defer cc.Unlock()
+	cc.observedCosts = make(map[types.NamespacedName]observedCost)
 	cc.npCostMap = make(map[string]*NodePoolCost)
 	cc.nodeClaimMap = make(map[types.NamespacedName]NodeClaimMetaData)
 }
@@ -308,7 +332,7 @@ func (cc *ClusterCost) Reset() {
 func (cc *ClusterCost) GetClusterCost() float64 {
 	cc.RLock()
 	defer cc.RUnlock()
-	return lo.SumBy(lo.Values(cc.npCostMap), func(npc *NodePoolCost) float64 { return npc.cost })
+	return lo.SumBy(lo.Values(cc.npCostMap), func(npc *NodePoolCost) float64 { return npc.cost }) + lo.SumBy(lo.Values(cc.observedCosts), func(c observedCost) float64 { return c.Price })
 }
 
 // GetNodepoolCost returns the total cost of compute resources for a specific
@@ -316,11 +340,16 @@ func (cc *ClusterCost) GetClusterCost() float64 {
 func (cc *ClusterCost) GetNodepoolCost(np *v1.NodePool) float64 {
 	cc.RLock()
 	defer cc.RUnlock()
-	npc, exists := cc.npCostMap[np.Name]
-	if !exists {
-		return 0
+	total := 0.0
+	if npc, exists := cc.npCostMap[np.Name]; exists {
+		total = npc.cost
 	}
-	return npc.cost
+	for _, cost := range cc.observedCosts {
+		if cost.NodePoolName == np.Name {
+			total += cost.Price
+		}
+	}
+	return total
 }
 
 func findOfferingPrice(instanceTypes []*cloudprovider.InstanceType, key OfferingKey) (float64, bool) {
@@ -342,4 +371,25 @@ func nodeClaimMissingLabels(nc v1.NodeClaim) bool {
 		}
 	}
 	return len(missingLabels) > 0
+}
+
+// UpdateNodeClaimState records a fresh per-instance cost without creating a launch offering.
+func (cc *ClusterCost) UpdateNodeClaimState(nc *v1.NodeClaim, observation cloudprovider.NodeClaimState) {
+	cc.Lock()
+	defer cc.Unlock()
+	key := client.ObjectKeyFromObject(nc)
+	// Don't resurrect a cost entry after a concurrent deletion, and don't let an
+	// older request overwrite a newer observation that completed first.
+	previous, observed := cc.observedCosts[key]
+	_, tracked := cc.nodeClaimMap[key]
+	if (!observed && !tracked) || previous.ObservedAt.After(observation.ObservedAt) {
+		return
+	}
+	if old, ok := cc.nodeClaimMap[key]; ok {
+		if err := cc.internalRemoveOffering(old.NodePoolName, old.NodeClaimKey); err != nil {
+			return
+		}
+		delete(cc.nodeClaimMap, key)
+	}
+	cc.observedCosts[key] = observedCost{NodePoolName: nc.Labels[v1.NodePoolLabelKey], Price: observation.Price, ObservedAt: observation.ObservedAt}
 }

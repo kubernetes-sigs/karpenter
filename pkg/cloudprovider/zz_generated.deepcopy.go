@@ -81,6 +81,11 @@ func (in *Offering) DeepCopyInto(out *Offering) {
 			(*out)[key] = val.DeepCopy()
 		}
 	}
+	if in.CapacityTypeTransitions != nil {
+		in, out := &in.CapacityTypeTransitions, &out.CapacityTypeTransitions
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.CapacityOverride != nil {
 		in, out := &in.CapacityOverride, &out.CapacityOverride
 		*out = make(v1.ResourceList, len(*in))

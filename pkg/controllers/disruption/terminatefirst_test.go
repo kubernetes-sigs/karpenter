@@ -234,6 +234,29 @@ var _ = Describe("TerminateFirstDrift", func() {
 				Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 2, 1)).To(BeEquivalentTo(int64(1)))
 			})
 
+			DescribeTable("does not credit mutable reservation coverage during static drift", func(annotateClaim, annotateNode bool) {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				withReservation(0)
+				if annotateClaim {
+					nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+				}
+				if annotateNode {
+					node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+				}
+				// The current template targets this reservation directly, but persisted group launch intent still wins.
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, staticDriftController)
+
+				Expect(queue.GetCommands()).To(BeEmpty())
+				Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+			},
+				Entry("NodeClaim records mutable coverage", true, false),
+				Entry("Node records mutable coverage", false, true),
+				Entry("both record mutable coverage", true, true),
+			)
+
 			// One NodePool's lookup failure must neither stop drift for the others nor leak the limits.nodes slots they reserve.
 			It("still drifts other static NodePools when one NodePool's instance types can't be resolved", func() {
 				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
@@ -511,6 +534,73 @@ var _ = Describe("TerminateFirstDrift", func() {
 			Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
 			Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeReserved)).To(BeTrue())
 			Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
+		})
+
+		DescribeTable("credits only reusable reservation coverage during dynamic drift", func(annotateClaim, annotateNode, crossPool bool) {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			setupReservedOffering(0, true, v1.CapacityTypeReserved)
+			if annotateClaim {
+				nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+			}
+			if annotateNode {
+				node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+			}
+			if crossPool {
+				other := test.NodePool()
+				other.Spec.Template.Spec.Requirements = nodePool.Spec.Template.Spec.Requirements
+				ExpectApplied(ctx, env.Client, other)
+				// Only the other NodePool offers the occupied reservation. Credit must follow the candidate's launch
+				// behavior rather than the replacement NodePool or the shared reservation ID.
+				withoutReservation := mostExpensiveInstance.DeepCopy()
+				withoutReservation.Offerings = nil
+				cloudProvider.InstanceTypesForNodePool[nodePool.Name] = []*cloudprovider.InstanceType{withoutReservation}
+				cloudProvider.InstanceTypesForNodePool[other.Name] = []*cloudprovider.InstanceType{mostExpensiveInstance}
+			}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			if annotateClaim || annotateNode {
+				Expect(queue.GetCommands()).To(BeEmpty())
+				Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+				return
+			}
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
+			Expect(cmds[0].Results.NewNodeClaims).To(HaveLen(1))
+			Expect(cmds[0].Results.NewNodeClaims[0].Requirements.Get(cloudprovider.ReservationIDLabel).Has(reservationID)).To(BeTrue())
+			Expect(cmds[0].Results.NewNodeClaims[0].NodePoolName).ToNot(Equal(nodePool.Name))
+		},
+			Entry("NodeClaim records mutable coverage", true, false, false),
+			Entry("Node records mutable coverage", false, true, false),
+			Entry("both record mutable coverage", true, true, false),
+			Entry("NodeClaim excludes credit for another NodePool", true, false, true),
+			Entry("Node excludes credit for another NodePool", false, true, true),
+			Entry("both exclude credit for another NodePool", true, true, true),
+			Entry("direct reservation still credits another NodePool", false, false, true),
+		)
+
+		It("replaces mutable reservation coverage before termination when On-Demand fallback exists", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			setupReservedOffering(0, true, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+			node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			bindReschedulablePod(node)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			ExpectSingletonReconciled(ctx, driftController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			Expect(cmds[0].Replacements).To(HaveLen(1))
+			Expect(cmds[0].Replacements[0].Requirements.Get(v1.CapacityTypeLabelKey).Values()).To(ConsistOf(v1.CapacityTypeOnDemand))
 		})
 
 		It("does NOT terminate-first when more reschedulable pods need the reservation than the freed slot can hold", func() {
