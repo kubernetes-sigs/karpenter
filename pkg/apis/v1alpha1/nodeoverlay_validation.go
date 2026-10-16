@@ -24,11 +24,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1/cel"
 )
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodeOverlay) RuntimeValidate(ctx context.Context) error {
-	return multierr.Combine(in.Spec.validateRequirements(ctx), in.Spec.validateCapacity())
+	_, err := in.RuntimeValidateAndCompilePriceExpression(ctx)
+	return err
 }
 
 // This function is used by the NodeOverlay validation webhook to verify the nodeoverlay requirements.
@@ -44,6 +46,20 @@ func (in *NodeOverlaySpec) validateRequirements(ctx context.Context) (errs error
 		}
 	}
 	return errs
+}
+
+// RuntimeValidateAndCompilePriceExpression validates the overlay and returns its compiled
+// expression so reconciliation can reuse it without compiling a second time.
+func (in *NodeOverlay) RuntimeValidateAndCompilePriceExpression(ctx context.Context) (*cel.PriceExpression, error) {
+	var compiled *cel.PriceExpression
+	var err error
+	if in.Spec.PriceExpression != nil {
+		compiled, err = cel.Compile(*in.Spec.PriceExpression)
+		if err != nil {
+			err = fmt.Errorf("invalid priceExpression: %w", err)
+		}
+	}
+	return compiled, multierr.Combine(in.Spec.validateRequirements(ctx), in.Spec.validateCapacity(), err)
 }
 
 func (in *NodeOverlaySpec) validateCapacity() (errs error) {
