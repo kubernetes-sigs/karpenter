@@ -182,7 +182,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 //     replaces-first with these Results (as it always has).
 //
 //  2. Only if pass 1 leaves pods pending AND terminateFirstEnabled is set by the caller AND the candidate itself holds a
-//     reservation: re-simulate in strict mode with the candidate's reservation slot credited back (modeling the slot it
+//     reusable reservation: re-simulate in strict mode with the candidate's reservation slot credited back (modeling the slot it
 //     will free on termination). If every pod then places, terminateFirst is true — deleting the candidate is exactly
 //     what unblocks the reschedule. Strict mode makes surplus pods that wouldn't fit the freed slot fail rather than
 //     fall back, and a reservation that is unavailable for another reason stays unschedulable, so we don't terminate
@@ -207,10 +207,10 @@ func SimulateSchedulingWithReservedFallback(
 	}
 
 	// The gate is caller-supplied so each method controls terminate-first independently (drift: TerminateFirstDrift,
-	// repair: TerminateFirstRepair). Only a reserved candidate is eligible: its slot is finite and exclusive, so a
-	// replacement can't be staged until the old node frees it — on-demand/spot can just add a node (replace-first).
-	reservationID := candidate.Labels()[cloudprovider.ReservationIDLabel]
-	if !terminateFirstEnabled || candidate.capacityType != v1.CapacityTypeReserved || reservationID == "" {
+	// repair: TerminateFirstRepair). Only an exclusive reservation supplies reusable capacity. Mutable coverage can
+	// move to another consumer, so deleting such a candidate cannot guarantee a slot even to a different NodePool.
+	reservationID := reusableReservationID(candidate)
+	if !terminateFirstEnabled || reservationID == "" {
 		return results, false, nil
 	}
 
@@ -473,8 +473,25 @@ func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudPr
 	return true, offered, nil
 }
 
-// holdsOfferedReservation reports whether the candidate holds a slot in a reservation that's still offered, so
-// terminating it frees a slot its refill can launch into.
+// reusableReservationID identifies reservation capacity that disruption may credit after terminating the candidate.
+// Mutable capacity types, including provider-managed reservation groups, never supply guaranteed replacement slots.
+func reusableReservationID(c *Candidate) string {
+	if c.capacityType != v1.CapacityTypeReserved {
+		return ""
+	}
+	// Node and NodeClaim observations can converge separately. Either recording mutable coverage is enough to
+	// withhold credit, regardless of current NodePool configuration or which snapshot StateNode.Annotations prefers.
+	if c.NodeClaim != nil && c.NodeClaim.Annotations[v1.CapacityTypeTransitionsAnnotationKey] != "" {
+		return ""
+	}
+	if c.Node != nil && c.Node.Annotations[v1.CapacityTypeTransitionsAnnotationKey] != "" {
+		return ""
+	}
+	return c.Labels()[cloudprovider.ReservationIDLabel]
+}
+
+// holdsOfferedReservation reports whether the candidate holds a reusable slot in a reservation that's still offered.
 func holdsOfferedReservation(c *Candidate, offered sets.Set[string]) bool {
-	return c.capacityType == v1.CapacityTypeReserved && offered.Has(c.Labels()[cloudprovider.ReservationIDLabel])
+	reservationID := reusableReservationID(c)
+	return reservationID != "" && offered.Has(reservationID)
 }

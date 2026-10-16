@@ -334,7 +334,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// INV-F2-3: a reserved NodePool whose reservation is full (Available=true, ReservationCapacity=0) with no fallback
 	// can't pre-spin a replacement — the pod can only reschedule once the candidate frees its own reservation slot. This
 	// is decided by SimulateSchedulingWithReservedFallback (identical to Drift), so repair terminates first (delete-only).
-	It("should issue a delete-only command for a reserved NodePool whose reservation is full with no fallback", func() {
+	DescribeTable("credits only reusable reservation coverage during dynamic repair", func(annotateClaim, annotateNode bool) {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
 		reservationID := "r-" + mostExpensiveInstance.Name
 		mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
@@ -367,6 +367,12 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			ProviderID:  test.RandomProviderID(),
 			Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32"), corev1.ResourcePods: resource.MustParse("100")},
 		}})
+		if annotateClaim {
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+		}
+		if annotateNode {
+			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		// A reschedulable pod so the pre-spin simulation has a workload it can only place by freeing the reservation.
@@ -384,6 +390,11 @@ var _ = Describe("Repair/TerminateFirst", func() {
 
 		ExpectSingletonReconciled(ctx, repairController)
 
+		if annotateClaim || annotateNode {
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
+			return
+		}
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
 		Expect(cmds[0].Decision()).To(Equal(disruption.TerminateFirstDecision))
@@ -398,7 +409,12 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		// Drain bound and repair condition stamped on the terminate-first path too (M13/M14).
 		Expect(lo.FromPtr(cmds[0].Candidates[0].TerminationGracePeriod)).To(Equal(repairTGP))
 		Expect(cmds[0].Candidates[0].RepairPolicyResult.Condition).To(Equal(corev1.NodeConditionType("BadNode")))
-	})
+	},
+		Entry("direct reservation retains credit", false, false),
+		Entry("NodeClaim records mutable coverage", true, false),
+		Entry("Node records mutable coverage", false, true),
+		Entry("both record mutable coverage", true, true),
+	)
 
 	It("should carry a blocking pod in the terminate-first plan for a reserved NodePool whose reservation is full", func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
@@ -612,6 +628,37 @@ var _ = Describe("Repair/TerminateFirst", func() {
 			// The delete-only path must not hold the limits.nodes slot it never uses.
 			Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 2, 1)).To(BeEquivalentTo(int64(1)))
 		})
+
+		DescribeTable("does not credit mutable reservation coverage during static repair", func(annotateClaim, annotateNode bool) {
+			withReservation(0)
+			nodePool := reservedStaticNodePool(v1.CapacityTypeReserved)
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey:              nodePool.Name,
+				corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+				corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				cloudprovider.ReservationIDLabel: reservationID,
+			}}})
+			if annotateClaim {
+				nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+			}
+			if annotateNode {
+				node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.CapacityTypeTransitionsAnnotationKey: "on-demand,reserved"})
+			}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			markUnhealthy(node)
+			env.Clock.Step(31 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, repairController)
+
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(recorder.DetectedEvent("static NodePool's capacity reservations are full and cannot stage a replacement")).To(BeTrue())
+		},
+			Entry("NodeClaim records mutable coverage", true, false),
+			Entry("Node records mutable coverage", false, true),
+			Entry("both record mutable coverage", true, true),
+		)
 
 		// A node whose reservation is no longer offered frees no slot a refill could launch into, so terminating it first
 		// would lose the node; below limits.nodes it's replaced first instead.
