@@ -49,6 +49,36 @@ const (
 	MinValuesPolicyBestEffort MinValuesPolicy = "BestEffort"
 )
 
+// ClusterStateObservabilityResource identifies a Kubernetes resource whose state metrics are enabled.
+type ClusterStateObservabilityResource string
+
+const (
+	ClusterStateObservabilityPod            ClusterStateObservabilityResource = "Pod"
+	ClusterStateObservabilityNode           ClusterStateObservabilityResource = "Node"
+	ClusterStateObservabilityNodeClaim      ClusterStateObservabilityResource = "NodeClaim"
+	ClusterStateObservabilityNodePool       ClusterStateObservabilityResource = "NodePool"
+	ClusterStateObservabilityCapacityBuffer ClusterStateObservabilityResource = "CapacityBuffer"
+	ClusterStateObservabilityNodeOverlay    ClusterStateObservabilityResource = "NodeOverlay"
+)
+
+var (
+	validClusterStateObservabilityResources = []ClusterStateObservabilityResource{
+		ClusterStateObservabilityPod,
+		ClusterStateObservabilityNode,
+		ClusterStateObservabilityNodeClaim,
+		ClusterStateObservabilityNodePool,
+		ClusterStateObservabilityCapacityBuffer,
+		ClusterStateObservabilityNodeOverlay,
+	}
+	defaultClusterStateObservabilityResources = []ClusterStateObservabilityResource{
+		ClusterStateObservabilityPod,
+		ClusterStateObservabilityNode,
+		ClusterStateObservabilityNodeClaim,
+		ClusterStateObservabilityNodePool,
+		ClusterStateObservabilityCapacityBuffer,
+	}
+)
+
 var (
 	validLogLevels          = []string{"", "debug", "info", "error"}
 	validPreferencePolicies = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
@@ -175,33 +205,35 @@ var KarpenterFeatureGates = []FeatureGate{
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
-	ServiceName                      string
-	MetricsPort                      int
-	HealthProbePort                  int
-	KubeClientQPS                    int
-	KubeClientBurst                  int
-	EnableProfiling                  bool
-	DisableControllerWarmup          bool
-	DisableLeaderElection            bool
-	DisableClusterStateObservability bool
-	LeaderElectionName               string
-	LeaderElectionNamespace          string
-	MemoryLimit                      int64
-	CPURequests                      int64
-	LogLevel                         string
-	LogOutputPaths                   string
-	LogErrorOutputPaths              string
-	BatchMaxDuration                 time.Duration
-	BatchIdleDuration                time.Duration
-	preferencePolicyRaw              string
-	PreferencePolicy                 PreferencePolicy
-	minValuesPolicyRaw               string
-	MinValuesPolicy                  MinValuesPolicy
-	IgnoreDRARequests                bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
-	LegacyNodeRepair                 bool // NOTE: This flag is planned for deprecation along with the legacy node repair controller.
-	FeatureGates                     FeatureGates
-	schedulerConfigRaw               string
-	SchedulerConfig                  *SchedulerConfiguration
+	ServiceName                           string
+	MetricsPort                           int
+	HealthProbePort                       int
+	KubeClientQPS                         int
+	KubeClientBurst                       int
+	EnableProfiling                       bool
+	DisableControllerWarmup               bool
+	DisableLeaderElection                 bool
+	DisableClusterStateObservability      bool
+	ClusterStateObservabilityResources    []ClusterStateObservabilityResource
+	clusterStateObservabilityResourcesRaw string
+	LeaderElectionName                    string
+	LeaderElectionNamespace               string
+	MemoryLimit                           int64
+	CPURequests                           int64
+	LogLevel                              string
+	LogOutputPaths                        string
+	LogErrorOutputPaths                   string
+	BatchMaxDuration                      time.Duration
+	BatchIdleDuration                     time.Duration
+	preferencePolicyRaw                   string
+	PreferencePolicy                      PreferencePolicy
+	minValuesPolicyRaw                    string
+	MinValuesPolicy                       MinValuesPolicy
+	IgnoreDRARequests                     bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
+	LegacyNodeRepair                      bool // NOTE: This flag is planned for deprecation along with the legacy node repair controller.
+	FeatureGates                          FeatureGates
+	schedulerConfigRaw                    string
+	SchedulerConfig                       *SchedulerConfiguration
 }
 
 type FlagSet struct {
@@ -231,6 +263,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.BoolVarWithEnv(&o.DisableControllerWarmup, "disable-controller-warmup", "DISABLE_CONTROLLER_WARMUP", true, "Disable controller warmup which starts controller sources before leader election is won. Controller warmup pre-populates caches and improves leader failover time.")
 	fs.BoolVarWithEnv(&o.DisableLeaderElection, "disable-leader-election", "DISABLE_LEADER_ELECTION", false, "Disable the leader election client before executing the main loop. Disable when running replicated components for high availability is not desired.")
 	fs.BoolVarWithEnv(&o.DisableClusterStateObservability, "disable-cluster-state-observability", "DISABLE_CLUSTER_STATE_OBSERVABILITY", false, "Disable cluster state metrics and events")
+	fs.StringVar(&o.clusterStateObservabilityResourcesRaw, "cluster-state-observability-resources", env.WithDefaultString("CLUSTER_STATE_OBSERVABILITY_RESOURCES", ""), "Comma-separated resource types with cluster state metrics enabled. Supported values: Pod,Node,NodeClaim,NodePool,CapacityBuffer,NodeOverlay. Defaults to existing metrics.")
 	fs.StringVar(&o.LeaderElectionName, "leader-election-name", env.WithDefaultString("LEADER_ELECTION_NAME", "karpenter-leader-election"), "Leader election name to create and monitor the lease if running outside the cluster")
 	fs.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", env.WithDefaultString("LEADER_ELECTION_NAMESPACE", ""), "Leader election namespace to create and monitor the lease if running outside the cluster")
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
@@ -267,6 +300,11 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	if o.CPURequests <= 0 {
 		o.CPURequests = 1000
 	}
+	observabilityResources, err := ParseClusterStateObservabilityResources(o.clusterStateObservabilityResourcesRaw)
+	if err != nil {
+		return fmt.Errorf("parsing cluster state observability resources, %w", err)
+	}
+	o.ClusterStateObservabilityResources = observabilityResources
 	gates, err := ParseFeatureGates(o.FeatureGates.inputStr)
 	if err != nil {
 		return fmt.Errorf("parsing feature gates, %w", err)
@@ -280,6 +318,40 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	o.PreferencePolicy = PreferencePolicy(o.preferencePolicyRaw)
 	o.MinValuesPolicy = MinValuesPolicy(o.minValuesPolicyRaw)
 	return nil
+}
+
+// ParseClusterStateObservabilityResources validates the resource types selected for state metrics.
+// An empty value preserves the existing set of metrics.
+func ParseClusterStateObservabilityResources(raw string) ([]ClusterStateObservabilityResource, error) {
+	if strings.TrimSpace(raw) == "" {
+		return append([]ClusterStateObservabilityResource(nil), defaultClusterStateObservabilityResources...), nil
+	}
+	resources := make([]ClusterStateObservabilityResource, 0)
+	seen := map[ClusterStateObservabilityResource]struct{}{}
+	for _, value := range strings.Split(raw, ",") {
+		resource := ClusterStateObservabilityResource(strings.TrimSpace(value))
+		if !lo.Contains(validClusterStateObservabilityResources, resource) {
+			return nil, fmt.Errorf("%q is not a supported resource type, supported values are %s", value, strings.Join(lo.Map(validClusterStateObservabilityResources, func(r ClusterStateObservabilityResource, _ int) string { return string(r) }), ", "))
+		}
+		if _, ok := seen[resource]; ok {
+			continue
+		}
+		seen[resource] = struct{}{}
+		resources = append(resources, resource)
+	}
+	return resources, nil
+}
+
+// ClusterStateObservabilityEnabledFor reports whether metrics for a resource are enabled.
+func (o *Options) ClusterStateObservabilityEnabledFor(resource ClusterStateObservabilityResource) bool {
+	if o.DisableClusterStateObservability {
+		return false
+	}
+	resources := o.ClusterStateObservabilityResources
+	if len(resources) == 0 {
+		resources = defaultClusterStateObservabilityResources
+	}
+	return lo.Contains(resources, resource)
 }
 
 func (o *Options) ToContext(ctx context.Context) context.Context {
