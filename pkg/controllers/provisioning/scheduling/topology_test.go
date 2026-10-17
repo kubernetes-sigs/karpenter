@@ -31,9 +31,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -1853,6 +1855,188 @@ var _ = Describe("Topology", func() {
 			// scheduling shouldn't be affected since it's a preferred affinity
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2, 2))
 		})
+	})
+
+	Context("Combined Zonal Topology and Required Node Affinity Fallback", func() {
+		// instanceType returns an instance type that only has on-demand offerings in the given zones
+		instanceType := func(name string, zones ...string) *cloudprovider.InstanceType {
+			return fake.NewInstanceType(name, fake.WithOfferings(lo.Map(zones, func(zone string, _ int) cloudprovider.Offering {
+				return cloudprovider.Offering{
+					Available: true,
+					Requirements: pscheduling.NewLabelRequirements(map[string]string{
+						v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone: zone,
+					}),
+					Price: 1.0,
+				}
+			})...))
+		}
+		// spreadReplica returns a pending replica with a DoNotSchedule spread over topologyKey and one required node
+		// affinity term per group of instance types, in priority order
+		spreadReplica := func(topologyKey string, nodeSelector map[string]string, terms [][]string, nodeAffinityPolicy *corev1.NodeInclusionPolicy) *corev1.Pod {
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+				NodeSelector: nodeSelector,
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{
+					MaxSkew:            1,
+					TopologyKey:        topologyKey,
+					WhenUnsatisfiable:  corev1.DoNotSchedule,
+					LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+					NodeAffinityPolicy: nodeAffinityPolicy,
+				}},
+			})
+			pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: lo.Map(terms, func(instanceTypes []string, _ int) corev1.NodeSelectorTerm {
+						return corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: instanceTypes,
+						}}}
+					}),
+				},
+			}}
+			return pod
+		}
+
+		// Replicas already running on term[0] nodes in zone-1 and zone-2 force the next replica into zone-3. kube-scheduler
+		// counts those replicas because they sit on nodes matching one of the pod's required node affinity terms. Relaxing
+		// away term[0] must not make Karpenter stop counting them, otherwise it places the fallback replica in a zone that
+		// kube-scheduler will reject.
+		DescribeTable("should keep counting replicas on higher-priority terms after relaxing to a fallback term",
+			func(nodeAffinityPolicy *corev1.NodeInclusionPolicy) {
+				if nodeAffinityPolicy != nil && env.Version.Minor() < 26 {
+					Skip("NodeAffinityPolicy ony enabled by default for K8s >= 1.26.x")
+				}
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					instanceType("preferred", "test-zone-1", "test-zone-2"),
+					instanceType("fallback", "test-zone-1", "test-zone-2", "test-zone-3"),
+				}
+				terms := [][]string{{"preferred"}, {"fallback"}}
+				ExpectApplied(ctx, env.Client, nodePool)
+
+				// Two replicas already running on term[0] nodes in zone-1 and zone-2
+				for _, zone := range []string{"test-zone-1", "test-zone-2"} {
+					pod := spreadReplica(corev1.LabelTopologyZone, map[string]string{corev1.LabelTopologyZone: zone}, terms, nodeAffinityPolicy)
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "preferred"))
+					Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, zone))
+				}
+
+				// A term[1] node in zone-1 with spare capacity, hosting a pod outside the spread selector
+				filler := test.UnschedulablePod(test.PodOptions{
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone:       "test-zone-1",
+						corev1.LabelInstanceTypeStable: "fallback",
+					},
+				})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, filler)
+				fillerNode := ExpectScheduled(ctx, env.Client, filler)
+
+				// The spread only allows zone-3, where term[0] isn't offered, so the pod relaxes to term[1]. The zone-1 and
+				// zone-2 replicas still count toward skew, so the existing zone-1 node must be rejected.
+				pod := spreadReplica(corev1.LabelTopologyZone, nil, terms, nodeAffinityPolicy)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Name).ToNot(Equal(fillerNode.Name))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "fallback"))
+			},
+			Entry("with the default nodeAffinityPolicy", nil),
+			Entry("with nodeAffinityPolicy Honor", lo.ToPtr(corev1.NodeInclusionPolicyHonor)),
+			Entry("with nodeAffinityPolicy Ignore", lo.ToPtr(corev1.NodeInclusionPolicyIgnore)),
+		)
+
+		type spreadFallbackCase struct {
+			topologyKey   string
+			instanceTypes []*cloudprovider.InstanceType
+			terms         [][]string
+			// existingReplicas are node selectors pinning each replica that is already running before the pending one
+			existingReplicas []map[string]string
+			// an empty expectedInstanceType means the pending replica must stay unschedulable
+			expectedInstanceType string
+			// an empty expectedZone means any zone is acceptable
+			expectedZone string
+		}
+
+		DescribeTable("should place the pending replica where kube-scheduler would accept it",
+			func(tc spreadFallbackCase) {
+				cloudProvider.InstanceTypes = tc.instanceTypes
+				ExpectApplied(ctx, env.Client, nodePool)
+
+				replicaNodes := sets.New[string]()
+				for _, selector := range tc.existingReplicas {
+					pod := spreadReplica(tc.topologyKey, selector, tc.terms, nil)
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					replicaNodes.Insert(ExpectScheduled(ctx, env.Client, pod).Name)
+				}
+
+				pod := spreadReplica(tc.topologyKey, nil, tc.terms, nil)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				if tc.expectedInstanceType == "" {
+					ExpectNotScheduled(ctx, env.Client, pod)
+					return
+				}
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(replicaNodes.Has(node.Name)).To(BeFalse())
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, tc.expectedInstanceType))
+				if tc.expectedZone != "" {
+					Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, tc.expectedZone))
+				}
+			},
+			// term[1] isn't offered in zone-3, so the original terms must stay in the filter across two relaxations for the
+			// replica to reach term[2] in zone-3 rather than term[1] in zone-1 or zone-2
+			Entry("walks past a fallback term that isn't offered in the required zone", spreadFallbackCase{
+				topologyKey: corev1.LabelTopologyZone,
+				instanceTypes: []*cloudprovider.InstanceType{
+					instanceType("preferred", "test-zone-1", "test-zone-2"),
+					instanceType("fallback", "test-zone-1", "test-zone-2"),
+					instanceType("last-resort", "test-zone-1", "test-zone-2", "test-zone-3"),
+				},
+				terms: [][]string{{"preferred"}, {"fallback"}, {"last-resort"}},
+				existingReplicas: []map[string]string{
+					{corev1.LabelTopologyZone: "test-zone-1", corev1.LabelInstanceTypeStable: "preferred"},
+					{corev1.LabelTopologyZone: "test-zone-2", corev1.LabelInstanceTypeStable: "preferred"},
+				},
+				expectedInstanceType: "last-resort",
+				expectedZone:         "test-zone-3",
+			}),
+			// With no term able to launch in zone-3, the replica must stay pending instead of landing on capacity in zone-1
+			// or zone-2 that kube-scheduler would reject
+			Entry("stays unschedulable when no term can launch in the required zone", spreadFallbackCase{
+				topologyKey: corev1.LabelTopologyZone,
+				instanceTypes: []*cloudprovider.InstanceType{
+					instanceType("preferred", "test-zone-1", "test-zone-2"),
+					instanceType("fallback", "test-zone-1", "test-zone-2"),
+					instanceType("other", "test-zone-1", "test-zone-2", "test-zone-3"),
+				},
+				terms: [][]string{{"preferred"}, {"fallback"}},
+				existingReplicas: []map[string]string{
+					{corev1.LabelTopologyZone: "test-zone-1", corev1.LabelInstanceTypeStable: "preferred"},
+					{corev1.LabelTopologyZone: "test-zone-2", corev1.LabelInstanceTypeStable: "preferred"},
+				},
+			}),
+			// A hostname spread only counts the candidate node itself, which always matches the remaining terms, so
+			// relaxation never hid replicas here. This guards against restoring the original terms breaking it.
+			Entry("still spreads across hostnames after relaxing to a fallback term", spreadFallbackCase{
+				topologyKey: corev1.LabelHostname,
+				instanceTypes: []*cloudprovider.InstanceType{
+					fake.NewInstanceType("preferred", fake.WithOfferings(cloudprovider.Offering{
+						Available: false,
+						Requirements: pscheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "test-zone-1",
+						}),
+						Price: 1.0,
+					})),
+					instanceType("fallback", "test-zone-1", "test-zone-2", "test-zone-3"),
+				},
+				terms: [][]string{{"preferred"}, {"fallback"}},
+				existingReplicas: []map[string]string{
+					{corev1.LabelTopologyZone: "test-zone-1", corev1.LabelInstanceTypeStable: "fallback"},
+				},
+				expectedInstanceType: "fallback",
+			}),
+		)
 	})
 
 	// https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/#interaction-with-node-affinity-and-node-selectors
