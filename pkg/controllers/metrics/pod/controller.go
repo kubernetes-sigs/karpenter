@@ -263,14 +263,8 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			})
 			c.unscheduledPods.Delete(req.String())
 			// Delete the unbound metric since the pod is deleted
-			PodUnboundTimeSeconds.DeletePartialMatch(map[string]string{
-				podName:      req.Name,
-				podNamespace: req.Namespace,
-			})
-			PodProvisioningUnboundTimeSeconds.DeletePartialMatch(map[string]string{
-				podName:      req.Name,
-				podNamespace: req.Namespace,
-			})
+			deleteUnboundMetrics(PodUnboundTimeSeconds, req.Name, req.Namespace)
+			deleteUnboundMetrics(PodProvisioningUnboundTimeSeconds, req.Name, req.Namespace)
 			PodSchedulingUndecidedTimeSeconds.Delete(map[string]string{
 				podName:      req.Name,
 				podNamespace: req.Namespace,
@@ -401,6 +395,19 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 		}
 	}
 }
+
+// deleteUnboundMetrics deletes a pod's series from an unbound gauge. It deletes each dynamic_resources value with
+// the full label set rather than calling DeletePartialMatch, which scans every series in the gauge on each call.
+func deleteUnboundMetrics(gauge opmetrics.GaugeMetric, name, namespace string) {
+	for _, v := range metrics.BoolValues {
+		gauge.Delete(map[string]string{
+			podName:             name,
+			podNamespace:        namespace,
+			podDynamicResources: v.Name,
+		})
+	}
+}
+
 func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.Time) {
 	key := client.ObjectKeyFromObject(pod).String()
 	dynamicResources := strconv.FormatBool(podutils.HasDRARequirements(pod))
@@ -423,10 +430,7 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 				})
 			} else {
 				// Idempotently delete the unbound_time_seconds metric if the schedulable time is zero
-				PodProvisioningUnboundTimeSeconds.DeletePartialMatch(map[string]string{
-					podName:      pod.Name,
-					podNamespace: pod.Namespace,
-				})
+				deleteUnboundMetrics(PodProvisioningUnboundTimeSeconds, pod.Name, pod.Namespace)
 			}
 		}
 		c.unscheduledPods.Insert(key)
@@ -434,14 +438,8 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 	}
 	if c.unscheduledPods.Has(key) && ok && cond.Status == corev1.ConditionTrue {
 		// Delete the unbound metric since the pod is now bound
-		PodUnboundTimeSeconds.DeletePartialMatch(map[string]string{
-			podName:      pod.Name,
-			podNamespace: pod.Namespace,
-		})
-		PodProvisioningUnboundTimeSeconds.DeletePartialMatch(map[string]string{
-			podName:      pod.Name,
-			podNamespace: pod.Namespace,
-		})
+		deleteUnboundMetrics(PodUnboundTimeSeconds, pod.Name, pod.Namespace)
+		deleteUnboundMetrics(PodProvisioningUnboundTimeSeconds, pod.Name, pod.Namespace)
 
 		PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), map[string]string{
 			podDynamicResources: dynamicResources,
