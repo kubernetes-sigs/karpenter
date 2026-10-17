@@ -108,6 +108,51 @@ var _ = Describe("Topology", func() {
 	})
 
 	Context("Zonal", func() {
+		It("should balance pods across zones declared with a normalized topology key alias", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelFailureDomainBetaZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			// The group is keyed on the stable key, which is the only zone label test nodes carry.
+			ExpectSkew(ctx, env.Client, "default", &corev1.TopologySpreadConstraint{
+				TopologyKey:   corev1.LabelTopologyZone,
+				LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+			}).To(ConsistOf(1, 1, 2))
+		})
+		It("should ignore nodes labeled only with the legacy zone key when spreading on the stable key", func() {
+			firstNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{corev1.LabelTopologyZone: "test-zone-1"}}})
+			secondNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{corev1.LabelTopologyZone: "test-zone-2"}}})
+			// kube-scheduler matches topology keys literally, so this node is outside the stable key's domains.
+			legacyNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{corev1.LabelFailureDomainBetaZone: "test-zone-3"}}})
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			// Keep test-zone-3 out of the NodePool, so only the legacy node could make it a domain.
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}},
+			}
+			ExpectApplied(ctx, env.Client, nodePool, firstNode, secondNode, legacyNode)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(firstNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(secondNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(legacyNode))
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, NodeName: firstNode.Name}),
+				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, NodeName: secondNode.Name}),
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 2)...,
+			)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
+		})
 		It("should balance pods across zones (match labels)", func() {
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
@@ -2357,6 +2402,24 @@ var _ = Describe("Topology", func() {
 			ExpectScheduled(ctx, env.Client, zone3Pod)
 			// the pod with anti-affinity
 			ExpectNotScheduled(ctx, env.Client, affPod)
+		})
+		It("should not violate pod anti-affinity on a normalized zone key alias", func() {
+			affLabels := map[string]string{"security": "s2"}
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: affLabels},
+				PodAntiRequirements: []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: affLabels},
+					TopologyKey:   corev1.LabelFailureDomainBetaZone,
+				}},
+			}, 4)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			// Same as on the stable key: the first NodeClaim isn't pinned to a zone yet, so it blocks every
+			// zone for the other pods. Skew is read on the stable key, the only zone label test nodes carry.
+			ExpectSkew(ctx, env.Client, "default", &corev1.TopologySpreadConstraint{
+				TopologyKey:   corev1.LabelTopologyZone,
+				LabelSelector: &metav1.LabelSelector{MatchLabels: affLabels},
+			}).To(ConsistOf(1))
 		})
 		It("should not violate pod anti-affinity on zone (other schedules first)", func() {
 			affLabels := map[string]string{"security": "s2"}
