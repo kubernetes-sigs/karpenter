@@ -112,11 +112,20 @@ func (env *Environment) ExpectCleanCluster() {
 		Expect(pods.Items[i].Namespace).ToNot(Equal("default"),
 			fmt.Sprintf("expected no pods in the `default` namespace, found %s/%s", pods.Items[i].Namespace, pods.Items[i].Name))
 	}
-	for _, obj := range []client.Object{&v1.NodePool{}, env.DefaultNodeClass.DeepCopy()} {
+	// Any NodePool would provision capacity for test pods, so none may exist. NodeClasses do nothing without a
+	// NodePool, so only ones a previous run created (and Cleanup would delete) count; a provider's pre-existing
+	// NodeClasses are left alone.
+	for _, check := range []struct {
+		obj  client.Object
+		opts []client.ListOption
+	}{
+		{obj: &v1.NodePool{}},
+		{obj: env.DefaultNodeClass.DeepCopy(), opts: []client.ListOption{client.HasLabels{test.DiscoveryLabel}}},
+	} {
 		metaList := &metav1.PartialObjectMetadataList{}
-		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
+		gvk := lo.Must(apiutil.GVKForObject(check.obj, env.Client.Scheme()))
 		metaList.SetGroupVersionKind(gvk)
-		Expect(env.Client.List(env.Context, metaList, client.Limit(1))).To(Succeed())
+		Expect(env.Client.List(env.Context, metaList, append(check.opts, client.Limit(1))...)).To(Succeed())
 		Expect(metaList.Items).To(HaveLen(0), fmt.Sprintf("expected no %s to exist", gvk.Kind))
 	}
 }

@@ -90,6 +90,8 @@ jobs:
           ${{ env.OUTPUT_DIR }}/*_performance_report.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
+          ${{ env.OUTPUT_DIR }}/perf_thresholds*.tsv
+          ${{ env.OUTPUT_DIR }}/perf_summary*.md
         retention-days: 30
         if-no-files-found: ignore
     - name: cleanup 
