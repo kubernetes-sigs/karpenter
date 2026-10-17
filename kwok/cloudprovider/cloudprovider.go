@@ -153,7 +153,8 @@ func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (
 // Reboot simulates an in-place restart. KWOK has no instance to restart, so it gives the Node a new boot ID,
 // which is what the reboot controller observes as proof of a new boot; the simulated kubelet never goes NotReady,
 // so the node rejoins as soon as the new boot is observed. The boot ID derives from the operationID, so a retried
-// request for the same reboot is idempotent.
+// request for the same reboot is idempotent. A Node with RebootNoRecoveryAnnotationKey accepts the reboot but keeps
+// its boot ID, simulating a node that never comes back.
 func (c CloudProvider) Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) error {
 	if nodeClaim.Status.NodeName == "" {
 		return serrors.Wrap(fmt.Errorf("rebooting nodeclaim, node is not registered"), "NodeClaim", klog.KObj(nodeClaim))
@@ -161,6 +162,9 @@ func (c CloudProvider) Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, oper
 	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClaim.Status.NodeName}, node); err != nil {
 		return fmt.Errorf("rebooting node, %w", err)
+	}
+	if _, ok := node.Annotations[v1alpha1.RebootNoRecoveryAnnotationKey]; ok {
+		return nil
 	}
 	stored := node.DeepCopy()
 	node.Status.NodeInfo.BootID = fmt.Sprintf("kwok-%s", operationID)
