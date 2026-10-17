@@ -24,6 +24,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -75,33 +76,34 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 
 	// File output
 	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
-		writeReportFiles(report, filePrefix, outputDir)
+		Expect(writeReportFiles(report, filePrefix, outputDir)).To(Succeed(), "writing performance report to OUTPUT_DIR")
 	}
 }
 
 // writeReportFiles persists the report JSON and any profile data under
 // outputDir. The caller-supplied filePrefix is sanitized to prevent path
 // traversal via the OUTPUT_DIR environment variable or the prefix itself.
-func writeReportFiles(report *PerformanceReport, filePrefix, outputDir string) {
+func writeReportFiles(report *PerformanceReport, filePrefix, outputDir string) error {
 	safePrefix := filepath.Base(filepath.Clean(filePrefix))
-	writeUnder := func(name string, data []byte) (string, error) {
-		return common.WriteArtifactUnder(outputDir, name, data)
+	reportJSON, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling report: %w", err)
 	}
-	if reportJSON, err := json.MarshalIndent(report, "", "  "); err == nil {
-		if path, err := writeUnder(fmt.Sprintf("%s_performance_report.json", safePrefix), reportJSON); err == nil {
-			GinkgoWriter.Printf("Report written to: %s\n", path)
+	for name, data := range map[string][]byte{
+		fmt.Sprintf("%s_performance_report.json", safePrefix):        reportJSON,
+		fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", safePrefix): report.MemoryProfileData,
+		fmt.Sprintf("karpenter_cpu_profile_%s.pb.gz", safePrefix):    report.CPUProfileData,
+	} {
+		if len(data) == 0 {
+			continue
 		}
-	}
-	if len(report.MemoryProfileData) > 0 {
-		if path, err := writeUnder(fmt.Sprintf("karpenter_memory_profile_%s.pb.gz", safePrefix), report.MemoryProfileData); err == nil {
-			GinkgoWriter.Printf("Memory profile saved to: %s\n", path)
+		path, err := common.WriteArtifactUnder(outputDir, name, data)
+		if err != nil {
+			return err
 		}
+		GinkgoWriter.Printf("Written: %s\n", path)
 	}
-	if len(report.CPUProfileData) > 0 {
-		if path, err := writeUnder(fmt.Sprintf("karpenter_cpu_profile_%s.pb.gz", safePrefix), report.CPUProfileData); err == nil {
-			GinkgoWriter.Printf("CPU profile saved to: %s\n", path)
-		}
-	}
+	return nil
 }
 
 // ReportScaleOut monitors a scale-out operation and returns a performance report.

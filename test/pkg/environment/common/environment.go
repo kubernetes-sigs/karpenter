@@ -35,7 +35,9 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	serializeryaml "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -44,6 +46,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	kwokcloudprovider "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
@@ -67,6 +70,9 @@ var (
 	nodePoolPath    = flag.String("default-nodepool", "", "Pass in a default karpenter nodepool")
 	repairCondition = flag.String("repair-condition", "", "Pass in a <type>=<status>[/<reason>] node condition that matches a cloud provider RepairPolicy, for repair specs to inject")
 	rebootCondition = flag.String("reboot-condition", "", "Pass in a <type>=<status>[/<reason>] node condition that a cloud provider RepairPolicy remediates with a reboot, for reboot specs to inject")
+	// Label selectors for the two NodePools of heterogeneous specs, required outside KWOK.
+	heterogeneousDensePool  = flag.String("heterogeneous-dense-pool", "", "Pass in a label selector (e.g. 'example.com/instance-category in (c)') restricting the NodePool that heterogeneous specs pack many small pods onto; requires --heterogeneous-sparse-pool")
+	heterogeneousSparsePool = flag.String("heterogeneous-sparse-pool", "", "Pass in a label selector (e.g. 'example.com/instance-category in (m)') restricting the NodePool that heterogeneous specs place few large pods onto; must select instance types disjoint from --heterogeneous-dense-pool")
 )
 
 type Environment struct {
@@ -212,6 +218,43 @@ func (env *Environment) RebootCondition() (corev1.NodeCondition, bool) {
 		return corev1.NodeCondition{Type: kwokcloudprovider.KWOKRebootRequiredCondition, Status: corev1.ConditionTrue}, true
 	}
 	return corev1.NodeCondition{}, false
+}
+
+// HeterogeneousNodePoolRequirements returns the requirements for the two NodePools of heterogeneous specs:
+// --heterogeneous-dense-pool and --heterogeneous-sparse-pool if set, otherwise KWOK's "c" and "m" instance families.
+// ok is false when neither is available.
+func (env *Environment) HeterogeneousNodePoolRequirements() (dense, sparse []v1.NodeSelectorRequirementWithMinValues, ok bool) {
+	if *heterogeneousDensePool != "" || *heterogeneousSparsePool != "" {
+		return parseRequirements("heterogeneous-dense-pool", *heterogeneousDensePool), parseRequirements("heterogeneous-sparse-pool", *heterogeneousSparsePool), true
+	}
+	if env.IsDefaultNodeClassKWOK() {
+		family := func(f string) []v1.NodeSelectorRequirementWithMinValues {
+			return []v1.NodeSelectorRequirementWithMinValues{{Key: v1alpha1.InstanceFamilyLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{f}}}
+		}
+		return family("c"), family("m"), true
+	}
+	return nil, nil, false
+}
+
+// parseRequirements converts a label selector flag value into NodePool requirements.
+func parseRequirements(flagName, value string) []v1.NodeSelectorRequirementWithMinValues {
+	selector, err := labels.Parse(value)
+	if err != nil {
+		panic(fmt.Sprintf("--%s must be a label selector: %v", flagName, err))
+	}
+	requirements, _ := selector.Requirements()
+	if len(requirements) == 0 {
+		panic(fmt.Sprintf("--%s must contain at least one requirement", flagName))
+	}
+	operators := map[selection.Operator]corev1.NodeSelectorOperator{
+		selection.In: corev1.NodeSelectorOpIn, selection.Equals: corev1.NodeSelectorOpIn, selection.DoubleEquals: corev1.NodeSelectorOpIn,
+		selection.NotIn: corev1.NodeSelectorOpNotIn, selection.NotEquals: corev1.NodeSelectorOpNotIn,
+		selection.Exists: corev1.NodeSelectorOpExists, selection.DoesNotExist: corev1.NodeSelectorOpDoesNotExist,
+		selection.GreaterThan: corev1.NodeSelectorOpGt, selection.LessThan: corev1.NodeSelectorOpLt,
+	}
+	return lo.Map(requirements, func(r labels.Requirement, _ int) v1.NodeSelectorRequirementWithMinValues {
+		return v1.NodeSelectorRequirementWithMinValues{Key: r.Key(), Operator: operators[r.Operator()], Values: lo.Ternary(r.Values().Len() > 0, r.Values().List(), nil)}
+	})
 }
 
 // parseCondition parses a <type>=<status>[/<reason>] node condition flag value. The reason is optional; it's needed

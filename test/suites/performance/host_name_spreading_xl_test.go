@@ -56,15 +56,15 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(scaleOutReport.TotalPods).To(BeNumerically(">=", 1999), "Should have 2000 total pods")
 
 			// XL Performance assertions - hostname spreading at scale may require many more nodes
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("hostNameSpreadingXL/scaleOut", 35*time.Minute)),
+			expectTotalTime("hostNameSpreadingXL/scaleOut", scaleOutReport, 35*time.Minute,
 				"Total XL scale-out time should be less than 35 minutes")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("hostNameSpreadingXL/scaleOut", 0.38)),
+			expectCPUUtil("hostNameSpreadingXL/scaleOut", scaleOutReport, 0.38,
 				"Average CPU utilization should be greater than 38%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("hostNameSpreadingXL/scaleOut", 0.40)),
+			expectMemoryUtil("hostNameSpreadingXL/scaleOut", scaleOutReport, 0.40,
 				"Average memory utilization should be greater than 40%")
-			Expect(scaleOutReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("hostNameSpreadingXL/scaleOut", 720)),
+			expectHeap("hostNameSpreadingXL/scaleOut", scaleOutReport, 720,
 				"Karpenter controller P95 live heap should be less than 720 MB during scale-out")
-			Expect(scaleOutReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("hostNameSpreadingXL/scaleOut", 1.40)),
+			expectCPU("hostNameSpreadingXL/scaleOut", scaleOutReport, 1.40,
 				"Karpenter controller avg CPU should be less than 1.40 cores during scale-out")
 
 			// ========== PHASE 2: XL CONSOLIDATION TEST ==========
@@ -86,15 +86,15 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(consolidationReport.PodsNetChange).To(Equal(-600), "Should have net reduction of 600 pods")
 
 			// XL Consolidation assertions
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("hostNameSpreadingXL/consolidation", 35*time.Minute)),
+			expectTotalTime("hostNameSpreadingXL/consolidation", consolidationReport, 35*time.Minute,
 				"XL consolidation should complete within 35 minutes")
-			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", CPUUtilThreshold("hostNameSpreadingXL/consolidation", 0.38)),
+			expectCPUUtil("hostNameSpreadingXL/consolidation", consolidationReport, 0.38,
 				"Average CPU utilization should be greater than 38%")
-			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", MemoryUtilThreshold("hostNameSpreadingXL/consolidation", 0.40)),
+			expectMemoryUtil("hostNameSpreadingXL/consolidation", consolidationReport, 0.40,
 				"Average memory utilization should be greater than 40%")
-			Expect(consolidationReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("hostNameSpreadingXL/consolidation", 730)),
+			expectHeap("hostNameSpreadingXL/consolidation", consolidationReport, 730,
 				"Karpenter controller P95 live heap should be less than 730 MB during consolidation")
-			Expect(consolidationReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("hostNameSpreadingXL/consolidation", 1.70)),
+			expectCPU("hostNameSpreadingXL/consolidation", consolidationReport, 1.70,
 				"Karpenter controller avg CPU should be less than 1.70 cores during consolidation")
 
 		})
