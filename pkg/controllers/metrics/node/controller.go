@@ -58,14 +58,16 @@ var (
 )
 
 var (
-	Allocatable         opmetrics.GaugeMetric
-	TotalPodRequests    opmetrics.GaugeMetric
-	TotalPodLimits      opmetrics.GaugeMetric
-	TotalDaemonRequests opmetrics.GaugeMetric
-	TotalDaemonLimits   opmetrics.GaugeMetric
-	SystemOverhead      opmetrics.GaugeMetric
-	Lifetime            opmetrics.GaugeMetric
-	ClusterUtilization  opmetrics.GaugeMetric
+	Allocatable                  opmetrics.GaugeMetric
+	TotalPodRequests             opmetrics.GaugeMetric
+	TotalPodLimits               opmetrics.GaugeMetric
+	TotalDaemonRequests          opmetrics.GaugeMetric
+	TotalDaemonLimits            opmetrics.GaugeMetric
+	SystemOverhead               opmetrics.GaugeMetric
+	Lifetime                     opmetrics.GaugeMetric
+	ClusterUtilization           opmetrics.GaugeMetric
+	SecondsUntilExpiry           opmetrics.GaugeMetric
+	SecondsUntilForcedDisruption opmetrics.GaugeMetric
 )
 
 // Initialize metrics at runtime to ensure cloud provider's well-known labels are properly
@@ -157,6 +159,28 @@ func initializeMetrics() {
 			Help:      "Utilization of allocatable resources by pod requests",
 		},
 		[]opmetrics.Label{metrics.ResourceType},
+		opmetrics.Alpha,
+	)
+	SecondsUntilExpiry = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeClaimSubsystem,
+			Name:      "seconds_until_expiry",
+			Help:      "Seconds until the NodeClaim reaches its expiry deadline, when cordon and drain begin. Computed as creationTimestamp plus expireAfter minus now, so the value may be negative once the deadline has passed. NodeClaims with expireAfter set to Never emit no series.",
+		},
+		nodeLabelNames(),
+		opmetrics.Alpha,
+	)
+	SecondsUntilForcedDisruption = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeClaimSubsystem,
+			Name:      "seconds_until_forced_disruption",
+			Help:      "Seconds until pods on the NodeClaim's node are force-deleted, bypassing blocking PDBs and the do-not-disrupt annotation. Computed as creationTimestamp plus expireAfter plus terminationGracePeriod minus now, so the value may be negative once the deadline has passed. NodeClaims without a terminationGracePeriod emit no series, since drain then waits indefinitely.",
+		},
+		nodeLabelNames(),
 		opmetrics.Alpha,
 	)
 }
@@ -280,12 +304,32 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 			})
 		}
 	}
-	return append(res,
-		&metrics.StoreMetric{
-			GaugeMetric: Lifetime,
-			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+	res = append(res, &metrics.StoreMetric{
+		GaugeMetric: Lifetime,
+		Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+		Labels:      getNodeLabels(n),
+	})
+	// Emit the anticipatory counterpart to karpenter_nodeclaims_disrupted_total{reason="expired"}:
+	// the expiry deadline is fixed at NodeClaim creation, so the countdown is knowable well
+	// before the disruption itself. A NodeClaim with expireAfter set to Never has no deadline,
+	// and a NodeClaim without a terminationGracePeriod waits indefinitely to drain, so neither
+	// emits a series for the corresponding gauge.
+	if nodeClaim := n.NodeClaim; nodeClaim != nil && nodeClaim.Spec.ExpireAfter.Duration != nil {
+		expiryTime := nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration)
+		res = append(res, &metrics.StoreMetric{
+			GaugeMetric: SecondsUntilExpiry,
+			Value:       time.Until(expiryTime).Seconds(),
 			Labels:      getNodeLabels(n),
 		})
+		if nodeClaim.Spec.TerminationGracePeriod != nil {
+			res = append(res, &metrics.StoreMetric{
+				GaugeMetric: SecondsUntilForcedDisruption,
+				Value:       time.Until(expiryTime.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)).Seconds(),
+				Labels:      getNodeLabels(n),
+			})
+		}
+	}
+	return res
 }
 
 func getNodeLabelsWithResourceType(n *state.StateNode, resourceTypeName string) prometheus.Labels {
