@@ -33,7 +33,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolbackoff"
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
@@ -43,15 +45,17 @@ type Drift struct {
 	provisioner *provisioning.Provisioner
 	recorder    events.Recorder
 	clock       clock.Clock
+	backoff     *nodepoolbackoff.State
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock, backoff *nodepoolbackoff.State) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
 		recorder:    recorder,
 		clock:       clk,
+		backoff:     backoff,
 	}
 }
 
@@ -62,6 +66,8 @@ func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 
 // ComputeCommand generates a disruption command given candidates
 func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
+	initDriftBackoffMetrics(ctx, d.backoff, lo.Uniq(lo.Map(candidates, func(c *Candidate, _ int) string { return c.NodePool.Name }))...)
+
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
@@ -79,6 +85,9 @@ func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
 		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
+			continue
+		}
+		if isDriftBackedOff(ctx, d.backoff, d.recorder, candidate.NodePool) {
 			continue
 		}
 		// Simulate rescheduling the candidate's pods. When they can't be replaced-first and the candidate holds a full
@@ -130,4 +139,33 @@ func (d *Drift) Class() string {
 
 func (d *Drift) ConsolidationType() string {
 	return ""
+}
+
+func driftBackoffEnabled(ctx context.Context, backoff *nodepoolbackoff.State) bool {
+	return options.FromContext(ctx).FeatureGates.NodePoolDriftBackoff && backoff != nil
+}
+
+// initDriftBackoffMetrics registers a zero-valued back-off counter for each NodePool so the metric is visible (at 0)
+// for healthy pools rather than being absent until the first back-off. Add(0) is idempotent: it only ensures the
+// series exists and never clobbers an incremented value.
+func initDriftBackoffMetrics(ctx context.Context, backoff *nodepoolbackoff.State, nodePoolNames ...string) {
+	if !driftBackoffEnabled(ctx, backoff) {
+		return
+	}
+	for _, nodePoolName := range nodePoolNames {
+		DriftBackoffsTotal.Add(0, map[string]string{metrics.NodePoolLabel: nodePoolName})
+	}
+}
+
+// isDriftBackedOff reports whether the NodePool is currently backed off after repeated unrecoverable drift replacement
+// failures, publishing an event when it is.
+func isDriftBackedOff(ctx context.Context, backoff *nodepoolbackoff.State, recorder events.Recorder, nodePool *v1.NodePool) bool {
+	if !driftBackoffEnabled(ctx, backoff) {
+		return false
+	}
+	level, until, backedOff := backoff.GetBackoff(nodePool)
+	if backedOff {
+		recorder.Publish(disruptionevents.NodePoolDriftBackoff(nodePool, until, level))
+	}
+	return backedOff
 }
