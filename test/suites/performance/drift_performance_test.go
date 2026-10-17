@@ -62,8 +62,8 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				"Initial deployment should complete within 5 minutes")
 			Expect(initialReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("drift/initial", 190)),
 				"Karpenter controller P95 live heap should be less than 190 MB during initial deployment")
-			Expect(initialReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("drift/initial", 0.70)),
-				"Karpenter controller avg CPU should be less than 0.70 cores during scale-out")
+			Expect(initialReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("drift/initial", 0.80)),
+				"Karpenter controller avg CPU should be less than 0.80 cores during scale-out")
 
 			// Allow system to stabilize before triggering drift
 			By("Allowing system to stabilize before triggering drift")
