@@ -187,10 +187,19 @@ func (c *Controller) reconcileRequested(ctx context.Context, nodeClaim *v1.NodeC
 		}
 	}
 
+	return c.issueReboot(ctx, nodeClaim, node)
+}
+
+// issueReboot calls the provider and moves to RebootIssued, failing the reboot on errors that retrying can't fix.
+func (c *Controller) issueReboot(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node) (reconcile.Result, error) {
 	// Use a stable operationID across retries and restarts.
 	if err := c.cloudProvider.Reboot(ctx, nodeClaim, rebootOperationID(nodeClaim)); err != nil {
 		if cloudprovider.IsNodeRebootNotImplementedError(err) {
 			return c.transitionToFailed(ctx, nodeClaim, node, resultProviderError, "reboot not implemented by the cloud provider")
+		}
+		// Retrying can't succeed, so fail now instead of after the issuance timeout.
+		if cloudprovider.IsNodeRebootFailedError(err) || cloudprovider.IsNodeClaimNotFoundError(err) {
+			return c.transitionToFailed(ctx, nodeClaim, node, resultProviderError, fmt.Sprintf("reboot rejected by the cloud provider: %s", err))
 		}
 		// Stay in RebootRequested and retry for transient provider errors.
 		return reconcile.Result{}, fmt.Errorf("issuing reboot, %w", err)
@@ -343,6 +352,12 @@ func (c *Controller) transitionToFailed(ctx context.Context, nodeClaim *v1.NodeC
 		}
 	} else {
 		// Reboot failures after disruption escalate to NodeClaim replacement.
+		// The replacement inherits the reboot's committed drain bound, so failure cleanup can't block indefinitely.
+		if tgp, err := rebootTerminationGracePeriod(nodeClaim); err == nil && tgp != nil {
+			if err := nodeclaimutils.TightenTerminationTimestampAnnotation(ctx, c.kubeClient, nodeClaim, c.clock.Now().Add(*tgp)); err != nil {
+				return reconcile.Result{}, client.IgnoreNotFound(err)
+			}
+		}
 		if err := c.kubeClient.Delete(ctx, nodeClaim, client.Preconditions{ResourceVersion: lo.ToPtr(nodeClaim.ResourceVersion)}); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}

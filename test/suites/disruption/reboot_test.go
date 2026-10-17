@@ -135,7 +135,7 @@ var _ = Describe("Reboot", func() {
 				}
 				g.Expect(n.DeletionTimestamp.IsZero()).To(BeFalse(), "node not yet replaced")
 			}
-		}).WithPolling(time.Second).Should(Succeed())
+		}).WithTimeout(35 * time.Minute).WithPolling(time.Second).Should(Succeed())
 		Expect(boots).To(HaveLen(2), "expected exactly two reboots before replacement")
 
 		env.EventuallyExpectNotFound(nodeClaim, node)

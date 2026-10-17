@@ -70,6 +70,7 @@ type FeatureGates struct {
 	TerminateFirstDrift       bool
 	TerminateFirstRepair      bool
 	PodDeletionCostManagement bool
+	PredictionEnabled         bool
 }
 
 // FeatureGate is the source-of-truth description of a feature gate. Declaring gates as FeatureGates keeps each gate's
@@ -148,6 +149,14 @@ var (
 		Help: "Karpenter sets controller.kubernetes.io/pod-deletion-cost on pods so ReplicaSet scale-down prefers " +
 			"nodes it plans to consolidate, and stops reading that annotation as a disruption cost.",
 	}
+	PredictionEnabledFeatureGate = FeatureGate{
+		Name:    "PredictionEnabled",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help: "Karpenter sizes nodes during provisioning and disruption using the post-recreation resource requests " +
+			"predicted by a registered prediction source, and waits for that source to hydrate before scheduling. " +
+			"Requires a registered prediction source.",
+	}
 )
 
 // KarpenterFeatureGates are the feature gates Karpenter supports, in the order --feature-gates lists them.
@@ -161,6 +170,7 @@ var KarpenterFeatureGates = []FeatureGate{
 	TerminateFirstDriftFeatureGate,
 	TerminateFirstRepairFeatureGate,
 	PodDeletionCostManagementFeatureGate,
+	PredictionEnabledFeatureGate,
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -188,6 +198,7 @@ type Options struct {
 	minValuesPolicyRaw               string
 	MinValuesPolicy                  MinValuesPolicy
 	IgnoreDRARequests                bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
+	LegacyNodeRepair                 bool // NOTE: This flag is planned for deprecation along with the legacy node repair controller.
 	FeatureGates                     FeatureGates
 	schedulerConfigRaw               string
 	SchedulerConfig                  *SchedulerConfiguration
@@ -232,6 +243,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
+	fs.BoolVarWithEnv(&o.LegacyNodeRepair, "legacy-node-repair", "LEGACY_NODE_REPAIR", false, "When set with the NodeRepair feature gate, Karpenter runs the legacy node repair controller instead of node repair as a disruption method. The legacy controller only replaces nodes: it does not support terminate-first repair, reboot, repair policy priority or termination grace periods, or the karpenter.sh/do-not-repair annotation. NOTE: The legacy node repair controller is planned for deprecation. If you use it because the new one does not work for you, please open an issue with your use case or problem.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", featureGatesDefault()), featureGatesHelp())
 	fs.StringVar(&o.schedulerConfigRaw, "scheduler-config", env.WithDefaultString("SCHEDULER_CONFIG", ""), "A YAML/JSON document configuring the parts of the cluster's kube-scheduler behavior that Karpenter must mirror during scheduling simulation, currently only podTopologySpread.defaultConstraints. Empty means no scheduler-config overrides.")
 }
@@ -285,9 +297,11 @@ func DefaultFeatureGates() FeatureGates {
 		TerminateFirstDrift:       TerminateFirstDriftFeatureGate.Default,
 		TerminateFirstRepair:      TerminateFirstRepairFeatureGate.Default,
 		PodDeletionCostManagement: PodDeletionCostManagementFeatureGate.Default,
+		PredictionEnabled:         PredictionEnabledFeatureGate.Default,
 	}
 }
 
+//nolint:gocyclo
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	gateMap := map[string]bool{}
 	gates := DefaultFeatureGates()
@@ -323,6 +337,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap[PodDeletionCostManagementFeatureGate.Name]; ok {
 		gates.PodDeletionCostManagement = val
+	}
+	if val, ok := gateMap[PredictionEnabledFeatureGate.Name]; ok {
+		gates.PredictionEnabled = val
 	}
 
 	return gates, nil

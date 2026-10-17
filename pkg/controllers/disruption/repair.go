@@ -59,7 +59,7 @@ type Repair struct {
 }
 
 // NewRepair constructs the repair method around the matcher cluster state matches Nodes with. It panics when cluster
-// state has none, since health.NewRepairPolicyMatcher only returns nil when node repair is disabled.
+// state has none, since health.NewRepairPolicyMatcher only returns nil when node repair is disabled or replaced by --legacy-node-repair.
 func NewRepair(c consolidation) *Repair {
 	policyMatcher := c.cluster.RepairPolicyMatcher()
 	if policyMatcher == nil {
@@ -76,8 +76,8 @@ func NewRepair(c consolidation) *Repair {
 // RepairPolicy, have waited past that policy's toleration, and are not vetoed by the do-not-repair annotation. A vetoed
 // node that repair would otherwise act on (a RepairPolicy is eligible) is reported with a Blocked event.
 func (r *Repair) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
-	// Repair is behind the NodeRepair feature gate, matching the old node.health controller's gating.
-	if !options.FromContext(ctx).FeatureGates.NodeRepair {
+	// Repair is behind the NodeRepair feature gate, and --legacy-node-repair replaces it with the node.health controller.
+	if !options.FromContext(ctx).FeatureGates.NodeRepair || options.FromContext(ctx).LegacyNodeRepair {
 		return false
 	}
 	// A disruption candidate always has a registered Node; a nil here is an invariant violation, so fail loud.
@@ -124,8 +124,12 @@ func (r *Repair) ComputeCommands(ctx context.Context, disruptionBudgetMapping ma
 
 //nolint:gocyclo // Static and dynamic replacement flows are intentionally kept inline.
 func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
+	// We use a fixed value for now so all candidates get the same value
+	// This is important for repair since it scores candidates based on their current age (calculated as now - eligibleAt).
+	// We don't want the order in which candidates are evaluated to affect their age.
+	now := r.clock.Now()
 	sort.SliceStable(candidates, func(i, j int) bool {
-		si, sj := candidates[i].RepairPolicyResult.Score, candidates[j].RepairPolicyResult.Score
+		si, sj := candidates[i].RepairPolicyResult.ScoreAt(now), candidates[j].RepairPolicyResult.ScoreAt(now)
 		if si != sj {
 			return si > sj // higher score repairs first
 		}
@@ -180,26 +184,46 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 				continue
 			}
 
+			nct := pscheduling.NewNodeClaimTemplate(np)
+			// Only a candidate holding a slot in a still-offered reservation frees a slot the refill can use, so only it can
+			// terminate first on full reservations; any other candidate can't be replaced either way, so it's blocked.
+			// Checked only with terminate-first enabled, since without it there's nothing to do but replace first.
+			var reservationsFull bool
+			if terminateFirstEnabled {
+				full, offered, err := staticReservations(ctx, r.cloudProvider, np, nct)
+				// Other candidates don't depend on this one, so one NodePool's failure doesn't stop repair for the rest.
+				if err != nil {
+					log.FromContext(ctx).Error(err, "skipping repair candidate, failed checking capacity reservations")
+					continue
+				}
+				if full && !holdsOfferedReservation(candidate, offered) {
+					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool's capacity reservations are full and cannot stage a replacement")...)
+					continue
+				}
+				reservationsFull = full
+			}
 			limit, ok := np.Spec.Limits[resources.Node]
 			nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
 			// Atomic accounting, not a naive count: deleting/already-reserved nodes would otherwise let repair burst
 			// past limits.nodes when commands race. A zero result reserves nothing, so the delete-only path leaks no
-			// reservation; a non-zero result's slot is consumed by the replacement staged below.
-			if r.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, 1) == 0 {
+			// reservation; a non-zero result's slot is consumed by the replacement staged below. Full reservations are
+			// checked first so the delete-only path never takes a slot.
+			if reservationsFull || r.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, 1) == 0 {
 				// Static provisioning refuses NotReady or deleting NodePools, so terminating first there would strand
 				// the workload with no replacement.
 				refillable := np.StatusConditions().Root().IsTrue() && np.DeletionTimestamp.IsZero()
 				if !terminateFirstEnabled || !refillable {
-					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "static NodePool is at its node limit and cannot stage a replacement")...)
+					r.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, lo.Ternary(reservationsFull,
+						"static NodePool's capacity reservations are full and cannot stage a replacement",
+						"static NodePool is at its node limit and cannot stage a replacement"))...)
 					continue
 				}
 				return []Command{{
-					Candidates:          []*Candidate{candidate},
-					PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-					TerminateFirst:      true,
+					Candidates:           []*Candidate{candidate},
+					PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+					TerminateFirstReason: lo.Ternary(reservationsFull, TerminateFirstNoReservedCapacity, TerminateFirstStaticAtLimit),
 				}}, nil
 			}
-			nct := pscheduling.NewNodeClaimTemplate(np)
 			result := pscheduling.Results{NewNodeClaims: []*pscheduling.NodeClaim{{NodeClaimTemplate: *nct}}}
 			return []Command{{
 				Candidates:          []*Candidate{candidate},
@@ -220,10 +244,10 @@ func (r *Repair) computeCommands(ctx context.Context, disruptionBudgetMapping ma
 		if terminateFirst {
 			// Carry the Results (no Replacements) so nodes that can absorb the freed pods get nominated.
 			return []Command{{
-				Candidates:          []*Candidate{candidate},
-				Results:             results,
-				PoolDisruptionCosts: computePoolDisruptionCosts([]*Candidate{candidate}),
-				TerminateFirst:      true,
+				Candidates:           []*Candidate{candidate},
+				Results:              results,
+				PoolDisruptionCosts:  computePoolDisruptionCosts([]*Candidate{candidate}),
+				TerminateFirstReason: TerminateFirstNoReservedCapacity,
 			}}, nil
 		}
 		if !results.AllNonPendingPodsScheduled() {

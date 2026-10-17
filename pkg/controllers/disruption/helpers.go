@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,6 +43,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
+	pkgscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
@@ -278,9 +281,14 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	if err != nil {
 		return nil, nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
+	// We use a clock which has a fixed value for now so all candidates get the same value.
+	// now is used in the calculation of DisruptionCost.
+	// Using a fixed value is important for repair which tie-breaks candidates based on their DisruptionCost.
+	// We don't want the order in which candidates are evaluated to affect their DisruptionCost.
+	var fixedNowClk clock.Clock = fixedNowClock{Clock: clk, now: clk.Now()}
 	allNodes := cluster.DeepCopyNodes()
 	allCandidates := lo.FilterMap(allNodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, fixedNowClk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil
 	})
 	// Compute totals using ALL nodes for disruption cost denominator (RFC requirement:
@@ -289,6 +297,15 @@ func GetCandidatesWithTotals(ctx context.Context, cluster *state.Cluster, kubeCl
 	filtered := lo.Filter(allCandidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) })
 	return filtered, nodePoolTotals, nil
 }
+
+// fixedNowClock is a clock that has a fixed value for now.
+type fixedNowClock struct {
+	clock.Clock
+	now time.Time
+}
+
+func (c fixedNowClock) Now() time.Time                  { return c.now }
+func (c fixedNowClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
 func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
@@ -426,4 +443,38 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 	return lo.Filter(current, func(c *Candidate, _ int) bool {
 		return proposedNames.Has(c.Name())
 	})
+}
+
+// staticReservations reports whether a static NodePool's replacement can only land in full capacity reservations, so
+// pre-spinning it would fail to launch until a reserved node frees its slot, and which compatible reservations are still
+// offered (Available, even if full). A compatible non-reserved offering, even an unavailable one, means the replacement
+// doesn't depend on a reservation slot, so the NodePool waits for that capacity rather than terminating first. A static
+// replacement is the bare NodePool template, so this is an offering lookup rather than a scheduling simulation.
+// GetInstanceTypes is NodeClass-scoped, so offerings are filtered by the template's requirements.
+func staticReservations(ctx context.Context, cloudProvider cloudprovider.CloudProvider, np *v1.NodePool, nct *scheduling.NodeClaimTemplate) (bool, sets.Set[string], error) {
+	its, err := cloudProvider.GetInstanceTypes(ctx, np)
+	if err != nil {
+		return false, nil, serrors.Wrap(fmt.Errorf("getting instance types, %w", err), "NodePool", klog.KObj(np))
+	}
+	offered := sets.New[string]()
+	for _, it := range its {
+		if !nct.Requirements.IsCompatible(it.Requirements, pkgscheduling.AllowUndefinedWellKnownLabels) {
+			continue
+		}
+		for _, o := range it.Offerings.Compatible(nct.Requirements) {
+			if o.CapacityType() != v1.CapacityTypeReserved || o.Launchable() {
+				return false, nil, nil
+			}
+			if o.Available {
+				offered.Insert(o.ReservationID())
+			}
+		}
+	}
+	return true, offered, nil
+}
+
+// holdsOfferedReservation reports whether the candidate holds a slot in a reservation that's still offered, so
+// terminating it frees a slot its refill can launch into.
+func holdsOfferedReservation(c *Candidate, offered sets.Set[string]) bool {
+	return c.capacityType == v1.CapacityTypeReserved && offered.Has(c.Labels()[cloudprovider.ReservationIDLabel])
 }

@@ -300,6 +300,10 @@ func (in *StateNode) ValidateNodeDisruptable(clk clock.Clock) error {
 	}
 	// Checked ahead of nomination, which provisioning keeps renewing on an uninitialized node while pods wait for it.
 	if !in.Initialized() {
+		// Liveness's registration timeout owns a node until it registers, so only a registered node is ignorable.
+		if !in.Registered() {
+			return fmt.Errorf("node isn't initialized nor registered")
+		}
 		return NewNodeUninitializedError(fmt.Errorf("node isn't initialized"))
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.

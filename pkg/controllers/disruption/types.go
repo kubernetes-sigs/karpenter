@@ -251,8 +251,9 @@ type Command struct {
 	Candidates          []*Candidate
 	Replacements        []*Replacement
 	PoolDisruptionCosts map[string]float64
-	// TerminateFirst marks a delete-only terminate-first command (RFC #3203); Decision() surfaces it as TerminateFirstDecision.
-	TerminateFirst bool
+	// TerminateFirstReason marks a delete-only terminate-first command (RFC #3203) with why its replacement couldn't be
+	// staged first; Decision() surfaces it as TerminateFirstDecision.
+	TerminateFirstReason TerminateFirstReason
 	// Reboot is already handed off to its controller, so the queue only records the decision.
 	Reboot bool
 }
@@ -281,6 +282,17 @@ var (
 	RejectedDecision Decision = "rejected"
 )
 
+// TerminateFirstReason is why a terminate-first command couldn't stage its replacement first.
+type TerminateFirstReason string
+
+const (
+	// TerminateFirstNoReservedCapacity means the replacement has no reserved capacity to launch into except the slot the
+	// node holds in a full capacity reservation.
+	TerminateFirstNoReservedCapacity TerminateFirstReason = "no-reserved-capacity"
+	// TerminateFirstStaticAtLimit means a static NodePool at its node limit can't launch the replacement alongside the node.
+	TerminateFirstStaticAtLimit TerminateFirstReason = "static-at-limit"
+)
+
 func (c Command) Decision() Decision {
 	switch {
 	case len(c.Candidates) > 0 && c.Reboot:
@@ -288,7 +300,7 @@ func (c Command) Decision() Decision {
 	case len(c.Candidates) > 0 && len(c.Replacements) > 0:
 		return ReplaceDecision
 	case len(c.Candidates) > 0 && len(c.Replacements) == 0:
-		if c.TerminateFirst {
+		if c.TerminateFirstReason != "" {
 			return TerminateFirstDecision
 		}
 		return DeleteDecision

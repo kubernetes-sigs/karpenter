@@ -17,7 +17,6 @@ limitations under the License.
 package common
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,8 +26,6 @@ import (
 	"github.com/montanaflynn/stats"
 	. "github.com/onsi/ginkgo/v2"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/prometheus/common/expfmt"
-	"github.com/prometheus/common/model"
 )
 
 type ResourceSample struct {
@@ -109,7 +106,7 @@ func (mp *KarpenterMetricsPoller) run(ctx context.Context) {
 
 	state := &pollerState{firstSample: true}
 
-	pod, err := mp.env.FindActiveKarpenterPod(ctx)
+	pod, err := mp.env.EventuallyFindActiveKarpenterPod(ctx)
 	if err != nil || pod == nil {
 		mp.recordError(fmt.Errorf("finding karpenter pod: %w", err))
 		return
@@ -228,23 +225,17 @@ func (mp *KarpenterMetricsPoller) recordSample(state *pollerState, now time.Time
 
 // scrapeMetrics uses the API server pod proxy to fetch /metrics from the Karpenter pod.
 func (mp *KarpenterMetricsPoller) scrapeMetrics(ctx context.Context, podName string) (processMetrics, error) {
-	data, err := mp.env.KubeClient.CoreV1().Pods("kube-system").ProxyGet("http", podName, "8080", "/metrics", nil).DoRaw(ctx)
+	families, err := scrapeKarpenterMetricFamilies(ctx, mp.env, podName)
 	if err != nil {
-		return processMetrics{}, fmt.Errorf("proxy GET /metrics: %w", err)
+		return processMetrics{}, err
 	}
-	return parseProcessMetrics(data)
+	return parseProcessMetrics(families)
 }
 
-// parseProcessMetrics extracts the resource metrics from a Prometheus text
+// parseProcessMetrics extracts the resource metrics from a parsed Prometheus
 // exposition. Every metric must be present: a sample missing heap would
 // silently lower the heap statistics that the performance tests gate on.
-func parseProcessMetrics(data []byte) (processMetrics, error) {
-	parser := expfmt.NewTextParser(model.UTF8Validation)
-	families, err := parser.TextToMetricFamilies(bytes.NewReader(data))
-	if err != nil {
-		return processMetrics{}, fmt.Errorf("parsing metrics: %w", err)
-	}
-
+func parseProcessMetrics(families map[string]*dto.MetricFamily) (processMetrics, error) {
 	m := processMetrics{
 		residentBytes: getGaugeValue(families, "process_resident_memory_bytes"),
 		heapLiveBytes: getGaugeValue(families, "go_gc_heap_live_bytes"),

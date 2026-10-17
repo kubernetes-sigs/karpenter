@@ -104,7 +104,8 @@ func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, ku
 	methods := []Method{}
 	// Repair runs first: fixing a fault outranks any discretionary rebalance. Do not register the method while the
 	// feature gate is disabled, since candidate construction performs cluster-wide API and scheduling work.
-	if options.FromContext(ctx).FeatureGates.NodeRepair {
+	// --legacy-node-repair runs the legacy node.health controller in place of this method.
+	if options.FromContext(ctx).FeatureGates.NodeRepair && !options.FromContext(ctx).LegacyNodeRepair {
 		methods = append(methods, NewRepair(c))
 	}
 	return append(methods, []Method{
@@ -170,6 +171,9 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			return reconciler.Result{Requeue: true}, nil
 		}
 		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
+	}
+	if options.FromContext(ctx).FeatureGates.PredictionEnabled && !c.provisioner.PredictionStoreHydrated(ctx) {
+		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action

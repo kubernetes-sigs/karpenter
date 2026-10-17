@@ -277,7 +277,7 @@ var _ = Describe("Repair Policies", func() {
 			Expect(result.ReasonRegex).To(Equal(`48Error$`))
 			Expect(result.Fallback).To(BeFalse())
 			Expect(result.SelectedEligibleAt).To(Equal(now.Add(30 * time.Minute)))
-			Expect(result.Score).To(BeNumerically("~", 25.0/30.0))
+			Expect(result.ScoreAt(now.Add(35 * time.Minute))).To(BeNumerically("~", 25.0/30.0))
 		})
 
 		It("retains the earliest eligibility across same-action policies", func() {
@@ -422,7 +422,7 @@ var _ = Describe("Repair Policies", func() {
 			}}}
 
 			result := Resolve(nodeMatcher.Match(node), now, time.Time{})
-			Expect(result.Score).To(Equal(float64(6)))
+			Expect(result.ScoreAt(now)).To(Equal(float64(6)))
 			Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 			Expect(result.Condition).To(Equal(corev1.NodeConditionType("HighPriority")))
 		})
@@ -450,7 +450,7 @@ var _ = Describe("Repair Policies", func() {
 
 			for _, conditions := range [][]corev1.NodeCondition{{highPriority, lowPriority}, {lowPriority, highPriority}} {
 				result := evaluate(nodeMatcher, now, conditions...)
-				Expect(result.Score).To(Equal(float64(7)))
+				Expect(result.ScoreAt(now)).To(Equal(float64(7)))
 				Expect(result.Action).To(Equal(cloudprovider.ReplaceNode))
 				Expect(result.Condition).To(Equal(corev1.NodeConditionType("LowPriority")))
 				Expect(result.ConditionStatus).To(Equal(corev1.ConditionFalse))
@@ -572,7 +572,7 @@ var _ = Describe("Repair Policies", func() {
 			}}}}
 		}
 		now := time.Unix(0, 0).Add(time.Hour)
-		Expect(Resolve(matcher.Match(node("Other")), now, time.Time{}).Score).To(BeNumerically(">", Resolve(matcher.Match(node("XID")), now, time.Time{}).Score))
+		Expect(Resolve(matcher.Match(node("Other")), now, time.Time{}).ScoreAt(now)).To(BeNumerically(">", Resolve(matcher.Match(node("XID")), now, time.Time{}).ScoreAt(now)))
 	})
 
 	It("describes a match for logging", func() {

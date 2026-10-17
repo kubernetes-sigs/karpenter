@@ -49,6 +49,7 @@ type OptionsFields struct {
 	BatchMaxDuration                 *time.Duration
 	BatchIdleDuration                *time.Duration
 	IgnoreDRARequests                *bool
+	LegacyNodeRepair                 *bool
 	FeatureGates                     FeatureGates
 	SchedulerConfig                  *options.SchedulerConfiguration
 }
@@ -63,6 +64,7 @@ type FeatureGates struct {
 	TerminateFirstDrift       *bool
 	TerminateFirstRepair      *bool
 	PodDeletionCostManagement *bool
+	PredictionEnabled         *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -93,6 +95,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		PreferencePolicy:                 lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
 		MinValuesPolicy:                  lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
 		IgnoreDRARequests:                lo.FromPtrOr(opts.IgnoreDRARequests, true),
+		LegacyNodeRepair:                 lo.FromPtrOr(opts.LegacyNodeRepair, false),
 		SchedulerConfig:                  opts.SchedulerConfig,
 		FeatureGates: options.FeatureGates{
 			NodeRepair:                lo.FromPtrOr(opts.FeatureGates.NodeRepair, options.NodeRepairFeatureGate.Default),
@@ -104,6 +107,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			TerminateFirstDrift:       lo.FromPtrOr(opts.FeatureGates.TerminateFirstDrift, options.TerminateFirstDriftFeatureGate.Default),
 			TerminateFirstRepair:      lo.FromPtrOr(opts.FeatureGates.TerminateFirstRepair, options.TerminateFirstRepairFeatureGate.Default),
 			PodDeletionCostManagement: lo.FromPtrOr(opts.FeatureGates.PodDeletionCostManagement, options.PodDeletionCostManagementFeatureGate.Default),
+			PredictionEnabled:         lo.FromPtrOr(opts.FeatureGates.PredictionEnabled, options.PredictionEnabledFeatureGate.Default),
 		},
 	}
 }

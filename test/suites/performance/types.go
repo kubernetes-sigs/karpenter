@@ -18,6 +18,8 @@ package performance
 
 import (
 	"time"
+
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 // ConsolidationRound represents a single round of consolidation
@@ -58,6 +60,9 @@ type PerformanceReport struct {
 	KarpenterAvgCPUCores float64 `json:"karpenter_avg_cpu_cores"`
 	KarpenterMaxCPUCores float64 `json:"karpenter_max_cpu_cores"`
 	MetricsSampleCount   int     `json:"metrics_sample_count"`
+
+	LatencyStats map[string]common.HistogramStats `json:"latency_stats,omitempty"`
+	Counters     map[string]uint64                `json:"counters,omitempty"`
 
 	// pprof debug artifacts (not used for assertions, saved for offline analysis)
 	MemoryProfileData []byte `json:"-"`

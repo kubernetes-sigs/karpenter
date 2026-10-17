@@ -43,6 +43,7 @@ import (
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
 	nodehydration "sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/legacyrepair"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	nodeclaimconsistency "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
@@ -74,15 +75,20 @@ import (
 )
 
 type ControllerOptions struct {
-	registrationHooks    []cloudprovider.NodeLifecycleHook
-	disableVPAPrediction bool
+	registrationHooks   []cloudprovider.NodeLifecycleHook
+	enableVPAPrediction bool
 }
 
-// WithoutVPAPrediction disables the VPA prediction controller. Use this when
-// a different prediction source is registered separately.
-func WithoutVPAPrediction() option.Function[ControllerOptions] {
+// WithVPAPrediction enables the VPA prediction controller as the prediction source.
+// When enabled alongside the PredictionEnabled feature gate, Karpenter uses VPA
+// recommendations to size nodes during provisioning and disruption. With the gate
+// enabled, a prediction source must be registered to mark the prediction store
+// hydrated, or provisioning and disruption wait indefinitely. Only VPAs targeting
+// built-in workloads (Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
+// ReplicationController) are applied.
+func WithVPAPrediction() option.Function[ControllerOptions] {
 	return func(o *ControllerOptions) {
-		o.disableVPAPrediction = true
+		o.enableVPAPrediction = true
 	}
 }
 
@@ -96,6 +102,7 @@ func WithRegistrationHook(hook cloudprovider.NodeLifecycleHook) option.Function[
 	}
 }
 
+//nolint:gocyclo
 func NewControllers(
 	ctx context.Context,
 	mgr manager.Manager,
@@ -112,7 +119,7 @@ func NewControllers(
 	o := option.Resolve(opts...)
 	deviceAllocationController := deviceallocation.NewController(kubeClient)
 	virtualPodCache := virtualpods.NewVirtualPodCache(kubeClient)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache)
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationController, virtualPodCache, predictionStore)
 	evictionQueue := terminator.NewQueue(clock, kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
@@ -175,10 +182,13 @@ func NewControllers(
 		)
 	}
 
-	// Register the reboot controller alongside node repair. The repair disruption method itself is
-	// registered in the disruption controller; the standalone node/health controller was removed by #3311.
-	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
-		controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+	// The reboot controller only acts on NodeClaims with a committed reboot, so it always runs: a reboot already in flight
+	// finishes even if node repair is disabled or the provider stops selecting reboot.
+	controllers = append(controllers, nodeclaimreboot.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder))
+	// The repair disruption method is registered in the disruption controller. --legacy-node-repair instead runs the
+	// legacy node.health controller.
+	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair && options.FromContext(ctx).LegacyNodeRepair {
+		controllers = append(controllers, legacyrepair.NewController(kubeClient, cloudProvider, clock, recorder))
 	}
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock, deviceAllocationController, virtualPodCache))
@@ -213,6 +223,9 @@ func NewControllers(
 			deletionCostQueue,
 			deletioncost.NewController(clock, kubeClient, cloudProvider, cluster, deletionCostQueue),
 		)
+	}
+	if o.enableVPAPrediction && options.FromContext(ctx).FeatureGates.PredictionEnabled {
+		controllers = append(controllers, informer.NewVPAController(kubeClient, predictionStore, cluster, recorder))
 	}
 
 	return controllers
