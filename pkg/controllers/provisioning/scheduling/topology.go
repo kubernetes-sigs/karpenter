@@ -401,8 +401,9 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 	var previousNode *corev1.Node
 	var previousNodeRequirements scheduling.Requirements
 
-	for i, p := range pods {
-		if IgnoredForTopology(&pods[i]) {
+	for i := range pods {
+		p := &pods[i]
+		if IgnoredForTopology(p) {
 			continue
 		}
 		// pod is excluded for counting purposes
@@ -549,8 +550,8 @@ func (t *Topology) buildNamespaceList(ctx context.Context, namespace string, nam
 		return nil, fmt.Errorf("listing namespaces, %w", err)
 	}
 	selected := sets.New[string]()
-	for _, namespace := range namespaceList.Items {
-		selected.Insert(namespace.Name)
+	for i := range namespaceList.Items {
+		selected.Insert(namespaceList.Items[i].Name)
 	}
 	selected.Insert(namespaces...)
 	return selected, nil

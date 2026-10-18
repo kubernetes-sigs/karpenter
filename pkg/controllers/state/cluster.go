@@ -232,8 +232,8 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 		nodeClaimNames.Insert(nodeClaim.Name)
 	}
 	nodeNames := sets.New[string]()
-	for _, node := range nodeList.Items {
-		nodeNames.Insert(node.Name)
+	for i := range nodeList.Items {
+		nodeNames.Insert(nodeList.Items[i].Name)
 	}
 	// The names tracked in-memory should at least have all the data that is in the api-server
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
@@ -720,9 +720,10 @@ func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonS
 		return nil
 	}
 	var pod *corev1.Pod
-	for _, p := range pods.Items {
-		if metav1.IsControlledBy(&p, daemonset) && (pod == nil || p.CreationTimestamp.After(pod.CreationTimestamp.Time)) {
-			pod = &p
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if metav1.IsControlledBy(p, daemonset) && (pod == nil || p.CreationTimestamp.After(pod.CreationTimestamp.Time)) {
+			pod = p
 		}
 	}
 	if pod != nil {
@@ -852,8 +853,8 @@ func (c *Cluster) matchRepairPolicies(ctx context.Context, node *corev1.Node, ol
 	// Guard on Enabled so a disabled V(1) logger doesn't pay for building the key/value pairs.
 	if logger := log.FromContext(ctx).V(1); logger.Enabled() {
 		logger = logger.WithValues("Node", klog.KObj(node))
-		for _, m := range matches {
-			logger.WithValues(m.LogValues()...).Info("matched repair policy")
+		for i := range matches {
+			logger.WithValues(matches[i].LogValues()...).Info("matched repair policy")
 		}
 		if len(matches) == 0 && len(oldNode.repairPolicyMatches) > 0 {
 			logger.Info("no longer matches any repair policy")

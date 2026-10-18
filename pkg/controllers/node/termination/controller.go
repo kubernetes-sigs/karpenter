@@ -338,8 +338,8 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 	// Match on Pod -> PersistentVolumeClaim -> PersistentVolume Name <- VolumeAttachment
 	shouldFilterOutVolume := sets.New[string]()
 	for _, p := range unDrainablePods {
-		for _, v := range p.Spec.Volumes {
-			pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, p, v)
+		for i := range p.Spec.Volumes {
+			pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, p, &p.Spec.Volumes[i])
 			if errors.IsNotFound(err) {
 				continue
 			}

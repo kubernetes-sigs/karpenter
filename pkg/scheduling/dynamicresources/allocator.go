@@ -635,7 +635,8 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 
 			deviceIDsByIT[itID] = make([]DeviceID, len(a.allocatedDevicesMetadata))
 			itReqs := scheduling.NewRequirements()
-			for di, da := range a.allocatedDevicesMetadata {
+			for di := range a.allocatedDevicesMetadata {
+				da := &a.allocatedDevicesMetadata[di]
 				deviceIDsByIT[itID][di] = da.deviceWithID.ID
 				meta := claimAllocMeta[da.claimIndex]
 				// Update the contributed requirements for the device, each devices contributed requirements are intersected to

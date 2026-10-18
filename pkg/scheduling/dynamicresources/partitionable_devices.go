@@ -463,7 +463,8 @@ func (a *allocator) restoreAllocatingCounters(device cloudprovider.Device, poolK
 // For FirstAvailable, at least one sub-request per request needs to be feasible.
 func (a *allocator) countersFeasible() bool {
 	for _, cd := range a.claimData {
-		for _, rd := range cd.Requests {
+		for j := range cd.Requests {
+			rd := &cd.Requests[j]
 			if len(rd.SubRequests) > 0 {
 				anyFeasible := false
 				for i := range rd.SubRequests {
@@ -480,7 +481,7 @@ func (a *allocator) countersFeasible() bool {
 					return false
 				}
 			} else if rd.AllocationMode == resourcev1.DeviceAllocationModeAll {
-				if !a.allModeCountersFeasible(&rd) {
+				if !a.allModeCountersFeasible(rd) {
 					return false
 				}
 			}

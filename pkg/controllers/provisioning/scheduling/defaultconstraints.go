@@ -187,7 +187,9 @@ func (d *DefaultTopologySpreadInjector) defaultSelector(ctx context.Context, p *
 // pod, mirroring upstream's GetPodServices followed by a labels.Merge of each matching Service's selector.
 func (d *DefaultTopologySpreadInjector) serviceMatchLabels(ctx context.Context, p *corev1.Pod) map[string]string {
 	matchLabels := map[string]string{}
-	for _, svc := range d.services(ctx, p.Namespace) {
+	services := d.services(ctx, p.Namespace)
+	for i := range services {
+		svc := &services[i]
 		// A nil selector matches nothing, not everything, so such a Service never contributes. A non-nil but empty
 		// selector matches every pod, but contributes no labels.
 		if svc.Spec.Selector == nil {

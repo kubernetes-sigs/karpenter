@@ -60,13 +60,14 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 	}
 
 	var errs error
-	for _, np := range npl.Items {
-		newIts, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
+	for i := range npl.Items {
+		np := &npl.Items[i]
+		newIts, err := c.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
 			errs = multierr.Append(errs, err)
 			continue
 		}
-		c.clusterCost.UpdateOfferings(ctx, &np, newIts)
+		c.clusterCost.UpdateOfferings(ctx, np, newIts)
 	}
 	if errs != nil {
 		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", errs)

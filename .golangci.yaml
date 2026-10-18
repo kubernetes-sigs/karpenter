@@ -10,6 +10,7 @@ linters:
     - bidichk
     - copyloopvar
     - errorlint
+    - gocritic
     - gocyclo
     - goheader
     - gosec
@@ -31,6 +32,11 @@ linters:
         settings:
           linters: {}
           lintersConfig: {}
+    # Large per-iteration copies in scheduling and cluster state hot paths (#3211, #3310).
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - rangeValCopy
     gocyclo:
       min-complexity: 11
     goheader:
@@ -81,6 +87,12 @@ linters:
       - path-except: pkg/apis/
         linters:
           - kubeapilinter
+      - path-except: pkg/(scheduling|controllers/provisioning/scheduling|controllers/state)/
+        linters:
+          - gocritic
+      - path: _test\.go$
+        linters:
+          - gocritic
     paths:
       - tools
       - website
