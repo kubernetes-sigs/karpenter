@@ -11,6 +11,7 @@ linters:
     - copyloopvar
     - depguard
     - errorlint
+    - gocritic
     - gocyclo
     - goheader
     - gosec
@@ -48,6 +49,11 @@ linters:
           deny:
             - pkg: github.com/avast/retry-go
               desc: use k8s.io/apimachinery/pkg/util/wait
+    # Large per-iteration copies in scheduling and cluster state hot paths (#3211, #3310).
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - rangeValCopy
     gocyclo:
       min-complexity: 30
     goheader:
@@ -100,6 +106,12 @@ linters:
       - path-except: pkg/apis/
         linters:
           - kubeapilinter
+      - path-except: pkg/(scheduling|controllers/provisioning/scheduling|controllers/state)/
+        linters:
+          - gocritic
+      - path: _test\.go$
+        linters:
+          - gocritic
     paths:
       - tools
       - website
