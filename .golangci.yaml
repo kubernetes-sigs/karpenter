@@ -9,6 +9,7 @@ linters:
     - asciicheck
     - bidichk
     - copyloopvar
+    - depguard
     - errorlint
     - gocyclo
     - goheader
@@ -31,6 +32,21 @@ linters:
         settings:
           linters: {}
           lintersConfig: {}
+    # One owner for helpers that keep getting re-implemented (review on #3028, #2894,
+    # #3015, #3407). #2968 replaced retry-go with k8s wait.
+    depguard:
+      rules:
+        resources:
+          files:
+            - $all
+            - "!**/pkg/utils/resources/*.go"
+          deny:
+            - pkg: k8s.io/component-helpers/resource
+              desc: use sigs.k8s.io/karpenter/pkg/utils/resources
+        retry:
+          deny:
+            - pkg: github.com/avast/retry-go
+              desc: use k8s.io/apimachinery/pkg/util/wait
     gocyclo:
       min-complexity: 11
     goheader:
