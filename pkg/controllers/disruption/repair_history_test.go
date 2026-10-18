@@ -123,12 +123,10 @@ var _ = Describe("RebootHistory", func() {
 		var wg sync.WaitGroup
 		start := make(chan struct{})
 		for range commits {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-start
 				history.RecordCommittedReboot("nodeclaim-uid")
-			}()
+			})
 		}
 		close(start)
 		wg.Wait()

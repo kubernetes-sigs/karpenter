@@ -67,7 +67,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		ExpectApplied(ctx, env.Client, rs)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
 		}}}})
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
@@ -79,12 +79,12 @@ var _ = Describe("TerminateFirstDrift", func() {
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-		for i := 0; i < count; i++ {
+		for range count {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"tf-spread": "x"},
 					OwnerReferences: []metav1.OwnerReference{{
-						APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+						APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
 					}},
 				},
 				PodAntiRequirements: []corev1.PodAffinityTerm{{
@@ -105,7 +105,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 
 		BeforeEach(func() {
 			nodePool = test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-				Replicas:   lo.ToPtr(int64(1)),
+				Replicas:   new(int64(1)),
 				Disruption: v1.Disruption{Budgets: []v1.Budget{{Nodes: "100%"}}},
 			}})
 			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
@@ -126,7 +126,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("issues a delete-only command for a static NodePool at its node limit when TerminateFirstDrift is enabled", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true)}}))
 			// At the node limit (limit == replicas == 1): the pool can't stage a replacement without bursting over the
 			// limit, so terminate-first applies.
 			nodePool.Spec.Limits = v1.Limits{resources.Node: resource.MustParse("1")}
@@ -143,7 +143,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("blocks instead of terminating first when the static NodePool at its node limit is NotReady", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true)}}))
 			nodePool.Spec.Limits = v1.Limits{resources.Node: resource.MustParse("1")}
 			nodePool.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "NotReady", "NotReady")
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -156,7 +156,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("replaces-first for a static NodePool below its node limit even when TerminateFirstDrift is enabled", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true)}}))
 			// Below the node limit (limit 2 > replicas 1): the pool can stage a replacement without bursting over the
 			// limit, so it replaces-first rather than terminating first even with the gate on.
 			nodePool.Spec.Limits = v1.Limits{resources.Node: resource.MustParse("2")}
@@ -172,7 +172,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("replaces-first for a static NodePool when TerminateFirstDrift is disabled", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(false)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(false)}}))
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
@@ -218,7 +218,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			}
 
 			It("issues a delete-only command when the reservation is full", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				withReservation(0)
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -236,10 +236,10 @@ var _ = Describe("TerminateFirstDrift", func() {
 
 			// One NodePool's lookup failure must neither stop drift for the others nor leak the limits.nodes slots they reserve.
 			It("still drifts other static NodePools when one NodePool's instance types can't be resolved", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				withReservation(0)
 				healthyPool := test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-					Replicas:   lo.ToPtr(int64(1)),
+					Replicas:   new(int64(1)),
 					Limits:     v1.Limits{resources.Node: resource.MustParse("2")},
 					Disruption: v1.Disruption{Budgets: []v1.Budget{{Nodes: "100%"}}},
 				}})
@@ -270,7 +270,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 
 			// The on-demand fallback is only temporarily unavailable, so the NodePool waits for it instead of terminating first.
 			It("replaces-first when the template's on-demand offerings are unavailable", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				for _, o := range mostExpensiveInstance.Offerings {
 					o.Available = false
 				}
@@ -289,7 +289,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			// The fake's offerings carry no instance-type label, as on AWS, so only filtering instance types by the template
 			// keeps a reservation outside the template from counting as capacity for the replacement.
 			It("treats the reservations as full when only an instance type outside the template has capacity", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				withReservation(0)
 				leastExpensiveInstance.Offerings = append(leastExpensiveInstance.Offerings, &cloudprovider.Offering{
 					Price:               leastExpensiveOffering.Price / 1_000_000.0,
@@ -314,7 +314,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			// Candidate order is arbitrary, so with a budget of 1 the one candidate that frees a usable slot must be moved
 			// ahead of those that don't.
 			It("terminates first the candidate holding an offered reservation slot ahead of those that don't", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				withReservation(0)
 				const unoffered = 20
 				nodePool.Spec.Replicas = lo.ToPtr(int64(unoffered + 1))
@@ -352,7 +352,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			// Only a reserved node holds a reservation slot, whatever reservation label it carries, so a NodePool with no
 			// reserved candidates is still blocked rather than pre-spinning a replacement that can't launch.
 			It("blocks a non-reserved node carrying a stale reservation label when the reservations are full", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				withReservation(0)
 				nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeOnDemand
 				node.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeOnDemand
@@ -366,7 +366,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			})
 
 			It("blocks a node whose reservation is no longer offered when the reservations are full", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				withReservation(0)
 				nodeClaim.Labels[cloudprovider.ReservationIDLabel] = "r-canceled"
 				node.Labels[cloudprovider.ReservationIDLabel] = "r-canceled"
@@ -380,7 +380,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			})
 
 			It("replaces-first when the reservation has capacity", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				withReservation(1)
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -394,7 +394,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 			})
 
 			It("replaces-first regardless of the reservation when TerminateFirstDrift is disabled", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(false)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(false)}}))
 				withReservation(0)
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -409,9 +409,9 @@ var _ = Describe("TerminateFirstDrift", func() {
 
 			// A non-reserved candidate frees no reservation slot, so terminating it first wouldn't let the refill launch.
 			It("only terminates reserved candidates first when the reservation is full", func() {
-				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true)}}))
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true), TerminateFirstDrift: new(true)}}))
 				withReservation(0)
-				nodePool.Spec.Replicas = lo.ToPtr(int64(2))
+				nodePool.Spec.Replicas = new(int64(2))
 				nodePool.Spec.Limits = v1.Limits{resources.Node: resource.MustParse("3")}
 				odNodeClaim, odNode := test.NodeClaimAndNode(v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
@@ -491,7 +491,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		}
 
 		It("issues a delete-only command when the reservation is full and there is no fallback", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy (row 1), reserved-only pool
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -514,7 +514,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("does NOT terminate-first when more reschedulable pods need the reservation than the freed slot can hold", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy, reserved-only pool
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -530,7 +530,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("does NOT terminate-first when the reservation is full AND otherwise unavailable (something else wrong)", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, false, v1.CapacityTypeReserved) // full AND unavailable (row 2): expiring / ICE'd / incompatible
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -546,7 +546,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("does NOT drift when TerminateFirstDrift is disabled and the reservation is full with no fallback (Blocked)", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(false), ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(false), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy (row 1), reserved-only pool
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -564,7 +564,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("replaces-first when the reservation is full but an on-demand fallback exists", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, true, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand) // full but healthy, on-demand fallback allowed
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -580,7 +580,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("replaces-first when the reservation still has a spare slot", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(5, true, v1.CapacityTypeReserved) // spare reservation capacity -> can grow in place
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -599,9 +599,9 @@ var _ = Describe("TerminateFirstDrift", func() {
 		// NodePool can host the pods. This is the two-pass behavior: pass 1 (RequireReservedCapacity) makes NP1's full
 		// reservation not satisfy the pod, so the scheduler falls through to NP2.
 		setupODFallbackNodePool := func() *v1.NodePool {
-			nodePool.Spec.Weight = lo.ToPtr(int32(100))
+			nodePool.Spec.Weight = new(int32(100))
 			od := test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-				Weight:     lo.ToPtr(int32(1)),
+				Weight:     new(int32(1)),
 				Disruption: v1.Disruption{ConsolidateAfter: v1.MustParseNillableDuration("1h"), Budgets: []v1.Budget{{Nodes: "100%"}}},
 				Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Requirements: []v1.NodeSelectorRequirementWithMinValues{
 					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}},
@@ -611,7 +611,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		}
 
 		It("weighted: a full-but-healthy reserved NodePool replaces-first onto a lower-weight on-demand NodePool (does NOT terminate-first)", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, true, v1.CapacityTypeReserved) // full but healthy (Available=true, cap=0)
 			od := setupODFallbackNodePool()
 			ExpectApplied(ctx, env.Client, nodePool, od, nodeClaim, node)
@@ -630,7 +630,7 @@ var _ = Describe("TerminateFirstDrift", func() {
 		})
 
 		It("weighted: an unavailable reserved NodePool replaces-first onto a lower-weight on-demand NodePool", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{TerminateFirstDrift: new(true), ReservedCapacity: new(true)}}))
 			setupReservedOffering(0, false, v1.CapacityTypeReserved) // full AND unavailable (Available=false)
 			od := setupODFallbackNodePool()
 			ExpectApplied(ctx, env.Client, nodePool, od, nodeClaim, node)

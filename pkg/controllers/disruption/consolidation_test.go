@@ -807,7 +807,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 				// Add a pod so that the node is non-empty and eligible for consolidation
 				pod := test.Pod(test.PodOptions{
-					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}},
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true)}}},
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
 				})
 				ExpectApplied(ctx, env.Client, pod)
@@ -876,7 +876,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 				// Add a pod so that the node is non-empty and eligible for consolidation
 				pod := test.Pod(test.PodOptions{
-					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}},
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true)}}},
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
 				})
 				ExpectApplied(ctx, env.Client, pod)
@@ -908,7 +908,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 				// Add a pod so that the node is non-empty and eligible for consolidation
 				pod := test.Pod(test.PodOptions{
-					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}},
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true)}}},
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
 				})
 				ExpectApplied(ctx, env.Client, pod)
@@ -977,7 +977,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 				// Add a pod so that the node is non-empty and eligible for consolidation
 				pod := test.Pod(test.PodOptions{
-					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)}}},
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true)}}},
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}},
 				})
 				ExpectApplied(ctx, env.Client, pod)
@@ -3067,8 +3067,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
@@ -3145,8 +3145,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 
@@ -3208,8 +3208,8 @@ var _ = Describe("Consolidation", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
+							Controller:         new(true),
+							BlockOwnerDeletion: new(true),
 						},
 					}}})
 			// Use the most expensive node as the source — consolidation should replace it with a cheaper one

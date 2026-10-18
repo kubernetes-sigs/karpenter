@@ -35,14 +35,14 @@ var _ = Describe("DRA Scheduling Internals", func() {
 	Describe("resourceClaimName", func() {
 		It("should use a direct ResourceClaimName", func() {
 			pod := &corev1.Pod{}
-			claim := corev1.PodResourceClaim{Name: "ref", ResourceClaimName: lo.ToPtr("claim-a")}
+			claim := corev1.PodResourceClaim{Name: "ref", ResourceClaimName: new("claim-a")}
 			name, ok := resourceClaimName(pod, &claim)
 			Expect(ok).To(BeTrue())
 			Expect(name).To(Equal("claim-a"))
 		})
 		It("should resolve a template's generated name from pod status", func() {
 			pod := &corev1.Pod{Status: corev1.PodStatus{ResourceClaimStatuses: []corev1.PodResourceClaimStatus{
-				{Name: "ref", ResourceClaimName: lo.ToPtr("generated-a")},
+				{Name: "ref", ResourceClaimName: new("generated-a")},
 			}}}
 			claim := corev1.PodResourceClaim{Name: "ref"}
 			name, ok := resourceClaimName(pod, &claim)

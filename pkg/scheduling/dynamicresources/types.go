@@ -18,6 +18,7 @@ package dynamicresources
 
 import (
 	"fmt"
+	"maps"
 	"unique"
 
 	"github.com/samber/lo"
@@ -159,13 +160,9 @@ func (s *apiServerSlice) Devices() []cloudprovider.Device {
 		s.devices = make([]cloudprovider.Device, len(s.slice.Spec.Devices))
 		for i, d := range s.slice.Spec.Devices {
 			attrs := make(map[resourcev1.QualifiedName]resourcev1.DeviceAttribute, len(d.Attributes))
-			for k, v := range d.Attributes {
-				attrs[k] = v
-			}
+			maps.Copy(attrs, d.Attributes)
 			capacity := make(map[resourcev1.QualifiedName]resourcev1.DeviceCapacity, len(d.Capacity))
-			for k, v := range d.Capacity {
-				capacity[k] = v
-			}
+			maps.Copy(capacity, d.Capacity)
 			s.devices[i] = cloudprovider.Device{
 				Name:                     unique.Make(d.Name),
 				Attributes:               attrs,

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -113,14 +114,10 @@ func (h *LatencyHarness) Stop() (*LatencyResult, error) {
 		Counters:     map[string]uint64{},
 	}
 	for _, name := range TargetHistograms {
-		for key, stats := range deltaHistogram(name, start[name], end[name]) {
-			res.LatencyStats[key] = stats
-		}
+		maps.Copy(res.LatencyStats, deltaHistogram(name, start[name], end[name]))
 	}
 	for _, name := range TargetCounters {
-		for key, delta := range deltaCounter(name, start[name], end[name]) {
-			res.Counters[key] = delta
-		}
+		maps.Copy(res.Counters, deltaCounter(name, start[name], end[name]))
 	}
 	GinkgoWriter.Printf("LatencyHarness: stopped, %d histogram series, %d counter series\n",
 		len(res.LatencyStats), len(res.Counters))

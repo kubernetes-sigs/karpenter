@@ -332,7 +332,7 @@ func (q *Queue) forceDelete(ctx context.Context, pod *corev1.Pod, nodeTerminatio
 	// Clamp the grace period to the node's remaining terminationGracePeriod, with a minimum of 1s
 	// to prevent a force-deletion from etcd (gracePeriodSeconds=0), which would violate at-most-one
 	// pod semantics. The node's terminationGracePeriod may already have elapsed by the time we reconcile.
-	gracePeriodSeconds := lo.ToPtr(max(int64(lo.FromPtr(nodeTerminationTime).Sub(q.clock.Now()).Seconds()), 1))
+	gracePeriodSeconds := new(max(int64(lo.FromPtr(nodeTerminationTime).Sub(q.clock.Now()).Seconds()), 1))
 	q.recorder.Publish(terminatorevents.DisruptPodDelete(pod, gracePeriodSeconds, nodeTerminationTime))
 	if err := q.kubeClient.Delete(ctx, pod, &client.DeleteOptions{
 		GracePeriodSeconds: gracePeriodSeconds,

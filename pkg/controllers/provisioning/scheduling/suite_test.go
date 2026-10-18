@@ -2441,8 +2441,8 @@ var _ = Context("Scheduling", func() {
 					Kind:               "DaemonSet",
 					Name:               ds1.Name,
 					UID:                ds1.UID,
-					Controller:         lo.ToPtr(true),
-					BlockOwnerDeletion: lo.ToPtr(true),
+					Controller:         new(true),
+					BlockOwnerDeletion: new(true),
 				})
 				ExpectApplied(ctx, env.Client, nodePool, ds1Pod)
 
@@ -2457,8 +2457,8 @@ var _ = Context("Scheduling", func() {
 					Kind:               "DaemonSet",
 					Name:               ds2.Name,
 					UID:                ds2.UID,
-					Controller:         lo.ToPtr(true),
-					BlockOwnerDeletion: lo.ToPtr(true),
+					Controller:         new(true),
+					BlockOwnerDeletion: new(true),
 				})
 				ExpectApplied(ctx, env.Client, nodePool, ds2Pod)
 
@@ -4702,13 +4702,13 @@ var _ = Context("Scheduling", func() {
 				nodePool = test.NodePool()
 				sc := test.StorageClass(test.StorageClassOptions{
 					ObjectMeta:        metav1.ObjectMeta{Name: "zone-sc"},
-					Provisioner:       lo.ToPtr(csiProvider),
+					Provisioner:       new(csiProvider),
 					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
 					Zones:             scZones,
 				})
 				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 					ObjectMeta:       metav1.ObjectMeta{Name: pvcName},
-					StorageClassName: lo.ToPtr("zone-sc"),
+					StorageClassName: new("zone-sc"),
 				})
 				ExpectApplied(ctx, env.Client, nodePool, sc, pvc)
 
@@ -4880,7 +4880,7 @@ var _ = Context("Scheduling", func() {
 							WhenUnsatisfiable: corev1.DoNotSchedule,
 							LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 							MaxSkew:           1,
-							MinDomains:        lo.ToPtr(int32(4)),
+							MinDomains:        new(int32(4)),
 						}},
 					}),
 				}, map[string]int{"none": 1}),

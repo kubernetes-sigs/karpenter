@@ -84,7 +84,7 @@ func (e ReservedOfferingError) Unwrap() error {
 	return e.error
 }
 
-var nodeID int64
+var nodeID atomic.Int64
 
 func NewNodeClaim(
 	nodeClaimTemplate *NodeClaimTemplate,
@@ -95,7 +95,7 @@ func NewNodeClaim(
 	reservedOfferingMode ReservedOfferingMode,
 	creditReservationCapacity map[string]int,
 ) *NodeClaim {
-	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
+	hostname := fmt.Sprintf("hostname-placeholder-%04d", nodeID.Add(1))
 	template := *nodeClaimTemplate
 	template.Requirements = scheduling.NewRequirements()
 	template.Requirements.Add(nodeClaimTemplate.Requirements.Values()...)
@@ -409,13 +409,7 @@ func (n *NodeClaim) addDaemonRequests() {
 	var minDaemonOverhead corev1.ResourceList
 	for _, g := range n.daemonOverheadGroups {
 		// Only consider groups that have at least one instance type still remaining
-		hasRemaining := false
-		for _, it := range g.InstanceTypes {
-			if remaining.Has(it) {
-				hasRemaining = true
-				break
-			}
-		}
+		hasRemaining := slices.ContainsFunc(g.InstanceTypes, remaining.Has)
 		if !hasRemaining {
 			continue
 		}

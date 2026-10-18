@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strconv"
@@ -239,9 +240,7 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 	if in.VolumeAttachmentLimits != nil {
 		in, out := &in.VolumeAttachmentLimits, &out.VolumeAttachmentLimits
 		*out = make(map[string]int, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
-		}
+		maps.Copy(*out, *in)
 	}
 	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
 	if in.Overhead != nil {
