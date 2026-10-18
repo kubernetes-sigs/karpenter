@@ -16,6 +16,9 @@ linters:
     - kubeapilinter
     - misspell
     - nilerr
+    # HTTP calls in the e2e profiler and metrics scrape ignored the test context,
+    # so they outlived a canceled spec. No issue filed; cheap to keep at zero.
+    - noctx
     - revive
     - staticcheck
     - tparallel
