@@ -18,6 +18,7 @@ linters:
     - misspell
     - modernize
     - nilerr
+    - noctx
     - revive
     - staticcheck
     - tparallel
