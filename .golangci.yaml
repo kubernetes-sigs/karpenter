@@ -12,6 +12,7 @@ linters:
     - depguard
     - errorlint
     - forbidigo
+    - ginkgolinter
     - gocyclo
     - goheader
     - gosec
@@ -62,6 +63,18 @@ linters:
         - pattern: ^v1\.DeletePropagationForeground$
           pkg: ^k8s\.io/apimachinery/pkg/apis/meta/v1$
           msg: use background deletion in e2e helpers
+    # Expect(x) and Eventually(f) without a matcher pass silently, e.g. the drift
+    # check in test/suites/disruption/drift_test.go and Expect(c.Delete(...)) in
+    # the pkg/test expectations helper. Also forbids focused specs left in.
+    ginkgolinter:
+      suppress-len-assertion: true
+      suppress-nil-assertion: true
+      suppress-err-assertion: true
+      suppress-compare-assertion: true
+      suppress-async-assertion: true
+      suppress-type-compare-assertion: true
+      forbid-focus-container: true
+      allow-havelen-zero: true
     gocyclo:
       min-complexity: 30
     goheader:
