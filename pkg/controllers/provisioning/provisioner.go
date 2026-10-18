@@ -379,7 +379,7 @@ func (p *Provisioner) NewScheduler(
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	defer metrics.Measure(scheduler.DurationSeconds, map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})()
-	start := time.Now()
+	start := p.clock.Now()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
@@ -471,7 +471,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 			"Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string {
 				return klog.KObj(p).String()
 			}), 5),
-			"duration", time.Since(start),
+			"duration", p.clock.Since(start),
 		).Info("found provisionable pod(s)")
 	}
 	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods.
