@@ -13,6 +13,7 @@ linters:
     - errorlint
     - forbidigo
     - ginkgolinter
+    - gocritic
     - gocyclo
     - goheader
     - gosec
@@ -75,6 +76,11 @@ linters:
       suppress-type-compare-assertion: true
       forbid-focus-container: true
       allow-havelen-zero: true
+    # Large per-iteration copies in scheduling and cluster state hot paths (#3211, #3310).
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - rangeValCopy
     gocyclo:
       min-complexity: 30
     goheader:
@@ -142,6 +148,12 @@ linters:
         linters:
           - forbidigo
         text: use background deletion
+      - path-except: pkg/(scheduling|controllers/provisioning/scheduling|controllers/state)/
+        linters:
+          - gocritic
+      - path: _test\.go$
+        linters:
+          - gocritic
     paths:
       - tools
       - website
