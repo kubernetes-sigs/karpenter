@@ -16,13 +16,12 @@ linters:
     - kubeapilinter
     - misspell
     - nilerr
+    - prealloc
     - revive
     - staticcheck
     - tparallel
     - unconvert
     - unparam
-  disable:
-    - prealloc
   settings:
     custom:
       kubeapilinter:
@@ -54,6 +53,10 @@ linters:
       enable-all: true
     misspell:
       locale: US
+    # Allocation regressions in hot paths: #3211, #3310, #3068, #3137.
+    prealloc:
+      simple: true
+      range-loops: true
     revive:
       rules:
         - name: dot-imports
@@ -73,6 +76,9 @@ linters:
       - linters:
           - goheader
         path: zz_(.+)\.go
+      - linters:
+          - prealloc
+        path: (_test\.go$|^pkg/test/|^test/)
       - linters:
           - goheader
         path: scheduling_benchmark_test.go

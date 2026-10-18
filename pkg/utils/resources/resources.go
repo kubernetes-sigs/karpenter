@@ -28,7 +28,7 @@ var Node = v1.ResourceName("nodes")
 
 // RequestsForPods returns the total resources of a variadic list of podspecs.
 func RequestsForPods(pods ...*v1.Pod) v1.ResourceList {
-	var resources []v1.ResourceList
+	resources := make([]v1.ResourceList, 0, len(pods))
 	for _, pod := range pods {
 		resources = append(resources, Ceiling(pod).Requests)
 	}
@@ -39,7 +39,7 @@ func RequestsForPods(pods ...*v1.Pod) v1.ResourceList {
 
 // LimitsForPods returns the total resources of a variadic list of podspecs
 func LimitsForPods(pods ...*v1.Pod) v1.ResourceList {
-	var resources []v1.ResourceList
+	resources := make([]v1.ResourceList, 0, len(pods))
 	for _, pod := range pods {
 		resources = append(resources, Ceiling(pod).Limits)
 	}
