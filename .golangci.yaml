@@ -18,13 +18,12 @@ linters:
     - misspell
     - modernize
     - nilerr
+    - prealloc
     - revive
     - staticcheck
     - tparallel
     - unconvert
     - unparam
-  disable:
-    - prealloc
   settings:
     custom:
       kubeapilinter:
@@ -73,6 +72,10 @@ linters:
       locale: US
     # Keeps `go fix ./...` from #3024 from drifting back (lo.ToPtr/ptr.To went 1110 -> 91 -> 641).
     modernize: {}
+    # Allocation regressions in hot paths: #3211, #3310, #3068, #3137.
+    prealloc:
+      simple: true
+      range-loops: true
     revive:
       rules:
         - name: dot-imports
@@ -92,6 +95,9 @@ linters:
       - linters:
           - goheader
         path: zz_(.+)\.go
+      - linters:
+          - prealloc
+        path: (_test\.go$|^pkg/test/|^test/)
       - linters:
           - goheader
         path: scheduling_benchmark_test.go
