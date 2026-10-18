@@ -731,7 +731,7 @@ func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeC
 		}
 		for _, node := range nodes {
 			if node.Spec.ProviderID == nodeClaim.Status.ProviderID {
-				Expect(c.Delete(ctx, node))
+				Expect(client.IgnoreNotFound(c.Delete(ctx, node))).To(Succeed())
 				ExpectFinalizersRemoved(ctx, c, node)
 				ExpectNotFound(ctx, c, node)
 			}

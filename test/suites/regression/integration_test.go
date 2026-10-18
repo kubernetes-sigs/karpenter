@@ -256,7 +256,7 @@ var _ = Describe("Integration", func() {
 				hash, found := np.Annotations[v1.NodePoolHashAnnotationKey]
 				g.Expect(found).To(BeTrue())
 				g.Expect(hash).To(Equal(np.Hash()))
-			})
+			}).Should(Succeed())
 		})
 	})
 	Describe("Utilization", Label(debug.NoWatch), Label(debug.NoEvents), func() {
