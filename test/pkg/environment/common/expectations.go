@@ -77,7 +77,7 @@ func (env *Environment) ExpectDeleted(objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
 		Eventually(func(g Gomega) {
-			g.Expect(client.IgnoreNotFound(env.Client.Delete(env, object, client.PropagationPolicy(metav1.DeletePropagationForeground), &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}))).To(Succeed())
+			g.Expect(client.IgnoreNotFound(env.Client.Delete(env, object, client.PropagationPolicy(metav1.DeletePropagationBackground), &client.DeleteOptions{GracePeriodSeconds: new(int64(0))}))).To(Succeed())
 		}).WithTimeout(time.Second * 10).Should(Succeed())
 	}
 }

@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -207,6 +208,7 @@ var (
 
 // Controller for the resource
 type Controller struct {
+	clock       clock.Clock
 	kubeClient  client.Client
 	metricStore *metrics.Store
 	cluster     *state.Cluster
@@ -234,8 +236,9 @@ func labelNames() []opmetrics.Label {
 }
 
 // NewController constructs a podController instance
-func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster) *Controller {
 	return &Controller{
+		clock:           clk,
 		kubeClient:      kubeClient,
 		metricStore:     metrics.NewStore(),
 		pendingPods:     sets.New[string](),
@@ -314,7 +317,7 @@ func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 	}
 	// If we haven't made a decision, get the time that we ACK'd the pod and emit the metric based on that
 	if podAckTime := c.cluster.PodAckTime(nn); !podAckTime.IsZero() {
-		PodSchedulingUndecidedTimeSeconds.Set(time.Since(podAckTime).Seconds(), map[string]string{
+		PodSchedulingUndecidedTimeSeconds.Set(c.clock.Since(podAckTime).Seconds(), map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
@@ -325,12 +328,12 @@ func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime time.Time) {
 	key := client.ObjectKeyFromObject(pod).String()
 	if pod.Status.Phase == corev1.PodPending {
-		PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
+		PodUnstartedTimeSeconds.Set(c.clock.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
 		if !schedulableTime.IsZero() {
-			PodProvisioningUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
+			PodProvisioningUnstartedTimeSeconds.Set(c.clock.Since(schedulableTime).Seconds(), map[string]string{
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
@@ -382,12 +385,12 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 			// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
 			c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
 		} else {
-			PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
+			PodUnstartedTimeSeconds.Set(c.clock.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
 			if !schedulableTime.IsZero() {
-				PodProvisioningUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
+				PodProvisioningUnstartedTimeSeconds.Set(c.clock.Since(schedulableTime).Seconds(), map[string]string{
 					podName:      pod.Name,
 					podNamespace: pod.Namespace,
 				})
@@ -410,13 +413,13 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 	if pod.Status.Phase == corev1.PodPending {
 		if !ok || cond.Status != corev1.ConditionTrue {
 			// If the podScheduled condition does not exist, or it exists and is not set to true, we emit pod_current_unbound_time_seconds metric.
-			PodUnboundTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
+			PodUnboundTimeSeconds.Set(c.clock.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
 				podName:             pod.Name,
 				podNamespace:        pod.Namespace,
 				podDynamicResources: dynamicResources,
 			})
 			if !schedulableTime.IsZero() {
-				PodProvisioningUnboundTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
+				PodProvisioningUnboundTimeSeconds.Set(c.clock.Since(schedulableTime).Seconds(), map[string]string{
 					podName:             pod.Name,
 					podNamespace:        pod.Namespace,
 					podDynamicResources: dynamicResources,
