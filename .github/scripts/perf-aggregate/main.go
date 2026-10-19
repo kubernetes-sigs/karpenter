@@ -55,6 +55,7 @@ type metricSpec struct {
 var metrics = []metricSpec{
 	{"total_time", "Duration", "seconds"},
 	{"karpenter_p95_memory_mb", "Controller Peak Memory", "MB"},
+	{"karpenter_p95_heap_mb", "Controller Peak Heap", "MB"},
 	// Both CPU series, because which one to read is an open question and this
 	// table is where it gets settled. In ryan-mist's 11-run sample the p95 CV
 	// was the worst of the three on all four sub-tests, 21.6 to 44.1 percent. The

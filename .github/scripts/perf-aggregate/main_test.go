@@ -310,6 +310,26 @@ var _ = Describe("Perf Aggregate", func() {
 			Expect(summary["scale_out"]["Controller Mean CPU"].CVPct).To(Equal(0.0))
 		})
 
+		It("reports the live heap series alongside resident set size", func() {
+			writeSample(root, "iter_1", "scale_out", map[string]any{
+				"karpenter_p95_memory_mb": 120.0,
+				"karpenter_p95_heap_mb":   40.0,
+			})
+			writeSample(root, "iter_2", "scale_out", map[string]any{
+				"karpenter_p95_memory_mb": 140.0,
+				"karpenter_p95_heap_mb":   44.0,
+			})
+
+			Expect(run(root, 2, io.Discard)).To(Succeed())
+
+			b, err := os.ReadFile(filepath.Join(root, summaryFile))
+			Expect(err).ToNot(HaveOccurred())
+			var summary map[string]map[string]stats
+			Expect(json.Unmarshal(b, &summary)).To(Succeed())
+			Expect(summary["scale_out"]["Controller Peak Memory"].Median).To(Equal(130.0))
+			Expect(summary["scale_out"]["Controller Peak Heap"].Median).To(Equal(42.0))
+		})
+
 		It("skips the step summary when the variable is unset, so local runs write no stray file", func() {
 			writeSample(root, "iter_1", "scale_out", map[string]any{"total_nodes": 4.0})
 			GinkgoT().Setenv("GITHUB_STEP_SUMMARY", "")
