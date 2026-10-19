@@ -64,6 +64,7 @@ jobs:
     - uses: ./.github/actions/install-deps
       with:
           k8sVersion: ${{ inputs.k8s_version }}
+          cache: ${{ inputs.git_ref == '' }}
     - name: Kind Cluster
       uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
       with:
