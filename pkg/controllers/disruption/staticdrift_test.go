@@ -31,6 +31,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -402,6 +403,8 @@ var _ = Describe("StaticDrift", func() {
 			// Since we cannot acquire limits, we should not have any drifts
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
+			// The budget-allowed candidate is reported Blocked rather than silently skipped
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(BeNumerically(">", 0))
 		})
 		It("should drift nodes when we can acquire limits", func() {
 			nodePool.Spec.Replicas = new(int64(5))
@@ -445,6 +448,7 @@ var _ = Describe("StaticDrift", func() {
 			// Should drift nodes since we can scale up to target
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(2))
+			Expect(recorder.Calls(events.DisruptionBlocked)).To(Equal(0))
 			for _, cmd := range cmds {
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, env.Clock, cluster, cloudProvider, cmd)
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)

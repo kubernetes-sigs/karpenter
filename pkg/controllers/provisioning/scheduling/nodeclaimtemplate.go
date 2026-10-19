@@ -116,9 +116,12 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 			return i.Name
 		})...))
 
-		// Collect available capacity types from the selected instance types
+		// Collect launchable capacity types from the selected instance types. Use Launchable (not Available) so a
+		// full-but-healthy reservation (Available, ReservationCapacity=0) doesn't contribute `reserved` to the
+		// capacity-type requirement — otherwise we could build a NodeClaim that includes `reserved` and then can't
+		// launch into it.
 		capacityTypes := lo.Uniq(lo.FlatMap(instanceTypes, func(it *cloudprovider.InstanceType, _ int) []string {
-			return lo.Map(it.Offerings.Available().Compatible(i.Requirements), func(o *cloudprovider.Offering, _ int) string {
+			return lo.Map(it.Offerings.Launchable().Compatible(i.Requirements), func(o *cloudprovider.Offering, _ int) string {
 				return o.CapacityType()
 			})
 		}))

@@ -23,16 +23,19 @@ import (
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
@@ -46,7 +49,12 @@ import (
 // controller needs — so tests can substitute a fake, and we avoid an import
 // cycle on the provisioner package.
 type ProvisionerTrigger interface {
+	// Trigger wakes the provisioner, deduping repeated triggers for the same
+	// object UID within a batching window.
 	Trigger(uid types.UID)
+	// TriggerReconcile wakes the provisioner without an associated object, for
+	// callers reacting to an event that has no stable object UID to dedupe on.
+	TriggerReconcile()
 }
 
 // Controller reconciles CapacityBuffer resources by resolving their pod template
@@ -76,8 +84,11 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	cb := &autoscalingv1beta1.CapacityBuffer{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, cb); err != nil {
 		if errors.IsNotFound(err) {
-			// The buffer was deleted; drop its virtual pods from the cache.
+			// The buffer was deleted; drop its virtual pods from the cache and
+			// wake the provisioner so it refreshes cluster state (e.g.
+			// bufferPodCounts).
 			c.virtualPodCache.RemoveEntry(req.NamespacedName)
+			c.trigger.TriggerReconcile()
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -116,21 +127,76 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Notify the provisioner so it can construct virtual pods and update the
 	// Provisioning condition in the next reconciliation. We trigger on every
 	// successful reconcile (not just status changes) so newly-applied buffers
-	// that already have accurate status still cause a provisioning pass.
-	if c.trigger != nil && resolved {
-		c.trigger.Trigger(cb.UID)
-	}
+	// that already have accurate status still cause a provisioning pass. We
+	// also trigger when the buffer failed to resolve (resolved == false): its
+	// stale entry was just dropped from the cache, and the provisioner must run
+	// to refresh cluster state so empty nodes can be reclaimed on an idle
+	// cluster.
+	c.trigger.Trigger(cb.UID)
 
 	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+const (
+	// podTemplateRefIndex indexes CapacityBuffers by spec.podTemplateRef.name.
+	podTemplateRefIndex = "spec.podTemplateRef.name"
+	// scalableRefIndex indexes CapacityBuffers by the workload their spec.scalableRef names, keyed by scalableRefKey.
+	scalableRefIndex = "spec.scalableRef"
+)
+
+// scalableRefKey identifies a workload for scalableRefIndex. An empty group means apps, as in apps.ResolveScalableRef.
+func scalableRefKey(group, kind, name string) string {
+	return fmt.Sprintf("%s/%s/%s", lo.CoalesceOrEmpty(group, appsv1.GroupName), kind, name)
+}
+
+// indexFields registers the field indexes the watch mappers list buffers by.
+func indexFields(ctx context.Context, indexer client.FieldIndexer) error {
+	if err := indexer.IndexField(ctx, &autoscalingv1beta1.CapacityBuffer{}, podTemplateRefIndex, func(o client.Object) []string {
+		if ref := o.(*autoscalingv1beta1.CapacityBuffer).Spec.PodTemplateRef; ref != nil {
+			return []string{ref.Name}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("indexing %s, %w", podTemplateRefIndex, err)
+	}
+	if err := indexer.IndexField(ctx, &autoscalingv1beta1.CapacityBuffer{}, scalableRefIndex, func(o client.Object) []string {
+		if ref := o.(*autoscalingv1beta1.CapacityBuffer).Spec.ScalableRef; ref != nil {
+			return []string{scalableRefKey(ref.APIGroup, ref.Kind, ref.Name)}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("indexing %s, %w", scalableRefIndex, err)
+	}
+	return nil
+}
+
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	if err := indexFields(ctx, m.GetFieldIndexer()); err != nil {
+		return err
+	}
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&autoscalingv1beta1.CapacityBuffer{}).
 		Watches(
 			&v1.PodTemplate{},
 			handler.EnqueueRequestsFromMapFunc(c.podTemplateToBuffers),
+		).
+		// A buffer whose scalableRef doesn't exist yet otherwise only re-resolves on its periodic requeue. Spec changes
+		// (including replicas) bump generation; status-only updates can't change the resolved shape or replica count.
+		Watches(
+			&appsv1.Deployment{},
+			handler.EnqueueRequestsFromMapFunc(c.scalableRefToBuffers(autoscalingv1beta1.KindDeployment)),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
+		Watches(
+			&appsv1.StatefulSet{},
+			handler.EnqueueRequestsFromMapFunc(c.scalableRefToBuffers(autoscalingv1beta1.KindStatefulSet)),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
+		Watches(
+			&appsv1.ReplicaSet{},
+			handler.EnqueueRequestsFromMapFunc(c.scalableRefToBuffers(autoscalingv1beta1.KindReplicaSet)),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
@@ -140,21 +206,23 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func (c *Controller) podTemplateToBuffers(ctx context.Context, obj client.Object) []reconcile.Request {
+	return c.buffersMatching(ctx, obj.GetNamespace(), podTemplateRefIndex, obj.GetName())
+}
+
+func (c *Controller) scalableRefToBuffers(kind string) handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+		return c.buffersMatching(ctx, obj.GetNamespace(), scalableRefIndex, scalableRefKey(appsv1.GroupName, kind, obj.GetName()))
+	}
+}
+
+func (c *Controller) buffersMatching(ctx context.Context, namespace, index, value string) []reconcile.Request {
 	buffers := &autoscalingv1beta1.CapacityBufferList{}
-	if err := c.kubeClient.List(ctx, buffers, client.InNamespace(obj.GetNamespace())); err != nil {
+	if err := c.kubeClient.List(ctx, buffers, client.InNamespace(namespace), client.MatchingFields{index: value}); err != nil {
 		return nil
 	}
-	var requests []reconcile.Request
-	for i := range buffers.Items {
-		cb := &buffers.Items[i]
-		if cb.Spec.PodTemplateRef == nil || cb.Spec.PodTemplateRef.Name != obj.GetName() {
-			continue
-		}
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{Name: cb.Name, Namespace: cb.Namespace},
-		})
-	}
-	return requests
+	return lo.Map(buffers.Items, func(cb autoscalingv1beta1.CapacityBuffer, _ int) reconcile.Request {
+		return reconcile.Request{NamespacedName: types.NamespacedName{Name: cb.Name, Namespace: cb.Namespace}}
+	})
 }
 
 // resolveAndUpdateStatus resolves the buffer's pod spec, computes replicas, and

@@ -60,7 +60,10 @@ type CloudProvider struct {
 	NextCreateErr      error
 	NextGetErr         error
 	NextDeleteErr      error
+	NextRebootErr      error
 	DeleteCalls        []*v1.NodeClaim
+	RebootCalls        []*v1.NodeClaim
+	RebootOperationIDs []string
 	GetCalls           []string
 
 	CreatedNodeClaims         map[string]*v1.NodeClaim
@@ -90,8 +93,11 @@ func (c *CloudProvider) Reset() {
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
 	c.NextDeleteErr = nil
+	c.NextRebootErr = nil
 	c.NextGetErr = nil
 	c.DeleteCalls = []*v1.NodeClaim{}
+	c.RebootCalls = nil
+	c.RebootOperationIDs = nil
 	c.GetCalls = nil
 	c.Drifted = ""
 	c.NodeClassGroupVersionKind = []schema.GroupVersionKind{
@@ -103,11 +109,27 @@ func (c *CloudProvider) Reset() {
 	}
 	c.RepairPolicy = []cloudprovider.RepairPolicy{
 		{
-			ConditionType:      "BadNode",
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 30 * time.Minute,
+			ConditionType:          "BadNode",
+			ConditionStatus:        corev1.ConditionFalse,
+			TolerationDuration:     30 * time.Minute,
+			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
+			Action:                 cloudprovider.ReplaceNode,
 		},
 	}
+}
+
+func (c *CloudProvider) Reboot(_ context.Context, nodeClaim *v1.NodeClaim, operationID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.NextRebootErr != nil {
+		temp := c.NextRebootErr
+		c.NextRebootErr = nil
+		return temp
+	}
+	c.RebootCalls = append(c.RebootCalls, nodeClaim)
+	c.RebootOperationIDs = append(c.RebootOperationIDs, operationID)
+	return nil
 }
 
 //nolint:gocyclo
@@ -158,11 +180,13 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 	offerings := instanceType.Offerings.Available().Compatible(reqs)
 	lo.Must0(len(offerings) != 0, "created nodeclaim with no available offerings")
 	for _, o := range offerings {
-		if o.CapacityType() == v1.CapacityTypeReserved {
+		// Only launch into a reserved offering that still has capacity. A full reservation stays Available (health) but
+		// is not launchable — matching the real provider, where reservation capacity and offering availability are
+		// independent axes (a full-but-healthy reservation is Available=true with ReservationCapacity=0). We do NOT
+		// flip Available on exhaustion; downstream scheduling/pricing already treats a zero-capacity reserved offering
+		// as non-launchable (see Offering.Launchable / offeringsToReserve).
+		if o.CapacityType() == v1.CapacityTypeReserved && o.ReservationCapacity > 0 {
 			o.ReservationCapacity -= 1
-			if o.ReservationCapacity == 0 {
-				o.Available = false
-			}
 			offering = o
 			break
 		}
