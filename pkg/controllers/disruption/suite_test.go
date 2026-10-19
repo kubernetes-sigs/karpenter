@@ -42,9 +42,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
@@ -53,11 +55,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
@@ -73,6 +77,7 @@ var disruptionController *disruption.Controller
 var pricingController *informer.PricingController
 var prov *provisioning.Provisioner
 var draController *deviceallocation.Controller
+var store *prediction.Store
 var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
@@ -99,14 +104,26 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
-	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider)
-	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	recorder = test.NewEventRecorder()
 	draController = deviceallocation.NewController(env.Client)
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
-	queue = disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+	store = prediction.NewStore(env.Client)
+	queue = &disruption.Queue{}
+	cloudProvider.Reset() // installs the fake provider's default repair policies
+	useRepairPolicies(cloudProvider.RepairPolicy)
 })
+
+// useRepairPolicies installs the provider's repair policies and rebuilds cluster state around one matcher compiled from
+// them, as the operator does once at startup. Specs must call it before any Node reaches cluster state.
+func useRepairPolicies(policies []cloudprovider.RepairPolicy) {
+	cloudProvider.RepairPolicy = policies
+	repairPolicyMatcher := lo.Must(health.NewRepairPolicyMatcher(
+		options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}})), cloudProvider))
+	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider, state.WithRepairPolicyMatcher(repairPolicyMatcher))
+	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), store)
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
+}
 
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
@@ -119,15 +136,20 @@ var _ = BeforeEach(func() {
 	ExpectSingletonReconciled(ctx, pricingController)
 
 	recorder.Reset() // Reset the events that we captured during the run
+	useRepairPolicies(cloudProvider.RepairPolicy)
 
 	// Rebuild the DRA device-allocation controller and the provisioner bound to it each test so DRA tracking state
 	// (which the controller accumulates across reconciles and never resets) doesn't leak between specs. This must
 	// happen before the disruptionController and queue below, which capture prov. Mirrors the provisioning suite.
 	draController = deviceallocation.NewController(env.Client)
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
+	store = prediction.NewStore(env.Client)
+	metaScheme := runtime.NewScheme()
+	Expect(metav1.AddMetaToScheme(metaScheme)).To(Succeed())
+	Expect(store.RegisterTargetKinds(ctx, &informertest.FakeInformers{Scheme: metaScheme}, prediction.SupportedTargets.UnsortedList()...)).To(Succeed())
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), store)
 
 	// Ensure that we reset the disruption controller's methods after each test run
-	disruptionController = disruption.NewController(env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
+	disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	env.Clock.SetTime(time.Now())
 	cluster.Reset()
 	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov))
@@ -177,6 +199,8 @@ var _ = AfterEach(func() {
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
 	disruption.NodepoolDecisionsPerformed.Reset()
+	disruption.TerminateFirstDecisionsTotal.Reset()
+	disruption.NodeClaimsUnhealthyDisruptedTotal.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -252,7 +276,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(Succeed())
 
-		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, nil, candidate)
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, env.Clock, recorder, nil, disruption.SimulationOptions{}, candidate)
 		Expect(err).To(Succeed())
 		Expect(results.PodErrors[pod]).To(BeNil())
 	})
@@ -472,9 +496,9 @@ var _ = Describe("Simulate Scheduling", func() {
 		hangCreateClient := newHangCreateClient(env.Client)
 		defer hangCreateClient.Stop()
 
-		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(hangCreateClient), virtualpods.NewVirtualPodCache(hangCreateClient))
+		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, env.Clock, deviceallocation.NewController(hangCreateClient), virtualpods.NewVirtualPodCache(hangCreateClient), store)
 		q := disruption.NewQueue(hangCreateClient, recorder, cluster, env.Clock, p)
-		dc := disruption.NewController(env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q, clusterCost)
+		dc := disruption.NewController(ctx, env.Clock, hangCreateClient, p, cloudProvider, recorder, cluster, q, clusterCost)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -850,6 +874,75 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
 	})
+	It("should not consider not ready nodes for the Unhealthy repair budget", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, nodes[0], nodes[1])
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		// NotReady is repair's own trigger, so the Unhealthy budget must not count these nodes against itself —
+		// otherwise a wave of unhealthy nodes would starve the budget that repairs them.
+		budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonUnhealthy)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(10))
+		// A discretionary reason still counts NotReady nodes (kubernetes-sigs/karpenter#981 semantics preserved).
+		budgets, err = disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonDrifted)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
+	})
+	It("should still consider marked-for-deletion nodes for the Unhealthy repair budget", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// An in-flight repair marks its candidate for deletion; those must still count so repair paces itself.
+		Expect(env.Client.Delete(ctx, nodeClaims[0])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodes[0])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodeClaims[1])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodes[1])).To(Succeed())
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, v1.DisruptionReasonUnhealthy)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
+	})
+	It("should consider rebooting nodes to the disruption count for all reasons, while draining and once issued", func() {
+		// An absolute budget, so a node wrongly dropped from the total can't cancel out of a percentage.
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "10"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// A committed reboot is in-place: never marked for deletion. Every reason must see it, or another method could
+		// disrupt on top of it and exceed the NodePool's budget. nodes[0] is still draining (Ready, Initialized);
+		// nodes[1] is issued (NotReady, initialized label removed) and must not drop out as an uninitialized node.
+		nodeClaims[0].StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "rebooting")
+		nodeClaims[1].StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonIssued, "rebooting")
+		ExpectApplied(ctx, env.Client, nodeClaims[0], nodeClaims[1])
+		delete(nodes[1].Labels, v1.NodeInitializedLabelKey)
+		ExpectApplied(ctx, env.Client, nodes[1])
+		ExpectMakeNodesNotReady(ctx, env.Client, env.Clock, nodes[1])
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, reason)
+			Expect(err).To(Succeed())
+			Expect(budgets[nodePool.Name]).To(Equal(8))
+		}
+	})
 })
 
 var _ = Describe("Pod Eviction Cost", func() {
@@ -904,6 +997,56 @@ var _ = Describe("Pod Eviction Cost", func() {
 			Spec: corev1.PodSpec{Priority: new(int32(-1))},
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
+	})
+	It("should prefer disruption-cost over pod-deletion-cost", func() {
+		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost:         "100",
+				v1.DisruptionCostAnnotationKey: "2000000000",
+			}},
+		})
+		costWithOnlyDeletionCost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost: "100",
+			}},
+		})
+		Expect(cost).To(BeNumerically(">", costWithOnlyDeletionCost))
+	})
+	It("should prefer disruption-cost over pod-deletion-cost when the gate is on", func() {
+		// Gate=ON twin of the spec above: DisruptionCost short-circuits before the
+		// gate check, so precedence must hold either way.
+		gateOnOpts := test.Options()
+		gateOnOpts.FeatureGates.PodDeletionCostManagement = true
+		gateOnCtx := options.ToContext(ctx, gateOnOpts)
+
+		cost := disruptionutils.EvictionCost(gateOnCtx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost:         "100",
+				v1.DisruptionCostAnnotationKey: "2000000000",
+			}},
+		})
+		Expect(cost).To(BeNumerically(">", standardPodCost),
+			"DisruptionCost annotation must win over PodDeletionCost even when gate=ON")
+	})
+	It("should ignore pod-deletion-cost for consolidation scoring when the gate is on", func() {
+		gateOnOpts := test.Options()
+		gateOnOpts.FeatureGates.PodDeletionCostManagement = true
+		gateOnCtx := options.ToContext(ctx, gateOnOpts)
+
+		cost := disruptionutils.EvictionCost(gateOnCtx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost: "2000000000",
+			}},
+		})
+		Expect(cost).To(BeNumerically("==", standardPodCost))
+	})
+	It("should fall back to pod-deletion-cost for consolidation scoring when the gate is off", func() {
+		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				corev1.PodDeletionCost: "100",
+			}},
+		})
+		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 })
 
@@ -1758,7 +1901,28 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized (NodeClaim=%s)`, nodeClaim.Name)))
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized nor registered (NodeClaim=%s)`, nodeClaim.Name)))
+	})
+	It("should not consider candidates that registered but aren't yet initialized", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, env.Clock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`validating node for disruption, node isn't initialized (Node=%s)`, node.Name)))
 	})
 	It("should not consider candidates that are not owned by a NodePool (no karpenter.sh/nodepool label)", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
@@ -54,6 +55,26 @@ func DisruptionTerminationMode(nodeClaim *v1.NodeClaim) string {
 		return metrics.TerminationModeForceful
 	}
 	return metrics.TerminationModeEventual
+}
+
+// PatchTerminationTimestampAnnotation sets the termination timestamp annotation using optimistic locking.
+func PatchTerminationTimestampAnnotation(ctx context.Context, kubeClient client.Client, nodeClaim *v1.NodeClaim, terminationTime time.Time) error {
+	stored := nodeClaim.DeepCopy()
+	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
+		v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime.Format(time.RFC3339),
+	})
+	return kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
+}
+
+// TightenTerminationTimestampAnnotation sets the termination timestamp annotation to terminationTime unless the
+// NodeClaim already has an earlier one, so a deadline can be tightened but never extended.
+func TightenTerminationTimestampAnnotation(ctx context.Context, kubeClient client.Client, nodeClaim *v1.NodeClaim, terminationTime time.Time) error {
+	if value, ok := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; ok {
+		if existing, err := time.Parse(time.RFC3339, value); err == nil && !existing.After(terminationTime) {
+			return nil
+		}
+	}
+	return PatchTerminationTimestampAnnotation(ctx, kubeClient, nodeClaim, terminationTime)
 }
 
 // IsManagedPredicateFuncs is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package integration_test
+package disruption_test
 
 import (
 	"fmt"
@@ -142,7 +142,8 @@ var _ = Describe("Termination", func() {
 			env.EventuallyExpectHealthy(pod)
 
 			// Delete the nodeclaim to start the TerminationGracePeriod
-			env.ExpectDeleted(nodeClaim)
+			// Background: a foreground cascade deletes the Node's kwok lease, and kwok drops pod evictions until it's back
+			Expect(env.Client.Delete(env, nodeClaim, client.PropagationPolicy(metav1.DeletePropagationBackground))).To(Succeed())
 
 			// Eventually the node will be tainted
 			Eventually(func(g Gomega) {
@@ -177,7 +178,8 @@ var _ = Describe("Termination", func() {
 			env.EventuallyExpectHealthy(pod)
 
 			// Delete the nodeclaim to start the TerminationGracePeriod
-			env.ExpectDeleted(nodeClaim)
+			// Background: a foreground cascade deletes the Node's kwok lease, and kwok drops pod evictions until it's back
+			Expect(env.Client.Delete(env, nodeClaim, client.PropagationPolicy(metav1.DeletePropagationBackground))).To(Succeed())
 
 			// Eventually the node will be tainted
 			Eventually(func(g Gomega) {
@@ -336,7 +338,8 @@ var _ = Describe("Termination", func() {
 		nodeCriticalDeploymentPod := env.ExpectPodsMatchingSelector(labels.SelectorFromSet(map[string]string{"app": "node-critical-deployment"}))[0]
 		clusterCriticalDeploymentPod := env.ExpectPodsMatchingSelector(labels.SelectorFromSet(map[string]string{"app": "cluster-critical-deployment"}))[0]
 
-		env.ExpectDeleted(nodeClaim)
+		// Background: a foreground cascade deletes the Node's kwok lease, and kwok drops pod evictions until it's back
+		Expect(env.Client.Delete(env, nodeClaim, client.PropagationPolicy(metav1.DeletePropagationBackground))).To(Succeed())
 
 		// Wait for non-critical deployment pod to drain and delete
 		env.EventuallyExpectTerminating(deploymentPod)

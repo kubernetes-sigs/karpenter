@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -149,6 +150,26 @@ func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	return "", nil
 }
 
+// Reboot simulates an in-place restart. KWOK has no instance to restart, so it gives the Node a new boot ID,
+// which is what the reboot controller observes as proof of a new boot; the simulated kubelet never goes NotReady,
+// so the node rejoins as soon as the new boot is observed. The boot ID derives from the operationID, so a retried
+// request for the same reboot is idempotent.
+func (c CloudProvider) Reboot(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) error {
+	if nodeClaim.Status.NodeName == "" {
+		return serrors.Wrap(fmt.Errorf("rebooting nodeclaim, node is not registered"), "NodeClaim", klog.KObj(nodeClaim))
+	}
+	node := &corev1.Node{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClaim.Status.NodeName}, node); err != nil {
+		return fmt.Errorf("rebooting node, %w", err)
+	}
+	stored := node.DeepCopy()
+	node.Status.NodeInfo.BootID = fmt.Sprintf("kwok-%s", operationID)
+	if err := c.kubeClient.Status().Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+		return fmt.Errorf("rebooting node, %w", err)
+	}
+	return nil
+}
+
 func (c CloudProvider) Name() string {
 	return "kwok"
 }
@@ -157,18 +178,58 @@ func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 	return []status.Object{&v1alpha1.KWOKNodeClass{}}
 }
 
+// KWOKUnhealthyCondition is a node condition the KWOK reference provider uses to SIMULATE an unhealthy node for
+// node-repair testing. KWOK's node lifecycle only manages NodeReady + the node Lease, so an injected Ready=False/Unknown
+// is reverted by the heartbeat stage and does not hold. A custom condition like this one is NOT managed by KWOK, so once
+// injected it persists (the node-heartbeat-with-lease stage in hack/kwok/stages re-emits it on every heartbeat). This
+// lets e2e tests exercise node repair deterministically, and models the kind of out-of-band unhealthy signal a
+// node-monitoring agent surfaces while the kubelet still reports Ready=True. The literal must stay in sync with the
+// hack/kwok/stages/node-heartbeat-with-lease.yaml stage template.
+const KWOKUnhealthyCondition corev1.NodeConditionType = "KWOKUnhealthy"
+
+// KWOKRebootRequiredCondition is a simulated reboot-clearable fault that KWOK's repair policies remediate with a
+// reboot, so the reboot action can be exercised end-to-end on KWOK. Like KWOKUnhealthyCondition, the
+// node-heartbeat-with-lease stage re-emits it while present. It's a separate condition type rather than a
+// KWOKUnhealthy reason because, when several policies are eligible for one condition, repair takes the most
+// disruptive action, so a reboot reason would always lose to KWOKUnhealthy's replace policy.
+const KWOKRebootRequiredCondition corev1.NodeConditionType = "KWOKRebootRequired"
+
 func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{
 		// Supported Kubelet Node Conditions
 		{
-			ConditionType:      corev1.NodeReady,
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 10 * time.Minute,
+			ConditionType:          corev1.NodeReady,
+			ConditionStatus:        corev1.ConditionFalse,
+			TolerationDuration:     10 * time.Minute,
+			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
+			Action:                 cloudprovider.ReplaceNode,
 		},
 		{
-			ConditionType:      corev1.NodeReady,
-			ConditionStatus:    corev1.ConditionUnknown,
-			TolerationDuration: 10 * time.Minute,
+			ConditionType:          corev1.NodeReady,
+			ConditionStatus:        corev1.ConditionUnknown,
+			ReasonRegex:            ".*",
+			TolerationDuration:     10 * time.Minute,
+			TerminationGracePeriod: lo.ToPtr(time.Duration(0)),
+			Action:                 cloudprovider.ReplaceNode,
+		},
+		// Simulated faults (see KWOKUnhealthyCondition and KWOKRebootRequiredCondition). A short toleration and an explicit
+		// termination grace period keep e2e repair tests fast and let them exercise the drain/TGP path deterministically.
+		// Ready=False is the policy set's single default fallback, so these carry a ReasonRegex and an explicit Action.
+		{
+			ConditionType:          KWOKUnhealthyCondition,
+			ConditionStatus:        corev1.ConditionTrue,
+			ReasonRegex:            ".*",
+			TolerationDuration:     30 * time.Second,
+			TerminationGracePeriod: lo.ToPtr(45 * time.Second),
+			Action:                 cloudprovider.ReplaceNode,
+		},
+		{
+			ConditionType:          KWOKRebootRequiredCondition,
+			ConditionStatus:        corev1.ConditionTrue,
+			ReasonRegex:            ".*",
+			TolerationDuration:     30 * time.Second,
+			TerminationGracePeriod: lo.ToPtr(time.Minute),
+			Action:                 cloudprovider.RebootNode,
 		},
 	}
 }

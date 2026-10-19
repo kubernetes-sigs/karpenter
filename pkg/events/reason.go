@@ -33,8 +33,12 @@ const (
 	NoCompatibleInstanceTypes = "NoCompatibleInstanceTypes"
 	Nominated                 = "Nominated"
 
-	// node/health
+	// node repair
 	NodeRepairBlocked = "NodeRepairBlocked"
+
+	// nodeclaim/reboot
+	RebootObserved = "RebootObserved"
+	RebootFailed   = "RebootFailed"
 
 	// node/termination/terminator
 	Disrupted                      = "Disrupted"
@@ -50,4 +54,7 @@ const (
 	InsufficientCapacityError = "InsufficientCapacityError"
 	UnregisteredTaintMissing  = "UnregisteredTaintMissing"
 	NodeClassNotReady         = "NodeClassNotReady"
+
+	// state/informer/vpa
+	PredictionTargetUnsupported = "PredictionTargetUnsupported"
 )

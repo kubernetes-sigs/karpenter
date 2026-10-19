@@ -1,0 +1,14 @@
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: Stage
+metadata:
+  name: node-unhealthy
+spec:
+  # No-op: outweighs node-initialize so kwok doesn't reset conditions a test injects on a labeled node.
+  next: {}
+  resourceRef:
+    apiGroup: v1
+    kind: Node
+  selector:
+    matchLabels:
+      kwok.x-k8s.io/stage: unhealthy
+  weight: 100

@@ -18,6 +18,8 @@ package performance
 
 import (
 	"time"
+
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 // ConsolidationRound represents a single round of consolidation
@@ -39,6 +41,7 @@ type PerformanceReport struct {
 	TotalTime               time.Duration `json:"total_time"`
 	PodsNetChange           int           `json:"change_in_pod_count"`
 	NodesNetChange          int           `json:"change_in_node_count"`
+	PodsDisrupted           int           `json:"pods_disrupted"`
 	TotalReservedCPUUtil    float64       `json:"total_reserved_cpu_utilization"`
 	TotalReservedMemoryUtil float64       `json:"total_reserved_memory_utilization"`
 	ResourceEfficiencyScore float64       `json:"resource_efficiency_score"`
@@ -50,10 +53,16 @@ type PerformanceReport struct {
 	KarpenterP95MemoryMB float64 `json:"karpenter_p95_memory_mb"`
 	KarpenterAvgMemoryMB float64 `json:"karpenter_avg_memory_mb"`
 	KarpenterMaxMemoryMB float64 `json:"karpenter_max_memory_mb"`
+	KarpenterP95HeapMB   float64 `json:"karpenter_p95_heap_mb"`
+	KarpenterAvgHeapMB   float64 `json:"karpenter_avg_heap_mb"`
+	KarpenterMaxHeapMB   float64 `json:"karpenter_max_heap_mb"`
 	KarpenterP95CPUCores float64 `json:"karpenter_p95_cpu_cores"`
 	KarpenterAvgCPUCores float64 `json:"karpenter_avg_cpu_cores"`
 	KarpenterMaxCPUCores float64 `json:"karpenter_max_cpu_cores"`
 	MetricsSampleCount   int     `json:"metrics_sample_count"`
+
+	LatencyStats map[string]common.HistogramStats `json:"latency_stats,omitempty"`
+	Counters     map[string]uint64                `json:"counters,omitempty"`
 
 	// pprof debug artifacts (not used for assertions, saved for offline analysis)
 	MemoryProfileData []byte `json:"-"`
