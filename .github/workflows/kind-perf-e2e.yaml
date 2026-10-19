@@ -16,14 +16,8 @@ on:
 permissions:
   contents: read
 env:
-  # Samples per test, and so also the matrix multiplier: one sample job per test
-  # per iteration. Left at 1 so this workflow's default cost does not change;
-  # dispatch with the iterations input to take a batch.
   PERF_ITERATIONS: "1"
 jobs:
-  # A matrix cannot count, so the index list has to come from a job. Keeps the
-  # sample count one number rather than a hand-maintained array, and lets
-  # workflow_dispatch override it without editing the file.
   plan:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
@@ -35,12 +29,6 @@ jobs:
       indices: ${{ steps.plan.outputs.indices }}
       git_ref: ${{ steps.ref.outputs.git_ref }}
     steps:
-    # A workflow_run job takes its workflow definition AND its checkout from the
-    # default branch, whichever PR triggered it. ApprovalComment records the
-    # reviewed commit in an artifact for exactly this reason. Until something
-    # read that artifact, every /karpenter perf run sampled main and reported the
-    # numbers against the PR, which multi-iteration aggregation would have turned
-    # into a tidy table about the wrong tree.
     - name: Download the ApprovalComment metadata
       if: github.event_name == 'workflow_run'
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -56,9 +44,6 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
-        # push and workflow_dispatch already run against the ref that triggered
-        # them, and actions/checkout treats an empty ref as "use the default", so
-        # those two paths want the empty string rather than a resolved SHA.
         if [[ "$EVENT_NAME" != "workflow_run" ]]; then
           echo "git_ref=" >> "$GITHUB_OUTPUT"
           echo "$EVENT_NAME: leaving the ref at the checkout default"
@@ -69,13 +54,7 @@ jobs:
           echo "::error title=ApprovalComment metadata missing::no $meta, so there is no commit to measure" >&2
           exit 1
         fi
-        # tail rather than a fixed line index: approval-comment.yaml writes the
-        # review body first, and a multi-line body shifts every line after it.
-        # The commit is always last.
         sha="$(tail -n 1 "$meta")"
-        # Refuse a branch name or a short SHA. The value reaches actions/checkout
-        # and a branch would silently reintroduce the defect this job exists to
-        # close, by measuring whatever that branch points at now.
         if ! [[ "$sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
           echo "::error title=Unusable review commit::'$sha' is not a 40-character SHA" >&2
           exit 1
@@ -94,17 +73,10 @@ jobs:
           echo "iterations must be a positive integer, got '$n'" >&2
           exit 1
         fi
-        # jq rather than seq piped through paste and sed, so the output is valid
-        # JSON by construction and fromJSON below cannot receive a near-miss.
         {
           echo "iterations=$n"
           echo "indices=$(jq -nc --argjson n "$n" '[range(1; $n + 1)]')"
         } >> "$GITHUB_OUTPUT"
-  # One job per (test, sample), so each sample draws a fresh runner, kind cluster
-  # and Karpenter pod. Looping inside one job would be cheaper but the samples
-  # would not be independent: karpenter_p95_memory_mb reads a resident-set gauge
-  # on a pod nothing restarts, and every sample would share one draw of the
-  # hosted runner pool.
   kind-perf-e2e:
     needs: plan
     permissions:
@@ -136,20 +108,12 @@ jobs:
       test_name: ${{ matrix.test.name }}
       iteration: ${{ matrix.iteration }}
       git_ref: ${{ needs.plan.outputs.git_ref }}
-  # Artifacts are the handoff because they are the only channel from a matrix leg
-  # to a later job that does not require the legs to agree on an order. always(),
-  # so a batch that lost a sample is still summarized at the n it has.
   perf-aggregate:
     needs: [plan, kind-perf-e2e]
     if: always() && needs.plan.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # download-artifact documents actions: read as needed only for other runs,
-      # and this one reads its own. Granted anyway, because the equivalent job in
-      # aws/karpenter-provider-aws (e2e-matrix.yaml, summary) carries it for a
-      # same-run download, and a failure here is a failure of the only job that
-      # produces the batch table.
       actions: read
     name: aggregate ${{ needs.plan.outputs.iterations }} sample(s) per test
     env:
@@ -160,14 +124,7 @@ jobs:
       with:
         go-version-file: go.mod
         check-latest: true
-        # No module cache. A workflow_run job's cache scope is the default
-        # branch, so a cache written after checking out a pull request's tree is
-        # a write into main's scope. Nothing is lost: perf-aggregate's main.go
-        # imports stdlib only, so `go run` downloads no modules.
         cache: false
-    # continue-on-error because download-artifact fails when its pattern matches
-    # nothing, which is what a run whose every sample job failed looks like. The
-    # aggregator names that case with a legible message.
     - name: Download this run's samples
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       continue-on-error: true
@@ -177,9 +134,6 @@ jobs:
     - name: Aggregate the batch
       env:
         ITERATIONS: ${{ needs.plan.outputs.iterations }}
-        # Stamped onto the table so the numbers name the tree they came from.
-        # github.sha on a workflow_run is the default branch tip, which is the
-        # value this workflow used to measure by accident.
         COMMIT: ${{ needs.plan.outputs.git_ref || github.sha }}
       shell: bash
       run: go run ./.github/scripts/perf-aggregate

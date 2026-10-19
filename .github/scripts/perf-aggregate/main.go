@@ -14,16 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Command perf-aggregate reduces one batch of performance samples into one
-// statistic per (phase, metric) pair. One sample is one run of the performance
-// suite, which writes one <phase>_performance_report.json per phase. It compares
-// nothing and decides nothing: the exit code says whether the batch was read,
-// not whether the numbers are acceptable.
-//
-// It walks OUTPUT_DIR rather than indexing known paths because the samples arrive
-// as download-artifact directories whose names the uploader chooses. The package
-// lives under .github, which Go's ./... does not reach, so the Makefile test
-// target names the path explicitly.
 package main
 
 import (
@@ -49,21 +39,10 @@ type metricSpec struct {
 	unit      string
 }
 
-// resource_efficiency_score is deliberately absent. report.go computes it as
-// 90*avgCPUUtil + 10*avgMemUtil, so it cannot move unless one of the two
-// utilization fields below moves. The raw field stays in every uploaded sample.
 var metrics = []metricSpec{
 	{"total_time", "Duration", "seconds"},
 	{"karpenter_p95_memory_mb", "Controller Peak Memory", "MB"},
 	{"karpenter_p95_heap_mb", "Controller Peak Heap", "MB"},
-	// Both CPU series, because which one to read is an open question and this
-	// table is where it gets settled. In ryan-mist's 11-run sample the p95 CV
-	// was the worst of the three on all four sub-tests, 21.6 to 44.1 percent. The
-	// mean was the best on the noisiest one and within 0.2 points of p50 on
-	// another. karpenter_p50_cpu_cores does not exist in PerformanceReport, so
-	// the mean is the lowest-variance CPU series obtainable without changing the
-	// report schema. Reporting both puts the CVs side by side over a full batch
-	// instead of a subset read out of run logs.
 	{"karpenter_p95_cpu_cores", "Controller CPU", "cores"},
 	{"karpenter_avg_cpu_cores", "Controller Mean CPU", "cores"},
 	{"total_nodes", "Final Nodes", "nodes"},
@@ -78,12 +57,6 @@ type stats struct {
 	Mean   float64 `json:"mean"`
 	Median float64 `json:"median"`
 	Stddev float64 `json:"stddev"`
-	// StdErr is the standard error of Mean, not of Median. It shrinks as
-	// 1/sqrt(n) for the mean under the central limit theorem. A median's does
-	// not: on a bimodal series whose middle order statistics straddle the gap,
-	// a median interval stays roughly the width of the gap however many samples
-	// are added. Reading Median plus or minus a multiple of this column is
-	// wrong, which is why the column is labelled for the mean in the table.
 	StdErr float64 `json:"stderr_of_mean"`
 	CVPct  float64 `json:"cv_pct"`
 	Min    float64 `json:"min"`
@@ -111,14 +84,11 @@ func main() {
 	}
 }
 
-// Split from main so tests can drive it against a synthetic tree.
 func run(outputDir string, iterations int, out io.Writer) error {
 	reportsByPhase, files, err := collectReports(outputDir)
 	if err != nil {
 		return err
 	}
-	// Fail rather than write an empty summary and exit 0, which would let a
-	// caller read "nothing ran" as "nothing to report".
 	if len(reportsByPhase) == 0 {
 		return fmt.Errorf("no %s files found under %s", reportSuffix, outputDir)
 	}
@@ -146,8 +116,6 @@ func run(outputDir string, iterations int, out io.Writer) error {
 			phaseSummary[m.display] = computeStats(values, m.unit)
 		}
 		summary[phase] = phaseSummary
-		// Inequality, not shortfall: an over-count means two matrix legs wrote the
-		// same report filename and this pooled their samples into one statistic.
 		if iterations > 0 && len(samples) != iterations {
 			fmt.Fprintf(out, "::warning title=Unexpected performance sample count::%s returned %d of %d dispatched samples. Its statistics are computed at n=%d.\n",
 				phase, len(samples), iterations, len(samples))
@@ -163,15 +131,6 @@ func run(outputDir string, iterations int, out io.Writer) error {
 	return appendStepSummary(table, os.Getenv("COMMIT"))
 }
 
-// appendStepSummary fences the table, because the step summary renders as
-// markdown and would otherwise collapse the columns. Done here rather than by
-// piping the step's stdout through tee, which would swallow the exit code.
-//
-// The commit goes in the heading rather than beside it because the heading is
-// what a reader sees first, and a batch table with no commit attached is the
-// failure this whole path had: a workflow_run job checks out the default branch
-// unless told otherwise, so the numbers described main while the run sat on a
-// pull request.
 func appendStepSummary(table, commit string) error {
 	path := os.Getenv("GITHUB_STEP_SUMMARY")
 	if path == "" {
@@ -192,17 +151,12 @@ func appendStepSummary(table, commit string) error {
 	return f.Close()
 }
 
-// A sample's reports share a directory, so one sample contributes at most one
-// file per phase and the length of a phase's slice is its n.
 func collectReports(root string) (map[string][]map[string]any, int, error) {
 	reportsByPhase := map[string][]map[string]any{}
 	files := 0
 	//nolint:gosec // G703: root is OUTPUT_DIR, created by the workflow. No untrusted input, and the walk only reads.
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			// WalkDir reports a missing root through this callback rather than
-			// as a return value. Treat it as an empty batch, which is what it is
-			// when every sample job failed and the download created nothing.
 			if path == root && os.IsNotExist(err) {
 				return nil
 			}
@@ -213,8 +167,6 @@ func collectReports(root string) (map[string][]map[string]any, int, error) {
 		}
 		data, readErr := readReport(path)
 		if readErr != nil {
-			// Lower n rather than end the batch, since the other samples are
-			// still usable.
 			fmt.Fprintf(os.Stderr, "warn: skipping %s: %v\n", path, readErr)
 			return nil
 		}
@@ -241,8 +193,6 @@ func readReport(path string) (map[string]any, error) {
 	return m, nil
 }
 
-// A sample missing the field is skipped rather than counted as zero, so n
-// stays the number of samples that measured the metric.
 func extractValues(samples []map[string]any, jsonField string) []float64 {
 	values := make([]float64, 0, len(samples))
 	for _, s := range samples {
@@ -254,9 +204,6 @@ func extractValues(samples []map[string]any, jsonField string) []float64 {
 		if !ok {
 			continue
 		}
-		// total_time is a time.Duration (test/suites/performance/types.go), which
-		// marshals as nanoseconds, so 1e9 always applies. Guarding the division
-		// on magnitude would report a sub-second phase as a billion seconds.
 		if jsonField == "total_time" {
 			v /= 1e9
 		}
@@ -265,8 +212,6 @@ func extractValues(samples []map[string]any, jsonField string) []float64 {
 	return values
 }
 
-// Divides by n-1, not n: the samples are a draw from the population of runs a
-// later comparison works against, not the population itself.
 func computeStats(values []float64, unit string) stats {
 	n := len(values)
 	sum := 0.0
@@ -324,8 +269,6 @@ func writeJSON(path string, v any) error {
 
 func formatTable(phases []string, summary map[string]map[string]stats) string {
 	var b strings.Builder
-	// "SE of mean" rather than "StdErr", because the column sits next to Median
-	// and the two do not go together. See the note on stats.StdErr.
 	fmt.Fprintf(&b, "\n%-58s %3s %12s %12s %12s %12s %7s\n",
 		"Phase / Metric", "n", "Median", "Mean", "Stddev", "SE of mean", "CV")
 	fmt.Fprintln(&b, strings.Repeat("-", 122))
@@ -334,7 +277,6 @@ func formatTable(phases []string, summary map[string]map[string]stats) string {
 		if !ok {
 			continue
 		}
-		// Declared order, not map order, so two runs produce diffable tables.
 		for _, m := range metrics {
 			s, ok := phaseSummary[m.display]
 			if !ok {

@@ -33,7 +33,6 @@ func TestPerfAggregate(t *testing.T) {
 	RunSpecs(t, "Perf Aggregate Suite")
 }
 
-// sampleDir stands in for the directory download-artifact produces.
 func writeSample(root, sampleDir, phase string, fields map[string]any) {
 	dir := filepath.Join(root, sampleDir)
 	Expect(os.MkdirAll(dir, 0o755)).To(Succeed())
@@ -55,14 +54,9 @@ var _ = Describe("Perf Aggregate", func() {
 		})
 
 		It("uses the sample standard deviation, dividing by n-1", func() {
-			// Sum of squared deviations of {1,2,3,4,5} about 3 is 10. Divided
-			// by n-1 = 4 that is 2.5, so stddev is sqrt(2.5) = 1.5811. The
-			// population form would divide by 5 and give sqrt(2) = 1.4142.
 			got := computeStats([]float64{1, 2, 3, 4, 5}, "seconds")
 			Expect(got.Stddev).To(BeNumerically("~", 1.5811, 0.0001))
-			// StdErr is stddev over sqrt(n) = 1.5811/sqrt(5).
 			Expect(got.StdErr).To(BeNumerically("~", 0.7071, 0.0001))
-			// CV is stddev over mean, as a percentage.
 			Expect(got.CVPct).To(BeNumerically("~", 52.7, 0.1))
 		})
 
@@ -112,9 +106,6 @@ var _ = Describe("Perf Aggregate", func() {
 		BeforeEach(func() { root = GinkgoT().TempDir() })
 
 		It("groups by phase across sample directories at any depth", func() {
-			// Two samples that arrived as download-artifact directories, and a
-			// third nested a level deeper, which is what upload-artifact
-			// produces when the uploaded glob shares a root with other files.
 			writeSample(root, "results-iter-1", "scale_out", map[string]any{"total_nodes": 4.0})
 			writeSample(root, "results-iter-1", "consolidation", map[string]any{"total_nodes": 1.0})
 			writeSample(root, "results-iter-2", "scale_out", map[string]any{"total_nodes": 5.0})
@@ -144,9 +135,6 @@ var _ = Describe("Perf Aggregate", func() {
 		var root string
 		BeforeEach(func() {
 			root = GinkgoT().TempDir()
-			// Cleared by default: these specs run under Actions during presubmit,
-			// where the variable is set and appending would land in the real job
-			// summary. Specs that want it set it themselves.
 			GinkgoT().Setenv("GITHUB_STEP_SUMMARY", "")
 			GinkgoT().Setenv("COMMIT", "")
 		})
@@ -172,8 +160,6 @@ var _ = Describe("Perf Aggregate", func() {
 			Expect(summary["scale_out"]["Final Nodes"].Median).To(Equal(5.0))
 			Expect(summary["scale_out"]["Duration"].Median).To(Equal(2.0))
 			Expect(summary["scale_out"]["CPU Utilization"].Stddev).To(Equal(0.0))
-			// A metric no sample carried gets no entry, rather than an entry
-			// at n=0.
 			Expect(summary["scale_out"]).ToNot(HaveKey("Controller CPU"))
 		})
 
@@ -212,9 +198,6 @@ var _ = Describe("Perf Aggregate", func() {
 		})
 
 		It("reports a phase that came back with more samples than were dispatched", func() {
-			// Two matrix legs writing the same phase filename would have their
-			// samples pooled into one statistic. The warning is what surfaces
-			// it.
 			writeSample(root, "iter_1", "scale_out", map[string]any{"total_nodes": 4.0})
 			writeSample(root, "iter_2", "scale_out", map[string]any{"total_nodes": 6.0})
 
@@ -252,10 +235,6 @@ var _ = Describe("Perf Aggregate", func() {
 		})
 
 		It("names the commit in the heading and on stdout when the workflow stamped one", func() {
-			// The batch is worthless without knowing which tree it measured: a
-			// workflow_run checkout defaults to the default branch, so an
-			// unlabelled table is exactly how n samples of main get read as n
-			// samples of the pull request.
 			writeSample(root, "iter_1", "scale_out", map[string]any{"total_nodes": 4.0})
 			summaryPath := filepath.Join(root, "step-summary.md")
 			GinkgoT().Setenv("GITHUB_STEP_SUMMARY", summaryPath)
@@ -285,9 +264,6 @@ var _ = Describe("Perf Aggregate", func() {
 		})
 
 		It("reports both CPU series, so the p95-or-mean question is answerable from the table", func() {
-			// ryan-mist's CV table on #2994 was computed from a subset read out of
-			// run logs. Both series in the batch output puts the comparison on the
-			// full sample.
 			writeSample(root, "iter_1", "scale_out", map[string]any{
 				"karpenter_p95_cpu_cores": 0.9,
 				"karpenter_avg_cpu_cores": 0.3,
@@ -305,7 +281,6 @@ var _ = Describe("Perf Aggregate", func() {
 			Expect(json.Unmarshal(b, &summary)).To(Succeed())
 			Expect(summary["scale_out"]["Controller CPU"].Median).To(Equal(0.7))
 			Expect(summary["scale_out"]["Controller Mean CPU"].Median).To(Equal(0.3))
-			// The point of carrying both: the CV separates them.
 			Expect(summary["scale_out"]["Controller CPU"].CVPct).To(BeNumerically(">", 0.0))
 			Expect(summary["scale_out"]["Controller Mean CPU"].CVPct).To(Equal(0.0))
 		})
@@ -340,8 +315,6 @@ var _ = Describe("Perf Aggregate", func() {
 		})
 
 		It("reports a missing directory as an empty batch, not as a walk error", func() {
-			// What a run whose every sample job failed looks like: the download
-			// step matched nothing and created no directory.
 			err := run(filepath.Join(root, "never-created"), 3, io.Discard)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("no " + reportSuffix + " files found"))

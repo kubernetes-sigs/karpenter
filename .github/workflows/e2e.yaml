@@ -33,13 +33,6 @@ on:
           default branch no matter which pull request triggered the run.
 jobs:
   e2e:
-    # contents: read and nothing else. This job runs the checked-out tree, and
-    # with git_ref set by a workflow_run caller that tree is a pull request's,
-    # so every write scope here is a write scope a pull request can reach.
-    # issues: write was on this job before and nothing used it: no step and no
-    # action under .github/actions touches the issues API, gh, or GITHUB_TOKEN.
-    # kind-e2e.yaml still grants issues: write at the call site, which is now an
-    # upper bound with nothing under it.
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -53,11 +46,6 @@ jobs:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         ref: ${{ inputs.git_ref }}
-    # Both values, because they answer different questions. The requested ref says
-    # what the caller asked for, HEAD says what was measured. A reader confirming
-    # that /karpenter perf tested the pull request rather than main greps the job
-    # log for "commit under test" and compares it with the review's commit; the
-    # same line lands in the job summary so it survives the log.
     - name: Record the commit under test
       env:
         GIT_REF: ${{ inputs.git_ref }}
@@ -117,8 +105,6 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         TEST_SUITE="$SUITE" make e2etests
-    # The name carries the sample index because upload-artifact requires names to
-    # be unique within a run, so without it the samples of a batch would collide.
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
