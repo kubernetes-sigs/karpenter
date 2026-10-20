@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	pstate "sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -53,7 +54,14 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
-const benchMaxNodes = 1000
+const (
+	benchMaxNodes               = 1000
+	benchNodePoolCount          = 3
+	benchCheaperNodeRejection   = "Can't replace with a cheaper node"
+	benchEventsPerUnconsolidate = 2
+)
+
+var benchPodCPU = resource.MustParse("30")
 
 var (
 	benchOnce       sync.Once
@@ -102,12 +110,10 @@ func setupBenchOnce(b *testing.B) {
 	benchProv = provisioning.NewProvisioner(benchClient, benchRecorder, benchCP, benchCluster, benchClock, draCtl, virtualpods.NewVirtualPodCache(benchClient), prediction.NewStore(benchClient))
 	benchQueue = disruption.NewQueue(benchClient, benchRecorder, benchCluster, benchClock, benchProv)
 
-	benchInstType = pickExpensiveOnDemand(benchCP.InstanceTypes)
+	benchInstType = pickCheapestOnDemandFitting(benchCP.InstanceTypes, benchPodCPU)
 	off := benchInstType.Offerings.Available()[0]
 
-	benchCP.InstanceTypes = []*cloudprovider.InstanceType{benchInstType}
-
-	benchNodePools = createBenchNodePools(b, 3)
+	benchNodePools = createBenchNodePools(b, benchNodePoolCount)
 
 	rs := test.ReplicaSet()
 	if err := benchClient.Create(benchCtx, rs); err != nil {
@@ -116,14 +122,18 @@ func setupBenchOnce(b *testing.B) {
 	benchNodeClaims, benchNodes = createBenchClusterState(b, benchMaxNodes, benchNodePools, benchInstType, off, rs)
 }
 
-func pickExpensiveOnDemand(its []*cloudprovider.InstanceType) *cloudprovider.InstanceType {
+func pickCheapestOnDemandFitting(its []*cloudprovider.InstanceType, cpu resource.Quantity) *cloudprovider.InstanceType {
 	ods := lo.Filter(its, func(it *cloudprovider.InstanceType, _ int) bool {
+		alloc := it.Allocatable()
+		if alloc.Cpu().Cmp(cpu) < 0 {
+			return false
+		}
 		return lo.ContainsBy(it.Offerings.Available(), func(o *cloudprovider.Offering) bool {
 			return o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == v1.CapacityTypeOnDemand
 		})
 	})
-	return lo.MaxBy(ods, func(a, b *cloudprovider.InstanceType) bool {
-		return a.Offerings.Cheapest().Price > b.Offerings.Cheapest().Price
+	return lo.MinBy(ods, func(a, b *cloudprovider.InstanceType) bool {
+		return a.Offerings.Cheapest().Price < b.Offerings.Cheapest().Price
 	})
 }
 
@@ -139,6 +149,7 @@ func createBenchNodePools(b *testing.B, count int) []*v1.NodePool {
 		},
 	})
 	for _, np := range nps {
+		np.Spec.Limits = nil
 		if err := benchClient.Create(benchCtx, np); err != nil {
 			b.Fatalf("create nodepool: %v", err)
 		}
@@ -242,7 +253,7 @@ func buildBenchPod(idx int, nodeName string, rs client.Object, antiSel metav1.La
 			TopologyKey:   corev1.LabelHostname,
 		}},
 		ResourceRequirements: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("30")},
+			Requests: corev1.ResourceList{corev1.ResourceCPU: benchPodCPU},
 		},
 	})
 	pod.Spec.NodeName = nodeName
@@ -286,10 +297,36 @@ func benchmarkSingleNodeConsolidation(b *testing.B, numNodes int) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		budgets, cands := candidatesForBench(b, singleNode, numNodes)
+		benchRecorder.Reset()
 		b.StartTimer()
-		if _, err := singleNode.ComputeCommands(benchCtx, budgets, cands...); err != nil {
+		cmds, err := singleNode.ComputeCommands(benchCtx, budgets, cands...)
+		b.StopTimer()
+		if err != nil {
 			b.Fatalf("compute commands: %v", err)
 		}
+		assertEveryCandidateRejectedOnPrice(b, cmds, numNodes)
+		b.StartTimer()
+	}
+}
+
+func assertEveryCandidateRejectedOnPrice(b *testing.B, cmds []disruption.Command, numNodes int) {
+	b.Helper()
+	if len(cmds) != 0 {
+		b.Fatalf("expected 0 commands, got %d", len(cmds))
+	}
+	wantEvents := numNodes * benchEventsPerUnconsolidate
+	if got := benchRecorder.Calls(events.Unconsolidatable); got != wantEvents {
+		b.Fatalf("expected %d simulations to reach the price comparison (%d Unconsolidatable events), got %d events", numNodes, wantEvents, got)
+	}
+	if !benchRecorder.DetectedEvent(benchCheaperNodeRejection) {
+		b.Fatalf("expected rejection reason %q", benchCheaperNodeRejection)
+	}
+}
+
+func assertNoCommands(b *testing.B, cmds []disruption.Command) {
+	b.Helper()
+	if len(cmds) != 0 {
+		b.Fatalf("expected 0 commands, got %d", len(cmds))
 	}
 }
 
@@ -311,9 +348,14 @@ func benchmarkMultiNodeConsolidation(b *testing.B, numNodes int) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		budgets, cands := candidatesForBench(b, multi, numNodes)
+		benchRecorder.Reset()
 		b.StartTimer()
-		if _, err := multi.ComputeCommands(benchCtx, budgets, cands...); err != nil {
+		cmds, err := multi.ComputeCommands(benchCtx, budgets, cands...)
+		b.StopTimer()
+		if err != nil {
 			b.Fatalf("compute commands: %v", err)
 		}
+		assertNoCommands(b, cmds)
+		b.StartTimer()
 	}
 }
