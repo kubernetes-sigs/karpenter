@@ -17,6 +17,8 @@ limitations under the License.
 package disruption_test
 
 import (
+	"time"
+
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -30,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Expiration", func() {
@@ -148,5 +151,27 @@ var _ = Describe("Expiration", func() {
 		env.EventuallyExpectCreatedNodeClaimCount("==", 1)
 		env.EventuallyExpectCreatedNodeCount("==", 1)
 		env.EventuallyExpectHealthyPodCount(selector, int(numPods))
+	})
+	It("should keep expired nodes while the Expired disruption budget is zero", func() {
+		nodePool.Spec.Disruption = v1.Disruption{
+			Budgets: []v1.Budget{{
+				Nodes:   "0",
+				Reasons: []v1.DisruptionReason{v1.DisruptionReasonExpired},
+			}},
+		}
+		nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
+		env.ExpectCreated(nodeClass, nodePool, dep)
+
+		nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+		node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+		env.EventuallyExpectHealthyPodCount(selector, numPods)
+		env.Monitor.Reset()
+
+		// The node has expired, but the Expired budget must prevent replacement and termination.
+		Consistently(func() int { return len(env.Monitor.DeletedNodes()) }).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(Equal(0))
+		env.EventuallyExpectNodeCount("==", 1)
+		env.EventuallyExpectCreatedNodeClaimCount("==", 1)
+		Expect(nodeClaim).NotTo(BeNil())
+		Expect(node).NotTo(BeNil())
 	})
 })

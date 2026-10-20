@@ -285,6 +285,25 @@ var _ = Describe("Expiration", func() {
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 		})
+		It("should continue budget-paced expiration when a NodePool is recreated with the same name", func() {
+			dynamicNodePool := test.NodePool()
+			nodeClaim.Labels[v1.NodePoolLabelKey] = dynamicNodePool.Name
+			ExpectApplied(ctx, env.Client, dynamicNodePool, nodeClaim)
+
+			env.Clock.Step(60 * time.Second)
+			result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+			Expect(result.RequeueAfter).To(Equal(time.Minute))
+
+			Expect(env.Client.Delete(ctx, dynamicNodePool)).To(Succeed())
+			ExpectNotFound(ctx, env.Client, dynamicNodePool)
+			recreatedNodePool := test.NodePool()
+			recreatedNodePool.Name = dynamicNodePool.Name
+			ExpectApplied(ctx, env.Client, recreatedNodePool)
+
+			env.Clock.Step(time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
 		It("should forcefully expire an expired standalone NodeClaim that no NodePool owns", func() {
 			delete(nodeClaim.Labels, v1.NodePoolLabelKey)
 			ExpectApplied(ctx, env.Client, nodeClaim)

@@ -17,6 +17,8 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -46,6 +48,20 @@ var (
 	nodePool               *v1.NodePool
 	node1, node2           *corev1.Node
 )
+
+type deleteErrorClient struct {
+	client.Client
+	err      error
+	failNext bool
+}
+
+func (c *deleteErrorClient) Delete(ctx context.Context, object client.Object, opts ...client.DeleteOption) error {
+	if c.failNext {
+		c.failNext = false
+		return c.err
+	}
+	return c.Client.Delete(ctx, object, opts...)
+}
 
 var _ = Describe("Queue", func() {
 	BeforeEach(func() {
@@ -86,6 +102,55 @@ var _ = Describe("Queue", func() {
 		node2.Spec.Taints = append(node2.Spec.Taints, v1.DisruptedNoScheduleTaint)
 	})
 	Context("Reconcile", func() {
+		It("does not terminate an expired node when replacement launch fails", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewExpiration(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements: []*disruption.Replacement{{
+					NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct},
+				}},
+			}
+			cloudProvider.AllowedCreateCalls = 0
+
+			Expect(queue.StartCommand(ctx, cmd)).To(HaveOccurred())
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			Expect(ExpectExists(ctx, env.Client, nodeClaim1).DeletionTimestamp.IsZero()).To(BeTrue())
+			Expect(queue.HasAny(nodeClaim1.Status.ProviderID)).To(BeFalse())
+		})
+		It("does not lose an expired command when candidate termination fails", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			cmd := &disruption.Command{
+				Method:            disruption.NewExpiration(env.Client, cluster, prov, recorder, env.Clock),
+				CreationTimestamp: env.Clock.Now(),
+				ID:                uuid.New(),
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
+				Replacements: []*disruption.Replacement{{
+					NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct},
+				}},
+			}
+			failingClient := &deleteErrorClient{Client: env.Client, err: errors.New("injected expiration termination failure"), failNext: true}
+			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, prov)
+			Expect(failingQueue.StartCommand(ctx, cmd)).To(BeNil())
+			replacement := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, client.ObjectKey{Name: cmd.Replacements[0].Name}, replacement)).To(Succeed())
+			replacement, _ = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacement)
+			ExpectObjectReconciled(ctx, failingClient, failingQueue, nodeClaim1)
+			ExpectExists(ctx, env.Client, nodeClaim1)
+			Expect(failingQueue.HasAny(nodeClaim1.Status.ProviderID)).To(BeTrue())
+			ExpectObjectReconciled(ctx, failingClient, failingQueue, nodeClaim1)
+			ExpectNotFound(ctx, env.Client, nodeClaim1)
+		})
 		It("should keep nodes tainted when replacements haven't finished initialization", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})

@@ -150,6 +150,94 @@ var _ = Describe("Expiration", func() {
 			Expect(queue.GetCommands()).To(HaveLen(0))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
+		It("should not expire a node protected by do-not-disrupt without a termination grace period", func() {
+			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+		})
+		It("should allow expiration of a do-not-disrupt node with a termination grace period", func() {
+			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 5 * time.Minute}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(1))
+		})
+		It("should expire an empty node without staging a replacement", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(1))
+			Expect(queue.GetCommands()[0].Replacements).To(BeEmpty())
+		})
+		It("should not expire when the replacement cannot be scheduled", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{{
+				Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"no-such-instance-type"},
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should use static replacement semantics after a dynamic NodePool becomes static", func() {
+			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(1))
+			Expect(queue.GetCommands()[0].Replacements).To(HaveLen(1))
+			Expect(queue.GetCommands()[0].Replacements[0].IsStaticNodeClaim).To(BeTrue())
+		})
+		It("should use dynamic replacement semantics after a static NodePool becomes dynamic", func() {
+			nodePool = test.StaticNodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: nodePool.Name},
+				Spec:       v1.NodePoolSpec{Replicas: lo.ToPtr(int64(1)), Disruption: v1.Disruption{Budgets: []v1.Budget{{Nodes: "100%"}}}},
+			})
+			nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
+			node.Labels[v1.NodePoolLabelKey] = nodePool.Name
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			nodePool.Spec.Replicas = nil
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(1))
+			Expect(queue.GetCommands()[0].Replacements).To(BeEmpty())
+		})
+		It("should rediscover an expired candidate after disruption controller restart without duplicating it", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
+
+			restartedQueue := disruption.NewQueue(env.Client, recorder, cluster, env.Clock, prov)
+			restartedController := disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, restartedQueue, clusterCost,
+				disruption.WithMethods(disruption.NewExpiration(env.Client, cluster, prov, recorder, env.Clock)))
+			_, err := restartedController.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(restartedQueue.GetCommands()).To(BeEmpty())
+		})
 		It("shouldn't disrupt a nodeclaim when expiration is disabled", func() {
 			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -214,6 +302,42 @@ var _ = Describe("Expiration", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			Expect(queue.GetCommands()).To(HaveLen(0))
+		})
+		It("should apply percentage budgets and expire the oldest static node first", func() {
+			staticNodePool := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas:   lo.ToPtr(int64(2)),
+					Disruption: v1.Disruption{Budgets: []v1.Budget{{Nodes: "50%"}}},
+				},
+			})
+			staticClaims, staticNodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey:            staticNodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				}},
+				Spec: v1.NodeClaimSpec{ExpireAfter: v1.MustParseNillableDuration("30s")},
+				Status: v1.NodeClaimStatus{Allocatable: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("32"), corev1.ResourcePods: resource.MustParse("100"),
+				}},
+			})
+			staticClaims[0].Spec.ExpireAfter = v1.MustParseNillableDuration("15s")
+			ExpectApplied(ctx, env.Client, staticNodePool)
+			for i := range staticClaims {
+				ExpectApplied(ctx, env.Client, staticClaims[i], staticNodes[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, staticNodes, staticClaims)
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(1))
+			Expect(queue.GetCommands()[0].Candidates[0].Name()).To(Equal(staticNodes[0].Name))
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 1, map[string]string{
+				metrics.NodePoolLabel: staticNodePool.Name,
+				metrics.ReasonLabel:   strings.ToLower(string(v1.DisruptionReasonExpired)),
+			})
 		})
 	})
 
@@ -335,6 +459,7 @@ var _ = Describe("Expiration", func() {
 		It("should honor an active scheduled Expired budget", func() {
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{
 				Nodes:    "0",
+				Reasons:  []v1.DisruptionReason{v1.DisruptionReasonExpired},
 				Schedule: lo.ToPtr("@hourly"),
 				Duration: &metav1.Duration{Duration: time.Hour},
 			}}
@@ -352,6 +477,28 @@ var _ = Describe("Expiration", func() {
 				metrics.NodePoolLabel: nodePool.Name,
 				metrics.ReasonLabel:   strings.ToLower(string(v1.DisruptionReasonExpired)),
 			})
+		})
+		It("should allow expiration after a scheduled budget window ends", func() {
+			base := time.Now().UTC().Truncate(time.Hour)
+			env.Clock.SetTime(base.Add(30 * time.Second))
+			nodeClaim.CreationTimestamp = metav1.Time{Time: base.Add(-time.Minute)}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+				Nodes:    "0",
+				Reasons:  []v1.DisruptionReason{v1.DisruptionReasonExpired},
+				Schedule: lo.ToPtr("0 * * * *"),
+				Duration: &metav1.Duration{Duration: time.Minute},
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			// The budget is active 30 seconds after the hourly hit.
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(HaveLen(0))
+
+			// After the one-minute duration expires, the same Expired candidate becomes actionable.
+			env.Clock.SetTime(base.Add(2 * time.Minute))
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(HaveLen(1))
 		})
 	})
 })
