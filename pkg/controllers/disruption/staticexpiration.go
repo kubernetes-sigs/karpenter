@@ -26,7 +26,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -39,14 +38,13 @@ import (
 // Static pools cannot use the normal scheduling simulation because their replica count, rather than pending workload,
 // determines the desired number of NodeClaims.
 type StaticExpiration struct {
-	cluster     *state.Cluster
-	provisioner *provisioning.Provisioner
-	recorder    events.Recorder
-	clock       clock.Clock
+	cluster  *state.Cluster
+	recorder events.Recorder
+	clock    clock.Clock
 }
 
-func NewStaticExpiration(cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock) *StaticExpiration {
-	return &StaticExpiration{cluster: cluster, provisioner: provisioner, recorder: recorder, clock: clk}
+func NewStaticExpiration(cluster *state.Cluster, recorder events.Recorder, clk clock.Clock) *StaticExpiration {
+	return &StaticExpiration{cluster: cluster, recorder: recorder, clock: clk}
 }
 
 func (e *StaticExpiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {

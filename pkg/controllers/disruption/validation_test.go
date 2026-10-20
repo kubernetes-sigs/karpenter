@@ -114,7 +114,7 @@ func NewMethodsWithNopValidator() []disruption.Method {
 	singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	return []disruption.Method{
 		disruption.NewStaticDrift(cluster, prov, cloudProvider, recorder),
-		disruption.NewStaticExpiration(cluster, prov, recorder, env.Clock),
+		disruption.NewStaticExpiration(cluster, recorder, env.Clock),
 		disruption.NewExpiration(env.Client, cluster, prov, recorder, env.Clock),
 		disruption.NewDrift(env.Client, cluster, prov, recorder, env.Clock),
 		emptiness,

@@ -114,7 +114,7 @@ func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, ku
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
 		NewStaticDrift(cluster, provisioner, cp, recorder),
 		// Replace expired NodeClaims in Static NodePools while respecting their replica and node limits.
-		NewStaticExpiration(cluster, provisioner, recorder, clk),
+		NewStaticExpiration(cluster, recorder, clk),
 		// Replace NodeClaims that have outlived their expireAfter. Ordered ahead of drift: a node past its lifetime
 		// bound has a deadline behind it, where a drifted node only has a spec mismatch.
 		NewExpiration(kubeClient, cluster, provisioner, recorder, clk),

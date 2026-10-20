@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 var _ = Describe("Expiration", func() {
@@ -123,6 +125,31 @@ var _ = Describe("Expiration", func() {
 
 			Expect(queue.GetCommands()).To(HaveLen(0))
 		})
+		It("should honor a blocking PDB during expiration", func() {
+			rs := test.ReplicaSet()
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "blocked"},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
+						Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					}},
+				},
+			})
+			pdb := test.PodDisruptionBudget(test.PDBOptions{
+				Labels:         map[string]string{"app": "blocked"},
+				MaxUnavailable: lo.ToPtr(intstr.FromInt(0)),
+			})
+			ExpectApplied(ctx, env.Client, rs, nodePool, nodeClaim, node, pod, pdb)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
 		It("shouldn't disrupt a nodeclaim when expiration is disabled", func() {
 			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -149,6 +176,44 @@ var _ = Describe("Expiration", func() {
 			Expect(queue.GetCommands()).To(HaveLen(1))
 			Expect(queue.GetCommands()[0].Reason()).To(Equal(v1.DisruptionReasonExpired))
 			Expect(queue.GetCommands()[0].Replacements).To(HaveLen(1))
+		})
+		It("should block static expiration when the node limit leaves no replacement capacity", func() {
+			staticNodePool := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas:   lo.ToPtr(int64(1)),
+					Limits:     v1.Limits{resources.Node: resource.MustParse("1")},
+					Disruption: v1.Disruption{Budgets: []v1.Budget{{Nodes: "100%"}}},
+				},
+			})
+			nodeClaim.Labels[v1.NodePoolLabelKey] = staticNodePool.Name
+			node.Labels[v1.NodePoolLabelKey] = staticNodePool.Name
+			ExpectApplied(ctx, env.Client, staticNodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+		})
+		It("should honor an Expired-only budget for static expiration", func() {
+			staticNodePool := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(1)),
+					Disruption: v1.Disruption{Budgets: []v1.Budget{
+						{Reasons: []v1.DisruptionReason{v1.DisruptionReasonExpired}, Nodes: "0"},
+						{Reasons: []v1.DisruptionReason{v1.DisruptionReasonDrifted}, Nodes: "100%"},
+					}},
+				},
+			})
+			nodeClaim.Labels[v1.NodePoolLabelKey] = staticNodePool.Name
+			node.Labels[v1.NodePoolLabelKey] = staticNodePool.Name
+			ExpectApplied(ctx, env.Client, staticNodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
 		})
 	})
 
@@ -266,6 +331,27 @@ var _ = Describe("Expiration", func() {
 			Expect(queue.GetCommands()).To(HaveLen(1))
 			Expect(queue.GetCommands()[0].Candidates).To(HaveLen(1))
 			Expect(queue.GetCommands()[0].Candidates[0].Name()).To(Equal(nodes[0].Name))
+		})
+		It("should honor an active scheduled Expired budget", func() {
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+				Nodes:    "0",
+				Schedule: lo.ToPtr("@hourly"),
+				Duration: &metav1.Duration{Duration: time.Hour},
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range numNodes {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			env.Clock.Step(60 * time.Second)
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(0))
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 0, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:   strings.ToLower(string(v1.DisruptionReasonExpired)),
+			})
 		})
 	})
 })
