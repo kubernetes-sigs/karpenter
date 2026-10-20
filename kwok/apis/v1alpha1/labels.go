@@ -33,6 +33,10 @@ const (
 	KwokLabelValue        = "fake"
 	NodeViewerLabelKey    = "eks-node-viewer/instance-price"
 	KwokPartitionLabelKey = "kwok-partition"
+
+	// RebootNoRecoveryAnnotationKey on a Node makes KWOK accept a reboot without simulating a new boot, so the node
+	// never recovers and e2e tests can exercise the reboot recovery timeout.
+	RebootNoRecoveryAnnotationKey = apis.Group + "/reboot-no-recovery"
 )
 
 func init() {
