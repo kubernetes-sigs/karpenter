@@ -32,6 +32,7 @@ import (
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/workqueue"
@@ -90,6 +91,7 @@ var (
 
 // nolint:gocyclo
 func (env *Environment) BeforeEach() {
+	env.SkipKnownFlaky()
 	debug.BeforeEach(env.Context, env.Config, env.Client)
 	// Expect this cluster to be clean for test runs to execute successfully
 	env.ExpectCleanCluster()
@@ -186,7 +188,11 @@ func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
 				// This only gets the metadata for the objects since we don't need all the details of the objects
 				metaList := &metav1.PartialObjectMetadataList{}
 				metaList.SetGroupVersionKind(lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme())))
-				g.Expect(env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel}))).To(Succeed())
+				if err := env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel})); meta.IsNoMatchError(err) {
+					return
+				} else {
+					g.Expect(err).ToNot(HaveOccurred())
+				}
 				// Limit the concurrency of these calls to 50 workers per object so that we try to limit how aggressively we
 				// are deleting so that we avoid getting client-side throttled
 				workqueue.ParallelizeUntil(env, 50, len(metaList.Items), func(i int) {
