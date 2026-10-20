@@ -153,7 +153,7 @@ func classifyDisruptableNode(ctx context.Context, kubeClient client.Client, clk 
 	// Expiry and drift are checked before consolidation so a node in a
 	// ConsolidateAfter=nil pool still ranks. Expiry wins the tie: its deadline
 	// has already passed, where drift is only a spec mismatch.
-	if isExpiring(node, nodePoolMap, clk) {
+	if isExpiring(node, clk) {
 		return partitionExpiring
 	}
 	if isDrifted(node, nodePoolMap) {
@@ -228,12 +228,8 @@ func isGoingAway(node *state.StateNode) bool {
 // TODO: the drift-condition read and IsStatic gate are duplicated in
 // disruption/drift.go and disruption/staticdrift.go; dedupe in a follow-up.
 // isExpiring reports whether the node has outlived its expireAfter and is therefore an Expired disruption candidate.
-// Static NodePools are excluded to match the Expired disruption method, which leaves them on the forceful path.
-func isExpiring(node *state.StateNode, nodePoolMap map[string]*v1.NodePool, clk clock.Clock) bool {
+func isExpiring(node *state.StateNode, clk clock.Clock) bool {
 	if node.NodeClaim == nil {
-		return false
-	}
-	if np := nodePoolMap[node.Labels()[v1.NodePoolLabelKey]]; np != nil && nodepoolutils.IsStatic(np) {
 		return false
 	}
 	return nodeclaimutils.IsExpired(node.NodeClaim, clk)

@@ -133,8 +133,8 @@ var _ = Describe("Expiration", func() {
 
 			Expect(queue.GetCommands()).To(HaveLen(0))
 		})
-		It("shouldn't disrupt an expired nodeclaim owned by a static nodepool", func() {
-			// Static nodepools size themselves from replicas, so they stay on the forceful expiration path.
+		It("should replace an expired nodeclaim owned by a static nodepool", func() {
+			// Static pools use their replica count rather than workload simulation to stage the replacement.
 			staticNodePool := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(1))},
 			})
@@ -146,7 +146,9 @@ var _ = Describe("Expiration", func() {
 			env.Clock.Step(60 * time.Second)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			Expect(queue.GetCommands()).To(HaveLen(0))
+			Expect(queue.GetCommands()).To(HaveLen(1))
+			Expect(queue.GetCommands()[0].Reason()).To(Equal(v1.DisruptionReasonExpired))
+			Expect(queue.GetCommands()[0].Replacements).To(HaveLen(1))
 		})
 	})
 

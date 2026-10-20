@@ -40,7 +40,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
-	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 // Expiration is a nodeclaim controller that deletes expired nodeclaims based on expireAfter
@@ -49,6 +48,11 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 }
+
+// deferredExpirationRequeueAfter bounds how long an expired NodeClaim can remain without a NodePool event after
+// this controller defers to budget-paced disruption. In particular, it lets us recover if the owning NodePool is
+// deleted after the initial deferral.
+const deferredExpirationRequeueAfter = time.Minute
 
 // NewController constructs a nodeclaim disruption controller
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
@@ -91,7 +95,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		return reconcile.Result{}, err
 	}
 	if !forceful {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: deferredExpirationRequeueAfter}, nil
 	}
 	// 4. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
@@ -128,8 +132,8 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 //
 //   - A standalone NodeClaim, which no NodePool owns, so there is no budget to evaluate and the disruption controller
 //     never builds a candidate for it.
-//   - A NodeClaim owned by a static NodePool, which sizes itself from replicas instead of staging a replacement per
-//     candidate. This mirrors Drift's split with StaticDrift; a budget-paced static expiration is follow-up work.
+//   - A NodeClaim owned by a static NodePool is handled by the disruption controller's StaticExpiration method,
+//     which stages a replacement while respecting replica and node limits.
 func (c *Controller) expiresForcefully(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, error) {
 	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
 	if !ok {
@@ -144,7 +148,7 @@ func (c *Controller) expiresForcefully(ctx context.Context, nodeClaim *v1.NodeCl
 		}
 		return false, serrors.Wrap(fmt.Errorf("getting nodepool, %w", err), "NodePool", klog.KRef("", nodePoolName))
 	}
-	return nodepoolutils.IsStatic(nodePool), nil
+	return false, nil
 }
 
 func (c *Controller) Name() string {

@@ -82,9 +82,7 @@ var _ = Describe("Expiration", func() {
 			Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(1))},
 		})
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
-			},
+			ObjectMeta: metav1.ObjectMeta{},
 			Spec: v1.NodeClaimSpec{
 				ExpireAfter: v1.MustParseNillableDuration("30s"),
 			},
@@ -104,7 +102,7 @@ var _ = Describe("Expiration", func() {
 
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 				metrics.ReasonLabel:              metrics.ExpiredReason,
-				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.NodePoolLabel:            "",
 				metrics.ConsolidationPolicyLabel: "",
 				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
@@ -120,7 +118,7 @@ var _ = Describe("Expiration", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 				metrics.ReasonLabel:              metrics.ExpiredReason,
-				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.NodePoolLabel:            "",
 				metrics.ConsolidationPolicyLabel: "",
 				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
@@ -152,13 +150,13 @@ var _ = Describe("Expiration", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 				metrics.ReasonLabel:              metrics.ExpiredReason,
-				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.NodePoolLabel:            "",
 				metrics.ConsolidationPolicyLabel: "",
 				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
 			ExpectMetricCounterValue(metrics.PodsDisruptionInitiatedTotal, 2, map[string]string{
 				metrics.ReasonLabel:              metrics.ExpiredReason,
-				metrics.NodePoolLabel:            nodePool.Name,
+				metrics.NodePoolLabel:            "",
 				metrics.ConsolidationPolicyLabel: "",
 				metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 			})
@@ -260,6 +258,33 @@ var _ = Describe("Expiration", func() {
 			// here would race that and force the node out at its deadline regardless of the budget.
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
+		It("shouldn't forcefully expire an expired NodeClaim owned by a static NodePool", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
+			ExpectApplied(ctx, env.Client, nodeClaim)
+
+			env.Clock.Step(60 * time.Second)
+			result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+			Expect(result.RequeueAfter).To(Equal(time.Minute))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should forcefully expire an expired NodeClaim after its dynamic NodePool is deleted", func() {
+			dynamicNodePool := test.NodePool()
+			nodeClaim.Labels[v1.NodePoolLabelKey] = dynamicNodePool.Name
+			ExpectApplied(ctx, env.Client, dynamicNodePool, nodeClaim)
+
+			// The first reconciliation defers to the budget-paced expiration method.
+			env.Clock.Step(60 * time.Second)
+			result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+			Expect(result.RequeueAfter).To(Equal(time.Minute))
+			ExpectExists(ctx, env.Client, nodeClaim)
+
+			// Once the owner disappears, the next bounded retry must take the forceful cleanup path.
+			Expect(env.Client.Delete(ctx, dynamicNodePool)).To(Succeed())
+			env.Clock.Step(time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+		})
 		It("should forcefully expire an expired standalone NodeClaim that no NodePool owns", func() {
 			delete(nodeClaim.Labels, v1.NodePoolLabelKey)
 			ExpectApplied(ctx, env.Client, nodeClaim)
@@ -272,6 +297,7 @@ var _ = Describe("Expiration", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 		})
 		It("should forcefully expire an expired NodeClaim whose owning NodePool is gone", func() {
+			nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
 			// nodePool is intentionally not applied, so the NodePool label dangles.
 			ExpectApplied(ctx, env.Client, nodeClaim)
 
