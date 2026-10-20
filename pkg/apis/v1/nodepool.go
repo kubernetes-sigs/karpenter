@@ -120,7 +120,7 @@ type Disruption struct {
 type Budget struct {
 	// reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
-	// allowed reasons are Underutilized, Empty, Drifted, and Unhealthy.
+	// allowed reasons are Underutilized, Empty, Drifted, Expired, and Unhealthy.
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	// +listType=set
@@ -177,13 +177,18 @@ func (p ConsolidationPolicy) IsBalanced() bool {
 }
 
 // DisruptionReason defines valid reasons for disruption budgets.
-// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted,Unhealthy}
+// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted,Expired,Unhealthy}
 type DisruptionReason string
 
 const (
 	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
 	DisruptionReasonEmpty         DisruptionReason = "Empty"
 	DisruptionReasonDrifted       DisruptionReason = "Drifted"
+	// DisruptionReasonExpired paces expiration through the shared disruption budget. A NodeClaim past
+	// creationTimestamp + expireAfter becomes a candidate rather than being deleted outright, so expiration is ordered
+	// and pre-spins replacement capacity. expireAfter is therefore a floor on node lifetime, not a ceiling: a budget
+	// that allows no disruptions holds an expired node until it does.
+	DisruptionReasonExpired DisruptionReason = "Expired"
 	// DisruptionReasonUnhealthy paces voluntary node repair through the shared disruption budget. Repair is ordered and
 	// pre-spins replacement capacity.
 	DisruptionReasonUnhealthy DisruptionReason = "Unhealthy"
@@ -264,6 +269,9 @@ type NodeClaimTemplateSpec struct {
 	// before terminating a node, measured from when the node is created. This
 	// is useful to implement features like eventually consistent node upgrade,
 	// memory leak protection, and disruption testing.
+	// Once this elapses the node becomes a voluntary disruption candidate under the Expired reason, so this
+	// NodePool's disruption budgets pace when it is actually replaced. ExpireAfter is therefore a floor on node
+	// lifetime rather than a ceiling: a budget that allows no disruptions holds an expired node until it opens.
 	// +kubebuilder:default:="720h"
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"

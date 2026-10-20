@@ -75,6 +75,9 @@ type NodeClaimSpec struct {
 	// before terminating a node, measured from when the node is created. This
 	// is useful to implement features like eventually consistent node upgrade,
 	// memory leak protection, and disruption testing.
+	// Once this elapses the node becomes a voluntary disruption candidate under the Expired reason, so the
+	// owning NodePool's disruption budgets pace when it is actually replaced. ExpireAfter is therefore a floor on
+	// node lifetime rather than a ceiling: a budget that allows no disruptions holds an expired node until it opens.
 	// +kubebuilder:default:="720h"
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"

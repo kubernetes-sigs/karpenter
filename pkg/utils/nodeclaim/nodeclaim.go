@@ -29,6 +29,7 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -43,6 +44,24 @@ func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
 	return lo.ContainsBy(cp.GetSupportedNodeClasses(), func(nodeClass status.Object) bool {
 		return object.GVK(nodeClass).GroupKind() == nodeClaim.Spec.NodeClassRef.GroupKind()
 	})
+}
+
+// ExpirationTime returns when the NodeClaim outlives its expireAfter, and false when expireAfter is unset ("Never"),
+// in which case the NodeClaim never expires.
+func ExpirationTime(nodeClaim *v1.NodeClaim) (time.Time, bool) {
+	if nodeClaim == nil || nodeClaim.Spec.ExpireAfter.Duration == nil {
+		return time.Time{}, false
+	}
+	return nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration), true
+}
+
+// IsExpired reports whether the NodeClaim has outlived its expireAfter as of now.
+func IsExpired(nodeClaim *v1.NodeClaim, clk clock.Clock) bool {
+	expirationTime, ok := ExpirationTime(nodeClaim)
+	if !ok {
+		return false
+	}
+	return !clk.Now().Before(expirationTime)
 }
 
 // DisruptionTerminationMode returns the termination_mode metric label value for a

@@ -113,6 +113,9 @@ func NewMethods(ctx context.Context, clk clock.Clock, cluster *state.Cluster, ku
 		NewEmptiness(c),
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
 		NewStaticDrift(cluster, provisioner, cp, recorder),
+		// Replace NodeClaims that have outlived their expireAfter. Ordered ahead of drift: a node past its lifetime
+		// bound has a deadline behind it, where a drifted node only has a spec mismatch.
+		NewExpiration(kubeClient, cluster, provisioner, recorder, clk),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 		NewDrift(kubeClient, cluster, provisioner, recorder, clk),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn

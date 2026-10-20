@@ -33,15 +33,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // RankNodes returns three slices whose position implies the pod-deletion-cost
-// annotation: groupA maps to math.MinInt32, groupBC is drifted then normal by
-// SavingsRatio DESC with the rank from RankForBC(i, len(groupBC)), and groupD
-// has its annotations cleared.
+// annotation: groupA maps to math.MinInt32, groupBC is expiring, then drifted,
+// then normal by SavingsRatio DESC with the rank from RankForBC(i, len(groupBC)),
+// and groupD has its annotations cleared.
 func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, nodes []*state.StateNode, nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) (groupA, groupBC, groupD []*state.StateNode, err error) {
 	// PDC only annotates pods on nodes Karpenter owns. An unmanaged node with a
 	// deletion timestamp satisfies StateNode.Deleted(), so without this filter it
@@ -64,6 +65,7 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 		return classifyNode(ctx, kubeClient, clk, n, nodePoolMap, nodePoolToInstanceTypesMap, pdbs)
 	})
 	disruptedBlocked := groups[partitionDisrupted]
+	expiring := groups[partitionExpiring]
 	drifted := groups[partitionDrifted]
 	normal := groups[partitionNormal]
 	cleanupOnly := groups[partitionCleanupOnly]
@@ -72,16 +74,21 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 		numNodes, disrupting := disruption.NodePoolStatsFromNodes(nodes, reason)
 		return disruption.NodePoolBudgetMap(ctx, clk, nodePoolMap, numNodes, disrupting, reason)
 	}
+	expiryBudget := budgetFor(v1.DisruptionReasonExpired)
 	driftBudget := budgetFor(v1.DisruptionReasonDrifted)
 	consolidationBudget := budgetFor(v1.DisruptionReasonUnderutilized)
-	var driftOverflow, normalOverflow []*state.StateNode
+	var expiryOverflow, driftOverflow, normalOverflow []*state.StateNode
+	expiring, expiryOverflow = applyPerNodePoolBudget(expiring, expiryBudget)
 	drifted, driftOverflow = applyPerNodePoolBudget(drifted, driftBudget)
 	normal, normalOverflow = applyPerNodePoolBudget(normal, consolidationBudget)
+	cleanupOnly = append(cleanupOnly, expiryOverflow...)
 	cleanupOnly = append(cleanupOnly, driftOverflow...)
 	cleanupOnly = append(cleanupOnly, normalOverflow...)
 
-	// Drifted first so index 0 carries the most-negative rank.
-	groupBC = append(drifted, normal...)
+	// Expiring first, then drifted, so index 0 carries the most-negative rank. This mirrors the order the disruption
+	// controller evaluates its methods in, so the pods most likely to move next get the lowest deletion cost.
+	groupBC = append(expiring, drifted...)
+	groupBC = append(groupBC, normal...)
 
 	log.FromContext(ctx).V(1).WithValues(
 		"totalNodes", len(disruptedBlocked)+len(groupBC)+len(cleanupOnly),
@@ -119,6 +126,7 @@ type nodePartition int
 
 const (
 	partitionDisrupted nodePartition = iota
+	partitionExpiring
 	partitionDrifted
 	partitionNormal
 	partitionCleanupOnly
@@ -142,8 +150,12 @@ func classifyDisruptableNode(ctx context.Context, kubeClient client.Client, clk 
 	if hasPinningPods(pods) || isUnpriceable(node, nodePoolToInstanceTypesMap) {
 		return partitionCleanupOnly
 	}
-	// Drift is checked first so a drifted node in a ConsolidateAfter=nil pool
-	// still ranks.
+	// Expiry and drift are checked before consolidation so a node in a
+	// ConsolidateAfter=nil pool still ranks. Expiry wins the tie: its deadline
+	// has already passed, where drift is only a spec mismatch.
+	if isExpiring(node, nodePoolMap, clk) {
+		return partitionExpiring
+	}
 	if isDrifted(node, nodePoolMap) {
 		return partitionDrifted
 	}
@@ -215,6 +227,18 @@ func isGoingAway(node *state.StateNode) bool {
 //
 // TODO: the drift-condition read and IsStatic gate are duplicated in
 // disruption/drift.go and disruption/staticdrift.go; dedupe in a follow-up.
+// isExpiring reports whether the node has outlived its expireAfter and is therefore an Expired disruption candidate.
+// Static NodePools are excluded to match the Expired disruption method, which leaves them on the forceful path.
+func isExpiring(node *state.StateNode, nodePoolMap map[string]*v1.NodePool, clk clock.Clock) bool {
+	if node.NodeClaim == nil {
+		return false
+	}
+	if np := nodePoolMap[node.Labels()[v1.NodePoolLabelKey]]; np != nil && nodepoolutils.IsStatic(np) {
+		return false
+	}
+	return nodeclaimutils.IsExpired(node.NodeClaim, clk)
+}
+
 func isDrifted(node *state.StateNode, nodePoolMap map[string]*v1.NodePool) bool {
 	if node.NodeClaim == nil {
 		return false

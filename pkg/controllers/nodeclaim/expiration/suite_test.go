@@ -23,6 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -70,11 +71,16 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("Expiration", func() {
+	// This controller only forcefully expires NodeClaims no disruption budget can pace: those owned by a static
+	// NodePool, and standalone ones no NodePool owns. Expiration of a NodeClaim owned by a dynamic NodePool is a
+	// voluntary disruption handled by the Expired disruption method, so the fixture NodePool here is static.
 	var nodePool *v1.NodePool
 	var nodeClaim *v1.NodeClaim
 	var node *corev1.Node
 	BeforeEach(func() {
-		nodePool = test.NodePool()
+		nodePool = test.StaticNodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(1))},
+		})
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
@@ -88,7 +94,7 @@ var _ = Describe("Expiration", func() {
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 			// step forward to make the node expired
 			env.Clock.Step(60 * time.Second)
@@ -238,6 +244,42 @@ var _ = Describe("Expiration", func() {
 			metrics.NodePoolLabel:            nodePool.Name,
 			metrics.ConsolidationPolicyLabel: "",
 			metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
+		})
+	})
+	Context("Deferring to budget-paced expiration", func() {
+		It("shouldn't forcefully expire an expired NodeClaim owned by a dynamic NodePool", func() {
+			dynamicNodePool := test.NodePool()
+			nodeClaim.Labels[v1.NodePoolLabelKey] = dynamicNodePool.Name
+			ExpectApplied(ctx, env.Client, dynamicNodePool, nodeClaim)
+
+			// step forward to make the node expired
+			env.Clock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			// The Expired disruption method owns this NodeClaim so that the NodePool's budgets pace it. Deleting it
+			// here would race that and force the node out at its deadline regardless of the budget.
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should forcefully expire an expired standalone NodeClaim that no NodePool owns", func() {
+			delete(nodeClaim.Labels, v1.NodePoolLabelKey)
+			ExpectApplied(ctx, env.Client, nodeClaim)
+
+			// step forward to make the node expired
+			env.Clock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			// No NodePool means no budget to pace against, so this controller remains responsible.
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+		})
+		It("should forcefully expire an expired NodeClaim whose owning NodePool is gone", func() {
+			// nodePool is intentionally not applied, so the NodePool label dangles.
+			ExpectApplied(ctx, env.Client, nodeClaim)
+
+			// step forward to make the node expired
+			env.Clock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
 		})
 	})
 })

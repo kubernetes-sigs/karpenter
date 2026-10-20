@@ -18,9 +18,12 @@ package expiration
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -37,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 // Expiration is a nodeclaim controller that deletes expired nodeclaims based on expireAfter
@@ -67,22 +71,33 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
-	// From here there are three scenarios to handle:
+	// From here there are four scenarios to handle:
 	// 1. If ExpireAfter is not configured, exit expiration loop
-	if nodeClaim.Spec.ExpireAfter.Duration == nil {
+	expirationTime, ok := nodeclaimutils.ExpirationTime(nodeClaim)
+	if !ok {
 		return reconcile.Result{}, nil
 	}
-	expirationTime := nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration)
 	// 2. If the NodeClaim isn't expired leave the reconcile loop.
 	if c.clock.Now().Before(expirationTime) {
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(c.clock.Now())}, nil
 	}
-	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
+	// 3. Expiration of a NodeClaim owned by a dynamic NodePool is a voluntary disruption, paced by that NodePool's
+	// disruption budgets under the Expired reason (see pkg/controllers/disruption/expiration.go). This controller must
+	// stand down for those NodeClaims, or its unconditional delete would race the budget and force the node out at its
+	// deadline regardless.
+	forceful, err := c.expiresForcefully(ctx, nodeClaim)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if !forceful {
+		return reconcile.Result{}, nil
+	}
+	// 4. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
+	// 5. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
 	labels := map[string]string{
 		metrics.ReasonLabel:              strings.ToLower(metrics.ExpiredReason),
@@ -105,6 +120,31 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	// USE CAUTION when determining whether to increase this timeout or remove this line
 	c.clock.Sleep(time.Second)
 	return reconcile.Result{}, nil
+}
+
+// expiresForcefully reports whether this NodeClaim's expiration is still this controller's to perform, rather than the
+// budget-paced Expired disruption method's. Two cases keep the forceful path, because neither can be paced by a
+// NodePool's disruption budget:
+//
+//   - A standalone NodeClaim, which no NodePool owns, so there is no budget to evaluate and the disruption controller
+//     never builds a candidate for it.
+//   - A NodeClaim owned by a static NodePool, which sizes itself from replicas instead of staging a replacement per
+//     candidate. This mirrors Drift's split with StaticDrift; a budget-paced static expiration is follow-up work.
+func (c *Controller) expiresForcefully(ctx context.Context, nodeClaim *v1.NodeClaim) (bool, error) {
+	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if !ok {
+		return true, nil
+	}
+	nodePool := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodePoolName}, nodePool); err != nil {
+		// A missing NodePool leaves nothing to pace against, so fall back to forceful expiration rather than leaving
+		// the NodeClaim to outlive its expireAfter indefinitely.
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, serrors.Wrap(fmt.Errorf("getting nodepool, %w", err), "NodePool", klog.KRef("", nodePoolName))
+	}
+	return nodepoolutils.IsStatic(nodePool), nil
 }
 
 func (c *Controller) Name() string {

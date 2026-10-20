@@ -114,13 +114,14 @@ spec:
                             description: |-
                               reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
                               Otherwise, this will apply to each reason defined.
-                              allowed reasons are Underutilized, Empty, Drifted, and Unhealthy.
+                              allowed reasons are Underutilized, Empty, Drifted, Expired, and Unhealthy.
                             items:
                               description: DisruptionReason defines valid reasons for disruption budgets.
                               enum:
                                 - Underutilized
                                 - Empty
                                 - Drifted
+                                - Expired
                                 - Unhealthy
                               type: string
                             maxItems: 50
@@ -241,6 +242,9 @@ spec:
                             before terminating a node, measured from when the node is created. This
                             is useful to implement features like eventually consistent node upgrade,
                             memory leak protection, and disruption testing.
+                            Once this elapses the node becomes a voluntary disruption candidate under the Expired reason, so this
+                            NodePool's disruption budgets pace when it is actually replaced. ExpireAfter is therefore a floor on node
+                            lifetime rather than a ceiling: a budget that allows no disruptions holds an expired node until it opens.
                           pattern: ^(([0-9]+(s|m|h))+|Never)$
                           type: string
                         nodeClassRef:

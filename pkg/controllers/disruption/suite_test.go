@@ -190,6 +190,7 @@ var _ = BeforeEach(func() {
 		v1.DisruptionReasonEmpty,
 		v1.DisruptionReasonUnderutilized,
 		v1.DisruptionReasonDrifted,
+		v1.DisruptionReasonExpired,
 	}
 })
 
