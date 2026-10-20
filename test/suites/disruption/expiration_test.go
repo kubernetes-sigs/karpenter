@@ -125,7 +125,7 @@ var _ = Describe("Expiration", func() {
 			MinAvailable: &minAvailable,
 		})
 		dep.Spec.Replicas = &numPods
-		selector := labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+		selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 		env.ExpectCreated(nodeClass, nodePool, pdb, dep)
 
 		nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]

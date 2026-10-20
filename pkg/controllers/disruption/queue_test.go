@@ -161,7 +161,7 @@ var _ = Describe("Queue", func() {
 			Expect(failingQueue.StartCommand(ctx, cmd)).To(BeNil())
 			replacement := &v1.NodeClaim{}
 			Expect(env.Client.Get(ctx, client.ObjectKey{Name: cmd.Replacements[0].Name}, replacement)).To(Succeed())
-			replacement, _ = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacement)
+			ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacement)
 			ExpectObjectReconciled(ctx, failingClient, failingQueue, nodeClaim1)
 			ExpectExists(ctx, env.Client, nodeClaim1)
 			Expect(failingQueue.HasAny(nodeClaim1.Status.ProviderID)).To(BeTrue())
