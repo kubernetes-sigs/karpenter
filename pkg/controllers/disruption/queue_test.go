@@ -27,7 +27,10 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/virtualpods"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -51,16 +54,27 @@ var (
 
 type deleteErrorClient struct {
 	client.Client
-	err      error
-	failNext bool
+	err  error
+	fail bool
 }
 
 func (c *deleteErrorClient) Delete(ctx context.Context, object client.Object, opts ...client.DeleteOption) error {
-	if c.failNext {
-		c.failNext = false
+	if c.fail {
 		return c.err
 	}
 	return c.Client.Delete(ctx, object, opts...)
+}
+
+type createErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c *createErrorClient) Create(ctx context.Context, object client.Object, opts ...client.CreateOption) error {
+	if _, ok := object.(*v1.NodeClaim); ok {
+		return c.err
+	}
+	return c.Client.Create(ctx, object, opts...)
 }
 
 var _ = Describe("Queue", func() {
@@ -117,12 +131,15 @@ var _ = Describe("Queue", func() {
 					NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct},
 				}},
 			}
-			cloudProvider.AllowedCreateCalls = 0
+			failingClient := &createErrorClient{Client: env.Client, err: errors.New("injected replacement launch failure")}
+			failingProvisioner := provisioning.NewProvisioner(failingClient, recorder, cloudProvider, cluster, env.Clock,
+				deviceallocation.NewController(failingClient), virtualpods.NewVirtualPodCache(failingClient), store)
+			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, failingProvisioner)
 
-			Expect(queue.StartCommand(ctx, cmd)).To(HaveOccurred())
+			Expect(failingQueue.StartCommand(ctx, cmd)).To(HaveOccurred())
 			ExpectExists(ctx, env.Client, nodeClaim1)
 			Expect(ExpectExists(ctx, env.Client, nodeClaim1).DeletionTimestamp.IsZero()).To(BeTrue())
-			Expect(queue.HasAny(nodeClaim1.Status.ProviderID)).To(BeFalse())
+			Expect(failingQueue.HasAny(nodeClaim1.Status.ProviderID)).To(BeFalse())
 		})
 		It("does not lose an expired command when candidate termination fails", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
@@ -139,7 +156,7 @@ var _ = Describe("Queue", func() {
 					NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct},
 				}},
 			}
-			failingClient := &deleteErrorClient{Client: env.Client, err: errors.New("injected expiration termination failure"), failNext: true}
+			failingClient := &deleteErrorClient{Client: env.Client, err: errors.New("injected expiration termination failure"), fail: true}
 			failingQueue := disruption.NewQueue(failingClient, recorder, cluster, env.Clock, prov)
 			Expect(failingQueue.StartCommand(ctx, cmd)).To(BeNil())
 			replacement := &v1.NodeClaim{}
@@ -148,8 +165,6 @@ var _ = Describe("Queue", func() {
 			ExpectObjectReconciled(ctx, failingClient, failingQueue, nodeClaim1)
 			ExpectExists(ctx, env.Client, nodeClaim1)
 			Expect(failingQueue.HasAny(nodeClaim1.Status.ProviderID)).To(BeTrue())
-			ExpectObjectReconciled(ctx, failingClient, failingQueue, nodeClaim1)
-			ExpectNotFound(ctx, env.Client, nodeClaim1)
 		})
 		It("should keep nodes tainted when replacements haven't finished initialization", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)

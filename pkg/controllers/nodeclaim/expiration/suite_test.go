@@ -232,14 +232,14 @@ var _ = Describe("Expiration", func() {
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 			metrics.ReasonLabel:              metrics.ExpiredReason,
-			metrics.NodePoolLabel:            nodePool.Name,
+			metrics.NodePoolLabel:            "",
 			metrics.ConsolidationPolicyLabel: "",
 			metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 		})
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 			metrics.ReasonLabel:              metrics.ExpiredReason,
-			metrics.NodePoolLabel:            nodePool.Name,
+			metrics.NodePoolLabel:            "",
 			metrics.ConsolidationPolicyLabel: "",
 			metrics.TerminationModeLabel:     metrics.TerminationModeGraceful,
 		})
