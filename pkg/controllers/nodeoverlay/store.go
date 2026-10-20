@@ -17,7 +17,14 @@ limitations under the License.
 package nodeoverlay
 
 import (
+	"fmt"
 	"sync/atomic"
+
+	"github.com/awslabs/operatorpkg/serrors"
+	"k8s.io/klog/v2"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -98,6 +105,7 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 //   - Validate instance configurations
 //   - Update instance properties for scheduling decisions
 type internalInstanceTypeStore struct {
+	priceOverlays      []v1alpha1.NodeOverlay
 	updates            map[string]map[string]*instanceTypeUpdate // nodePoolName -> (instanceName -> updates)
 	evaluatedNodePools sets.Set[string]                          // The set of NodePools that were evaluated to construct this InstanceTypeStore instance
 }
@@ -159,12 +167,8 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 	for i, offering := range offerings {
 		if overlay, ok := priceUpdates[offering.Requirements.String()]; ok {
 			// This offering needs modification - create a copy
-			copiedOffering := &cloudprovider.Offering{
-				Requirements:        offering.Requirements, // Shared - requirements are immutable
-				Price:               offering.Price,
-				Available:           offering.Available,
-				ReservationCapacity: offering.ReservationCapacity,
-			}
+			copiedOffering := new(cloudprovider.Offering)
+			*copiedOffering = *offering // Only Price and the overlay marker are mutated.
 			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
 			result[i] = copiedOffering
 		} else {
@@ -290,4 +294,39 @@ func (i *internalInstanceTypeStore) isOfferingUpdateConflicting(nodePoolName str
 
 func (s *InstanceTypeStore) Reset() {
 	s.store.Swap(NewInstanceTypeStore().store.Load())
+}
+
+// ApplyNodeClaimPrice prices a running instance using its observed labels, including
+// mutable reservation coverage. These observations never become launch offerings.
+func (s *InstanceTypeStore) ApplyNodeClaimPrice(labels map[string]string, price float64) (float64, error) {
+	store := s.store.Load()
+	if !store.evaluatedNodePools.Has(labels[v1.NodePoolLabelKey]) {
+		return 0, cloudprovider.NewUnevaluatedNodePoolError(labels[v1.NodePoolLabelKey])
+	}
+	actual := scheduling.NewLabelRequirements(labels)
+	var selected *v1alpha1.NodeOverlay
+	for i := range store.priceOverlays {
+		overlay := &store.priceOverlays[i]
+		requirements := scheduling.NewNodeSelectorRequirements(lo.Map(overlay.Spec.Requirements, func(r v1alpha1.NodeSelectorRequirement, _ int) corev1.NodeSelectorRequirement {
+			return r.AsNodeSelectorRequirement()
+		})...)
+		if !actual.IsCompatible(requirements) {
+			continue
+		}
+		if selected != nil {
+			if lo.FromPtr(selected.Spec.Weight) == lo.FromPtr(overlay.Spec.Weight) {
+				return 0, serrors.Wrap(fmt.Errorf("conflicting observed-node price overlays"), "NodePool", klog.KRef("", labels[v1.NodePoolLabelKey]))
+			}
+			break
+		}
+		selected = overlay
+	}
+	if selected != nil {
+		change := selected.Spec.Price
+		if change == nil {
+			change = selected.Spec.PriceAdjustment
+		}
+		return cloudprovider.AdjustedPrice(price, lo.FromPtr(change)), nil
+	}
+	return price, nil
 }

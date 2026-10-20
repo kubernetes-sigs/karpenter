@@ -208,6 +208,9 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 	if err != nil {
 		return fmt.Errorf("validating candidates, %w", err)
 	}
+	if err := validateCandidatePrices(cmd.Candidates, validatedCandidates); err != nil {
+		return err
+	}
 	if err := c.validateCommand(ctx, cmd, validatedCandidates); err != nil {
 		return fmt.Errorf("validating command, %w", err)
 	}

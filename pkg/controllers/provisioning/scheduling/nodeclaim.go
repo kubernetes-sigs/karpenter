@@ -343,7 +343,7 @@ func (n *NodeClaim) offeringsToReserve(
 			}
 			// Track every incompatible offering for release. Since releasing a reservation is a no-op when there is no
 			// reservation for the given host, there's no need to check that a reservation actually exists for the offering.
-			if !nodeClaimRequirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+			if !o.IsCompatible(nodeClaimRequirements) {
 				continue
 			}
 			if o.CapacityType() != v1.CapacityTypeReserved {
@@ -682,7 +682,7 @@ func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList
 	for _, group := range instanceType.AllocatableOfferingsList() {
 		resourceFit := resources.Fits(requests, group.Allocatable)
 		for _, of := range group.Offerings {
-			if requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+			if of.IsCompatible(requirements) {
 				hasOffering = true
 				if resourceFit {
 					return true, true

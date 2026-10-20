@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
+	"k8s.io/klog/v2"
+
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	"go.uber.org/multierr"
@@ -68,8 +71,13 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		}
 		c.clusterCost.UpdateOfferings(ctx, &np, newIts)
 	}
+	mutable, err := c.refreshRunningNodePrices(ctx)
+	errs = multierr.Append(errs, err)
 	if errs != nil {
 		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", errs)
+	}
+	if mutable {
+		return reconciler.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	return reconciler.Result{RequeueAfter: 1 * time.Hour}, nil
@@ -84,4 +92,31 @@ func (c *PricingController) Register(_ context.Context, m manager.Manager) error
 		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
+}
+
+// Mutable running-node prices refresh independently of Kubernetes label convergence.
+func (c *PricingController) refreshRunningNodePrices(ctx context.Context) (bool, error) {
+	var errs error
+	claims := &v1.NodeClaimList{}
+	if err := c.client.List(ctx, claims); err != nil {
+		return false, err
+	}
+	mutable := []*v1.NodeClaim{}
+	for i := range claims.Items {
+		if claims.Items[i].Annotations[v1.CapacityTypeTransitionsAnnotationKey] != "" {
+			mutable = append(mutable, &claims.Items[i])
+		}
+	}
+	if len(mutable) > 0 {
+		states, err := cloudprovider.RefreshNodeClaimStates(ctx, c.cloudProvider, mutable)
+		errs = multierr.Append(errs, err)
+		for _, nc := range mutable {
+			if state, ok := states[nc.Status.ProviderID]; ok && state.ValidAt(time.Now()) {
+				c.clusterCost.UpdateNodeClaimState(nc, state)
+			} else {
+				errs = multierr.Append(errs, serrors.Wrap(fmt.Errorf("fresh running-node price unavailable"), "NodeClaim", klog.KObj(nc)))
+			}
+		}
+	}
+	return len(mutable) > 0, errs
 }

@@ -88,6 +88,13 @@ func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient cli
 
 // IsConsolidated returns true if nothing has changed since markConsolidated was called.
 func (c *consolidation) IsConsolidated() bool {
+	// Mutable coverage can change without a Kubernetes event. Never cache a
+	// consolidated result across the next provider observation.
+	for _, node := range c.cluster.DeepCopyNodes() {
+		if (node.NodeClaim != nil && node.NodeClaim.Annotations[v1.CapacityTypeTransitionsAnnotationKey] != "") || (node.Node != nil && node.Node.Annotations[v1.CapacityTypeTransitionsAnnotationKey] != "") {
+			return false
+		}
+	}
 	return c.lastConsolidationState.Equal(c.cluster.ConsolidationState())
 }
 
@@ -98,6 +105,9 @@ func (c *consolidation) markConsolidated() {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
+	if cn.priceUnavailable {
+		return false
+	}
 	// Disable consolidation for static NodePool
 	if cn.OwnedByStaticNodePool() {
 		return false

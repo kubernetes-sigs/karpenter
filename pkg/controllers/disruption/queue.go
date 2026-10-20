@@ -228,6 +228,11 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 		return fmt.Errorf("waiting for replacement initialization, %w", err)
 	}
 
+	// Recheck economics after replacement-launch latency, before deleting any
+	// source. A failed/stale observation cancels this voluntary command.
+	if err := cmd.validatePriceState(ctx); err != nil {
+		return NewUnrecoverableError(err)
+	}
 	// All replacements have been provisioned.
 	// All we need to do now is get a successful delete call for each node claim,
 	// then the termination controller will handle the eventual deletion of the nodes.
@@ -377,12 +382,8 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 			q.cluster.NodePoolState.ReleaseNodeCount(nodePoolName, int64(len(replacements)))
 		}
 	}()
-	// First check if we can add the command.
-	providerIDs := lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
-		return c.ProviderID()
-	})
-	if q.HasAny(providerIDs...) {
-		return fmt.Errorf("candidate is being disrupted")
+	if err := q.validateStart(ctx, cmd); err != nil {
+		return err
 	}
 
 	log.FromContext(ctx).WithValues(append([]any{
@@ -517,4 +518,15 @@ func (q *Queue) IsEmpty() bool {
 	q.RLock()
 	defer q.RUnlock()
 	return len(q.ProviderIDToCommand) == 0
+}
+
+func (q *Queue) validateStart(ctx context.Context, cmd *Command) error {
+	if err := cmd.validatePriceState(ctx); err != nil {
+		return err
+	}
+	providerIDs := lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
+	if q.HasAny(providerIDs...) {
+		return fmt.Errorf("candidate is being disrupted")
+	}
+	return nil
 }

@@ -62,6 +62,7 @@ const (
 	RebootTerminationGracePeriodAnnotationKey  = apis.Group + "/reboot-termination-grace-period"
 	DRADriversAnnotationKey                    = apis.Group + "/requested-dra-drivers"
 	DisruptionCostAnnotationKey                = apis.Group + "/disruption-cost"
+	CapacityTypeTransitionsAnnotationKey       = apis.Group + "/capacity-type-transitions"
 )
 
 var (
@@ -161,6 +162,14 @@ var (
 		Stage:        docs.Alpha,
 		InternalOnly: true,
 	}
+	CapacityTypeTransitionsAnnotation = wellknown.Annotation{
+		Name:         CapacityTypeTransitionsAnnotationKey,
+		Example:      "on-demand,reserved",
+		UsedOn:       []runtime.Object{&NodeClaim{}, &v1.Node{}},
+		Help:         "Karpenter records the possible capacity-type labels of offerings whose capacity type may change after launch. Scheduling onto these nodes requires workloads to tolerate every recorded value. This does not advertise reserved launch capacity, and disruption never credits reusable reservation slots from these nodes.",
+		Stage:        docs.Alpha,
+		InternalOnly: true,
+	}
 	DisruptionCostAnnotation = wellknown.Annotation{
 		Name:    DisruptionCostAnnotationKey,
 		Example: "100",
@@ -186,6 +195,7 @@ var KarpenterAnnotations = []wellknown.Annotation{
 	RebootTerminationGracePeriodAnnotation,
 	DRADriversAnnotation,
 	DisruptionCostAnnotation,
+	CapacityTypeTransitionsAnnotation,
 }
 
 // Karpenter specific finalizers
