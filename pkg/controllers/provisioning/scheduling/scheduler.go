@@ -570,7 +570,10 @@ func (s *Scheduler) trySchedule(ctx context.Context, p *corev1.Pod) error {
 		// able to schedule later without relaxing constraints. This could occur in this scheduling run, if other NodeClaims
 		// release the required reservations when constrained, or in subsequent runs. For an example, reference the following
 		// test: "shouldn't relax preferences when a pod fails to schedule due to a reserved offering error".
-		if IsReservedOfferingError(err) {
+		// The exception is when all compatible reservations are full and the pod has no on-demand/spot fallback under its
+		// current requirements. If that's only because of a preference (e.g. preferred capacity-type=reserved under
+		// PreferencePolicy=Respect), relaxing it exposes the fallback; otherwise Relax returns false below and we defer.
+		if IsReservedOfferingError(err) && !IsReservationsExhaustedError(err) {
 			return err
 		}
 		// DRA errors are permanent while the IgnoreDRARequests flag is enabled, so we shouldn't attempt to relax

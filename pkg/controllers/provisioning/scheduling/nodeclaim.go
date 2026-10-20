@@ -84,6 +84,28 @@ func (e ReservedOfferingError) Unwrap() error {
 	return e.error
 }
 
+// ReservationsExhaustedError is a ReservedOfferingError raised when every compatible reserved offering is full and,
+// given the pod's current requirements, there is no on-demand or spot fallback. Unlike the pessimism case (a
+// reservation has capacity but another NodeClaim in this loop holds it), waiting is not guaranteed to help, so the
+// scheduler may relax the pod's preferences (e.g. a preferred affinity for capacity-type=reserved) to expose an
+// on-demand/spot fallback. If nothing can be relaxed it still defers like any other ReservedOfferingError.
+type ReservationsExhaustedError struct {
+	error
+}
+
+func NewReservationsExhaustedError(err error) ReservationsExhaustedError {
+	return ReservationsExhaustedError{error: NewReservedOfferingError(err)}
+}
+
+func IsReservationsExhaustedError(err error) bool {
+	ree := &ReservationsExhaustedError{}
+	return errors.As(err, ree)
+}
+
+func (e ReservationsExhaustedError) Unwrap() error {
+	return e.error
+}
+
 var nodeID int64
 
 func NewNodeClaim(
@@ -390,7 +412,7 @@ func (n *NodeClaim) offeringsToReserve(
 	// full reservation used to be Available=false and simply wasn't offered here).
 	if onlyFullReservations {
 		if strict {
-			return nil, NewReservedOfferingError(fmt.Errorf("all compatible reserved offerings are full and no on-demand or spot fallback is available"))
+			return nil, NewReservationsExhaustedError(fmt.Errorf("all compatible reserved offerings are full and no on-demand or spot fallback is available"))
 		}
 		return nil, fmt.Errorf("the only compatible reserved offering is full; falling through to other NodePools")
 	}
