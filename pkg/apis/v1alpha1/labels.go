@@ -16,9 +16,12 @@ limitations under the License.
 
 package v1alpha1
 
-import "sigs.k8s.io/karpenter/pkg/apis"
+import (
+	"sigs.k8s.io/karpenter/pkg/apis"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+)
 
 const (
-	PriceOverlayAppliedAnnotationKey    = apis.Group + "/price-overlay-applied"
+	PriceOverlayAppliedAnnotationKey    = v1.PriceOverlayAppliedAnnotationKey
 	CapacityOverlayAppliedAnnotationKey = apis.Group + "/capacity-overlay-applied"
 )

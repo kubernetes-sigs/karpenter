@@ -129,12 +129,7 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 			i.Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityTypes...))
 		}
 
-		if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {
-			i.Annotations = lo.Assign(i.Annotations, map[string]string{
-				v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
-			})
-		}
-		if foundCapacityOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); foundCapacityOverlay {
+		if lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }) {
 			i.Annotations = lo.Assign(i.Annotations, map[string]string{
 				v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
 			})
