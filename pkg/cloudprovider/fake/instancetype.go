@@ -373,7 +373,7 @@ func PartitionableGPUInstanceType(name, counterSet string, budget map[string]res
 
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
 func InstanceTypesAssorted() []*cloudprovider.InstanceType {
-	var instanceTypes []*cloudprovider.InstanceType
+	instanceTypes := make([]*cloudprovider.InstanceType, 0, 1344)
 	for _, cpu := range []int{1, 2, 4, 8, 16, 32, 64} {
 		for _, mem := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 			for _, zone := range []string{"test-zone-1", "test-zone-2", "test-zone-3"} {
@@ -415,7 +415,7 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 //	2vcpu, 4Gi mem, 20 pods
 //	3vcpu, 6Gi mem, 30 pods
 func InstanceTypes(total int) []*cloudprovider.InstanceType {
-	instanceTypes := []*cloudprovider.InstanceType{}
+	instanceTypes := make([]*cloudprovider.InstanceType, 0, total)
 	for i := range total {
 		instanceTypes = append(instanceTypes, NewInstanceType(
 			fmt.Sprintf("fake-it-%d", i),

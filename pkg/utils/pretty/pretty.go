@@ -58,7 +58,7 @@ func Slice[T any](s []T, maxItems int) string {
 func Map[K cmp.Ordered, V any](values map[K]V, maxItems int) string {
 	var buf bytes.Buffer
 	count := 0
-	var keys []K
+	keys := make([]K, 0, len(values))
 	for k := range values {
 		keys = append(keys, k)
 	}
