@@ -17,6 +17,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -1058,6 +1059,45 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
+		It("should price candidates with the NodeClaimPriceProvider", func() {
+			cloudprovider.SetNodeClaimPriceProvider(fixedPricer(0.001))
+			DeferCleanup(test.ResetNodeClaimPriceProvider)
+			pod := replicaSetPod()
+			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, env.Clock, cloudProvider, func(context.Context, *disruption.Candidate) bool { return true },
+				disruption.GracefulDisruptionClass, queue)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(candidates).To(HaveLen(1))
+			Expect(candidates[0].Price).To(Equal(0.001))
+		})
+		It("should not replace a node that the NodeClaimPriceProvider prices below every replacement", func() {
+			cloudprovider.SetNodeClaimPriceProvider(fixedPricer(0.0001))
+			DeferCleanup(test.ResetNodeClaimPriceProvider)
+			disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+				disruption.WithMethods(NewMethodsWithNopValidator()...))
+			pod := replicaSetPod()
+			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(BeEmpty())
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should replace the same node when it's priced by its offering", func() {
+			disruptionController = disruption.NewController(ctx, env.Clock, env.Client, prov, cloudProvider, recorder, cluster, queue, clusterCost,
+				disruption.WithMethods(NewMethodsWithNopValidator()...))
+			pod := replicaSetPod()
+			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			Expect(queue.GetCommands()).To(HaveLen(1))
+		})
 		It("cannot replace spot with spot if less than minimum InstanceTypes flexibility", func() {
 			// Forcefully shrink the possible instanceTypes to be lower than 15 to replace a nodeclaim
 			cloudProvider.InstanceTypes = lo.Slice(fake.InstanceTypesAssorted(), 0, 5)
@@ -5305,3 +5345,28 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 })
+
+// replicaSetPod returns a pod owned by a new ReplicaSet, so consolidation may reschedule it.
+func replicaSetPod() *corev1.Pod {
+	rs := test.ReplicaSet()
+	ExpectApplied(ctx, env.Client, rs)
+	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+	return test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+		Labels: map[string]string{"app": "test"},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion:         "apps/v1",
+			Kind:               "ReplicaSet",
+			Name:               rs.Name,
+			UID:                rs.UID,
+			Controller:         lo.ToPtr(true),
+			BlockOwnerDeletion: lo.ToPtr(true),
+		}},
+	}})
+}
+
+// fixedPricer prices every NodeClaim at the same hourly price.
+type fixedPricer float64
+
+func (p fixedPricer) NodeClaimPrice(context.Context, *v1.NodeClaim, *cloudprovider.InstanceType) (float64, bool) {
+	return float64(p), true
+}

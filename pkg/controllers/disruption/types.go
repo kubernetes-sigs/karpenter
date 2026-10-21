@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -88,7 +89,7 @@ type Candidate struct {
 	reschedulablePods []*corev1.Pod
 	hasPodBlockers    bool
 
-	// Price is the cheapest compatible offering price for this candidate.
+	// Price is this candidate's hourly price from the NodeClaimPriceProvider, or 0 if it's unknown.
 	// Precomputed at creation to avoid repeated offering lookups.
 	Price float64
 	// RescheduleDisruptionCost is 1.0 (base) + sum of positive pod eviction costs
@@ -210,6 +211,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		}
 	}
 	reschedulable := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) })
+	price, _ := cloudprovider.PriceNodeClaim(ctx, node.NodeClaim, instanceType)
 	return &Candidate{
 		StateNode:         node,
 		instanceType:      instanceType,
@@ -220,7 +222,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		hasPodBlockers:    hasPodBlockers,
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
 		DisruptionCost:           disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
-		Price:                    disruptionutils.ResolveOfferingPrice(node.Labels(), instanceType),
+		Price:                    price,
 		RescheduleDisruptionCost: disruptionutils.ComputeRescheduleDisruptionCost(ctx, reschedulable),
 	}, nil
 }
@@ -464,13 +466,7 @@ func (c Command) LogValues() []any {
 	})
 	replacementNodes := lo.Map(c.Replacements, func(replacement *Replacement, _ int) any {
 		ct := replacement.Requirements.Get(v1.CapacityTypeLabelKey)
-		m := map[string]any{
-			"capacity-type": lo.If(
-				ct.Has(v1.CapacityTypeReserved), v1.CapacityTypeReserved,
-			).ElseIf(
-				ct.Has(v1.CapacityTypeSpot), v1.CapacityTypeSpot,
-			).Else(v1.CapacityTypeOnDemand),
-		}
+		m := map[string]any{"capacity-type": launchCapacityType(ct)}
 		if len(c.Replacements) == 1 {
 			m["instance-types"] = pscheduling.InstanceTypeList(replacement.InstanceTypeOptions)
 		}
@@ -485,4 +481,19 @@ func (c Command) LogValues() []any {
 		"disrupted-nodes", candidateNodes,
 		"replacement-nodes", replacementNodes,
 	}
+}
+
+// launchCapacityType returns the capacity type a replacement launches with: the first class in precedence order that
+// the requirement allows, reported as its capacity type when only one is allowed, otherwise as the class.
+func launchCapacityType(requirement *scheduling.Requirement) string {
+	for _, class := range cloudprovider.CapacityTypeClassPrecedence {
+		allowed := lo.Filter(cloudprovider.CapacityTypesOf(class), func(ct string, _ int) bool { return requirement.Has(ct) })
+		if len(allowed) == 1 {
+			return allowed[0]
+		}
+		if len(allowed) > 1 {
+			return string(class)
+		}
+	}
+	return v1.CapacityTypeOnDemand
 }
