@@ -358,6 +358,9 @@ func WriteArtifactUnder(dir, name string, data []byte) (string, error) {
 	if rel, err := filepath.Rel(safeDir, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("refusing to write outside %q", safeDir)
 	}
+	if err := os.MkdirAll(safeDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating %s: %w", safeDir, err)
+	}
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}

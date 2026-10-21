@@ -58,11 +58,11 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(initialReport.TotalPods).To(Equal(600), "Should have 600 total pods")
 
 			// Performance assertions for initial deployment
-			Expect(initialReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("drift/initial", 5*time.Minute)),
+			expectTotalTime("drift/initial", initialReport, 5*time.Minute,
 				"Initial deployment should complete within 5 minutes")
-			Expect(initialReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("drift/initial", 190)),
+			expectHeap("drift/initial", initialReport, 190,
 				"Karpenter controller P95 live heap should be less than 190 MB during initial deployment")
-			Expect(initialReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("drift/initial", 0.70)),
+			expectCPU("drift/initial", initialReport, 0.70,
 				"Karpenter controller avg CPU should be less than 0.70 cores during scale-out")
 
 			// Allow system to stabilize before triggering drift
@@ -89,11 +89,11 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			Expect(driftReport.PodsNetChange).To(Equal(0), "Pods should not change during drift")
 
 			// Drift performance assertions
-			Expect(driftReport.TotalTime).To(BeNumerically("<", TotalTimeThreshold("drift/drift", 50*time.Minute)),
+			expectTotalTime("drift/drift", driftReport, 50*time.Minute,
 				"Drift should complete within 50 minutes")
-			Expect(driftReport.KarpenterP95HeapMB).To(BeNumerically("<", HeapThreshold("drift/drift", 250)),
+			expectHeap("drift/drift", driftReport, 250,
 				"Karpenter controller P95 live heap should be less than 250 MB during drift")
-			Expect(driftReport.KarpenterAvgCPUCores).To(BeNumerically("<", CPUThreshold("drift/drift", 1.05)),
+			expectCPU("drift/drift", driftReport, 1.05,
 				"Karpenter controller avg CPU should be less than 1.05 cores during drift")
 
 			// ========== PHASE 3: POST-DRIFT VALIDATION ==========

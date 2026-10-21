@@ -68,3 +68,6 @@ var _ = AfterEach(func() {
 	env.Cleanup()
 	env.AfterEach()
 })
+
+// Registered after the cleanup AfterEach so a soft-threshold failure can't skip cleanup.
+var _ = AfterEach(expectNoBreaches)
