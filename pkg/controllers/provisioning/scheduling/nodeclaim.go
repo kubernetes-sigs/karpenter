@@ -330,7 +330,7 @@ func (n *NodeClaim) offeringsToReserve(
 	// We distinguish three kinds of compatible offering because, once availability (health) and reservation capacity are
 	// decoupled, "the reservation is full" (ReservationCapacity==0, still Available) and "the reservation has capacity but
 	// I couldn't grab a slot this pessimistic pass" (ReservationCapacity>0, CanReserve==false) require opposite handling in
-	// strict mode: the former should fall back to on-demand/spot (or, with no fallback, defer), while the latter must defer
+	// strict mode: the former should fall back to on-demand/spot (or, with no fallback, fail), while the latter must defer
 	// so pessimistic reservation only schedules one NodeClaim per loop.
 	reservedWithCapacity := false  // compatible reserved offering with real capacity (cap>0) — a pessimism candidate
 	reservedFull := false          // compatible reserved offering that is full right now (Available, cap==0)
@@ -383,15 +383,13 @@ func (n *NodeClaim) offeringsToReserve(
 		return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
 	}
 
-	// The only compatible option is a full reservation. In strict mode defer until a slot frees, instead of creating a
-	// NodeClaim that getCapacityType would default to on-demand — which would mislaunch a reserved-only pool. In
-	// fallback mode fail with a PLAIN error — NOT a ReservedOfferingError, which would poison cross-NodePool
-	// fallthrough — so the scheduler falls through to a lower-weight NodePool, reproducing the pre-decouple behavior (a
-	// full reservation used to be Available=false and simply wasn't offered here).
+	// The only compatible option is a full reservation. Fail with a PLAIN error rather than creating a NodeClaim that
+	// getCapacityType would default to on-demand, which would mislaunch a reserved-only pool. This is NOT a
+	// ReservedOfferingError: there's no capacity to wait for this loop, so the scheduler should fall through to a
+	// lower-weight NodePool or relax the pod's preferences (e.g. a preferred capacity-type=reserved under
+	// PreferencePolicy=Respect, which hides an on-demand/spot fallback). This reproduces the pre-decouple behavior, where a
+	// full reservation was Available=false and simply wasn't offered here.
 	if onlyFullReservations {
-		if strict {
-			return nil, NewReservedOfferingError(fmt.Errorf("all compatible reserved offerings are full and no on-demand or spot fallback is available"))
-		}
 		return nil, fmt.Errorf("the only compatible reserved offering is full; falling through to other NodePools")
 	}
 
