@@ -36,7 +36,7 @@ var _ = Describe("KarpenterFeatureGates", func() {
 		}
 	})
 	It("should document every FeatureGates field", func() {
-		fields := lo.FilterMap(reflect.VisibleFields(reflect.TypeOf(options.FeatureGates{})), func(f reflect.StructField, _ int) (string, bool) {
+		fields := lo.FilterMap(reflect.VisibleFields(reflect.TypeFor[options.FeatureGates]()), func(f reflect.StructField, _ int) (string, bool) {
 			return f.Name, f.IsExported()
 		})
 		Expect(lo.Map(options.KarpenterFeatureGates, func(g options.FeatureGate, _ int) string { return g.Name })).To(ConsistOf(fields))

@@ -217,7 +217,7 @@ func DRADriversPublished(nodeClaim *v1.NodeClaim, slices []resourcev1.ResourceSl
 		return "", true
 	}
 	driversWithCompletePool := completePoolDrivers(slices)
-	for _, driver := range strings.Split(annotation, ",") {
+	for driver := range strings.SplitSeq(annotation, ",") {
 		driver = strings.TrimSpace(driver)
 		if driver == "" {
 			continue

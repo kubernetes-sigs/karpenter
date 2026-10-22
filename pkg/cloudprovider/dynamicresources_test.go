@@ -23,7 +23,6 @@ import (
 	. "github.com/onsi/gomega"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
@@ -40,7 +39,7 @@ var _ = Describe("DynamicResources", func() {
 							{
 								Name: unique.Make("gpu-0"),
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"gpu.nvidia.com/model": {StringValue: ptr.To("H100")},
+									"gpu.nvidia.com/model": {StringValue: new("H100")},
 								},
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.nvidia.com/memory": {Value: resource.MustParse("80Gi")},
@@ -76,7 +75,7 @@ var _ = Describe("DynamicResources", func() {
 
 			// Mutating the copy should not affect the original
 			copied.ResourceSliceTemplates[0].Devices[0].Attributes["gpu.nvidia.com/model"] = resourcev1.DeviceAttribute{
-				StringValue: ptr.To("A100"),
+				StringValue: new("A100"),
 			}
 			Expect(*original.ResourceSliceTemplates[0].Devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal("H100"))
 

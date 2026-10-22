@@ -95,7 +95,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 
 	BeforeEach(func() {
 		cloudProvider.Reset()
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true)}}))
 	})
 
 	It("fallback: a full reservation with no fallback yields no NodeClaim (pod falls through / pends, not a phantom reserved NodeClaim)", func() {
@@ -214,7 +214,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 	// the same instance type (which keeps its default on-demand offerings) so we can observe cross-NodePool fallthrough.
 	onDemandNodePool := func(instanceTypeName string) *v1.NodePool {
 		return test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-			Weight: lo.ToPtr(int32(1)),
+			Weight: new(int32(1)),
 			Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Requirements: []v1.NodeSelectorRequirementWithMinValues{
 				{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{instanceTypeName}},
 				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}},
@@ -234,7 +234,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		It("falls through to a lower-weight on-demand NodePool when the higher-weight reserved NodePool's reservation is full", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{newReservedType(reservedOffering("r-full", true, 0))}
 			reserved := reservedOnlyNodePool("reserved-type")
-			reserved.Spec.Weight = lo.ToPtr(int32(100))
+			reserved.Spec.Weight = new(int32(100))
 			od := onDemandNodePool("reserved-type")
 			ExpectApplied(ctx, env.Client, reserved, od)
 

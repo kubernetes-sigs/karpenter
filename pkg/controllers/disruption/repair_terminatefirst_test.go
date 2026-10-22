@@ -63,7 +63,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	}
 
 	BeforeEach(func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), TerminateFirstRepair: new(true)}}))
 		useRepairPolicies([]cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, TerminationGracePeriod: lo.ToPtr(repairTGP), Action: cloudprovider.ReplaceNode},
 		})
@@ -74,7 +74,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// staticNodePoolAtLimit: limit == replicas, so the pool is at its limit and can't stage a replacement.
 	staticNodePoolAtLimit := func(replicas int64) *v1.NodePool {
 		return test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-			Replicas: lo.ToPtr(replicas),
+			Replicas: new(replicas),
 			Limits:   v1.Limits{resources.Node: resource.MustParse(strconv.FormatInt(replicas, 10))},
 		}})
 	}
@@ -108,7 +108,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// Below the limit there's room to stage a replacement, so repair replaces-first even with the gate on.
 	It("should replace-first for a static NodePool below its node limit", func() {
 		nodePool := test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-			Replicas: lo.ToPtr(int64(1)),
+			Replicas: new(int64(1)),
 			Limits:   v1.Limits{resources.Node: resource.MustParse("2")},
 		}})
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
@@ -133,7 +133,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// first rather than stage a replacement that would push it past the limit.
 	It("does not stage a replacement past limits.nodes when a slot is already reserved", func() {
 		nodePool := test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-			Replicas: lo.ToPtr(int64(1)),
+			Replicas: new(int64(1)),
 			Limits:   v1.Limits{resources.Node: resource.MustParse("2")},
 		}})
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
@@ -158,7 +158,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// Gate off: a static NodePool at its limit is NOT terminate-first'd. It also can't pre-spin (at the limit), so it is
 	// Blocked (no command) rather than freed — the feature gate is honored for the static path.
 	It("does not terminate-first a static NodePool at its limit when TerminateFirstRepair is disabled", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), TerminateFirstRepair: new(false)}}))
 		nodePool := staticNodePoolAtLimit(1)
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name, v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"},
@@ -199,7 +199,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// replica count, a staged replacement would just be deleted by deprovisioning, so repair issues no command.
 	It("does not disrupt a static NodePool that is scaling down", func() {
 		nodePool := test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-			Replicas: lo.ToPtr(int64(1)),
+			Replicas: new(int64(1)),
 			Limits:   v1.Limits{resources.Node: resource.MustParse("3")}, // below limit, but over replicas
 		}})
 		nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
@@ -224,7 +224,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// full is not terminate-first'd — repair falls back to its normal pre-spin, which can't stage a replacement here, so
 	// the node is Blocked (no command) rather than freed.
 	It("does not terminate-first when TerminateFirstRepair is disabled", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(false)}}))
 		reservationID := "r-" + mostExpensiveInstance.Name
 		mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
 		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
@@ -259,7 +259,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		ExpectApplied(ctx, env.Client, rs)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
 		}}}})
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
@@ -287,7 +287,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		ExpectApplied(ctx, env.Client, rs)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
 		}}}})
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
@@ -335,7 +335,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// can't pre-spin a replacement — the pod can only reschedule once the candidate frees its own reservation slot. This
 	// is decided by SimulateSchedulingWithReservedFallback (identical to Drift), so repair terminates first (delete-only).
 	It("should issue a delete-only command for a reserved NodePool whose reservation is full with no fallback", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(true)}}))
 		reservationID := "r-" + mostExpensiveInstance.Name
 		mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
 		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
@@ -374,7 +374,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		ExpectApplied(ctx, env.Client, rs)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
 		}}}})
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
@@ -401,7 +401,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	})
 
 	It("should carry a blocking pod in the terminate-first plan for a reserved NodePool whose reservation is full", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(true)}}))
 		reservationID := "r-" + mostExpensiveInstance.Name
 		mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
 		mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
@@ -459,8 +459,8 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// every unlimited static pool look at-limit (always terminate-first with the gate on, always Blocked with it off).
 	DescribeTable("replaces-first for a static NodePool with no node limit",
 		func(gateOn bool) {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(gateOn)}}))
-			nodePool := test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(1))}})
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), TerminateFirstRepair: new(gateOn)}}))
+			nodePool := test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{Replicas: new(int64(1))}})
 			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name, v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"},
 			}})
@@ -483,9 +483,9 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// The below-limit replace-first path is gate-independent: even with TerminateFirstRepair off, a static pool below its
 	// limit stages a replacement (the gate only governs the at-limit terminate-first path).
 	It("replaces-first for a static NodePool below its limit even when TerminateFirstRepair is disabled", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), TerminateFirstRepair: new(false)}}))
 		nodePool := test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-			Replicas: lo.ToPtr(int64(1)),
+			Replicas: new(int64(1)),
 			Limits:   v1.Limits{resources.Node: resource.MustParse("2")},
 		}})
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
@@ -507,7 +507,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 	// Gate independence: repair reads TerminateFirstRepair, NOT TerminateFirstDrift. With the drift gate on but the repair
 	// gate off, an at-limit static pool is still Blocked. Guards against a mutation that ORs the two gates.
 	It("does not terminate-first when only the drift gate is on", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), TerminateFirstDrift: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), TerminateFirstDrift: new(true), TerminateFirstRepair: new(false)}}))
 		nodePool := staticNodePoolAtLimit(1)
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name, v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"},
@@ -551,7 +551,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		var reservationID string
 
 		BeforeEach(func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(true)}}))
 			reservationID = "r-" + mostExpensiveInstance.Name
 			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, reservationID))
 			mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
@@ -573,7 +573,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		// replicas=1, limit=2: limits.nodes leaves headroom, so only the reservation can make the pool full.
 		reservedStaticNodePool := func(capacityTypes ...string) *v1.NodePool {
 			return test.StaticNodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-				Replicas: lo.ToPtr(int64(1)),
+				Replicas: new(int64(1)),
 				Limits:   v1.Limits{resources.Node: resource.MustParse("2")},
 				Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Requirements: []v1.NodeSelectorRequirementWithMinValues{
 					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{mostExpensiveInstance.Name}},
@@ -738,7 +738,7 @@ var _ = Describe("Repair/TerminateFirst", func() {
 		})
 
 		It("should replace-first regardless of the reservation when TerminateFirstRepair is disabled", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true), ReservedCapacity: lo.ToPtr(true), TerminateFirstRepair: lo.ToPtr(false)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true), ReservedCapacity: new(true), TerminateFirstRepair: new(false)}}))
 			withReservation(0)
 			repairReservedNode(reservedStaticNodePool(v1.CapacityTypeReserved))
 

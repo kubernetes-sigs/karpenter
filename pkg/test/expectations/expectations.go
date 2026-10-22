@@ -490,7 +490,7 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 				// Only set AllowMultipleAllocations when true; leaving it nil for exclusive devices preserves the
 				// pre-capacity publish behavior (and a capacity RequestPolicy requires it to be true).
 				if d.AllowMultipleAllocations {
-					device.AllowMultipleAllocations = lo.ToPtr(true)
+					device.AllowMultipleAllocations = new(true)
 				}
 				devices[j] = device
 			}
@@ -580,7 +580,7 @@ func ExpectResourceClaimsProcessed(ctx context.Context, c client.Client, pod *co
 		}
 		pod.Status.ResourceClaimStatuses = append(pod.Status.ResourceClaimStatuses, corev1.PodResourceClaimStatus{
 			Name:              pc.Name,
-			ResourceClaimName: lo.ToPtr(claimName),
+			ResourceClaimName: new(claimName),
 		})
 	}
 	ExpectApplied(ctx, c, pod)

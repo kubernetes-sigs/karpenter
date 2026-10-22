@@ -23,7 +23,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -133,7 +132,7 @@ var _ = Describe("Controller", func() {
 			NodeName: nodes[0].Name,
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: "batch/v1", Kind: "Job", Name: "test-job", UID: types.UID("test-job-uid"),
-				Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+				Controller: new(true), BlockOwnerDeletion: new(true),
 			}}},
 		})
 		ExpectApplied(ctx, env.Client, rsPod, jobPod)
@@ -216,7 +215,7 @@ var _ = Describe("Controller", func() {
 			NodeName: nodes[0].Name,
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: "batch/v1", Kind: "Job", Name: "test-job", UID: types.UID("test-job-uid"),
-				Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+				Controller: new(true), BlockOwnerDeletion: new(true),
 			}}},
 		})
 		ExpectApplied(ctx, env.Client, jobPod)
