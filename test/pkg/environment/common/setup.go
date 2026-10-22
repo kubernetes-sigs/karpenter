@@ -96,6 +96,14 @@ func (env *Environment) BeforeEach() {
 	env.StartingNodeCount = env.Monitor.NodeCountAtReset()
 }
 
+// CleanupBeforeSuite removes test objects left behind by a previous run, so that clusters reused across runs don't fail
+// ExpectCleanCluster when an earlier run was interrupted before its AfterEach cleanup ran. It only deletes objects
+// carrying the test discovery label, the same as the per-spec cleanup, so it's a no-op on a clean cluster.
+func (env *Environment) CleanupBeforeSuite() {
+	By("cleaning up test objects left over from previous runs")
+	env.CleanupObjects(CleanableObjects...)
+}
+
 func (env *Environment) ExpectCleanCluster() {
 	var nodes corev1.NodeList
 	Expect(env.Client.List(env.Context, &nodes)).To(Succeed())
