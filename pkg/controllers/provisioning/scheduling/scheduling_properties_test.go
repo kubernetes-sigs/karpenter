@@ -51,4 +51,7 @@ var _ = Describe("Scheduling Properties", func() {
 	It("should only place pods on nodes that fit them", func() {
 		schedulingproperties.ExpectPlacementsFitNodes(ctx, GinkgoT(), cfg)
 	})
+	It("should schedule equivalent pods alike", func() {
+		schedulingproperties.ExpectEquivalentPodsScheduleAlike(ctx, GinkgoT(), cfg)
+	})
 })
