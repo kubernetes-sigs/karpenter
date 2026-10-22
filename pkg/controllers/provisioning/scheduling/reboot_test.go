@@ -52,6 +52,7 @@ var _ = Describe("Rebooting Nodes", func() {
 				},
 			},
 		})
+		node.Labels[corev1.LabelHostname] = node.Name
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, env.Clock, nodeClaim)
 		ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
@@ -99,6 +100,49 @@ var _ = Describe("Rebooting Nodes", func() {
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		Expect(ExpectScheduled(ctx, env.Client, pod).Name).To(Equal(node.Name))
 		Expect(cloudProvider.CreateCalls).To(BeEmpty())
+	})
+	It("should ignore the required anti-affinity of a rebooting node's terminating pods", func() {
+		antiAffinity := &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ha"}},
+			TopologyKey:   corev1.LabelHostname,
+		}}}}
+		evicted = ExpectExists(ctx, env.Client, evicted)
+		ExpectDeleted(ctx, env.Client, evicted)
+		ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(evicted))
+		evicted = test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ha"}}})
+		evicted.Spec.Affinity = antiAffinity
+		ExpectApplied(ctx, env.Client, evicted)
+		ExpectManualBinding(ctx, env.Client, evicted, node)
+		rebootNode()
+		ExpectDeletionTimestampSet(ctx, env.Client, evicted)
+		syncState()
+
+		pod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ha"}}})
+		pod.Spec.Affinity = antiAffinity
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		Expect(ExpectScheduled(ctx, env.Client, pod).Name).To(Equal(node.Name))
+		Expect(cloudProvider.CreateCalls).To(BeEmpty())
+	})
+	It("should keep the required anti-affinity of a terminating pod on a node that isn't rebooting", func() {
+		antiAffinity := &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ha"}},
+			TopologyKey:   corev1.LabelHostname,
+		}}}}
+		evicted = ExpectExists(ctx, env.Client, evicted)
+		ExpectDeleted(ctx, env.Client, evicted)
+		ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(evicted))
+		evicted = test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ha"}}})
+		evicted.Spec.Affinity = antiAffinity
+		ExpectApplied(ctx, env.Client, evicted)
+		ExpectManualBinding(ctx, env.Client, evicted, node)
+		ExpectDeletionTimestampSet(ctx, env.Client, evicted)
+		syncState()
+
+		pod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ha"}}})
+		pod.Spec.Affinity = antiAffinity
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		Expect(ExpectScheduled(ctx, env.Client, pod).Name).ToNot(Equal(node.Name))
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 	})
 	It("should count pods that stay on a rebooting node", func() {
 		rebootNode()

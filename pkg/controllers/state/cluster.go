@@ -263,6 +263,10 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node)
 			// if we receive the node deletion event before the pod deletion event, this can happen
 			return true
 		}
+		// A rebooting node returns without its terminating pods, so their terms no longer constrain it
+		if node.RebootInProgress() && node.terminatingPods[client.ObjectKeyFromObject(pod)] {
+			return true
+		}
 		return fn(pod, node.Node)
 	})
 }
