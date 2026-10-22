@@ -39,6 +39,7 @@ func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
+		env.CleanupBeforeSuite()
 	})
 	AfterSuite(func() {
 		env.Stop()
