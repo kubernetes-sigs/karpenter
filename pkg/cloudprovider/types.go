@@ -410,7 +410,12 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 				if _, ok := valuesForKey[req.Key]; !ok {
 					valuesForKey[req.Key] = sets.New[string]()
 				}
-				valuesForKey[req.Key] = valuesForKey[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
+				// Only count values that the requirement allows. The instance type may offer values (e.g. zones)
+				// that the requirements exclude after being narrowed by pod constraints such as volume topology
+				// or topology spread, and those values can't be satisfied by the resulting NodeClaim.
+				valuesForKey[req.Key] = valuesForKey[req.Key].Insert(lo.Filter(it.Requirements.Get(req.Key).Values(), func(value string, _ int) bool {
+					return req.Has(value)
+				})...)
 			}
 		}
 		for k, v := range valuesForKey {
