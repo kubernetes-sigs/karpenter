@@ -18,6 +18,7 @@ package scheduling
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"math/rand"
 	"strconv"
@@ -392,9 +393,7 @@ func (r *Requirement) DeepCopyInto(out *Requirement) {
 	// Deep copy the values set
 	if r.values != nil {
 		out.values = make(sets.Set[string], len(r.values))
-		for key, val := range r.values {
-			out.values[key] = val
-		}
+		maps.Copy(out.values, r.values)
 	}
 
 	// Note: We do not copy the mutex or the cached string representation.

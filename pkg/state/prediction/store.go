@@ -24,7 +24,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -86,7 +90,8 @@ type Store struct {
 	// Entries are sorted by strength (strongest first).
 	byWorkload map[WorkloadReference][]workloadEntry
 	// bySource maps the prediction source identity to its WorkloadReference, for deletion cleanup.
-	bySource map[types.NamespacedName]WorkloadReference
+	bySource    map[types.NamespacedName]WorkloadReference
+	targetKinds sets.Set[schema.GroupKind]
 }
 
 func NewStore(kubeClient client.Client) *Store {
@@ -95,7 +100,32 @@ func NewStore(kubeClient client.Client) *Store {
 		hydrationCh: make(chan struct{}),
 		byWorkload:  make(map[WorkloadReference][]workloadEntry),
 		bySource:    make(map[types.NamespacedName]WorkloadReference),
+		targetKinds: sets.New[schema.GroupKind](),
 	}
+}
+
+func (s *Store) RegisterTargetKinds(ctx context.Context, informers cache.Informers, kinds ...schema.GroupKind) error {
+	for _, kind := range kinds {
+		if !SupportedTargets.Has(kind) {
+			return serrors.Wrap(fmt.Errorf("unsupported prediction target kind"), "kind", kind.Kind)
+		}
+		s.targetKinds.Insert(kind)
+		var owner schema.GroupVersionKind
+		switch kind {
+		case schema.GroupKind{Group: "apps", Kind: "Deployment"}:
+			owner = appsv1.SchemeGroupVersion.WithKind("ReplicaSet")
+		case schema.GroupKind{Group: "batch", Kind: "CronJob"}:
+			owner = batchv1.SchemeGroupVersion.WithKind("Job")
+		default:
+			continue
+		}
+		obj := &metav1.PartialObjectMetadata{}
+		obj.SetGroupVersionKind(owner)
+		if _, err := informers.GetInformer(ctx, obj); err != nil {
+			return serrors.Wrap(fmt.Errorf("registering owner informer, %w", err), "kind", owner.Kind)
+		}
+	}
+	return nil
 }
 
 func (s *Store) MarkHydrated() {
@@ -276,6 +306,10 @@ func (s *Store) resolveWorkload(ctx context.Context, pod *corev1.Pod, cachedOwne
 	var workloadRef *metav1.OwnerReference
 	switch ref.Kind {
 	case "ReplicaSet":
+		if !s.targetKinds.Has(schema.GroupKind{Group: "apps", Kind: "Deployment"}) {
+			workloadRef = ref
+			break
+		}
 		rs := &metav1.PartialObjectMetadata{}
 		rs.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "ReplicaSet"})
 		if err := s.kubeClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: ref.Name}, rs); err != nil {
@@ -291,6 +325,10 @@ func (s *Store) resolveWorkload(ctx context.Context, pod *corev1.Pod, cachedOwne
 	case "StatefulSet", "DaemonSet", "ReplicationController":
 		workloadRef = ref
 	case "Job":
+		if !s.targetKinds.Has(schema.GroupKind{Group: "batch", Kind: "CronJob"}) {
+			workloadRef = ref
+			break
+		}
 		job := &metav1.PartialObjectMetadata{}
 		job.SetGroupVersionKind(schema.GroupVersionKind{Group: "batch", Version: "v1", Kind: "Job"})
 		if err := s.kubeClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: ref.Name}, job); err != nil {
@@ -311,10 +349,16 @@ func (s *Store) resolveWorkload(ctx context.Context, pod *corev1.Pod, cachedOwne
 			NamespacedName: types.NamespacedName{Namespace: pod.Namespace, Name: workloadRef.Name},
 		}
 	}
+	if !s.targetKinds.Has(workload.GroupKind) {
+		if cachedOwnerResolutions != nil {
+			cachedOwnerResolutions[ref.UID] = WorkloadReference{}
+		}
+		return WorkloadReference{}, false
+	}
 	if cachedOwnerResolutions != nil {
 		cachedOwnerResolutions[ref.UID] = workload
 	}
-	return workload, workloadRef != nil
+	return workload, true
 }
 
 func applyPredictions(containers []corev1.Container, pred *Prediction) []corev1.Container {

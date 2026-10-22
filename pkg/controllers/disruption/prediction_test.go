@@ -23,7 +23,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,7 +49,7 @@ var _ = Describe("Prediction", func() {
 	var node *corev1.Node
 
 	BeforeEach(func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: new(true)}}))
 		store.MarkHydrated()
 
 		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
@@ -113,7 +112,7 @@ var _ = Describe("Prediction", func() {
 
 	DescribeTable("should consolidate based on predicted workload requests only when the PredictionEnabled feature gate is enabled",
 		func(predictionEnabled bool, expectConsolidation bool) {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: lo.ToPtr(predictionEnabled)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{PredictionEnabled: new(predictionEnabled)}}))
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -123,7 +122,7 @@ var _ = Describe("Prediction", func() {
 					Labels: map[string]string{"app": "test"},
 					OwnerReferences: []metav1.OwnerReference{{
 						APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
-						Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+						Controller: new(true), BlockOwnerDeletion: new(true),
 					}},
 				},
 				ResourceRequirements: corev1.ResourceRequirements{
@@ -176,7 +175,7 @@ var _ = Describe("Prediction", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "DaemonSet", Name: ds.Name, UID: ds.UID,
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					Controller: new(true), BlockOwnerDeletion: new(true),
 				}},
 			},
 			ResourceRequirements: corev1.ResourceRequirements{
@@ -202,7 +201,7 @@ var _ = Describe("Prediction", func() {
 				Labels: map[string]string{"app": "test"},
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					Controller: new(true), BlockOwnerDeletion: new(true),
 				}},
 			},
 			ResourceRequirements: corev1.ResourceRequirements{
@@ -246,7 +245,7 @@ var _ = Describe("Prediction", func() {
 				Labels: map[string]string{"app": "test"},
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					Controller: new(true), BlockOwnerDeletion: new(true),
 				}},
 			},
 			ResourceRequirements: corev1.ResourceRequirements{
@@ -293,7 +292,7 @@ var _ = Describe("Prediction", func() {
 				Labels: map[string]string{"app": "a"},
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rsA.Name, UID: rsA.UID,
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					Controller: new(true), BlockOwnerDeletion: new(true),
 				}},
 			},
 			ResourceRequirements: corev1.ResourceRequirements{
@@ -306,7 +305,7 @@ var _ = Describe("Prediction", func() {
 				Labels: map[string]string{"app": "b"},
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rsB.Name, UID: rsB.UID,
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					Controller: new(true), BlockOwnerDeletion: new(true),
 				}},
 			},
 			ResourceRequirements: corev1.ResourceRequirements{
@@ -349,7 +348,7 @@ var _ = Describe("Prediction", func() {
 				Labels: map[string]string{"app": "test"},
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					Controller: new(true), BlockOwnerDeletion: new(true),
 				}},
 			},
 			ResourceRequirements: corev1.ResourceRequirements{
@@ -392,7 +391,7 @@ var _ = Describe("Prediction", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					Controller: new(true), BlockOwnerDeletion: new(true),
 				}},
 			},
 			ResourceRequirements: corev1.ResourceRequirements{

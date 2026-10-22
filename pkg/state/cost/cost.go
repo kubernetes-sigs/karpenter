@@ -82,6 +82,9 @@ type NodePoolCost struct {
 	cost float64
 	// offeringCounts tracks how many instances of each offering type are currently active (Count > 0)
 	offeringCounts map[OfferingKey]OfferingCount
+	// fixedPrices are the NodeClaims the NodeClaimPriceProvider priced from the NodeClaim alone. Offering updates don't
+	// change them.
+	fixedPrices map[types.NamespacedName]float64
 }
 
 // OfferingKey uniquely identifies a specific compute offering by its zone,
@@ -146,7 +149,7 @@ func (cc *ClusterCost) internalUpdateOfferings(np *v1.NodePool, instanceTypes []
 	}
 
 	// Update prices on active offerings and recalculate cost
-	cost := 0.0
+	cost := lo.Sum(lo.Values(npCost.fixedPrices))
 	for key, oc := range npCost.offeringCounts {
 		if newPrice, ok := prices[key]; ok {
 			oc.Price = newPrice
@@ -185,7 +188,14 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	nodePoolName := nodeClaim.Labels[v1.NodePoolLabelKey]
 	offeringKey := OfferingKey{CapacityType: nodeClaim.Labels[v1.CapacityTypeLabelKey], Zone: nodeClaim.Labels[corev1.LabelTopologyZone], InstanceName: nodeClaim.Labels[corev1.LabelInstanceTypeStable]}
 
-	err := cc.internalAddOffering(ctx, nodePoolName, offeringKey)
+	// A price the NodeClaim carries itself, such as one recorded at launch, is tracked as is. Other NodeClaims are
+	// priced by their offering.
+	var err error
+	if price, ok := cloudprovider.PriceNodeClaim(ctx, nodeClaim, nil); ok {
+		cc.internalAddFixedPrice(nodePoolName, client.ObjectKeyFromObject(nodeClaim), price)
+	} else {
+		err = cc.internalAddOffering(ctx, nodePoolName, offeringKey)
+	}
 	if err != nil {
 		failed = true
 		return serrors.Wrap(err, "nodeclaim", klog.KObj(nodeClaim), "nodepool", nodePoolName)
@@ -217,7 +227,12 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nn types.NamespacedN
 		}
 	}()
 
-	err := cc.internalRemoveOffering(metadata.NodePoolName, metadata.NodeClaimKey)
+	var err error
+	if npc, ok := cc.npCostMap[metadata.NodePoolName]; ok && lo.HasKey(npc.fixedPrices, nn) {
+		cc.internalRemoveFixedPrice(metadata.NodePoolName, nn)
+	} else {
+		err = cc.internalRemoveOffering(metadata.NodePoolName, metadata.NodeClaimKey)
+	}
 	if err != nil {
 		failed = true
 		return serrors.Wrap(err, "namespacedName", nn, "nodepool", metadata.NodePoolName)
@@ -290,10 +305,33 @@ func (cc *ClusterCost) internalRemoveOffering(npName string, offeringKey Offerin
 	} else {
 		npc.offeringCounts[offeringKey] = oc
 	}
-	if len(npc.offeringCounts) == 0 {
+	if len(npc.offeringCounts) == 0 && len(npc.fixedPrices) == 0 {
 		delete(cc.npCostMap, npName)
 	}
 	return nil
+}
+
+// internalAddFixedPrice adds a NodeClaim priced from the NodeClaim alone to a nodepool's cost.
+func (cc *ClusterCost) internalAddFixedPrice(npName string, nn types.NamespacedName, price float64) {
+	if _, exists := cc.npCostMap[npName]; !exists {
+		cc.npCostMap[npName] = &NodePoolCost{offeringCounts: make(map[OfferingKey]OfferingCount), cost: 0.0}
+	}
+	npc := cc.npCostMap[npName]
+	if npc.fixedPrices == nil {
+		npc.fixedPrices = map[types.NamespacedName]float64{}
+	}
+	npc.fixedPrices[nn] = price
+	npc.cost += price
+}
+
+// internalRemoveFixedPrice removes a NodeClaim priced from the NodeClaim alone from a nodepool's cost.
+func (cc *ClusterCost) internalRemoveFixedPrice(npName string, nn types.NamespacedName) {
+	npc := cc.npCostMap[npName]
+	npc.cost -= npc.fixedPrices[nn]
+	delete(npc.fixedPrices, nn)
+	if len(npc.offeringCounts) == 0 && len(npc.fixedPrices) == 0 {
+		delete(cc.npCostMap, npName)
+	}
 }
 
 func (cc *ClusterCost) Reset() {

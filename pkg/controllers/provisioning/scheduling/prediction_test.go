@@ -19,13 +19,14 @@ package scheduling_test
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/state/prediction"
@@ -38,6 +39,9 @@ var _ = Describe("PredictedRequests", func() {
 
 	BeforeEach(func() {
 		store = prediction.NewStore(env.Client)
+		metaScheme := runtime.NewScheme()
+		Expect(metav1.AddMetaToScheme(metaScheme)).To(Succeed())
+		Expect(store.RegisterTargetKinds(ctx, &informertest.FakeInformers{Scheme: metaScheme}, prediction.SupportedTargets.UnsortedList()...)).To(Succeed())
 	})
 
 	It("should return currentRequests when pod has no owner", func() {
@@ -62,13 +66,13 @@ var _ = Describe("PredictedRequests", func() {
 
 		rs := test.ReplicaSet()
 		rs.OwnerReferences = []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: new(true),
 		}}
 		ExpectApplied(ctx, env.Client, rs)
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
@@ -84,13 +88,13 @@ var _ = Describe("PredictedRequests", func() {
 
 		rs := test.ReplicaSet()
 		rs.OwnerReferences = []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: new(true),
 		}}
 		ExpectApplied(ctx, env.Client, rs)
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -126,13 +130,13 @@ var _ = Describe("PredictedRequests", func() {
 
 		rs := test.ReplicaSet()
 		rs.OwnerReferences = []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: new(true),
 		}}
 		ExpectApplied(ctx, env.Client, rs)
 
 		pods := test.UnschedulablePods(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
@@ -162,7 +166,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "StatefulSet", Name: ss.Name, UID: "recreated-uid", Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "StatefulSet", Name: ss.Name, UID: "recreated-uid", Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
@@ -186,7 +190,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "StatefulSet", Name: ss.Name, UID: ss.UID, Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "StatefulSet", Name: ss.Name, UID: ss.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")},
@@ -211,7 +215,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "DaemonSet", Name: ds.Name, UID: ds.UID, Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "DaemonSet", Name: ds.Name, UID: ds.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
@@ -235,7 +239,7 @@ var _ = Describe("PredictedRequests", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "etl-28400000", Namespace: "default",
 				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: "batch/v1", Kind: "CronJob", Name: "etl", UID: "cronjob-uid", Controller: lo.ToPtr(true),
+					APIVersion: "batch/v1", Kind: "CronJob", Name: "etl", UID: "cronjob-uid", Controller: new(true),
 				}},
 			},
 			Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
@@ -247,7 +251,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: lo.ToPtr(true),
+				APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")},
@@ -278,7 +282,7 @@ var _ = Describe("PredictedRequests", func() {
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: lo.ToPtr(true),
+				APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
@@ -297,13 +301,87 @@ var _ = Describe("PredictedRequests", func() {
 		Expect(result.Memory().Cmp(resource.MustParse("4Gi"))).To(Equal(0))
 	})
 
+	It("should resolve a job's pod to the job without looking it up when cronjobs aren't targeted", func() {
+		jobStore := prediction.NewStore(env.Client)
+		Expect(jobStore.RegisterTargetKinds(ctx, &informertest.FakeInformers{}, schema.GroupKind{Group: "batch", Kind: "Job"})).To(Succeed())
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "batch/v1", Kind: "Job", Name: "not-in-the-api-server", UID: "job-uid", Controller: new(true),
+			}}},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
+			},
+		})
+		jobStore.Set(
+			types.NamespacedName{Namespace: pod.Namespace, Name: "vpa-job"},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "batch", Kind: "Job"}, NamespacedName: types.NamespacedName{Namespace: pod.Namespace, Name: "not-in-the-api-server"}},
+			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
+				pod.Spec.Containers[0].Name: {corev1.ResourceMemory: resource.MustParse("4Gi")},
+			}},
+			env.Clock.Now(),
+		)
+		result := jobStore.PredictedRequests(ctx, nil, pod)
+		Expect(result.Memory().Cmp(resource.MustParse("4Gi"))).To(Equal(0))
+	})
+
+	It("should keep current requests for a pod whose workload kind isn't targeted", func() {
+		deploymentStore := prediction.NewStore(env.Client)
+		metaScheme := runtime.NewScheme()
+		Expect(metav1.AddMetaToScheme(metaScheme)).To(Succeed())
+		Expect(deploymentStore.RegisterTargetKinds(ctx, &informertest.FakeInformers{Scheme: metaScheme}, schema.GroupKind{Group: "apps", Kind: "Deployment"})).To(Succeed())
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "batch/v1", Kind: "Job", Name: "migrate", UID: "job-uid", Controller: new(true),
+			}}},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
+			},
+		})
+		deploymentStore.Set(
+			types.NamespacedName{Namespace: pod.Namespace, Name: "vpa-job"},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "batch", Kind: "Job"}, NamespacedName: types.NamespacedName{Namespace: pod.Namespace, Name: "migrate"}},
+			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
+				pod.Spec.Containers[0].Name: {corev1.ResourceMemory: resource.MustParse("4Gi")},
+			}},
+			env.Clock.Now(),
+		)
+		result := deploymentStore.PredictedRequests(ctx, nil, pod)
+		Expect(result.Memory().Cmp(resource.MustParse("1Gi"))).To(Equal(0))
+	})
+
+	It("should resolve a replicaset's pod to the replicaset without looking it up when deployments aren't targeted", func() {
+		rsStore := prediction.NewStore(env.Client)
+		Expect(rsStore.RegisterTargetKinds(ctx, &informertest.FakeInformers{}, schema.GroupKind{Group: "apps", Kind: "ReplicaSet"})).To(Succeed())
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "not-in-the-api-server", UID: "rs-uid", Controller: new(true),
+			}}},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
+			},
+		})
+		rsStore.Set(
+			types.NamespacedName{Namespace: pod.Namespace, Name: "vpa-rs"},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: types.NamespacedName{Namespace: pod.Namespace, Name: "not-in-the-api-server"}},
+			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
+				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("500m")},
+			}},
+			env.Clock.Now(),
+		)
+		result := rsStore.PredictedRequests(ctx, nil, pod)
+		Expect(result.Cpu().Cmp(resource.MustParse("500m"))).To(Equal(0))
+	})
+
 	It("should resolve pod to standalone replicaset with no deployment owner", func() {
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
@@ -322,19 +400,30 @@ var _ = Describe("PredictedRequests", func() {
 		Expect(result.Cpu().Cmp(resource.MustParse("300m"))).To(Equal(0))
 	})
 
-	It("should return currentRequests when ReplicaSet owner is not found", func() {
-		store.Set(types.NamespacedName{Name: "dummy"}, prediction.WorkloadReference{NamespacedName: types.NamespacedName{Name: "unrelated"}}, &prediction.Prediction{
-			Containers: map[string]corev1.ResourceList{"c": {corev1.ResourceCPU: resource.MustParse("1")}},
-		}, env.Clock.Now())
+	It("should return currentRequests when ReplicaSet owner is not found and keep them for the run", func() {
+		rs := test.ReplicaSet()
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "ghost-rs-deleted", Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: "rs-uid", Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
 			},
 		})
-		result := store.PredictedRequests(ctx, nil, pod)
+		store.Set(
+			types.NamespacedName{Namespace: "default", Name: "vpa-web"},
+			prediction.WorkloadReference{GroupKind: schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, NamespacedName: client.ObjectKeyFromObject(rs)},
+			&prediction.Prediction{Containers: map[string]corev1.ResourceList{
+				pod.Spec.Containers[0].Name: {corev1.ResourceCPU: resource.MustParse("500m")},
+			}},
+			env.Clock.Now(),
+		)
+		cachedOwnerResolutions := prediction.OwnerResolutions{}
+		result := store.PredictedRequests(ctx, cachedOwnerResolutions, pod)
+		Expect(result.Cpu().Cmp(resource.MustParse("100m"))).To(Equal(0))
+
+		ExpectApplied(ctx, env.Client, rs)
+		result = store.PredictedRequests(ctx, cachedOwnerResolutions, pod)
 		Expect(result.Cpu().Cmp(resource.MustParse("100m"))).To(Equal(0))
 	})
 
@@ -344,13 +433,13 @@ var _ = Describe("PredictedRequests", func() {
 
 		rs := test.ReplicaSet()
 		rs.OwnerReferences = []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: new(true),
 		}}
 		ExpectApplied(ctx, env.Client, rs)
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")},
@@ -396,13 +485,13 @@ var _ = Describe("PredictedRequests", func() {
 
 		rs := test.ReplicaSet()
 		rs.OwnerReferences = []metav1.OwnerReference{{
-			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: lo.ToPtr(true),
+			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID, Controller: new(true),
 		}}
 		ExpectApplied(ctx, env.Client, rs)
 
 		pod := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true),
 			}}},
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},

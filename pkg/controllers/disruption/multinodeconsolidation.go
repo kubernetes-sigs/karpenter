@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
@@ -212,15 +211,14 @@ func filterOutSameInstanceType(replacement *Replacement, consolidate []*Candidat
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, c := range consolidate {
 		existingInstanceTypes.Insert(c.instanceType.Name)
-		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduler.NewLabelRequirements(c.Labels()))
-		if len(compatibleOfferings) == 0 {
+		if c.Price <= 0 {
 			continue
 		}
 		existingPrice, ok := pricesByInstanceType[c.instanceType.Name]
 		if !ok {
 			existingPrice = math.MaxFloat64
 		}
-		if p := compatibleOfferings.Cheapest().Price; p < existingPrice {
+		if p := c.Price; p < existingPrice {
 			pricesByInstanceType[c.instanceType.Name] = p
 		}
 	}

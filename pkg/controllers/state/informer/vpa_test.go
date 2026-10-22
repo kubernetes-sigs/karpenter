@@ -178,7 +178,7 @@ var _ = Describe("VPA Controller", func() {
 				StartupBoost: &vpav1.StartupBoost{
 					CPU: &vpav1.GenericStartupBoost{
 						Type:   vpav1.FactorStartupBoostType,
-						Factor: lo.ToPtr(int32(3)),
+						Factor: new(int32(3)),
 					},
 				},
 			},
@@ -195,7 +195,7 @@ var _ = Describe("VPA Controller", func() {
 				StartupBoost: &vpav1.StartupBoost{
 					CPU: &vpav1.GenericStartupBoost{
 						Type:     vpav1.QuantityStartupBoostType,
-						Quantity: lo.ToPtr(resource.MustParse("1")),
+						Quantity: new(resource.MustParse("1")),
 					},
 				},
 			},
@@ -212,7 +212,7 @@ var _ = Describe("VPA Controller", func() {
 				StartupBoost: &vpav1.StartupBoost{
 					CPU: &vpav1.GenericStartupBoost{
 						Type:   vpav1.FactorStartupBoostType,
-						Factor: lo.ToPtr(int32(2)),
+						Factor: new(int32(2)),
 					},
 				},
 				ResourcePolicy: &vpav1.PodResourcePolicy{
@@ -221,7 +221,7 @@ var _ = Describe("VPA Controller", func() {
 						StartupBoost: &vpav1.StartupBoost{
 							CPU: &vpav1.GenericStartupBoost{
 								Type:   vpav1.FactorStartupBoostType,
-								Factor: lo.ToPtr(int32(5)),
+								Factor: new(int32(5)),
 							},
 						},
 					}},

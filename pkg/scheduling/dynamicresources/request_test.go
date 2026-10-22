@@ -26,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
-	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -386,7 +385,7 @@ var _ = Describe("Request Validation", func() {
 							},
 						},
 						Constraints: []resourcev1.DeviceConstraint{
-							{MatchAttribute: ptr.To(resourcev1.FullyQualifiedName(attr))},
+							{MatchAttribute: new(resourcev1.FullyQualifiedName(attr))},
 						},
 					},
 				},
@@ -422,7 +421,7 @@ var _ = Describe("Request Validation", func() {
 						Constraints: []resourcev1.DeviceConstraint{
 							{
 								Requests:       []string{"req-a"},
-								MatchAttribute: ptr.To(resourcev1.FullyQualifiedName(attr)),
+								MatchAttribute: new(resourcev1.FullyQualifiedName(attr)),
 							},
 						},
 					},
@@ -455,8 +454,8 @@ var _ = Describe("Request Validation", func() {
 							},
 						},
 						Constraints: []resourcev1.DeviceConstraint{
-							{MatchAttribute: ptr.To(resourcev1.FullyQualifiedName(attrZone))},
-							{MatchAttribute: ptr.To(resourcev1.FullyQualifiedName(attrRack))},
+							{MatchAttribute: new(resourcev1.FullyQualifiedName(attrZone))},
+							{MatchAttribute: new(resourcev1.FullyQualifiedName(attrRack))},
 						},
 					},
 				},
@@ -496,7 +495,7 @@ var _ = Describe("Request Validation", func() {
 							},
 						},
 						Constraints: []resourcev1.DeviceConstraint{
-							{MatchAttribute: ptr.To(resourcev1.FullyQualifiedName(attr))},
+							{MatchAttribute: new(resourcev1.FullyQualifiedName(attr))},
 						},
 					},
 				},
@@ -697,10 +696,10 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-gpu", "gpu.example.com", "pool-gpu", withAllNodes(), withGeneration(1, 1),
 						withAPIDevicesWithAttrs(
 							deviceWithAttrs("h100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								"gpu.example.com/model": {StringValue: ptr.To("H100")},
+								"gpu.example.com/model": {StringValue: new("H100")},
 							}),
 							deviceWithAttrs("a100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								"gpu.example.com/model": {StringValue: ptr.To("A100")},
+								"gpu.example.com/model": {StringValue: new("A100")},
 							}),
 						)),
 				}
@@ -739,7 +738,7 @@ var _ = Describe("Request Validation", func() {
 							Device: cloudprovider.Device{
 								Name: unique.Make("h100-0"),
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"gpu.example.com/model": {StringValue: ptr.To("H100")},
+									"gpu.example.com/model": {StringValue: new("H100")},
 								},
 							},
 							ID: deviceID("gpu.example.com", "pool-tmpl", "h100-0"),
@@ -750,7 +749,7 @@ var _ = Describe("Request Validation", func() {
 							Device: cloudprovider.Device{
 								Name: unique.Make("a100-0"),
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"gpu.example.com/model": {StringValue: ptr.To("A100")},
+									"gpu.example.com/model": {StringValue: new("A100")},
 								},
 							},
 							ID: deviceID("gpu.example.com", "pool-tmpl", "a100-0"),
@@ -790,7 +789,7 @@ var _ = Describe("Request Validation", func() {
 							Device: cloudprovider.Device{
 								Name: unique.Make("h100-0"),
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"gpu.example.com/model": {StringValue: ptr.To("H100")},
+									"gpu.example.com/model": {StringValue: new("H100")},
 								},
 							},
 							ID: deviceID("gpu.example.com", "pool-tmpl", "h100-0"),
@@ -801,7 +800,7 @@ var _ = Describe("Request Validation", func() {
 							Device: cloudprovider.Device{
 								Name: unique.Make("a100-0"),
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"gpu.example.com/model": {StringValue: ptr.To("A100")},
+									"gpu.example.com/model": {StringValue: new("A100")},
 								},
 							},
 							ID: deviceID("gpu.example.com", "pool-tmpl", "a100-0"),
@@ -815,7 +814,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-h100", "gpu.example.com", "pool-h100", withAllNodes(), withGeneration(1, 1),
 						withAPIDevicesWithAttrs(
 							deviceWithAttrs("h100-cluster", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								"gpu.example.com/model": {StringValue: ptr.To("H100")},
+								"gpu.example.com/model": {StringValue: new("H100")},
 							}),
 						)),
 				}
@@ -858,7 +857,7 @@ var _ = Describe("Request Validation", func() {
 							Device: cloudprovider.Device{
 								Name: unique.Make("a100-0"),
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"gpu.example.com/model": {StringValue: ptr.To("A100")},
+									"gpu.example.com/model": {StringValue: new("A100")},
 								},
 							},
 							ID: deviceID("gpu.example.com", "pool-tmpl", "a100-0"),
@@ -869,7 +868,7 @@ var _ = Describe("Request Validation", func() {
 							Device: cloudprovider.Device{
 								Name: unique.Make("a100-1"),
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"gpu.example.com/model": {StringValue: ptr.To("A100")},
+									"gpu.example.com/model": {StringValue: new("A100")},
 								},
 							},
 							ID: deviceID("gpu.example.com", "pool-tmpl", "a100-1"),
@@ -883,7 +882,7 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-h100", "gpu.example.com", "pool-h100", withAllNodes(), withGeneration(1, 1),
 						withAPIDevicesWithAttrs(
 							deviceWithAttrs("h100-cluster", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								"gpu.example.com/model": {StringValue: ptr.To("H100")},
+								"gpu.example.com/model": {StringValue: new("H100")},
 							}),
 						)),
 				}
@@ -989,10 +988,10 @@ var _ = Describe("Request Validation", func() {
 					makeAPISlice("s-a100", "gpu.example.com", "pool-a100", withAllNodes(), withGeneration(1, 1),
 						withAPIDevicesWithAttrs(
 							deviceWithAttrs("a100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								"gpu.example.com/model": {StringValue: ptr.To("A100")},
+								"gpu.example.com/model": {StringValue: new("A100")},
 							}),
 							deviceWithAttrs("a100-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								"gpu.example.com/model": {StringValue: ptr.To("A100")},
+								"gpu.example.com/model": {StringValue: new("A100")},
 							}),
 						)),
 				}
@@ -1971,7 +1970,7 @@ var _ = Describe("Request Validation", func() {
 			d := cloudprovider.Device{
 				Name: unique.Make("gpu-0"),
 				Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-					"gpu.example.com/model": {StringValue: ptr.To("H100")},
+					"gpu.example.com/model": {StringValue: new("H100")},
 				},
 			}
 			selectors := []resourcev1.DeviceSelector{
@@ -1988,7 +1987,7 @@ var _ = Describe("Request Validation", func() {
 			d := cloudprovider.Device{
 				Name: unique.Make("gpu-0"),
 				Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-					"gpu.example.com/model": {StringValue: ptr.To("A100")},
+					"gpu.example.com/model": {StringValue: new("A100")},
 				},
 			}
 			selectors := []resourcev1.DeviceSelector{
@@ -2005,8 +2004,8 @@ var _ = Describe("Request Validation", func() {
 			d := cloudprovider.Device{
 				Name: unique.Make("gpu-0"),
 				Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-					"gpu.example.com/model":  {StringValue: ptr.To("H100")},
-					"gpu.example.com/memory": {IntValue: ptr.To(int64(80))},
+					"gpu.example.com/model":  {StringValue: new("H100")},
+					"gpu.example.com/memory": {IntValue: new(int64(80))},
 				},
 				Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 					"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
@@ -2030,8 +2029,8 @@ var _ = Describe("Request Validation", func() {
 			d := cloudprovider.Device{
 				Name: unique.Make("gpu-0"),
 				Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-					"gpu.example.com/model":  {StringValue: ptr.To("H100")},
-					"gpu.example.com/memory": {IntValue: ptr.To(int64(20))},
+					"gpu.example.com/model":  {StringValue: new("H100")},
+					"gpu.example.com/memory": {IntValue: new(int64(20))},
 				},
 			}
 			selectors := []resourcev1.DeviceSelector{

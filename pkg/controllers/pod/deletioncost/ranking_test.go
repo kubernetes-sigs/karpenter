@@ -153,7 +153,7 @@ var _ = Describe("Ranking", func() {
 				ranks[expectPodRank(p)] = true
 			}
 			base := -len(nodes)
-			for i := 0; i < len(nodes); i++ {
+			for i := range nodes {
 				Expect(ranks).To(HaveKey(base+i), "expected contiguous rank %d in observed set %v", base+i, ranks)
 			}
 		})
@@ -171,7 +171,7 @@ var _ = Describe("Ranking", func() {
 			stsPod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: types.UID("sts-uid"),
-					Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+					Controller: new(true), BlockOwnerDeletion: new(true),
 				}}},
 				NodeName: nodes[0].Name,
 			})
@@ -563,7 +563,7 @@ var _ = Describe("Ranking", func() {
 			staticPool := &v1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{Name: staticName},
 				Spec: v1.NodePoolSpec{
-					Replicas: lo.ToPtr(int64(1)),
+					Replicas: new(int64(1)),
 					Template: activePool.Spec.Template,
 				},
 			}
@@ -652,7 +652,7 @@ var _ = Describe("Ranking", func() {
 
 			groupAPods := make([]*corev1.Pod, groupANodes)
 			groupCPods := make([]*corev1.Pod, groupCNodes)
-			for i := 0; i < groupANodes; i++ {
+			for i := range groupANodes {
 				nodes[i].Spec.Taints = append(nodes[i].Spec.Taints, v1.DisruptedNoScheduleTaint)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 				groupAPods[i] = rsOwnedPod(test.PodOptions{
@@ -661,7 +661,7 @@ var _ = Describe("Ranking", func() {
 				})
 				ExpectApplied(ctx, env.Client, groupAPods[i])
 			}
-			for i := 0; i < groupCNodes; i++ {
+			for i := range groupCNodes {
 				idx := groupANodes + i
 				ExpectApplied(ctx, env.Client, nodeClaims[idx], nodes[idx])
 				groupCPods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[idx].Name})
@@ -706,7 +706,7 @@ var _ = Describe("Ranking", func() {
 
 			groupAPods := make([]*corev1.Pod, groupANodes)
 			groupCPods := make([]*corev1.Pod, groupCNodes)
-			for i := 0; i < groupANodes; i++ {
+			for i := range groupANodes {
 				nodes[i].Spec.Taints = append(nodes[i].Spec.Taints, v1.DisruptedNoScheduleTaint)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 				groupAPods[i] = rsOwnedPod(test.PodOptions{
@@ -715,7 +715,7 @@ var _ = Describe("Ranking", func() {
 				})
 				ExpectApplied(ctx, env.Client, groupAPods[i])
 			}
-			for i := 0; i < groupCNodes; i++ {
+			for i := range groupCNodes {
 				idx := groupANodes + i
 				ExpectApplied(ctx, env.Client, nodeClaims[idx], nodes[idx])
 				groupCPods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[idx].Name})
@@ -765,7 +765,7 @@ var _ = Describe("Ranking", func() {
 
 			groupAPods := make([]*corev1.Pod, groupANodes)
 			groupCPods := make([]*corev1.Pod, groupCNodes)
-			for i := 0; i < groupANodes; i++ {
+			for i := range groupANodes {
 				nodes[i].Spec.Taints = append(nodes[i].Spec.Taints, v1.DisruptedNoScheduleTaint)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 				groupAPods[i] = rsOwnedPod(test.PodOptions{
@@ -774,7 +774,7 @@ var _ = Describe("Ranking", func() {
 				})
 				ExpectApplied(ctx, env.Client, groupAPods[i])
 			}
-			for i := 0; i < groupCNodes; i++ {
+			for i := range groupCNodes {
 				idx := groupANodes + i
 				ExpectApplied(ctx, env.Client, nodeClaims[idx], nodes[idx])
 				groupCPods[i] = rsOwnedPod(test.PodOptions{NodeName: nodes[idx].Name})
@@ -858,7 +858,7 @@ var _ = Describe("Ranking", func() {
 			nodes[1].Spec.Taints = append(nodes[1].Spec.Taints, v1.DisruptedNoScheduleTaint)
 			ExpectApplied(ctx, env.Client, nodes[0], nodes[1])
 
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				ExpectApplied(ctx, env.Client, rsOwnedPod(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "blocked"}},
 					NodeName:   nodes[0].Name,
@@ -947,15 +947,15 @@ var _ = Describe("Ranking", func() {
 			},
 			Entry("bare pod (no owner references) routes to Group D", (*metav1.OwnerReference)(nil), true),
 			Entry("StatefulSet-owned pod routes to Group D",
-				&metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: types.UID("sts-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
+				&metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "sts", UID: types.UID("sts-uid"), Controller: new(true), BlockOwnerDeletion: new(true)},
 				true,
 			),
 			Entry("Job-owned pod is NOT Group D",
-				&metav1.OwnerReference{APIVersion: "batch/v1", Kind: "Job", Name: "job", UID: types.UID("job-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
+				&metav1.OwnerReference{APIVersion: "batch/v1", Kind: "Job", Name: "job", UID: types.UID("job-uid"), Controller: new(true), BlockOwnerDeletion: new(true)},
 				false,
 			),
 			Entry("DaemonSet-owned pod is NOT Group D",
-				&metav1.OwnerReference{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "ds", UID: types.UID("ds-uid"), Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true)},
+				&metav1.OwnerReference{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "ds", UID: types.UID("ds-uid"), Controller: new(true), BlockOwnerDeletion: new(true)},
 				false,
 			),
 		)

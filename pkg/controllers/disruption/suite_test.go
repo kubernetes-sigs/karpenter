@@ -19,6 +19,7 @@ package disruption_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -42,9 +43,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
@@ -115,7 +118,7 @@ var _ = BeforeSuite(func() {
 func useRepairPolicies(policies []cloudprovider.RepairPolicy) {
 	cloudProvider.RepairPolicy = policies
 	repairPolicyMatcher := lo.Must(health.NewRepairPolicyMatcher(
-		options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}})), cloudProvider))
+		options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true)}})), cloudProvider))
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider, state.WithRepairPolicyMatcher(repairPolicyMatcher))
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
@@ -141,6 +144,9 @@ var _ = BeforeEach(func() {
 	// happen before the disruptionController and queue below, which capture prov. Mirrors the provisioning suite.
 	draController = deviceallocation.NewController(env.Client)
 	store = prediction.NewStore(env.Client)
+	metaScheme := runtime.NewScheme()
+	Expect(metav1.AddMetaToScheme(metaScheme)).To(Succeed())
+	Expect(store.RegisterTargetKinds(ctx, &informertest.FakeInformers{Scheme: metaScheme}, prediction.SupportedTargets.UnsortedList()...)).To(Succeed())
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), store)
 
 	// Ensure that we reset the disruption controller's methods after each test run
@@ -2365,8 +2371,8 @@ func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 }
 
 func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
-	for i := len(onDemandInstances) - 1; i >= 0; i-- {
-		elem := onDemandInstances[i]
+	for _, v := range slices.Backward(onDemandInstances) {
+		elem := v
 		if len(elem.Offerings.Compatible(scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone)))) > 0 {
 			return elem
 		}

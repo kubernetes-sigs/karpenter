@@ -42,6 +42,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	clientmetrics "k8s.io/client-go/tools/metrics"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -90,12 +91,36 @@ var (
 	)
 )
 
+// client-go request dimensions. These match the dimensions operatorpkg's
+// LatencyAdapter emits, derived from the request's URL template.
+var (
+	clientVerb        = opmetrics.Label{Name: "verb", Help: "The action of the Kubernetes API request, e.g. `GET`, `LIST`, `CREATE`, `UPDATE`."}
+	clientGroup       = opmetrics.Label{Name: "group", Help: "The API group of the request's target resource."}
+	clientVersion     = opmetrics.Label{Name: "version", Help: "The API version of the request's target resource."}
+	clientKind        = opmetrics.Label{Name: "kind", Help: "The kind of the request's target resource."}
+	clientSubresource = opmetrics.Label{Name: "subresource", Help: "The subresource of the request, if any."}
+)
+
+var (
+	ClientRateLimiterDuration = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Name:    "client_go_rate_limiter_duration_seconds",
+			Help:    "Time spent waiting on the client-side rate limiter before sending a Kubernetes API request. Broken down by verb, group, version, kind, and subresource.",
+			Buckets: []float64{0.005, 0.025, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0},
+		},
+		[]opmetrics.Label{clientVerb, clientGroup, clientVersion, clientKind, clientSubresource},
+		opmetrics.Alpha,
+	)
+)
+
 // Version is the karpenter app version injected during compilation
 // when using the Makefile
 var Version = "unspecified"
 
 func init() {
 	opmetrics.RegisterClientMetrics(crmetrics.Registry)
+	clientmetrics.RateLimiterLatency = &opmetrics.LatencyAdapter{Metric: ClientRateLimiterDuration}
 
 	BuildInfo.Set(1, map[string]string{
 		"version":   Version,
