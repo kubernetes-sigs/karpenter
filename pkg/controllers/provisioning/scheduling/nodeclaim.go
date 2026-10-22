@@ -131,7 +131,7 @@ func NewNodeClaim(
 func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, volumes scheduling.Volumes, relaxMinValues bool, allocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, allocationResult *dynamicresources.AllocationResult, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, NewTaintTolerationError(err)
 	}
 	// Filter out instance types which can't support the pod's volumes in addition to those of pods already
 	// scheduled to this NodeClaim
@@ -140,7 +140,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 		prospectiveVolumes := n.volumes.Union(volumes)
 		instanceTypes = filterInstanceTypesByVolumeAttachmentLimits(instanceTypes, prospectiveVolumes)
 		if len(instanceTypes) == 0 {
-			return nil, nil, nil, nil, volumeAttachmentLimitError(n.InstanceTypeOptions, prospectiveVolumes)
+			return nil, nil, nil, nil, NewVolumeConstraintError(volumeAttachmentLimitError(n.InstanceTypeOptions, prospectiveVolumes))
 		}
 	}
 
@@ -148,7 +148,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 
 	// Check NodeClaim Affinity Requirements
 	if err := baseRequirements.Compatible(podData.Requirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("incompatible requirements, %w", err)
+		return nil, nil, nil, nil, NewIncompatibleRequirementsError(fmt.Errorf("incompatible requirements, %w", err))
 	}
 	baseRequirements.Add(podData.Requirements.Values()...)
 
@@ -186,7 +186,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	// while TSC counting uses pod's original affinity.
 	if volReqs != nil {
 		if err := nodeClaimRequirements.Compatible(volReqs, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("incompatible volume requirements, %w", err)
+			return nil, nil, nil, nil, NewVolumeConstraintError(fmt.Errorf("incompatible volume requirements, %w", err))
 		}
 		nodeClaimRequirements.Add(volReqs.Values()...)
 	}
@@ -253,7 +253,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	}
 	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, NewOfferingError(err)
 	}
 	return nodeClaimRequirements, remaining, ofs, allocationResult, nil
 }
