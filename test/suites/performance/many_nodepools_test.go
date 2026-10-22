@@ -104,14 +104,14 @@ func diverseNodePools(count int) []*v1.NodePool {
 	sizeCeilings := []string{"8", "16", "32"}
 
 	nodePools := make([]*v1.NodePool, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		np := env.DefaultNodePool(nodeClass)
 		np.Spec.Limits = v1.Limits{}
 		np.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
 		np.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 		np.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 		// Unique weight and node-template label so that no two NodePools are identical.
-		np.Spec.Weight = lo.ToPtr(int32(1 + i%50))
+		np.Spec.Weight = new(int32(1 + i%50))
 		np.Spec.Template.Labels = lo.Assign(np.Spec.Template.Labels, map[string]string{
 			"diverse-nodepool-index": fmt.Sprintf("%d", i),
 		})
@@ -212,7 +212,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			// here is the controller's memory/CPU behavior while evaluating disruption at high NodePool cardinality.
 			By("Scaling the deployment down to trigger consolidation")
 			initialNodes := scaleOutReport.TotalNodes
-			deployment.Spec.Replicas = lo.ToPtr(int32(manyNodePoolsScaleInPodCount))
+			deployment.Spec.Replicas = new(int32(manyNodePoolsScaleInPodCount))
 			env.ExpectUpdated(deployment)
 
 			By("Monitoring scale-in / consolidation with many NodePools")
@@ -254,7 +254,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 
 			By(fmt.Sprintf("Creating one pinned deployment for each of %d targeted NodePools", manyNodePoolsTargetPools))
 			deployments := make([]*appsv1.Deployment, manyNodePoolsTargetPools)
-			for i := 0; i < manyNodePoolsTargetPools; i++ {
+			for i := range manyNodePoolsTargetPools {
 				deployments[i] = test.Deployment(test.CreateDeploymentOptions(fmt.Sprintf("mnp-target-%03d", i), 1, "50m", "128Mi",
 					test.WithNodeSelector(map[string]string{v1.NodePoolLabelKey: nodePools[i].Name}),
 					test.WithTolerations([]corev1.Toleration{manyNodePoolsToleration}),
@@ -285,7 +285,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			By(fmt.Sprintf("Zeroing out %d deployments to trigger consolidation", manyNodePoolsTargetPools-scaleInPools))
 			initialNodes := scaleOutReport.TotalNodes
 			for i := scaleInPools; i < manyNodePoolsTargetPools; i++ {
-				deployments[i].Spec.Replicas = lo.ToPtr(int32(0))
+				deployments[i].Spec.Replicas = new(int32(0))
 				env.ExpectUpdated(deployments[i])
 			}
 
