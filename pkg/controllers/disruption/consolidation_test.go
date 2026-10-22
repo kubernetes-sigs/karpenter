@@ -5358,8 +5358,8 @@ func replicaSetPod() *corev1.Pod {
 			Kind:               "ReplicaSet",
 			Name:               rs.Name,
 			UID:                rs.UID,
-			Controller:         lo.ToPtr(true),
-			BlockOwnerDeletion: lo.ToPtr(true),
+			Controller:         new(true),
+			BlockOwnerDeletion: new(true),
 		}},
 	}})
 }

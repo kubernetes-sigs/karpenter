@@ -302,7 +302,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		}
 		nodePoolWith := func(weight int32, instanceTypeName string, capacityTypes ...string) *v1.NodePool {
 			return test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-				Weight: lo.ToPtr(weight),
+				Weight: new(weight),
 				Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Requirements: []v1.NodeSelectorRequirementWithMinValues{
 					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{instanceTypeName}},
 					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: capacityTypes},
