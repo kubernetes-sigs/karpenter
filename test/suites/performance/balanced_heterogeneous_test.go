@@ -75,6 +75,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 				400, 15*time.Minute,
 				"balanced_heterogeneous_scale_out")
 			Expect(err).ToNot(HaveOccurred())
+			ExpectGates(scaleOutReport, "balancedHeterogeneous/scaleOut")
 			initialNodes := scaleOutReport.TotalNodes
 			Expect(initialNodes).To(BeNumerically(">", 0))
 
@@ -99,6 +100,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			consolidationReport.LatencyStats = result.LatencyStats
 			consolidationReport.Counters = result.Counters
 			OutputPerformanceReport(consolidationReport, "balanced_heterogeneous_consolidation")
+			ExpectGates(consolidationReport, "balancedHeterogeneous/consolidation")
 
 			By("Checking the scored moves belong to the two fixture NodePools")
 			scoredPools := expectBalancedDecisionsMatchThreshold(result)

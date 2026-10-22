@@ -39,6 +39,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 
 			scaleOutReport, err := ReportScaleOutWithOutput(env, "Balanced Basic Scale Out", 1000, 15*time.Minute, "balanced_basic_scale_out")
 			Expect(err).ToNot(HaveOccurred())
+			ExpectGates(scaleOutReport, "balancedBasic/scaleOut")
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically(">", 0))
 
 			h, err := common.StartLatencyHarness(env)
@@ -55,6 +56,7 @@ var _ = Describe("Performance", Label(debug.NoWatch), func() {
 			consolidationReport.LatencyStats = result.LatencyStats
 			consolidationReport.Counters = result.Counters
 			OutputPerformanceReport(consolidationReport, "balanced_basic_consolidation")
+			ExpectGates(consolidationReport, "balancedBasic/consolidation")
 
 			expectBalancedDecisionsMatchThreshold(result)
 		})

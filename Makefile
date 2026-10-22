@@ -141,6 +141,15 @@ e2etest-dra: ## Run DRA e2e integration tests
 	-kill $$(cat /tmp/dra-driver.pid) 2>/dev/null || true
 	-rm -f /tmp/dra-driver.pid
 
+perf-calibrate: ## Reduce DIR (base-*/ and <regression>/ report dirs) into performancev2 calibration for PROVIDER (default kwok); SOURCE describes the environment
+	go run ./test/suites/performancev2/cmd/calibrate -dir $(DIR) -provider $(or $(PROVIDER),kwok) -source "$(SOURCE)" > test/suites/performancev2/calibration/$(or $(PROVIDER),kwok).json
+
+perf-plot: ## Render performancev2 sweep reports in DIR as a pods x nodepools heat map (perf.html)
+	go run ./test/suites/performancev2/cmd/plot -dir $(DIR) -out perf.html
+
+perf-inventory: ## Print the performancev2 scenarios, vectors, metrics and levels per provider
+	go run ./test/suites/performancev2/cmd/inventory
+
 benchmark: ## Run benchmark tests for node overlay store
 	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
 
@@ -192,4 +201,4 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake vulncheck licenses verify download gen_instance_types setup-kind setup-kind-dra delete-kind-dra apply-with-kind-dra
+.PHONY: perf-calibrate perf-plot perf-inventory help presubmit install-kwok uninstall-kwok build apply delete test test-memory test-dra e2etest-dra benchmark deflake vulncheck licenses verify download gen_instance_types setup-kind setup-kind-dra delete-kind-dra apply-with-kind-dra
