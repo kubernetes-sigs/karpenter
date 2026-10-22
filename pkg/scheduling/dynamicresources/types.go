@@ -89,7 +89,8 @@ type NodeClaim interface {
 	// ResourceSlices returns per-instance-type in-flight ResourceSlice templates.
 	// Empty for existing initialized nodes. For pre-initialized nodes, contains outstanding
 	// templates under the single known instance type. For in-flight NodeClaims, contains
-	// all candidate instance types' templates.
+	// all candidate instance types' templates. The allocator calls ResourceSlices at most once per
+	// Allocate call, so implementations may do non-trivial work to build the result.
 	ResourceSlices() map[InstanceTypeID][]ResourceSlice
 }
 
