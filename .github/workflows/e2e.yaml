@@ -16,6 +16,21 @@ on:
         type: string
         required: false
         description: "Human-readable test name for job identification"
+      perf_env:
+        type: string
+        required: false
+        description: "KEY=VALUE lines exported to the test, e.g. KARPENTER_PERF_PROVIDER=kwok-ci"
+      regression:
+        type: string
+        required: false
+        description: "Patch in test/suites/performancev2/perf/regressions to apply before building"
+      plot:
+        type: boolean
+        default: false
+        description: "Render the performance reports as perf.html"
+      retention_days:
+        type: number
+        default: 30
 jobs:
   e2e:
     permissions:
@@ -29,6 +44,11 @@ jobs:
         echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
         echo "Workflow run name: ${{ github.event.workflow_run.name }}"
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - name: apply regression ${{ inputs.regression }}
+      if: inputs.regression != ''
+      env:
+        REGRESSION: ${{ inputs.regression }}
+      run: git apply "test/suites/performancev2/perf/regressions/${REGRESSION}.patch"
     - name: Set up Python 3.10
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
@@ -75,12 +95,20 @@ jobs:
       env:
           SUITE: ${{ inputs.suite }}
           FOCUS: ${{ inputs.focus }}
+          PERF_ENV: ${{ inputs.perf_env }}
       shell: bash
       run: |
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
+        while IFS= read -r kv; do [ -n "$kv" ] && export "${kv?}"; done <<< "$PERF_ENV"
         TEST_SUITE="$SUITE" make e2etests
+    - name: plot performance results
+      if: always() && inputs.plot && env.OUTPUT_DIR != ''
+      shell: bash
+      run: |
+        make perf-plot DIR="$OUTPUT_DIR"
+        mv perf.html "$OUTPUT_DIR/"
     - name: Upload performance results
       if: always() && env.OUTPUT_DIR != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -90,7 +118,8 @@ jobs:
           ${{ env.OUTPUT_DIR }}/*_performance_report.json
           ${{ env.OUTPUT_DIR }}/karpenter_memory_profile_*.pb.gz
           ${{ env.OUTPUT_DIR }}/karpenter_cpu_profile_*.pb.gz
-        retention-days: 30
+          ${{ env.OUTPUT_DIR }}/perf.html
+        retention-days: ${{ inputs.retention_days }}
         if-no-files-found: ignore
     - name: cleanup 
       shell: bash

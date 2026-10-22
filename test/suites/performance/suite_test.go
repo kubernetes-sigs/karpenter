@@ -39,6 +39,8 @@ func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
+		_, err := loadOverrides()
+		Expect(err).ToNot(HaveOccurred())
 	})
 	AfterSuite(func() {
 		env.Stop()
