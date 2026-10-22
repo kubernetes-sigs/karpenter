@@ -366,6 +366,7 @@ func (a *Allocator) Allocate(
 		ctx:                        ctx,
 		nodeClaim:                  nodeClaim,
 		pools:                      pools,
+		resourceSlices:             resourceSlices,
 		templateDevicesByIT:        templateDevicesByIT,
 		celCache:                   dracel.NewCache(0, dracel.Features{EnableConsumableCapacity: true}),
 		allocatedDevices:           sets.New[DeviceID](),
@@ -498,6 +499,9 @@ type allocator struct {
 	templateDevicesByIT  map[InstanceTypeID][]DeviceWithID
 	claimData            []*ClaimData
 	deviceMatchesRequest map[matchKey]bool
+	// resourceSlices holds the NodeClaim's template slices by instance type. It's fetched once per Allocate call and
+	// reused for every instance type evaluated, rather than calling NodeClaim.ResourceSlices() per instance type.
+	resourceSlices map[InstanceTypeID][]ResourceSlice
 
 	// allocatedDevices represents the set of devices that have currently been allocated in the decision tree. Devices
 	// are added and removed from this set as we traverse the tree. This contains minimal allocation metadata and is used
@@ -1018,7 +1022,7 @@ func (a *allocator) buildTemplateCounters() map[PoolKey]map[string]map[string]re
 	if remaining := a.allocationTracker.TemplateRemainingForIT(a.nodeClaim.ID(), a.itID); remaining != nil {
 		return remaining
 	}
-	slices, ok := a.nodeClaim.ResourceSlices()[a.itID]
+	slices, ok := a.resourceSlices[a.itID]
 	if !ok {
 		return nil
 	}
