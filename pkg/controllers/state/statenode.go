@@ -188,6 +188,8 @@ type StateNode struct {
 	podRequests        map[types.NamespacedName]corev1.ResourceList
 	podLimits          map[types.NamespacedName]corev1.ResourceList
 	podDisruptionCosts map[types.NamespacedName]float64
+	// terminatingPods are the pods with a deletion timestamp that a rebooting node won't have when it returns.
+	terminatingPods map[types.NamespacedName]bool
 
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
@@ -208,6 +210,7 @@ func NewNode() *StateNode {
 		podRequests:        map[types.NamespacedName]corev1.ResourceList{},
 		podLimits:          map[types.NamespacedName]corev1.ResourceList{},
 		podDisruptionCosts: map[types.NamespacedName]float64{},
+		terminatingPods:    map[types.NamespacedName]bool{},
 		hostPortUsage:      scheduling.NewHostPortUsage(),
 		volumeUsage:        scheduling.NewVolumeUsage(),
 	}
@@ -222,6 +225,7 @@ func (in *StateNode) ShallowCopy() *StateNode {
 		podRequests:         in.podRequests,
 		podLimits:           in.podLimits,
 		podDisruptionCosts:  in.podDisruptionCosts,
+		terminatingPods:     in.terminatingPods,
 		hostPortUsage:       in.hostPortUsage,
 		volumeUsage:         in.volumeUsage,
 		markedForDeletion:   in.markedForDeletion,
@@ -490,9 +494,18 @@ func (in *StateNode) Allocatable() corev1.ResourceList {
 	return in.Node.Status.Allocatable
 }
 
-// Available is allocatable minus anything allocated to pods.
+// Available is allocatable minus anything allocated to pods. A rebooting node is modeled as it will be when it returns.
 func (in *StateNode) Available() corev1.ResourceList {
-	return resources.Subtract(in.Allocatable(), in.PodRequests())
+	if !in.RebootInProgress() {
+		return resources.Subtract(in.Allocatable(), in.PodRequests())
+	}
+	var requests corev1.ResourceList
+	for podKey, podRequests := range in.podRequests {
+		if !in.terminatingPods[podKey] {
+			requests = resources.MergeInto(requests, podRequests)
+		}
+	}
+	return resources.Subtract(in.Allocatable(), requests)
 }
 
 func (in *StateNode) DaemonSetRequests() corev1.ResourceList {
@@ -584,6 +597,14 @@ func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client,
 			delete(in.podDisruptionCosts, podKey)
 		}
 	}
+	if podutils.IsTerminating(pod) && !podutils.IsOwnedByDaemonSet(pod) && !podutils.IsOwnedByNode(pod) {
+		if in.terminatingPods == nil {
+			in.terminatingPods = map[types.NamespacedName]bool{}
+		}
+		in.terminatingPods[podKey] = true
+	} else {
+		delete(in.terminatingPods, podKey)
+	}
 	in.hostPortUsage.Add(pod, hostPorts)
 	in.volumeUsage.Add(pod, volumes)
 	return nil
@@ -597,6 +618,7 @@ func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 	delete(in.daemonSetRequests, podKey)
 	delete(in.daemonSetLimits, podKey)
 	delete(in.podDisruptionCosts, podKey)
+	delete(in.terminatingPods, podKey)
 }
 
 func nominationWindow(ctx context.Context) time.Duration {
