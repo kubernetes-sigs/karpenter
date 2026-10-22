@@ -889,7 +889,13 @@ func checkTopologySpread(t *caseT, s scenario, placements []placement) {
 		selector string
 		domain   string
 	}
-	satisfied := map[spread]bool{}
+	type violation struct {
+		pod     *corev1.Pod
+		maxSkew int32
+		counts  map[string]int
+	}
+	satisfied := sets.New[spread]()
+	violations := map[spread]violation{}
 	for _, a := range placements {
 		for _, pod := range a.pods {
 			for _, constraint := range pod.Spec.TopologySpreadConstraints {
@@ -906,13 +912,18 @@ func checkTopologySpread(t *caseT, s scenario, placements []placement) {
 				}
 				domain := domains.UnsortedList()[0]
 				key := spread{key: constraint.TopologyKey, selector: metav1.FormatLabelSelector(constraint.LabelSelector), domain: domain}
-				satisfied[key] = satisfied[key] || counts[domain]-lo.Min(lo.Values(counts)) <= int(constraint.MaxSkew)
+				if counts[domain]-lo.Min(lo.Values(counts)) <= int(constraint.MaxSkew) {
+					satisfied.Insert(key)
+				} else {
+					violations[key] = violation{pod: pod, maxSkew: constraint.MaxSkew, counts: counts}
+				}
 			}
 		}
 	}
-	for key, ok := range satisfied {
-		if !ok {
-			t.Fatalf("pods spreading on %s with selector %s exceed their maxSkew in %s\n%s\n%s", key.key, key.selector, key.domain, describePlacements(placements), s)
+	for key, v := range violations {
+		if !satisfied.Has(key) {
+			t.Fatalf("pods spreading on %s with selector %s exceed maxSkew %d in %s, with counts %v\n%s\n%s\n%s", key.key, key.selector, v.maxSkew, key.domain, v.counts,
+				s.describe(v.pod), describePlacements(placements), s)
 		}
 	}
 }
