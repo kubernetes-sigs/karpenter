@@ -447,6 +447,14 @@ func (c *Cluster) NodeClaimExists(nodeClaimName string) bool {
 	return ok
 }
 
+func (c *Cluster) UnlaunchedNodeClaimExists(nodeClaimName string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	providerID, ok := c.nodeClaimNameToProviderID[nodeClaimName]
+	return ok && providerID == ""
+}
+
 // AckPods marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
 func (c *Cluster) AckPods(pods ...*corev1.Pod) {
 	now := c.clock.Now()
