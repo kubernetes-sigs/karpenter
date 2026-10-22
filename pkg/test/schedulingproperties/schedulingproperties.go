@@ -37,8 +37,10 @@ import (
 	"github.com/leanovate/gopter/prop"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -50,6 +52,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -58,6 +61,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	pkgscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
@@ -65,7 +69,11 @@ import (
 const (
 	absentLabelKey = "example.com/absent"
 	unmatchedValue = "unmatched"
+	// groupLabelKey labels each pod with its group, which pod affinity, anti-affinity, and topology spread select.
+	groupLabelKey = "example.com/group"
 )
+
+var groups = []string{"a", "b"}
 
 // Config describes the provider under test. CloudProvider, InstanceTypes, and Launch are required.
 type Config struct {
@@ -97,39 +105,64 @@ func ExpectSatisfiablePodsArePlaced(ctx context.Context, t TB, cfg Config) {
 	t.Helper()
 	defer setup(&cfg)()
 	check(t, cfg, func(rt *caseT) {
-		np, its, pods := drawScenario(rt, cfg, true)
-		scenario := describeScenario(np, its)
-		results, prov := solve(ctx, rt, cfg, np, its, pods)
+		s := drawScenario(rt, cfg, true)
+		results, prov := solve(ctx, rt, cfg, s)
 		placed := sets.New[types.UID]()
 		for _, nc := range results.NewNodeClaims {
 			placed.Insert(lo.Map(nc.Pods, func(pod *corev1.Pod, _ int) types.UID { return pod.UID })...)
 		}
-		for _, pod := range pods {
+		for _, pod := range s.pods {
 			if _, errored := lo.FindKeyBy(results.PodErrors, func(p *corev1.Pod, _ error) bool { return p.UID == pod.UID }); !errored && !placed.Has(pod.UID) {
-				rt.Fatalf("pod %s satisfiable by a launchable node was ignored: %v\n%s\n%s", pod.Name, prov.Validate(ctx, pod), describe(pod), scenario)
+				rt.Fatalf("pod %s satisfiable by a launchable node was ignored: %v\n%s\n%s", pod.Name, prov.Validate(ctx, pod), s.describe(pod), s)
 			}
 		}
 		for pod, err := range results.PodErrors {
-			rt.Fatalf("pod %s satisfiable by a launchable node was not placed: %v\n%s\n%s", pod.Name, err, describe(pod), scenario)
+			rt.Fatalf("pod %s satisfiable by a launchable node was not placed: %v\n%s\n%s", pod.Name, err, s.describe(pod), s)
 		}
-		if count := lo.SumBy(results.NewNodeClaims, func(nc *scheduling.NodeClaim) int { return len(nc.Pods) }); count != len(pods) {
-			rt.Fatalf("placed %d of %d satisfiable pods\n%s", count, len(pods), scenario)
+		if count := lo.SumBy(results.NewNodeClaims, func(nc *scheduling.NodeClaim) int { return len(nc.Pods) }); count != len(s.pods) {
+			rt.Fatalf("placed %d of %d satisfiable pods\n%s", count, len(s.pods), s)
 		}
-		checkPlacements(ctx, rt, cfg, np, pods, results, scenario)
+		checkPlacements(ctx, rt, cfg, s, results)
 	})
 }
 
 // ExpectPlacementsFitNodes checks that every pod Provisioner.Schedule places on a new NodeClaim matches the required
-// node affinity, taints, and allocatable resources of each instance type the NodeClaim can launch as. ctx must carry
-// operator options.
+// node affinity, taints, allocatable resources, volume topology, and host ports of each instance type the NodeClaim can
+// launch as, that placements honor required pod affinity, anti-affinity, and topology spread, and that each NodeClaim
+// keeps the NodePool's minValues unless the BestEffort policy relaxed them. ctx must carry operator options.
 func ExpectPlacementsFitNodes(ctx context.Context, t TB, cfg Config) {
 	t.Helper()
 	defer setup(&cfg)()
 	check(t, cfg, func(rt *caseT) {
-		np, its, pods := drawScenario(rt, cfg, false)
-		scenario := describeScenario(np, its)
-		results, _ := solve(ctx, rt, cfg, np, its, pods)
-		checkPlacements(ctx, rt, cfg, np, pods, results, scenario)
+		s := drawScenario(rt, cfg, false)
+		results, _ := solve(ctx, rt, cfg, s)
+		checkPlacements(ctx, rt, cfg, s, results)
+	})
+}
+
+// ExpectEquivalentPodsScheduleAlike checks that rewriting pods' node constraints into equivalent ones, and reordering
+// the instance types, doesn't change which pods Provisioner.Schedule places together, the instance type options of
+// their NodeClaims, or which pods fail. ctx must carry operator options.
+func ExpectEquivalentPodsScheduleAlike(ctx context.Context, t TB, cfg Config) {
+	t.Helper()
+	defer setup(&cfg)()
+	check(t, cfg, func(rt *caseT) {
+		s := drawScenario(rt, cfg, false)
+		// Karpenter breaks ties between topology domains in map order, so pods with pod affinity, anti-affinity, or
+		// topology spread don't schedule deterministically.
+		for _, pod := range s.pods {
+			pod.Spec.TopologySpreadConstraints = nil
+			if pod.Spec.Affinity != nil {
+				pod.Spec.Affinity.PodAffinity, pod.Spec.Affinity.PodAntiAffinity = nil, nil
+			}
+		}
+		results, _ := solve(ctx, rt, cfg, s)
+		rewritten := rewrite(rt, s)
+		rewrittenResults, _ := solve(ctx, rt, cfg, rewritten)
+		if before, after := outcome(results), outcome(rewrittenResults); before != after {
+			rt.Fatalf("equivalent pods scheduled differently\nbefore:\n%s\nafter:\n%s\nrewritten pods:\n%s\n%s", before, after,
+				strings.Join(lo.Map(rewritten.pods, func(pod *corev1.Pod, _ int) string { return pod.Name + ":\n" + rewritten.describe(pod) }), "\n"), s)
+		}
 	})
 }
 
@@ -142,9 +175,21 @@ func setup(cfg *Config) func() {
 	return func() { v1.RestrictedLabelDomains.Delete(added...) }
 }
 
+// scenario is one generated case: a NodePool, its instance types, and the pods to schedule.
+type scenario struct {
+	np   *v1.NodePool
+	its  []*cloudprovider.InstanceType
+	pods []*corev1.Pod
+	// volumes are the PersistentVolumeClaims, PersistentVolumes, and StorageClasses the pods mount.
+	volumes []runtime.Object
+	// volumeSelectors are the node selectors each pod's volume requires, keyed by pod UID.
+	volumeSelectors map[types.UID]*corev1.NodeSelector
+	minValuesPolicy options.MinValuesPolicy
+}
+
 // drawScenario draws a NodePool, its instance types, and pods. When satisfiable is true, every pod is satisfied by
 // a node that the NodePool can launch from one of the instance types.
-func drawScenario(t *caseT, cfg Config, satisfiable bool) (*v1.NodePool, []*cloudprovider.InstanceType, []*corev1.Pod) {
+func drawScenario(t *caseT, cfg Config, satisfiable bool) scenario {
 	indices := t.distinct(len(cfg.InstanceTypes), 1, t.limits.InstanceTypes)
 	slices.Sort(indices)
 	its := lo.Map(indices, func(i int, _ int) *cloudprovider.InstanceType { return cfg.InstanceTypes[i] })
@@ -186,6 +231,12 @@ func drawScenario(t *caseT, cfg Config, satisfiable bool) (*v1.NodePool, []*clou
 	}
 	others := otherValues(its, labels)
 	drawNodePoolRequirements(t, np, singleValuedLabels(target, offering), labels, others)
+	// launchable now also honors the drawn requirements.
+	npRequirements = pkgscheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
+	drawMinValues(t, np, lo.Filter(its, func(it *cloudprovider.InstanceType, _ int) bool { return len(launchable(it)) > 0 }))
+	s := scenario{np: np, its: its, volumeSelectors: map[types.UID]*corev1.NodeSelector{}}
+	// Under the Strict policy, minValues can leave satisfiable pods unplaced.
+	s.minValuesPolicy = lo.Ternary(satisfiable || t.bool(), options.MinValuesPolicyBestEffort, options.MinValuesPolicyStrict)
 	// Only draw Exists for keys every instance type defines. Karpenter intersects Exists with NotIn as NotIn, so a pod
 	// requiring a label can share a NodeClaim that lands on a node without it. See #3425.
 	universal := sets.New(lo.Filter(lo.Keys(labels), func(key string, _ int) bool {
@@ -193,11 +244,218 @@ func drawScenario(t *caseT, cfg Config, satisfiable bool) (*v1.NodePool, []*clou
 			return !it.Requirements.Has(key) || it.Requirements.Get(key).Operator() == corev1.NodeSelectorOpIn
 		})
 	})...)
-	pods := make([]*corev1.Pod, t.intRange(1, t.limits.Pods))
-	for i := range pods {
-		pods[i] = drawPod(t, i, np, target.Allocatable(), labels, others, universal, satisfiable)
+	topologyKeys := append([]string{corev1.LabelHostname}, lo.Without([]string{corev1.LabelTopologyZone}, cfg.KnownDeviations.UnsortedList()...)...)
+	constraints := lo.Map(groups, func(group string, _ int) podConstraints {
+		return drawPodConstraints(t, group, topologyKeys, satisfiable)
+	})
+	s.pods = make([]*corev1.Pod, t.intRange(1, t.limits.Pods))
+	for i := range s.pods {
+		pod := drawPod(t, i, np, target.Allocatable(), labels, others, universal, satisfiable)
+		group := t.Intn(len(groups))
+		constraints[group].apply(pod, groups[group])
+		if lo.ContainsBy(pod.Spec.TopologySpreadConstraints, func(c corev1.TopologySpreadConstraint) bool { return c.WhenUnsatisfiable == corev1.DoNotSchedule }) {
+			avoidSpreadRelaxation(pod)
+		}
+		drawHostPort(t, pod)
+		if volumes, selector := drawVolume(t, i, pod, labels, others, universal, satisfiable); selector != nil {
+			s.volumes = append(s.volumes, volumes...)
+			s.volumeSelectors[pod.UID] = selector
+		}
+		s.pods[i] = pod
 	}
-	return np, its, pods
+	return s
+}
+
+// drawMinValues may add a NodePool requirement with minValues on a key every launchable instance type carries a single
+// value of, so the nodes a NodeClaim's options launch as carry as many values as the options do. minValues is at most
+// the number of values the launchable instance types carry.
+func drawMinValues(t *caseT, np *v1.NodePool, launchable []*cloudprovider.InstanceType) {
+	if len(launchable) == 0 || t.bool() {
+		return
+	}
+	keys := lo.Filter(launchable[0].Requirements.Keys().UnsortedList(), func(key string, _ int) bool {
+		return !lo.ContainsBy(np.Spec.Template.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues) bool { return r.Key == key }) &&
+			lo.EveryBy(launchable, func(it *cloudprovider.InstanceType) bool {
+				return it.Requirements.Has(key) && it.Requirements.Get(key).Operator() == corev1.NodeSelectorOpIn && it.Requirements.Get(key).Len() == 1
+			})
+	})
+	if len(keys) == 0 {
+		return
+	}
+	slices.Sort(keys)
+	key := sampledFrom(t, keys)
+	values := sets.New(lo.Map(launchable, func(it *cloudprovider.InstanceType, _ int) string { return it.Requirements.Get(key).Any() })...)
+	np.Spec.Template.Spec.Requirements = append(np.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+		Key: key, Operator: corev1.NodeSelectorOpExists, MinValues: new(t.intRange(1, len(values))),
+	})
+}
+
+// podConstraints are the pod affinity, anti-affinity, and topology spread constraints a group's pods share. Every pod
+// a spread selects spreads the same way, so the last one placed in a domain saw every selected pod there.
+type podConstraints struct {
+	podAffinity     *corev1.PodAffinity
+	podAntiAffinity *corev1.PodAntiAffinity
+	spread          []corev1.TopologySpreadConstraint
+}
+
+// drawPodConstraints draws group's pod constraints over topology keys, the first of which is hostname. Satisfiable pods
+// can each have their own node, so their hard spreads and anti-affinity only use hostname, because Karpenter counts
+// zones it could launch into as empty spread domains, and they don't require affinity, because pods requiring it may
+// not fit on one node.
+func drawPodConstraints(t *caseT, group string, keys []string, satisfiable bool) podConstraints {
+	required := lo.Ternary(satisfiable, keys[:1], keys)
+	selecting := func(selected string) *metav1.LabelSelector {
+		return &metav1.LabelSelector{MatchLabels: map[string]string{groupLabelKey: selected}}
+	}
+	var c podConstraints
+	if t.bool() {
+		whenUnsatisfiable := sampledFrom(t, []corev1.UnsatisfiableConstraintAction{corev1.DoNotSchedule, corev1.ScheduleAnyway})
+		c.spread = []corev1.TopologySpreadConstraint{{
+			MaxSkew:           1 + t.Int31n(2),
+			TopologyKey:       sampledFrom(t, lo.Ternary(whenUnsatisfiable == corev1.DoNotSchedule, required, keys)),
+			WhenUnsatisfiable: whenUnsatisfiable,
+			LabelSelector:     selecting(group),
+		}}
+		// Karpenter only counts a pod toward a spread that honors node affinity if the pod's NodeClaim already satisfies
+		// that affinity when the pod is placed, missing pods whose NodeClaim narrows to it later. See #3472.
+		if whenUnsatisfiable == corev1.DoNotSchedule {
+			c.spread[0].NodeAffinityPolicy = new(corev1.NodeInclusionPolicyIgnore)
+		}
+	}
+	// Required affinity selects its own group, so the first pod placed can satisfy it. It's only on hostname, because
+	// Karpenter can give the first pod in another topology several domains, then doesn't count it, so a later pod
+	// starts a second domain. See #3470.
+	if !satisfiable && t.bool() {
+		c.podAffinity = &corev1.PodAffinity{}
+		c.podAffinity.RequiredDuringSchedulingIgnoredDuringExecution = []corev1.PodAffinityTerm{{LabelSelector: selecting(group), TopologyKey: keys[0]}}
+	}
+	if t.bool() {
+		c.podAntiAffinity = &corev1.PodAntiAffinity{}
+		c.podAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = []corev1.PodAffinityTerm{{LabelSelector: selecting(sampledFrom(t, groups)), TopologyKey: sampledFrom(t, required)}}
+	}
+	if t.bool() {
+		c.podAffinity = lo.CoalesceOrEmpty(c.podAffinity, &corev1.PodAffinity{})
+		c.podAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.WeightedPodAffinityTerm{{
+			Weight: 1 + t.Int31n(100), PodAffinityTerm: corev1.PodAffinityTerm{LabelSelector: selecting(sampledFrom(t, groups)), TopologyKey: sampledFrom(t, keys)},
+		}}
+	}
+	if t.bool() {
+		c.podAntiAffinity = lo.CoalesceOrEmpty(c.podAntiAffinity, &corev1.PodAntiAffinity{})
+		c.podAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.WeightedPodAffinityTerm{{
+			Weight: 1 + t.Int31n(100), PodAffinityTerm: corev1.PodAffinityTerm{LabelSelector: selecting(sampledFrom(t, groups)), TopologyKey: sampledFrom(t, keys)},
+		}}
+	}
+	return c
+}
+
+// apply adds the group label and c to pod.
+func (c podConstraints) apply(pod *corev1.Pod, group string) {
+	pod.Labels = lo.Assign(pod.Labels, map[string]string{groupLabelKey: group})
+	for _, spread := range c.spread {
+		pod.Spec.TopologySpreadConstraints = append(pod.Spec.TopologySpreadConstraints, *spread.DeepCopy())
+	}
+	if c.podAffinity != nil || c.podAntiAffinity != nil {
+		pod.Spec.Affinity = lo.CoalesceOrEmpty(pod.Spec.Affinity, &corev1.Affinity{})
+		pod.Spec.Affinity.PodAffinity, pod.Spec.Affinity.PodAntiAffinity = c.podAffinity.DeepCopy(), c.podAntiAffinity.DeepCopy()
+	}
+}
+
+// avoidSpreadRelaxation keeps scheduling from relaxing pod's required node affinity or tolerations. Karpenter keys a
+// pod's spread counts by both, so relaxing either starts counts that miss pods already placed. See #3401.
+func avoidSpreadRelaxation(pod *corev1.Pod) {
+	pod.Spec.Tolerations = append(pod.Spec.Tolerations, corev1.Toleration{Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectPreferNoSchedule})
+	if affinity := pod.Spec.Affinity; affinity != nil && affinity.NodeAffinity != nil && affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		// Satisfiable pods' last term is the one the target satisfies.
+		terms := affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+		affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = terms[max(0, len(terms)-1):]
+	}
+}
+
+// drawHostPort may give pod a host port from a small set, so pods placed together can conflict.
+func drawHostPort(t *caseT, pod *corev1.Pod) {
+	if t.bool() {
+		return
+	}
+	port := sampledFrom(t, []int32{80, 81})
+	pod.Spec.Containers[0].Ports = []corev1.ContainerPort{{
+		ContainerPort: port,
+		HostPort:      port,
+		HostIP:        sampledFrom(t, []string{"", "0.0.0.0", "10.0.0.1", "10.0.0.2"}),
+		// The API server defaults the protocol to TCP, but the fake client doesn't.
+		Protocol: sampledFrom(t, []corev1.Protocol{corev1.ProtocolTCP, corev1.ProtocolUDP}),
+	}}
+}
+
+// drawVolume may mount a PersistentVolumeClaim on pod, either bound to a PersistentVolume whose node affinity requires
+// one of labels or unbound with a WaitForFirstConsumer StorageClass whose allowed topologies do, returning the objects
+// and the node selector the volume requires. Its terms are OR'd, so a satisfiable pod's volume has one term the target
+// satisfies. The volume constrains a key the pod doesn't, because Karpenter collapses contradictory requirements on one
+// key into DoesNotExist (#3423), and never the nodepool label, because Karpenter ignores pods whose requirements reduce
+// to nodepool DoesNotExist (#1265).
+func drawVolume(t *caseT, i int, pod *corev1.Pod, labels map[string]string, others map[string][]string, universal sets.Set[string], satisfiable bool) ([]runtime.Object, *corev1.NodeSelector) {
+	keys := lo.Without(lo.Keys(labels), append(nodeAffinityKeys(pod), v1.NodePoolLabelKey)...)
+	if len(keys) == 0 || t.bool() {
+		return nil, nil
+	}
+	slices.Sort(keys)
+	key := sampledFrom(t, keys)
+	claim := metav1.ObjectMeta{Name: fmt.Sprintf("pvc-%d", i), Namespace: pod.Namespace}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "volume", VolumeSource: corev1.VolumeSource{
+		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim.Name},
+	}})
+	terms := t.intRange(1, 2)
+	selector := &corev1.NodeSelector{}
+	if t.bool() {
+		for j := range terms {
+			selector.NodeSelectorTerms = append(selector.NodeSelectorTerms, corev1.NodeSelectorTerm{
+				MatchExpressions: []corev1.NodeSelectorRequirement{drawRequirement(t, labels, others, universal, key, satisfiable && j == terms-1)},
+			})
+		}
+		pv := test.PersistentVolume(test.PersistentVolumeOptions{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pv-%d", i)}, NodeSelectorTerms: selector.NodeSelectorTerms})
+		pv.Namespace = "" // PersistentVolumes are cluster scoped.
+		return []runtime.Object{pv, test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{ObjectMeta: claim, VolumeName: pv.Name})}, selector
+	}
+	var topologies []corev1.TopologySelectorTerm
+	for j := range terms {
+		values := []string{labels[key]}
+		if (!satisfiable || j != terms-1) && t.bool() {
+			values = []string{otherValue(key, labels[key])}
+		}
+		topologies = append(topologies, corev1.TopologySelectorTerm{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: key, Values: values}}})
+		selector.NodeSelectorTerms = append(selector.NodeSelectorTerms, corev1.NodeSelectorTerm{
+			MatchExpressions: []corev1.NodeSelectorRequirement{{Key: key, Operator: corev1.NodeSelectorOpIn, Values: values}},
+		})
+	}
+	sc := test.StorageClass(test.StorageClassOptions{
+		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("sc-%d", i)}, AllowedTopologies: topologies, VolumeBindingMode: new(storagev1.VolumeBindingWaitForFirstConsumer),
+	})
+	return []runtime.Object{sc, test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{ObjectMeta: claim, StorageClassName: &sc.Name})}, selector
+}
+
+// nodeAffinityKeys returns the keys pod's nodeSelector and node affinity constrain.
+func nodeAffinityKeys(pod *corev1.Pod) []string {
+	keys := lo.Keys(pod.Spec.NodeSelector)
+	for _, term := range nodeSelectorTerms(pod) {
+		keys = append(keys, lo.Map(term.MatchExpressions, func(r corev1.NodeSelectorRequirement, _ int) string { return r.Key })...)
+	}
+	return keys
+}
+
+// nodeSelectorTerms returns pod's required and preferred node affinity terms.
+func nodeSelectorTerms(pod *corev1.Pod) []*corev1.NodeSelectorTerm {
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
+		return nil
+	}
+	var terms []*corev1.NodeSelectorTerm
+	if required := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution; required != nil {
+		for i := range required.NodeSelectorTerms {
+			terms = append(terms, &required.NodeSelectorTerms[i])
+		}
+	}
+	for i := range pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
+		terms = append(terms, &pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution[i].Preference)
+	}
+	return terms
 }
 
 // drawNodePoolRequirements adds NodePool requirements the target satisfies on its instance type and offering labels.
@@ -373,19 +631,29 @@ func drawRequirement(t *caseT, labels map[string]string, others map[string][]str
 	return req
 }
 
-// solve schedules pending pods for np through Provisioner.Schedule over an in-memory client.
-func solve(ctx context.Context, t *caseT, cfg Config, np *v1.NodePool, its []*cloudprovider.InstanceType, pods []*corev1.Pod) (scheduling.Results, *provisioning.Provisioner) {
-	np = np.DeepCopy()
+// solve schedules pending pods for s through Provisioner.Schedule over an in-memory client.
+func solve(ctx context.Context, t *caseT, cfg Config, s scenario) (scheduling.Results, *provisioning.Provisioner) {
+	np := s.np.DeepCopy()
 	np.StatusConditions().SetTrue(status.ConditionReady)
-	objects := append([]runtime.Object{np}, lo.Map(pods, func(pod *corev1.Pod, _ int) runtime.Object { return pod.DeepCopy() })...)
+	objects := append([]runtime.Object{np}, lo.Map(s.pods, func(pod *corev1.Pod, _ int) runtime.Object { return pod.DeepCopy() })...)
+	objects = append(objects, lo.Map(s.volumes, func(o runtime.Object, _ int) runtime.Object { return o.DeepCopyObject() })...)
 	kubeClient := fakecr.NewClientBuilder().WithRuntimeObjects(objects...).WithIndex(&corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*corev1.Pod).Spec.NodeName}
-	}).Build()
-	cp := drawnInstanceTypes{CloudProvider: cfg.CloudProvider, its: its}
+	}).WithInterceptorFuncs(interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		// The API server ignores the namespace when getting a cluster-scoped object, but the fake client doesn't find it.
+		switch obj.(type) {
+		case *corev1.PersistentVolume, *storagev1.StorageClass:
+			key.Namespace = ""
+		}
+		return c.Get(ctx, key, obj, opts...)
+	}}).Build()
+	cp := drawnInstanceTypes{CloudProvider: cfg.CloudProvider, its: s.its}
 	cluster := state.NewCluster(clock.RealClock{}, kubeClient, cp)
 	prov := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cp, cluster, clock.RealClock{}, nil, nil, nil)
+	opts := *options.FromContext(ctx)
+	opts.MinValuesPolicy = s.minValuesPolicy
 	// Scheduling logs bury the failure report.
-	results, err := prov.Schedule(log.IntoContext(ctx, logr.Discard()))
+	results, err := prov.Schedule(log.IntoContext(options.ToContext(ctx, &opts), logr.Discard()))
 	if err != nil {
 		t.Fatalf("scheduling, %v", err)
 	}
@@ -402,11 +670,28 @@ func (d drawnInstanceTypes) GetInstanceTypes(context.Context, *v1.NodePool) ([]*
 	return d.its, nil
 }
 
+// placement is a new NodeClaim with the pods placed on it and the nodes its instance type options launch as.
+type placement struct {
+	name     string
+	pods     []*corev1.Pod
+	launched []*v1.NodeClaim
+}
+
+// domains returns the values of key the placement's nodes can carry. Each NodeClaim is its own hostname.
+func (p placement) domains(key string) sets.Set[string] {
+	if key == corev1.LabelHostname {
+		return sets.New(p.name)
+	}
+	return sets.New(lo.FilterMap(p.launched, func(nc *v1.NodeClaim, _ int) (string, bool) { value, ok := nc.Labels[key]; return value, ok })...)
+}
+
 // checkPlacements launches every instance type option of every new NodeClaim and checks the resulting node against
 // the placed pods as submitted, not as relaxed by scheduling.
-func checkPlacements(ctx context.Context, t *caseT, cfg Config, np *v1.NodePool, pods []*corev1.Pod, results scheduling.Results, scenario string) {
-	submitted := lo.KeyBy(pods, func(pod *corev1.Pod) types.UID { return pod.UID })
-	for _, nc := range results.NewNodeClaims {
+func checkPlacements(ctx context.Context, t *caseT, cfg Config, s scenario, results scheduling.Results) {
+	submitted := lo.KeyBy(s.pods, func(pod *corev1.Pod) types.UID { return pod.UID })
+	var placements []placement
+	for i, nc := range results.NewNodeClaims {
+		p := placement{name: fmt.Sprintf("nodeclaim-%d", i), pods: lo.Map(nc.Pods, func(pod *corev1.Pod, _ int) *corev1.Pod { return submitted[pod.UID] })}
 		nodeClaim := nc.ToNodeClaim()
 		for _, it := range nc.InstanceTypeOptions {
 			launch := nodeClaim.DeepCopy()
@@ -417,10 +702,17 @@ func checkPlacements(ctx context.Context, t *caseT, cfg Config, np *v1.NodePool,
 			if err != nil {
 				t.Fatalf("launching instance type option %s, %v", it.Name, err)
 			}
-			checkNodePool(t, np, it, launched)
-			checkNode(t, it, launched, lo.Map(nc.Pods, func(pod *corev1.Pod, _ int) *corev1.Pod { return submitted[pod.UID] }), scenario)
+			checkNodePool(t, s.np, it, launched)
+			checkNode(t, s, it, launched, p.pods)
+			p.launched = append(p.launched, launched)
 		}
+		checkHostPorts(t, s, p)
+		checkMinValues(t, s, nodeClaim, p)
+		placements = append(placements, p)
 	}
+	checkPodAntiAffinity(t, s, placements)
+	checkPodAffinity(t, s, placements)
+	checkTopologySpread(t, s, placements)
 }
 
 // checkNodePool checks that the launched node satisfies the NodePool's requirements.
@@ -441,19 +733,20 @@ func checkNodePool(t *caseT, np *v1.NodePool, it *cloudprovider.InstanceType, la
 	}
 }
 
-func checkNode(t *caseT, it *cloudprovider.InstanceType, launched *v1.NodeClaim, pods []*corev1.Pod, scenario string) {
+func checkNode(t *caseT, s scenario, it *cloudprovider.InstanceType, launched *v1.NodeClaim, pods []*corev1.Pod) {
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: launched.Labels}, Spec: corev1.NodeSpec{Taints: launched.Spec.Taints}}
 	requests := corev1.ResourceList{corev1.ResourcePods: *resource.NewQuantity(int64(len(pods)), resource.DecimalSI)}
 	for _, pod := range pods {
 		if ok, err := nodeaffinity.GetRequiredNodeAffinity(pod).Match(node); err != nil {
 			t.Fatalf("matching pod %s against %s, %v", pod.Name, it.Name, err)
 		} else if !ok {
-			t.Fatalf("pod %s placed on %s doesn't match node labels %v\n%s\n%s", pod.Name, it.Name, node.Labels, describe(pod), scenario)
+			t.Fatalf("pod %s placed on %s doesn't match node labels %v\n%s\n%s", pod.Name, it.Name, node.Labels, s.describe(pod), s)
 		}
+		checkVolume(t, s, it, node, pod)
 		if taint, untolerated := corev1helpers.FindMatchingUntoleratedTaint(klog.Background(), node.Spec.Taints, pod.Spec.Tolerations, func(t *corev1.Taint) bool {
 			return t.Effect == corev1.TaintEffectNoSchedule || t.Effect == corev1.TaintEffectNoExecute
 		}, false); untolerated {
-			t.Fatalf("pod %s placed on %s doesn't tolerate taint %v\n%s\n%s", pod.Name, it.Name, taint, describe(pod), scenario)
+			t.Fatalf("pod %s placed on %s doesn't tolerate taint %v\n%s\n%s", pod.Name, it.Name, taint, s.describe(pod), s)
 		}
 		for name, quantity := range resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{}) {
 			total := requests[name]
@@ -463,9 +756,286 @@ func checkNode(t *caseT, it *cloudprovider.InstanceType, launched *v1.NodeClaim,
 	}
 	for name, quantity := range requests {
 		if allocatable := launched.Status.Allocatable[name]; quantity.Cmp(allocatable) > 0 {
-			t.Fatalf("pods placed on %s request %s %s, exceeding allocatable %s\n%s", it.Name, quantity.String(), name, allocatable.String(), scenario)
+			t.Fatalf("pods placed on %s request %s %s, exceeding allocatable %s\n%s", it.Name, quantity.String(), name, allocatable.String(), s)
 		}
 	}
+}
+
+// checkVolume checks that node matches the topology of pod's volume.
+func checkVolume(t *caseT, s scenario, it *cloudprovider.InstanceType, node *corev1.Node, pod *corev1.Pod) {
+	selector, ok := s.volumeSelectors[pod.UID]
+	if !ok {
+		return
+	}
+	if matches, err := nodeaffinity.NewNodeSelector(selector); err != nil {
+		t.Fatalf("parsing volume topology of pod %s, %v", pod.Name, err)
+	} else if !matches.Match(node) {
+		t.Fatalf("pod %s placed on %s doesn't match its volume's topology with node labels %v\n%s\n%s", pod.Name, it.Name, node.Labels, s.describe(pod), s)
+	}
+}
+
+// checkHostPorts checks that no two pods on a node use the same host port and protocol on overlapping host IPs, where
+// an empty or unspecified host IP overlaps every IP.
+func checkHostPorts(t *caseT, s scenario, p placement) {
+	used := map[corev1.ContainerPort]*corev1.Pod{}
+	for _, pod := range p.pods {
+		for _, container := range pod.Spec.Containers {
+			for _, port := range container.Ports {
+				if port.HostPort == 0 {
+					continue
+				}
+				for existing, other := range used {
+					wildcard := lo.Contains([]string{"", "0.0.0.0"}, existing.HostIP) || lo.Contains([]string{"", "0.0.0.0"}, port.HostIP)
+					if existing.HostPort == port.HostPort && existing.Protocol == port.Protocol && (existing.HostIP == port.HostIP || wildcard) {
+						t.Fatalf("pods %s and %s placed on one node both use host port %d/%s on %q and %q\n%s\n%s\n%s", other.Name, pod.Name, port.HostPort,
+							port.Protocol, existing.HostIP, port.HostIP, s.describe(other), s.describe(pod), s)
+					}
+				}
+				used[port] = pod
+			}
+		}
+	}
+}
+
+// checkMinValues checks that, for each NodePool requirement with minValues, the nodes a NodeClaim's options launch as
+// carry at least the NodeClaim's minValues, which only the BestEffort policy may relax below the NodePool's. The
+// relaxed annotation isn't checked: NodeClaims from one NodePool share an annotations map, so the last one created
+// sets it for all of them. See #3469.
+func checkMinValues(t *caseT, s scenario, nodeClaim *v1.NodeClaim, p placement) {
+	for _, req := range s.np.Spec.Template.Spec.Requirements {
+		if req.MinValues == nil {
+			continue
+		}
+		minValues := *req.MinValues
+		if relaxed, ok := lo.Find(nodeClaim.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues) bool { return r.Key == req.Key }); ok && lo.FromPtr(relaxed.MinValues) < minValues {
+			if s.minValuesPolicy == options.MinValuesPolicyStrict {
+				t.Fatalf("NodeClaim for pods %v relaxed minValues of %s to %d under the Strict policy\n%s", podNames(p.pods), req.Key, lo.FromPtr(relaxed.MinValues), s)
+			}
+			minValues = lo.FromPtr(relaxed.MinValues)
+		}
+		if values := sets.New(lo.FilterMap(p.launched, func(nc *v1.NodeClaim, _ int) (string, bool) { value, ok := nc.Labels[req.Key]; return value, ok })...); values.Len() < minValues {
+			t.Fatalf("NodeClaim for pods %v can launch with %d values %v of %s, fewer than minValues %d\n%s", podNames(p.pods), values.Len(), sets.List(values), req.Key, minValues, s)
+		}
+	}
+}
+
+// checkPodAntiAffinity checks that no two pods can land in one domain of a required anti-affinity term either has
+// that selects the other.
+func checkPodAntiAffinity(t *caseT, s scenario, placements []placement) {
+	for _, a := range placements {
+		for _, b := range placements {
+			for _, pod := range a.pods {
+				if pod.Spec.Affinity == nil || pod.Spec.Affinity.PodAntiAffinity == nil {
+					continue
+				}
+				for _, term := range pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+					for _, other := range b.pods {
+						if other.UID != pod.UID && selects(term, pod, other) && a.domains(term.TopologyKey).HasAny(b.domains(term.TopologyKey).UnsortedList()...) {
+							t.Fatalf("pod %s can land in the same %s as pod %s, which its anti-affinity selects\n%s\n%s\n%s\n%s", pod.Name, term.TopologyKey, other.Name,
+								s.describe(pod), s.describe(other), describePlacements(placements), s)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// checkPodAffinity checks that each pod with a required affinity term lands, whichever domain its NodeClaim launches in,
+// with another pod the term selects. Only the first pod the term selects can be placed without one, so at most one pod
+// per term goes without, and only if the term selects it.
+func checkPodAffinity(t *caseT, s scenario, placements []placement) {
+	unanchored := map[string]*corev1.Pod{}
+	for _, a := range placements {
+		for _, pod := range a.pods {
+			if pod.Spec.Affinity == nil || pod.Spec.Affinity.PodAffinity == nil {
+				continue
+			}
+			for _, term := range pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+				if anchored(pod, term, a, placements) {
+					continue
+				}
+				key := fmt.Sprintf("%s %s", metav1.FormatLabelSelector(term.LabelSelector), term.TopologyKey)
+				if first, ok := unanchored[key]; ok {
+					t.Fatalf("pods %s and %s can each land in a %s without a pod their affinity selects\n%s\n%s\n%s", first.Name, pod.Name, term.TopologyKey,
+						s.describe(pod), describePlacements(placements), s)
+				} else if !selects(term, pod, pod) {
+					t.Fatalf("pod %s can land in a %s without a pod its affinity selects\n%s\n%s\n%s", pod.Name, term.TopologyKey, s.describe(pod), describePlacements(placements), s)
+				}
+				unanchored[key] = pod
+			}
+		}
+	}
+}
+
+// anchored returns whether, whichever domain a launches in, another pod term selects lands there too.
+func anchored(pod *corev1.Pod, term corev1.PodAffinityTerm, a placement, placements []placement) bool {
+	domains := a.domains(term.TopologyKey)
+	return domains.Len() > 0 && lo.EveryBy(sets.List(domains), func(domain string) bool {
+		return lo.SomeBy(placements, func(b placement) bool {
+			return (b.name == a.name || b.domains(term.TopologyKey).Equal(sets.New(domain))) &&
+				lo.SomeBy(b.pods, func(other *corev1.Pod) bool { return other.UID != pod.UID && selects(term, pod, other) })
+		})
+	})
+}
+
+// checkTopologySpread checks the skew of each DoNotSchedule topology spread constraint. Every pod a constraint selects
+// shares it, so the last one placed in a domain saw every selected pod there, and the domain's count may exceed the
+// minimum over the domains of the nodes that pod's constraint includes by at most maxSkew. Pods that a NodeClaim's
+// options disagree on including aren't judged.
+func checkTopologySpread(t *caseT, s scenario, placements []placement) {
+	type spread struct {
+		key      string
+		selector string
+		domain   string
+	}
+	satisfied := map[spread]bool{}
+	for _, a := range placements {
+		for _, pod := range a.pods {
+			for _, constraint := range pod.Spec.TopologySpreadConstraints {
+				if constraint.WhenUnsatisfiable != corev1.DoNotSchedule {
+					continue
+				}
+				domains := a.domains(constraint.TopologyKey)
+				if domains.Len() != 1 {
+					t.Fatalf("pod %s spreads on %s but its NodeClaim can launch in %v\n%s\n%s", pod.Name, constraint.TopologyKey, sets.List(domains), s.describe(pod), s)
+				}
+				counts, ok := spreadCounts(pod, constraint, placements)
+				if !ok {
+					continue
+				}
+				domain := domains.UnsortedList()[0]
+				key := spread{key: constraint.TopologyKey, selector: metav1.FormatLabelSelector(constraint.LabelSelector), domain: domain}
+				satisfied[key] = satisfied[key] || counts[domain]-lo.Min(lo.Values(counts)) <= int(constraint.MaxSkew)
+			}
+		}
+	}
+	for key, ok := range satisfied {
+		if !ok {
+			t.Fatalf("pods spreading on %s with selector %s exceed their maxSkew in %s\n%s\n%s", key.key, key.selector, key.domain, describePlacements(placements), s)
+		}
+	}
+}
+
+// spreadCounts counts the pods constraint selects in each domain of the nodes it includes, which are those matching
+// pod's node affinity unless its node affinity policy is Ignore. A NodeClaim that could launch in several domains holds
+// no selected pods, since they spread the same way, so counting each of its domains is the worst case. It returns false
+// when a NodeClaim's options disagree on whether they're included.
+func spreadCounts(pod *corev1.Pod, constraint corev1.TopologySpreadConstraint, placements []placement) (map[string]int, bool) {
+	selector := lo.Must(metav1.LabelSelectorAsSelector(constraint.LabelSelector))
+	counts := map[string]int{}
+	for _, p := range placements {
+		matches := lo.Map(p.launched, func(nc *v1.NodeClaim, _ int) bool {
+			return lo.FromPtr(constraint.NodeAffinityPolicy) == corev1.NodeInclusionPolicyIgnore ||
+				lo.Must(nodeaffinity.GetRequiredNodeAffinity(pod).Match(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: nc.Labels}}))
+		})
+		if len(lo.Uniq(matches)) > 1 {
+			return nil, false
+		}
+		if len(matches) == 0 || !matches[0] {
+			continue
+		}
+		selected := lo.CountBy(p.pods, func(other *corev1.Pod) bool {
+			return other.Namespace == pod.Namespace && selector.Matches(labels.Set(other.Labels))
+		})
+		domains := p.domains(constraint.TopologyKey)
+		if domains.Len() > 1 && selected > 0 {
+			return nil, false
+		}
+		for domain := range domains {
+			counts[domain] += selected
+		}
+	}
+	return counts, true
+}
+
+// selects returns whether term, belonging to pod, selects other.
+func selects(term corev1.PodAffinityTerm, pod, other *corev1.Pod) bool {
+	namespaces := lo.Ternary(len(term.Namespaces) == 0, []string{pod.Namespace}, term.Namespaces)
+	return lo.Contains(namespaces, other.Namespace) && lo.Must(metav1.LabelSelectorAsSelector(term.LabelSelector)).Matches(labels.Set(other.Labels))
+}
+
+// rewrite returns s with each pod's node constraints rewritten into equivalent ones and the instance types reordered.
+func rewrite(t *caseT, s scenario) scenario {
+	s.its = lo.Map(t.Perm(len(s.its)), func(i int, _ int) *cloudprovider.InstanceType { return s.its[i] })
+	s.pods = lo.Map(s.pods, func(pod *corev1.Pod, _ int) *corev1.Pod {
+		pod = pod.DeepCopy()
+		rewritePod(t, pod)
+		return pod
+	})
+	return s
+}
+
+func rewritePod(t *caseT, pod *corev1.Pod) {
+	if len(pod.Spec.NodeSelector) > 0 && t.bool() {
+		foldNodeSelector(pod)
+	}
+	// No node carries the absent label.
+	if affinity := pod.Spec.Affinity; affinity != nil && affinity.NodeAffinity != nil && affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil && t.bool() {
+		required := affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		for i := range required.NodeSelectorTerms {
+			required.NodeSelectorTerms[i].MatchExpressions = append(required.NodeSelectorTerms[i].MatchExpressions, corev1.NodeSelectorRequirement{
+				Key: absentLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist,
+			})
+		}
+	}
+	// No node has the untainted taint.
+	if t.bool() {
+		pod.Spec.Tolerations = append(pod.Spec.Tolerations, corev1.Toleration{Key: "example.com/untainted", Operator: corev1.TolerationOpExists})
+	}
+	// Neither requirements in a term, values in a requirement, nor tolerations are ordered.
+	for _, term := range nodeSelectorTerms(pod) {
+		shuffle(t, term.MatchExpressions)
+		for i := range term.MatchExpressions {
+			shuffle(t, term.MatchExpressions[i].Values)
+		}
+	}
+	shuffle(t, pod.Spec.Tolerations)
+}
+
+// foldNodeSelector moves pod's nodeSelector into every required term, which is equivalent.
+func foldNodeSelector(pod *corev1.Pod) {
+	pod.Spec.Affinity = lo.CoalesceOrEmpty(pod.Spec.Affinity, &corev1.Affinity{})
+	pod.Spec.Affinity.NodeAffinity = lo.CoalesceOrEmpty(pod.Spec.Affinity.NodeAffinity, &corev1.NodeAffinity{})
+	required := lo.CoalesceOrEmpty(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution, &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{}}})
+	keys := lo.Keys(pod.Spec.NodeSelector)
+	slices.Sort(keys)
+	for i := range required.NodeSelectorTerms {
+		for _, key := range keys {
+			required.NodeSelectorTerms[i].MatchExpressions = append(required.NodeSelectorTerms[i].MatchExpressions, corev1.NodeSelectorRequirement{
+				Key: key, Operator: corev1.NodeSelectorOpIn, Values: []string{pod.Spec.NodeSelector[key]},
+			})
+		}
+	}
+	pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = required
+	pod.Spec.NodeSelector = nil
+}
+
+func shuffle[E any](t *caseT, s []E) { t.Shuffle(len(s), func(i, j int) { s[i], s[j] = s[j], s[i] }) }
+
+// outcome describes which pods Provisioner.Schedule placed together with which instance type options, and which pods
+// failed, independent of order.
+func outcome(results scheduling.Results) string {
+	nodeClaims := lo.Map(results.NewNodeClaims, func(nc *scheduling.NodeClaim, _ int) string {
+		its := lo.Map(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })
+		slices.Sort(its)
+		return fmt.Sprintf("%v on %v", podNames(nc.Pods), its)
+	})
+	slices.Sort(nodeClaims)
+	return fmt.Sprintf("%s\nfailed: %v", strings.Join(nodeClaims, "\n"), podNames(lo.Keys(results.PodErrors)))
+}
+
+// podNames returns the pods' sorted names.
+func podNames(pods []*corev1.Pod) []string {
+	names := lo.Map(pods, func(pod *corev1.Pod, _ int) string { return pod.Name })
+	slices.Sort(names)
+	return names
+}
+
+func describePlacements(placements []placement) string {
+	return strings.Join(lo.Map(placements, func(p placement, _ int) string {
+		return fmt.Sprintf("%s: pods %v, zones %v", p.name, podNames(p.pods), sets.List(p.domains(corev1.LabelTopologyZone)))
+	}), "\n")
 }
 
 // excludedValue returns the value a NotIn excludes: the target's own value on a miss, otherwise a value another
@@ -490,14 +1060,15 @@ func otherValue(key, value string) string {
 	return unmatchedValue
 }
 
-// describeScenario describes the NodePool and instance types a failure depends on, since draws aren't reported.
-func describeScenario(np *v1.NodePool, its []*cloudprovider.InstanceType) string {
-	return fmt.Sprintf("NodePool labels: %v\nNodePool taints: %v\nNodePool requirements: %v\ninstance types: %v", np.Spec.Template.Labels,
-		np.Spec.Template.Spec.Taints, np.Spec.Template.Spec.Requirements, lo.Map(its, func(it *cloudprovider.InstanceType, _ int) string { return it.Name }))
+// String describes the NodePool and instance types a failure depends on, since draws aren't reported.
+func (s scenario) String() string {
+	return fmt.Sprintf("NodePool labels: %v\nNodePool taints: %v\nNodePool requirements: %v\nminValues policy: %s\ninstance types: %v", s.np.Spec.Template.Labels,
+		s.np.Spec.Template.Spec.Taints, s.np.Spec.Template.Spec.Requirements, s.minValuesPolicy, lo.Map(s.its, func(it *cloudprovider.InstanceType, _ int) string { return it.Name }))
 }
 
-func describe(pod *corev1.Pod) string {
-	return fmt.Sprintf("nodeSelector: %v\naffinity: %v\ntolerations: %v", pod.Spec.NodeSelector, pod.Spec.Affinity, pod.Spec.Tolerations)
+func (s scenario) describe(pod *corev1.Pod) string {
+	return fmt.Sprintf("labels: %v\nnodeSelector: %v\naffinity: %v\ntopologySpreadConstraints: %v\ntolerations: %v\nports: %v\nvolume topology: %v", pod.Labels,
+		pod.Spec.NodeSelector, pod.Spec.Affinity, pod.Spec.TopologySpreadConstraints, pod.Spec.Tolerations, pod.Spec.Containers[0].Ports, s.volumeSelectors[pod.UID])
 }
 
 var (
