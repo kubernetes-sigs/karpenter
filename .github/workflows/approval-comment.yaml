@@ -2,9 +2,13 @@ name: ApprovalComment
 on:
   pull_request_review:
     types: [submitted]
+permissions:
+  contents: read
 jobs:
   approval-comment:
-    if: startsWith(github.event.review.body, '/karpenter perf')
+    if: |
+      startsWith(github.event.review.body, '/karpenter perf') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

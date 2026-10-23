@@ -9,6 +9,7 @@ go.work.sum
 report.json
 *__debug_*
 bin/
+/perf-aggregate
 
 # Common in OSs and IDEs
 .idea
