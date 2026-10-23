@@ -71,6 +71,7 @@ type FeatureGates struct {
 	TerminateFirstRepair      bool
 	PodDeletionCostManagement bool
 	PredictionEnabled         bool
+	DisruptionSimulationReuse bool
 }
 
 // FeatureGate is the source-of-truth description of a feature gate. Declaring gates as FeatureGates keeps each gate's
@@ -157,6 +158,12 @@ var (
 			"predicted by a registered prediction source, and waits for that source to hydrate before scheduling. " +
 			"Requires a registered prediction source.",
 	}
+	DisruptionSimulationReuseFeatureGate = FeatureGate{
+		Name:    "DisruptionSimulationReuse",
+		Default: false,
+		Stage:   docs.Alpha,
+		Help:    "Karpenter reuses immutable scheduler preparation across consolidation simulations in one method pass.",
+	}
 )
 
 // KarpenterFeatureGates are the feature gates Karpenter supports, in the order --feature-gates lists them.
@@ -171,6 +178,7 @@ var KarpenterFeatureGates = []FeatureGate{
 	TerminateFirstRepairFeatureGate,
 	PodDeletionCostManagementFeatureGate,
 	PredictionEnabledFeatureGate,
+	DisruptionSimulationReuseFeatureGate,
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -298,6 +306,7 @@ func DefaultFeatureGates() FeatureGates {
 		TerminateFirstRepair:      TerminateFirstRepairFeatureGate.Default,
 		PodDeletionCostManagement: PodDeletionCostManagementFeatureGate.Default,
 		PredictionEnabled:         PredictionEnabledFeatureGate.Default,
+		DisruptionSimulationReuse: DisruptionSimulationReuseFeatureGate.Default,
 	}
 }
 
@@ -311,35 +320,22 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	if err := cliflag.NewMapStringBool(&gateMap).Set(gateStr); err != nil {
 		return gates, err
 	}
-	if val, ok := gateMap[NodeRepairFeatureGate.Name]; ok {
-		gates.NodeRepair = val
-	}
-	if val, ok := gateMap[SpotToSpotConsolidationFeatureGate.Name]; ok {
-		gates.SpotToSpotConsolidation = val
-	}
-	if val, ok := gateMap[ReservedCapacityFeatureGate.Name]; ok {
-		gates.ReservedCapacity = val
-	}
-	if val, ok := gateMap[NodeOverlayFeatureGate.Name]; ok {
-		gates.NodeOverlay = val
-	}
-	if val, ok := gateMap[StaticCapacityFeatureGate.Name]; ok {
-		gates.StaticCapacity = val
-	}
-	if val, ok := gateMap[CapacityBufferFeatureGate.Name]; ok {
-		gates.CapacityBuffer = val
-	}
-	if val, ok := gateMap[TerminateFirstDriftFeatureGate.Name]; ok {
-		gates.TerminateFirstDrift = val
-	}
-	if val, ok := gateMap[TerminateFirstRepairFeatureGate.Name]; ok {
-		gates.TerminateFirstRepair = val
-	}
-	if val, ok := gateMap[PodDeletionCostManagementFeatureGate.Name]; ok {
-		gates.PodDeletionCostManagement = val
-	}
-	if val, ok := gateMap[PredictionEnabledFeatureGate.Name]; ok {
-		gates.PredictionEnabled = val
+	for name, gate := range map[string]*bool{
+		NodeRepairFeatureGate.Name:                &gates.NodeRepair,
+		SpotToSpotConsolidationFeatureGate.Name:   &gates.SpotToSpotConsolidation,
+		ReservedCapacityFeatureGate.Name:          &gates.ReservedCapacity,
+		NodeOverlayFeatureGate.Name:               &gates.NodeOverlay,
+		StaticCapacityFeatureGate.Name:            &gates.StaticCapacity,
+		CapacityBufferFeatureGate.Name:            &gates.CapacityBuffer,
+		TerminateFirstDriftFeatureGate.Name:       &gates.TerminateFirstDrift,
+		TerminateFirstRepairFeatureGate.Name:      &gates.TerminateFirstRepair,
+		PodDeletionCostManagementFeatureGate.Name: &gates.PodDeletionCostManagement,
+		PredictionEnabledFeatureGate.Name:         &gates.PredictionEnabled,
+		DisruptionSimulationReuseFeatureGate.Name: &gates.DisruptionSimulationReuse,
+	} {
+		if val, ok := gateMap[name]; ok {
+			*gate = val
+		}
 	}
 
 	return gates, nil
