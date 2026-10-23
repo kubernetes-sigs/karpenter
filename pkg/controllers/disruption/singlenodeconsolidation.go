@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -58,6 +59,9 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
+	// The wall-clock check below only runs between candidates, so also bound the scheduling simulations themselves.
+	timeoutCtx, cancel := context.WithTimeout(ctx, SingleNodeConsolidationTimeoutDuration)
+	defer cancel()
 	constrainedByBudgets := false
 
 	unseenNodePools := sets.New(lo.Map(candidates, func(c *Candidate, _ int) string { return c.NodePool.Name })...)
@@ -88,8 +92,16 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 		}
 
 		// compute a possible consolidation option
-		cmd, err := s.computeConsolidation(ctx, candidate)
+		cmd, err := s.computeConsolidation(timeoutCtx, candidate)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: s.ConsolidationType()})
+				log.FromContext(ctx).V(1).Info("abandoning single-node consolidation due to timeout", "candidates_evaluated", i)
+				// this candidate's nodepool wasn't actually evaluated, so keep prioritizing it next time
+				unseenNodePools.Insert(candidate.NodePool.Name)
+				s.PreviouslyUnseenNodePools = unseenNodePools
+				return []Command{}, nil
+			}
 			log.FromContext(ctx).Error(err, "failed computing consolidation")
 			continue
 		}
