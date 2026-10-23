@@ -158,8 +158,13 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 				// 2. The node was chosen for a previous disruption command, we assume that the uninitialized node will come up
 				//    for this command, and we assume it will be successful. If it is not successful, the node will become
 				//    not terminating, and we will no longer need to consider these pods.
-				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; !ok {
-					results.PodErrors[p] = lo.Ternary[error](n.RebootInProgress(), NewRebootingNodeError(n), NewUninitializedNodeError(n))
+				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; ok {
+					continue
+				}
+				if n.RebootInProgress() {
+					results.PodErrors[p] = NewRebootingNodeError(n)
+				} else {
+					results.PodErrors[p] = NewUninitializedNodeError(n)
 				}
 			}
 		}
@@ -261,7 +266,14 @@ func NewRebootingNodeError(node *scheduling.ExistingNode) *RebootingNodeError {
 }
 
 func (r *RebootingNodeError) Error() string {
-	return fmt.Sprintf("would schedule against rebooting node/%s", r.Name())
+	var info []string
+	if r.NodeClaim != nil {
+		info = append(info, fmt.Sprintf("nodeclaim/%s", r.NodeClaim.Name))
+	}
+	if r.Node != nil {
+		info = append(info, fmt.Sprintf("node/%s", r.Node.Name))
+	}
+	return fmt.Sprintf("would schedule against rebooting %s", strings.Join(info, ", "))
 }
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.

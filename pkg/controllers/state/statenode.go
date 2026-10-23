@@ -403,8 +403,13 @@ func (in *StateNode) RebootInProgress() bool {
 	if in.NodeClaim == nil {
 		return false
 	}
-	cond := in.NodeClaim.StatusConditions().Get(v1.ConditionTypeRebooting)
-	return cond != nil && cond.IsTrue()
+	// Scan directly: StatusConditions() allocates, and this runs in scheduling hot paths like node sorting.
+	for i := range in.NodeClaim.Status.Conditions {
+		if in.NodeClaim.Status.Conditions[i].Type == v1.ConditionTypeRebooting {
+			return in.NodeClaim.Status.Conditions[i].IsTrue()
+		}
+	}
+	return false
 }
 
 func (in *StateNode) Taints() []corev1.Taint {
@@ -513,7 +518,7 @@ func (in *StateNode) RebootDepartingPods() []types.NamespacedName {
 	if !in.RebootInProgress() {
 		return nil
 	}
-	return lo.Keys(lo.PickBy(in.terminatingPods, func(_ types.NamespacedName, terminating bool) bool { return terminating }))
+	return lo.Keys(in.terminatingPods)
 }
 
 func (in *StateNode) DaemonSetRequests() corev1.ResourceList {

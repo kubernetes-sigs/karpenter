@@ -898,6 +898,10 @@ func (s *Scheduler) sortExistingNodes() {
 		if !s.existingNodes[i].Initialized() && s.existingNodes[j].Initialized() {
 			return false
 		}
+		// Capacity a rebooting node offers only exists once it returns, so prefer nodes that can take pods now
+		if ri, rj := s.existingNodes[i].RebootInProgress(), s.existingNodes[j].RebootInProgress(); ri != rj {
+			return rj
+		}
 		return s.existingNodes[i].Name() < s.existingNodes[j].Name()
 	})
 }
