@@ -245,6 +245,49 @@ var _ = Describe("Pod Metrics", func() {
 				"dynamic_resources": expected,
 			})
 			Expect(found).To(BeTrue())
+			// The unbound metrics are deleted now that the pod is bound
+			_, found = FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
+				"name":      pod.GetName(),
+				"namespace": pod.GetNamespace(),
+			})
+			Expect(found).To(BeFalse())
+			_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+				"name":      pod.GetName(),
+				"namespace": pod.GetNamespace(),
+			})
+			Expect(found).To(BeFalse())
+		},
+		Entry("when the pod does not request dynamic resources", test.Pod(), "false"),
+		Entry("when the pod requests dynamic resources via a pod-level resource claim",
+			test.Pod(test.PodOptions{ResourceClaims: []corev1.PodResourceClaim{test.PodResourceClaimReference("gpu", "gpu-claim")}}), "true"),
+	)
+	DescribeTable("should delete the pod unbound metrics labeled with dynamic_resources on pod delete",
+		func(pod *corev1.Pod, expected string) {
+			if expected == "true" && env.Version.Minor() < 34 {
+				Skip("DRA is only available in K8s versions >= 1.34.x")
+			}
+			pod.Status.Phase = corev1.PodPending
+			ExpectApplied(ctx, env.Client, pod)
+			cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{}, map[string][]*corev1.Pod{"n1": {pod}}, map[string][]*corev1.Pod{"nc1": {pod}})
+			ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+			for _, name := range []string{"karpenter_pods_unbound_time_seconds", "karpenter_pods_provisioning_unbound_time_seconds"} {
+				_, found := FindMetricWithLabelValues(name, map[string]string{
+					"name":              pod.GetName(),
+					"namespace":         pod.GetNamespace(),
+					"dynamic_resources": expected,
+				})
+				Expect(found).To(BeTrue())
+			}
+
+			ExpectDeleted(ctx, env.Client, pod)
+			ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
+			for _, name := range []string{"karpenter_pods_unbound_time_seconds", "karpenter_pods_provisioning_unbound_time_seconds"} {
+				_, found := FindMetricWithLabelValues(name, map[string]string{
+					"name":      pod.GetName(),
+					"namespace": pod.GetNamespace(),
+				})
+				Expect(found).To(BeFalse())
+			}
 		},
 		Entry("when the pod does not request dynamic resources", test.Pod(), "false"),
 		Entry("when the pod requests dynamic resources via a pod-level resource claim",
