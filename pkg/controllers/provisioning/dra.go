@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -52,7 +54,8 @@ func (p *Provisioner) gatherResourceSlices(ctx context.Context, stateNodes []*st
 		if n.Node == nil {
 			continue
 		}
-		if n.Initialized() {
+		// A rebooting node keeps the devices it published, so its riding pods' allocations stay accounted for
+		if n.Initialized() || n.RebootInProgress() {
 			includedNodeNames.Insert(n.Name())
 		}
 	}
@@ -85,20 +88,23 @@ func nodeOwnerName(slice *resourcev1.ResourceSlice) (string, bool) {
 //   - Devices allocated exclusively by deleting pods (all consumers are in deletingPodUIDs) are excluded, since those
 //     pods are migrating off their nodes.
 //   - Releasable devices with no live consumers (unowned) are excluded.
+//   - Exclusive devices whose remaining consumers are all leaving the same rebooting node stay allocated but are
+//     recorded as releasable for that node alone, since only that node returns without them.
 //   - For multi-allocatable (shared) devices that survive the above, the consumed capacity of any claim whose pods are
 //     all deleting is subtracted, so a deleting pod's share of a shared device is freed even when live pods keep the
 //     device itself in use.
 //
 // The remaining devices form the allocator's immutable seed set of already-allocated in-cluster devices, split into
 // exclusively-allocated devices and the consumed capacity of multi-allocatable (shared) devices.
-func (p *Provisioner) gatherAllocatedDevices(ctx context.Context, deletingPodUIDs sets.Set[types.UID]) (dynamicresources.AllocatedDeviceState, error) {
+func (p *Provisioner) gatherAllocatedDevices(ctx context.Context, deletingPodUIDs sets.Set[types.UID], rebootDepartingPods map[types.UID]string) (dynamicresources.AllocatedDeviceState, error) {
 	seq, err := p.deviceAllocationController.AllocatedDevices(ctx)
 	if err != nil {
 		return dynamicresources.AllocatedDeviceState{}, fmt.Errorf("getting allocated devices, %w", err)
 	}
 	state := dynamicresources.AllocatedDeviceState{
-		ExclusiveDevices: sets.New[cloudprovider.DeviceID](),
-		ConsumedCapacity: map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{},
+		ExclusiveDevices:        sets.New[cloudprovider.DeviceID](),
+		ConsumedCapacity:        map[cloudprovider.DeviceID]map[resourcev1.QualifiedName]resource.Quantity{},
+		RebootReleasableDevices: map[cloudprovider.DeviceID]string{},
 	}
 	for id, meta := range seq {
 		// A device with no live consumers that every referencing claim considers releasable is available.
@@ -122,8 +128,48 @@ func (p *Provisioner) gatherAllocatedDevices(ctx context.Context, deletingPodUID
 			continue
 		}
 		state.ExclusiveDevices.Insert(id)
+		if nodeName, ok := rebootDepartingNode(meta.PodUIDs, deletingPodUIDs, rebootDepartingPods); ok && meta.Releasable {
+			state.RebootReleasableDevices[id] = nodeName
+		}
 	}
 	return state, nil
+}
+
+// rebootDepartingNode returns the rebooting node that every non-deleting consumer is leaving, if there is exactly one.
+func rebootDepartingNode(podUIDs []types.UID, deletingPodUIDs sets.Set[types.UID], rebootDepartingPods map[types.UID]string) (string, bool) {
+	var nodeName string
+	for _, uid := range podUIDs {
+		if deletingPodUIDs.Has(uid) {
+			continue
+		}
+		n, ok := rebootDepartingPods[uid]
+		if !ok || (nodeName != "" && n != nodeName) {
+			return "", false
+		}
+		nodeName = n
+	}
+	return nodeName, nodeName != ""
+}
+
+// rebootDepartingPods maps the UID of each pod leaving a rebooting node to that node's name.
+func (p *Provisioner) rebootDepartingPods(ctx context.Context, stateNodes []*state.StateNode) (map[types.UID]string, error) {
+	departing := map[types.UID]string{}
+	for _, n := range stateNodes {
+		if n.Node == nil {
+			continue
+		}
+		for _, key := range n.RebootDepartingPods() {
+			pod := &corev1.Pod{}
+			if err := p.kubeClient.Get(ctx, key, pod); err != nil {
+				if errors.IsNotFound(err) {
+					continue
+				}
+				return nil, fmt.Errorf("getting pod, %w", err)
+			}
+			departing[pod.UID] = n.Name()
+		}
+	}
+	return departing, nil
 }
 
 // effectiveConsumedCapacity computes a shared device's consumed capacity with the contributions of fully-deleting
