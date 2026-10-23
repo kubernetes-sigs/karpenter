@@ -56,8 +56,14 @@ jobs:
       shell: bash
       run: |
         go install github.com/google/ko@latest      
+    - name: install VPA
+      if: inputs.suite == 'Disruption'
+      shell: bash
+      run: make install-vpa
     - name: install kwok and controller
       shell: bash
+      env:
+        PREDICTION_ENABLED: ${{ inputs.suite == 'Disruption' }}
       run: |
         make install-kwok
         export KWOK_REPO=kind.local

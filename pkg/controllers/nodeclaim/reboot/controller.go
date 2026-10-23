@@ -243,7 +243,7 @@ func (c *Controller) drain(ctx context.Context, nodeClaim *v1.NodeClaim, node *c
 	floor := rebootRequestedAt(nodeClaim).Add(minDrainTime)
 	var deadline *time.Time
 	if tgp != nil {
-		deadline = lo.ToPtr(rebootRequestedAt(nodeClaim).Add(max(*tgp, minDrainTime)))
+		deadline = new(rebootRequestedAt(nodeClaim).Add(max(*tgp, minDrainTime)))
 	}
 	// A timeout, not a force-delete deadline: residual pods are never deleted.
 	if err := c.terminator.Drain(ctx, node, deadline, terminator.Timeout); err != nil {
@@ -358,7 +358,7 @@ func (c *Controller) transitionToFailed(ctx context.Context, nodeClaim *v1.NodeC
 				return reconcile.Result{}, client.IgnoreNotFound(err)
 			}
 		}
-		if err := c.kubeClient.Delete(ctx, nodeClaim, client.Preconditions{ResourceVersion: lo.ToPtr(nodeClaim.ResourceVersion)}); err != nil {
+		if err := c.kubeClient.Delete(ctx, nodeClaim, client.Preconditions{ResourceVersion: new(nodeClaim.ResourceVersion)}); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 		c.clearIssuanceStarted(nodeClaim.UID)

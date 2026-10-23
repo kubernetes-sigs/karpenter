@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"math/rand"
+	"strconv"
 	"strings"
 	"time"
 
@@ -279,7 +280,7 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        newName,
 			Labels:      addInstanceLabels(nodeClaim.Labels, instanceType, nodeClaim, cheapestOffering),
-			Annotations: addKwokAnnotation(nodeClaim.Annotations),
+			Annotations: addLaunchPriceAnnotation(addKwokAnnotation(nodeClaim.Annotations), cheapestOffering),
 		},
 		Spec: corev1.NodeSpec{
 			ProviderID: kwokProviderPrefix + newName,
@@ -360,4 +361,28 @@ func (c CloudProvider) toNodeClaim(node *corev1.Node) (*v1.NodeClaim, error) {
 			Allocatable: node.Status.Allocatable,
 		},
 	}, nil
+}
+
+// addLaunchPriceAnnotation records the launch price of an on-demand-alt offering, which NodeClaimPriceProvider reads back.
+func addLaunchPriceAnnotation(annotations map[string]string, offering *cloudprovider.Offering) map[string]string {
+	if offering.CapacityType() != CapacityTypeOnDemandAlt {
+		return annotations
+	}
+	annotations[v1alpha1.LaunchPriceAnnotationKey] = strconv.FormatFloat(offering.Price, 'f', -1, 64)
+	return annotations
+}
+
+// NodeClaimPriceProvider prices an on-demand-alt NodeClaim at its recorded launch price, and every other NodeClaim by its
+// offering. It's an example of a provider whose launch price isn't an offering lookup.
+type NodeClaimPriceProvider struct {
+	cloudprovider.DefaultNodeClaimPriceProvider
+}
+
+func (p NodeClaimPriceProvider) NodeClaimPrice(ctx context.Context, nodeClaim *v1.NodeClaim, instanceType *cloudprovider.InstanceType) (float64, bool) {
+	if raw, ok := nodeClaim.Annotations[v1alpha1.LaunchPriceAnnotationKey]; ok {
+		if price, err := strconv.ParseFloat(raw, 64); err == nil {
+			return price, true
+		}
+	}
+	return p.DefaultNodeClaimPriceProvider.NodeClaimPrice(ctx, nodeClaim, instanceType)
 }

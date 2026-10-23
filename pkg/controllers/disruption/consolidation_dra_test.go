@@ -49,7 +49,7 @@ var _ = Describe("Consolidation/DRA", func() {
 		}
 		// Enable DRA (gated off by default). The suite's BeforeEach resets options, and runs before this one, so this
 		// re-enables DRA for the consolidation simulation.
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(false)}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: new(false)}))
 		nodePool = test.NodePool()
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
@@ -111,7 +111,7 @@ var _ = Describe("Consolidation/DRA", func() {
 		pod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
-				Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+				Controller: new(true), BlockOwnerDeletion: new(true),
 			}}},
 			ResourceClaims:          []corev1.PodResourceClaim{test.PodResourceClaimReference("gpu", claimName)},
 			ContainerResourceClaims: []corev1.ResourceClaim{{Name: "gpu"}},
@@ -265,7 +265,7 @@ var _ = Describe("Consolidation/DRA", func() {
 		candidatePod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID,
-				Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+				Controller: new(true), BlockOwnerDeletion: new(true),
 			}}},
 			ResourceClaims:          []corev1.PodResourceClaim{test.PodResourceClaimReference("gpu", "candidate-claim")},
 			ContainerResourceClaims: []corev1.ResourceClaim{{Name: "gpu"}},

@@ -172,6 +172,9 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		}
 		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
 	}
+	if options.FromContext(ctx).FeatureGates.PredictionEnabled && !c.provisioner.PredictionStoreHydrated(ctx) {
+		return reconciler.Result{RequeueAfter: time.Second}, nil
+	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {

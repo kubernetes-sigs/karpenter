@@ -31,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 )
@@ -112,10 +113,7 @@ func (kp *KarpenterProfiler) run(ctx context.Context) {
 }
 
 func (kp *KarpenterProfiler) establishPortForward(ctx context.Context, localPort int) error {
-	findCtx, findCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer findCancel()
-
-	pod, err := kp.env.FindActiveKarpenterPod(findCtx)
+	pod, err := kp.env.EventuallyFindActiveKarpenterPod(ctx)
 	if err != nil || pod == nil {
 		return fmt.Errorf("finding karpenter pod: %w", err)
 	}
@@ -248,6 +246,30 @@ func (env *Environment) FindActiveKarpenterPod(ctx context.Context) (*corev1.Pod
 
 	pod := &corev1.Pod{}
 	if err := env.Client.Get(ctx, types.NamespacedName{Name: holderArr[0], Namespace: "kube-system"}, pod); err != nil {
+		return nil, err
+	}
+	return pod, nil
+}
+
+const (
+	leaderPodPollInterval = 5 * time.Second
+	leaderPodPollTimeout  = 2 * time.Minute
+)
+
+func (env *Environment) EventuallyFindActiveKarpenterPod(ctx context.Context) (*corev1.Pod, error) {
+	var pod *corev1.Pod
+	var lastErr error
+	if err := wait.PollUntilContextTimeout(ctx, leaderPodPollInterval, leaderPodPollTimeout, true,
+		func(ctx context.Context) (bool, error) {
+			pod, lastErr = env.FindActiveKarpenterPod(ctx)
+			if lastErr == nil && pod == nil {
+				lastErr = fmt.Errorf("leader lease resolved to a nil pod")
+			}
+			return lastErr == nil, nil
+		}); err != nil {
+		if lastErr != nil {
+			return nil, fmt.Errorf("%w (last lookup error: %w)", err, lastErr)
+		}
 		return nil, err
 	}
 	return pod, nil

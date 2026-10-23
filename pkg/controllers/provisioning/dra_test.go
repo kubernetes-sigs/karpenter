@@ -130,13 +130,13 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Skip("DRA is only available in K8s versions >= 1.34.x")
 		}
 		// DRA support is gated off by default; enable it for these tests.
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(false)}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: new(false)}))
 		nodePool = test.NodePool()
 		// Use a provisioner backed by a fresh deviceallocation controller so each test starts with clean
 		// allocated-device tracking state. The controller must be reconciled (hydrated) before a provisioning round
 		// that relies on the in-cluster allocated-device set — see provisionDRA.
 		draController = deviceallocation.NewController(env.Client)
-		draProvisioner = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client))
+		draProvisioner = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, env.Clock, draController, virtualpods.NewVirtualPodCache(env.Client), nil)
 	})
 
 	// provisionDRA reconciles the deviceallocation controller (so the allocator sees the current in-cluster allocated
@@ -484,7 +484,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 
 	Context("Enablement gating (N)", func() {
 		It("should reject DRA pods with a DRAError when IgnoreDRARequests is enabled (N1)", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(true)}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: new(true)}))
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
 			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
 			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)))
@@ -1086,7 +1086,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			// Device capacity restricted to {4Gi,8Gi,16Gi}; a 32Gi request exceeds all valid values and is rejected.
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityPolicyGPUInstanceType("gpu-it", "16Gi",
 				&resourcev1.CapacityRequestPolicy{
-					Default:     lo.ToPtr(resource.MustParse("4Gi")),
+					Default:     new(resource.MustParse("4Gi")),
 					ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
 				})}
 			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
@@ -1107,7 +1107,7 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			// Device has 16Gi with a Default consumption of 4Gi. Three pods that request the device WITHOUT naming the
 			// capacity dimension each consume the 4Gi default (not the whole device), so all three pack onto one device.
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{capacityPolicyGPUInstanceType("gpu-it", "16Gi",
-				&resourcev1.CapacityRequestPolicy{Default: lo.ToPtr(resource.MustParse("4Gi"))})}
+				&resourcev1.CapacityRequestPolicy{Default: new(resource.MustParse("4Gi"))})}
 			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
 			pods := lo.Times(3, func(i int) *corev1.Pod {
 				name := fmt.Sprintf("default-claim-%d", i)

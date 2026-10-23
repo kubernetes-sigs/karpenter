@@ -12,6 +12,8 @@ A file for [guiding coding agents](https://agents.md/).
     `go test ./pkg/controllers/disruption/... -race`
   - Focus a single spec: `FOCUS="<spec text>" make test` or pass
     `--ginkgo.focus="<spec text>"` to `go test`.
+  - Scheduling properties run a pinned seed; explore more cases with
+    `go test ./pkg/controllers/provisioning/scheduling/... --ginkgo.focus="Scheduling Properties" -schedulingproperties.checks=5000 -schedulingproperties.seed=0`.
 - **Lint/codegen:** `make verify`
   - Runs `go generate`, CRD validation scripts, `go vet`, and golangci-lint.
     Fails if it leaves a diff, so run it after changing APIs in `pkg/apis`.

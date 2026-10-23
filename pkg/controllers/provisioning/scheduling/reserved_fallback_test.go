@@ -95,7 +95,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 
 	BeforeEach(func() {
 		cloudProvider.Reset()
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: new(true)}}))
 	})
 
 	It("fallback: a full reservation with no fallback yields no NodeClaim (pod falls through / pends, not a phantom reserved NodeClaim)", func() {
@@ -169,10 +169,10 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		Expect(results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
 	})
 
-	It("strict (provisioning): a reserved-only pool with a full reservation defers instead of launching on-demand", func() {
+	It("strict (provisioning): a reserved-only pool with a full reservation fails to schedule instead of launching on-demand", func() {
 		// A reserved-ONLY NodePool (capacity-type In [reserved], no on-demand/spot fallback) whose reservation is full
-		// but Available. There is no non-reserved fallback, so strict must defer (ReservedOfferingError) rather than
-		// create a NodeClaim that would be launched on-demand — this is the reserved-only mislaunch guard.
+		// but Available. There is no non-reserved fallback, so strict must not create a NodeClaim that would be launched
+		// on-demand — this is the reserved-only mislaunch guard.
 		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{newReservedType(reservedOffering("r-full", true, 0))}
 		nodePool = test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
 			Requirements: []v1.NodeSelectorRequirementWithMinValues{
@@ -187,9 +187,11 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		Expect(err).ToNot(HaveOccurred())
 		results, err := s.Solve(injection.WithControllerName(ctx, "provisioner"), []*corev1.Pod{pod})
 		Expect(err).ToNot(HaveOccurred())
-		// No on-demand mislaunch: no NodeClaim is created and the pod defers via a (retryable) ReservedOfferingError.
+		// No on-demand mislaunch: no NodeClaim is created. The pod fails with a plain error, not a ReservedOfferingError,
+		// since there's no capacity to wait for this loop.
 		Expect(results.NewNodeClaims).To(HaveLen(0))
-		Expect(results.ReservedOfferingErrors()).To(HaveKey(pod))
+		Expect(results.PodErrors).To(HaveKey(pod))
+		Expect(results.ReservedOfferingErrors()).ToNot(HaveKey(pod))
 	})
 
 	It("strict (provisioning): a reservation with capacity is preferred over on-demand (regression guard)", func() {
@@ -212,7 +214,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 	// the same instance type (which keeps its default on-demand offerings) so we can observe cross-NodePool fallthrough.
 	onDemandNodePool := func(instanceTypeName string) *v1.NodePool {
 		return test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{
-			Weight: lo.ToPtr(int32(1)),
+			Weight: new(int32(1)),
 			Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Requirements: []v1.NodeSelectorRequirementWithMinValues{
 				{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{instanceTypeName}},
 				{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}},
@@ -232,7 +234,7 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 		It("falls through to a lower-weight on-demand NodePool when the higher-weight reserved NodePool's reservation is full", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{newReservedType(reservedOffering("r-full", true, 0))}
 			reserved := reservedOnlyNodePool("reserved-type")
-			reserved.Spec.Weight = lo.ToPtr(int32(100))
+			reserved.Spec.Weight = new(int32(100))
 			od := onDemandNodePool("reserved-type")
 			ExpectApplied(ctx, env.Client, reserved, od)
 
@@ -281,6 +283,176 @@ var _ = Describe("Reserved Instance Types/Full-but-available (capacity-availabil
 			Expect(results.NewNodeClaims).To(HaveLen(1))
 			scheduled := lo.Filter([]*corev1.Pod{p1, p2}, func(p *corev1.Pod, _ int) bool { _, pending := results.PodErrors[p]; return !pending })
 			Expect(scheduled).To(HaveLen(1))
+		})
+	})
+
+	// https://github.com/kubernetes-sigs/karpenter/issues/3451: under PreferencePolicy=Respect, a preferred
+	// capacity-type=reserved is treated as required on the first pass, which hides the on-demand/spot fallback once the
+	// reservation is full. The scheduler must relax the preference or fall through to another NodePool instead of
+	// deferring forever, without launching on-demand where the pod's required terms or the NodePool don't allow it.
+	Context("strict (provisioning): a full reservation behind a preferred capacity-type=reserved", func() {
+		instanceType := func(name string, reserved *cloudprovider.Offering) *cloudprovider.InstanceType {
+			it := fake.NewInstanceType(name, fake.WithResources(map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("4Gi"),
+			}))
+			it.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+			it.Offerings = append(it.Offerings, reserved)
+			return it
+		}
+		nodePoolWith := func(weight int32, instanceTypeName string, capacityTypes ...string) *v1.NodePool {
+			return test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{
+				Weight: new(weight),
+				Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Requirements: []v1.NodeSelectorRequirementWithMinValues{
+					{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{instanceTypeName}},
+					{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: capacityTypes},
+				}}},
+			}})
+		}
+		preferReserved := []corev1.NodeSelectorRequirement{
+			{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeReserved}},
+		}
+		podOpts := func(opts test.PodOptions) test.PodOptions {
+			opts.ResourceRequirements = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}}
+			return opts
+		}
+
+		It("relaxes the preference and falls back to on-demand in a NodePool that allows it", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType("reserved-type", reservedOffering("r-full", true, 0))}
+			ExpectApplied(ctx, env.Client, nodePoolWith(10, "reserved-type", v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			pod := test.UnschedulablePod(podOpts(test.PodOptions{NodePreferences: preferReserved}))
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(BeEmpty())
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
+		})
+		It("provisions a node for the pod end to end", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType("reserved-type", reservedOffering("r-full", true, 0))}
+			ExpectApplied(ctx, env.Client, nodePoolWith(10, "reserved-type", v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			pod := test.UnschedulablePod(podOpts(test.PodOptions{NodePreferences: preferReserved}))
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("doesn't launch on-demand in a reserved-only NodePool", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType("reserved-type", reservedOffering("r-full", true, 0))}
+			ExpectApplied(ctx, env.Client, nodePoolWith(10, "reserved-type", v1.CapacityTypeReserved))
+
+			pod := test.UnschedulablePod(podOpts(test.PodOptions{NodePreferences: preferReserved}))
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.NewNodeClaims).To(HaveLen(0))
+			Expect(results.PodErrors).To(HaveKey(pod))
+		})
+		It("doesn't launch on-demand for a pod that requires reserved, even if it has other preferences to relax", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType("reserved-type", reservedOffering("r-full", true, 0))}
+			ExpectApplied(ctx, env.Client, nodePoolWith(10, "reserved-type", v1.CapacityTypeReserved, v1.CapacityTypeOnDemand))
+
+			pod := test.UnschedulablePod(podOpts(test.PodOptions{
+				NodeRequirements: preferReserved,
+				NodePreferences: []corev1.NodeSelectorRequirement{
+					{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+				},
+			}))
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.NewNodeClaims).To(HaveLen(0))
+			Expect(results.PodErrors).To(HaveKey(pod))
+		})
+		It("reserves a sibling reservation with capacity instead of treating a full one as exhaustion", func() {
+			it := instanceType("reserved-type", reservedOffering("r-full", true, 0))
+			it.Offerings = append(it.Offerings, reservedOffering("r-has-cap", true, 1))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{it}
+			ExpectApplied(ctx, env.Client, nodePoolWith(10, "reserved-type", v1.CapacityTypeReserved))
+
+			pod := test.UnschedulablePod(podOpts(test.PodOptions{NodePreferences: preferReserved}))
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-has-cap"))
+		})
+		It("honors the preference via a lower-weight NodePool's reservation before relaxing it", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				instanceType("type-a", reservedOffering("r-full", true, 0)),
+				instanceType("type-b", reservedOffering("r-has-cap", true, 1)),
+			}
+			ExpectApplied(ctx, env.Client,
+				nodePoolWith(100, "type-a", v1.CapacityTypeReserved, v1.CapacityTypeOnDemand),
+				nodePoolWith(10, "type-b", v1.CapacityTypeReserved),
+			)
+
+			pod := test.UnschedulablePod(podOpts(test.PodOptions{NodePreferences: preferReserved}))
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-has-cap"))
+		})
+		It("relaxes the preference when a lower-weight NodePool's reservation is also full", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				instanceType("type-a", reservedOffering("r-full-a", true, 0)),
+				instanceType("type-b", reservedOffering("r-full-b", true, 0)),
+			}
+			ExpectApplied(ctx, env.Client,
+				nodePoolWith(100, "type-a", v1.CapacityTypeReserved, v1.CapacityTypeOnDemand),
+				nodePoolWith(10, "type-b", v1.CapacityTypeReserved),
+			)
+
+			pod := test.UnschedulablePod(podOpts(test.PodOptions{NodePreferences: preferReserved}))
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].InstanceTypeOptions[0].Name).To(Equal("type-a"))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand)).To(BeTrue())
+		})
+		It("falls through from a full reserved-only NodePool to a lower-weight on-demand NodePool", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{instanceType("reserved-type", reservedOffering("r-full", true, 0))}
+			ExpectApplied(ctx, env.Client,
+				nodePoolWith(100, "reserved-type", v1.CapacityTypeReserved),
+				nodePoolWith(10, "reserved-type", v1.CapacityTypeOnDemand),
+			)
+
+			pod := smallPod()
+			results := solveWith([]*corev1.Pod{pod}, scheduling.DisableReservedCapacityFallback)
+
+			Expect(results.PodErrors).ToNot(HaveKey(pod))
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey).Values()).To(ConsistOf(v1.CapacityTypeOnDemand))
+		})
+		It("doesn't relax while a reservation with capacity is pessimistically held, regardless of concurrency", func() {
+			// The second pod can't reserve r-has-cap this pass (the first pod holds it), so it must defer to the next loop
+			// rather than relax to on-demand, even though a lower-weight NodePool's reservation is full.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				instanceType("type-a", reservedOffering("r-has-cap", true, 1)),
+				instanceType("type-b", reservedOffering("r-full", true, 0)),
+			}
+			ExpectApplied(ctx, env.Client,
+				nodePoolWith(100, "type-a", v1.CapacityTypeOnDemand),
+				nodePoolWith(50, "type-a", v1.CapacityTypeReserved, v1.CapacityTypeOnDemand),
+				nodePoolWith(10, "type-b", v1.CapacityTypeReserved),
+			)
+
+			labels := map[string]string{"app": "spread"}
+			pods := lo.Times(2, func(_ int) *corev1.Pod {
+				return test.UnschedulablePod(podOpts(test.PodOptions{
+					ObjectMeta:      metav1.ObjectMeta{Labels: labels},
+					NodePreferences: preferReserved,
+					PodAntiRequirements: []corev1.PodAffinityTerm{{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+						TopologyKey:   corev1.LabelHostname,
+					}},
+				}))
+			})
+			results := solveWith(pods, scheduling.DisableReservedCapacityFallback, scheduling.NumConcurrentReconciles(4))
+
+			Expect(results.NewNodeClaims).To(HaveLen(1))
+			Expect(results.NewNodeClaims[0].Requirements.Get(v1alpha1.LabelReservationID).Values()).To(ConsistOf("r-has-cap"))
+			Expect(results.ReservedOfferingErrors()).To(HaveLen(1))
 		})
 	})
 })
