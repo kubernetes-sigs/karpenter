@@ -37,7 +37,7 @@ var _ = Describe("RingBufferUtils", func() {
 		boolBuffer.Insert(true)
 		Expect(boolBuffer.Len()).To(Equal(1))
 		for _, value := range boolBuffer.Items() {
-			Expect(value).To(Equal(true))
+			Expect(value).To(BeTrue())
 		}
 		boolBuffer.Reset()
 		Expect(boolBuffer.Len()).To(Equal(0))
@@ -48,11 +48,11 @@ var _ = Describe("RingBufferUtils", func() {
 		boolBuffer.Insert(true)
 		Expect(boolBuffer.Len()).To(Equal(2))
 		for _, value := range boolBuffer.Items() {
-			Expect(value).To(Equal(true))
+			Expect(value).To(BeTrue())
 		}
 		boolBuffer.Insert(false)
 		Expect(boolBuffer.Len()).To(Equal(2))
-		Expect(boolBuffer.Items()[0]).To(Equal(false))
-		Expect(boolBuffer.Items()[1]).To(Equal(true))
+		Expect(boolBuffer.Items()[0]).To(BeFalse())
+		Expect(boolBuffer.Items()[1]).To(BeTrue())
 	})
 })

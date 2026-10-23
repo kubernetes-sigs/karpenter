@@ -1446,9 +1446,10 @@ func (env *Environment) ExpectPodPortForwarded(ctx context.Context, pod *corev1.
 		close(stop)
 	}()
 	go func() {
+		defer GinkgoRecover()
 		fw, err := portforward.New(dialer, []string{fmt.Sprintf("%d:%d", localPort, podPort)}, stop, ready, io.Discard, io.Discard)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(fw.ForwardPorts())
+		Expect(fw.ForwardPorts()).To(Succeed())
 	}()
 	<-ready
 }
