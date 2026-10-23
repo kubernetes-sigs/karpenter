@@ -185,10 +185,12 @@ func ValidateClaimRequest(
 	// no combination of sub-request selections actually fits, the per-claim check runs
 	// during the DFS.
 	var baseTotalDevices int
-	for _, req := range data.Requests {
+	for i := range data.Requests {
+		req := &data.Requests[i]
 		if len(req.SubRequests) > 0 {
 			minDevices := math.MaxInt
-			for _, sub := range req.SubRequests {
+			for j := range req.SubRequests {
+				sub := &req.SubRequests[j]
 				minDevices = min(minDevices, sub.NumDevices+len(sub.AllDevices))
 			}
 			baseTotalDevices += minDevices
@@ -206,10 +208,11 @@ func ValidateClaimRequest(
 	// Prune instance types whose template devices would push the total over the limit.
 	// Collect all unique instance type IDs across All-mode requests.
 	allITs := sets.New[InstanceTypeID]()
-	for _, req := range data.Requests {
+	for i := range data.Requests {
+		req := &data.Requests[i]
 		if len(req.SubRequests) > 0 {
-			for _, sub := range req.SubRequests {
-				for itID := range sub.AllTemplateDevicesByIT {
+			for j := range req.SubRequests {
+				for itID := range req.SubRequests[j].AllTemplateDevicesByIT {
 					allITs.Insert(itID)
 				}
 			}
@@ -222,11 +225,12 @@ func ValidateClaimRequest(
 	var prunedCount int
 	for itID := range allITs {
 		var templateCount int
-		for _, req := range data.Requests {
+		for i := range data.Requests {
+			req := &data.Requests[i]
 			if len(req.SubRequests) > 0 {
 				minForReq := math.MaxInt
-				for _, sub := range req.SubRequests {
-					minForReq = min(minForReq, len(sub.AllTemplateDevicesByIT[itID]))
+				for j := range req.SubRequests {
+					minForReq = min(minForReq, len(req.SubRequests[j].AllTemplateDevicesByIT[itID]))
 				}
 				templateCount += minForReq
 			} else {

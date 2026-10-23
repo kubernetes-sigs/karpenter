@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func GetPersistentVolumeClaim(ctx context.Context, kubeClient client.Client, pod *v1.Pod, volume v1.Volume) (*v1.PersistentVolumeClaim, error) {
+func GetPersistentVolumeClaim(ctx context.Context, kubeClient client.Client, pod *v1.Pod, volume *v1.Volume) (*v1.PersistentVolumeClaim, error) {
 	var pvcName string
 	switch {
 	case volume.PersistentVolumeClaim != nil:
