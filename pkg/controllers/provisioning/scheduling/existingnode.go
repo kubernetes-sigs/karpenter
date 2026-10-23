@@ -62,6 +62,11 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 			daemonResources[k] = v
 		}
 	}
+	// A rebooting node returns without its terminating pods, so their host ports and volumes don't conflict there
+	for _, podKey := range n.RebootDepartingPods() {
+		n.HostPortUsage().DeletePod(podKey)
+		n.VolumeUsage().DeletePod(podKey)
+	}
 	available := n.Available()
 	node := &ExistingNode{
 		StateNode:               n,

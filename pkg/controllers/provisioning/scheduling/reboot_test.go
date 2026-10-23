@@ -20,6 +20,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -140,6 +141,119 @@ var _ = Describe("Rebooting Nodes", func() {
 
 		pod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ha"}}})
 		pod.Spec.Affinity = antiAffinity
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		Expect(ExpectScheduled(ctx, env.Client, pod).Name).ToNot(Equal(node.Name))
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+	})
+	It("should keep the zone anti-affinity of a rebooting node's terminating pods", func() {
+		antiAffinity := &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ha"}},
+			TopologyKey:   corev1.LabelTopologyZone,
+		}}}}
+		evicted = ExpectExists(ctx, env.Client, evicted)
+		ExpectDeleted(ctx, env.Client, evicted)
+		ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(evicted))
+		evicted = test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ha"}}})
+		evicted.Spec.Affinity = antiAffinity
+		ExpectApplied(ctx, env.Client, evicted)
+		ExpectManualBinding(ctx, env.Client, evicted, node)
+		rebootNode()
+		ExpectDeletionTimestampSet(ctx, env.Client, evicted)
+		syncState()
+
+		zone := node.Labels[corev1.LabelTopologyZone]
+		pod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ha"}}})
+		pod.Spec.Affinity = antiAffinity
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		scheduled := ExpectScheduled(ctx, env.Client, pod)
+		Expect(scheduled.Name).ToNot(Equal(node.Name))
+		Expect(scheduled.Labels[corev1.LabelTopologyZone]).ToNot(Equal(zone))
+	})
+	It("should ignore the host ports of a rebooting node's terminating pods", func() {
+		ports := []corev1.ContainerPort{{ContainerPort: 18080, HostPort: 18080, Protocol: corev1.ProtocolTCP}}
+		evicted = ExpectExists(ctx, env.Client, evicted)
+		ExpectDeleted(ctx, env.Client, evicted)
+		ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(evicted))
+		evicted = test.Pod()
+		evicted.Spec.Containers[0].Ports = ports
+		ExpectApplied(ctx, env.Client, evicted)
+		ExpectManualBinding(ctx, env.Client, evicted, node)
+		rebootNode()
+		ExpectDeletionTimestampSet(ctx, env.Client, evicted)
+		syncState()
+
+		pod := test.UnschedulablePod()
+		pod.Spec.Containers[0].Ports = ports
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		Expect(ExpectScheduled(ctx, env.Client, pod).Name).To(Equal(node.Name))
+		Expect(cloudProvider.CreateCalls).To(BeEmpty())
+	})
+	It("should keep the host ports of a terminating pod on a node that isn't rebooting", func() {
+		ports := []corev1.ContainerPort{{ContainerPort: 18080, HostPort: 18080, Protocol: corev1.ProtocolTCP}}
+		evicted = ExpectExists(ctx, env.Client, evicted)
+		ExpectDeleted(ctx, env.Client, evicted)
+		ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(evicted))
+		evicted = test.Pod()
+		evicted.Spec.Containers[0].Ports = ports
+		ExpectApplied(ctx, env.Client, evicted)
+		ExpectManualBinding(ctx, env.Client, evicted, node)
+		ExpectDeletionTimestampSet(ctx, env.Client, evicted)
+		syncState()
+
+		pod := test.UnschedulablePod()
+		pod.Spec.Containers[0].Ports = ports
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		Expect(ExpectScheduled(ctx, env.Client, pod).Name).ToNot(Equal(node.Name))
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+	})
+	// The node can attach one volume, so a pod with a different volume only fits once the evicted pod's volume is gone.
+	bindVolumePod := func() {
+		GinkgoHelper()
+		ExpectApplied(ctx, env.Client, &storagev1.CSINode{
+			ObjectMeta: metav1.ObjectMeta{Name: node.Name},
+			Spec: storagev1.CSINodeSpec{Drivers: []storagev1.CSINodeDriver{{
+				Name:        csiProvider,
+				NodeID:      "fake-node-id",
+				Allocatable: &storagev1.VolumeNodeResources{Count: new(int32(1))},
+			}}},
+		}, test.StorageClass(test.StorageClassOptions{
+			ObjectMeta:        metav1.ObjectMeta{Name: "reboot-storage-class"},
+			Provisioner:       new(csiProvider),
+			VolumeBindingMode: new(storagev1.VolumeBindingWaitForFirstConsumer),
+		}))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		evicted = ExpectExists(ctx, env.Client, evicted)
+		ExpectDeleted(ctx, env.Client, evicted)
+		ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(evicted))
+		pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: new("reboot-storage-class")})
+		ExpectApplied(ctx, env.Client, pvc)
+		evicted = test.Pod(test.PodOptions{PersistentVolumeClaims: []string{pvc.Name}})
+		ExpectApplied(ctx, env.Client, evicted)
+		ExpectManualBinding(ctx, env.Client, evicted, node)
+	}
+	volumePod := func() *corev1.Pod {
+		GinkgoHelper()
+		pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: new("reboot-storage-class")})
+		ExpectApplied(ctx, env.Client, pvc)
+		return test.UnschedulablePod(test.PodOptions{PersistentVolumeClaims: []string{pvc.Name}})
+	}
+	It("should ignore the volumes of a rebooting node's terminating pods", func() {
+		bindVolumePod()
+		rebootNode()
+		ExpectDeletionTimestampSet(ctx, env.Client, evicted)
+		syncState()
+
+		pod := volumePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		Expect(ExpectScheduled(ctx, env.Client, pod).Name).To(Equal(node.Name))
+		Expect(cloudProvider.CreateCalls).To(BeEmpty())
+	})
+	It("should keep the volumes of a terminating pod on a node that isn't rebooting", func() {
+		bindVolumePod()
+		ExpectDeletionTimestampSet(ctx, env.Client, evicted)
+		syncState()
+
+		pod := volumePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		Expect(ExpectScheduled(ctx, env.Client, pod).Name).ToNot(Equal(node.Name))
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))

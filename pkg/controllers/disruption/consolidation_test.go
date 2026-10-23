@@ -2533,6 +2533,40 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
+		DescribeTable("should not consolidate onto a rebooting node with a terminating pod",
+			func(ownerKind string, expectConsolidation bool) {
+				nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+				rs := test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				owner := []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: ownerKind, Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true)}}
+				terminating := test.Pod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: owner},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("31")}},
+				})
+				moving := test.Pod(test.PodOptions{
+					ObjectMeta:           metav1.ObjectMeta{Labels: labels, OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true)}}},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}},
+				})
+				ExpectApplied(ctx, env.Client, terminating, moving, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
+				ExpectManualBinding(ctx, env.Client, terminating, nodes[0])
+				ExpectManualBinding(ctx, env.Client, moving, nodes[1])
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+				nodeClaims[0] = ExpectExists(ctx, env.Client, nodeClaims[0])
+				nodeClaims[0].StatusConditions().SetTrueWithReason(v1.ConditionTypeRebooting, v1.RebootReasonRequested, "reboot requested")
+				nodes[0] = ExpectExists(ctx, env.Client, nodes[0])
+				nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1.RebootingNoScheduleTaint)
+				ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0])
+				ExpectDeletionTimestampSet(ctx, env.Client, terminating)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[0]))
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				Expect(queue.GetCommands()).To(HaveLen(lo.Ternary(expectConsolidation, 1, 0)))
+			},
+			Entry("ReplicaSet pod", "ReplicaSet", false),
+			Entry("StatefulSet pod", "StatefulSet", false),
+		)
 		It("can delete nodes if another nodePool has no node template", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()

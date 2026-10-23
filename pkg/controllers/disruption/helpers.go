@@ -149,7 +149,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
 		// even if they are still in the middle of their initialization loop. In the case of disruption, we don't want
 		// to proceed disrupting if our scheduling decision relies on nodes that haven't entered a terminal state.
-		if !n.Initialized() {
+		if !n.Initialized() || n.RebootInProgress() {
 			for _, p := range n.Pods {
 				// Only add a pod scheduling error if it isn't on an already deleting node.
 				// If the pod is on a deleting node, we assume one of two things has already happened:
@@ -159,7 +159,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 				//    for this command, and we assume it will be successful. If it is not successful, the node will become
 				//    not terminating, and we will no longer need to consider these pods.
 				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; !ok {
-					results.PodErrors[p] = NewUninitializedNodeError(n)
+					results.PodErrors[p] = lo.Ternary[error](n.RebootInProgress(), NewRebootingNodeError(n), NewUninitializedNodeError(n))
 				}
 			}
 		}
@@ -249,6 +249,19 @@ func (u *UninitializedNodeError) Error() string {
 		info = append(info, fmt.Sprintf("node/%s", u.Node.Name))
 	}
 	return fmt.Sprintf("would schedule against uninitialized %s", strings.Join(info, ", "))
+}
+
+// RebootingNodeError tracks a pod that would schedule to a rebooting node, whose capacity only exists once it returns
+type RebootingNodeError struct {
+	*scheduling.ExistingNode
+}
+
+func NewRebootingNodeError(node *scheduling.ExistingNode) *RebootingNodeError {
+	return &RebootingNodeError{ExistingNode: node}
+}
+
+func (r *RebootingNodeError) Error() string {
+	return fmt.Sprintf("would schedule against rebooting node/%s", r.Name())
 }
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.

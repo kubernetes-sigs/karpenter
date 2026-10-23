@@ -508,6 +508,14 @@ func (in *StateNode) Available() corev1.ResourceList {
 	return resources.Subtract(in.Allocatable(), requests)
 }
 
+// RebootDepartingPods returns the terminating pods a rebooting node won't have when it returns.
+func (in *StateNode) RebootDepartingPods() []types.NamespacedName {
+	if !in.RebootInProgress() {
+		return nil
+	}
+	return lo.Keys(lo.PickBy(in.terminatingPods, func(_ types.NamespacedName, terminating bool) bool { return terminating }))
+}
+
 func (in *StateNode) DaemonSetRequests() corev1.ResourceList {
 	return resources.Merge(lo.Values(in.daemonSetRequests)...)
 }
