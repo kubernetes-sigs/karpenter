@@ -1379,7 +1379,9 @@ func (env *Environment) ExpectPodMetrics() (res []PrometheusMetric) {
 	localPort := rand.IntnRange(1025, 49151)
 	env.ExpectPodPortForwarded(ctx, env.ExpectActiveKarpenterPod(), 8080, localPort)
 
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", localPort))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/metrics", localPort), nil)
+	Expect(err).ToNot(HaveOccurred())
+	resp, err := http.DefaultClient.Do(req)
 	Expect(err).ToNot(HaveOccurred())
 	reader := bufio.NewReader(resp.Body)
 	defer resp.Body.Close()
