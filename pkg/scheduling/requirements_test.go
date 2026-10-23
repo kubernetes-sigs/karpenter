@@ -684,6 +684,36 @@ var _ = Describe("Requirements", func() {
 			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(2))
 		})
 	})
+	Context("Pod Requirements", func() {
+		var pod *corev1.Pod
+		BeforeEach(func() {
+			pod = &corev1.Pod{Spec: corev1.PodSpec{
+				NodeSelector: map[string]string{"zone": "a"},
+				Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"apps"}}}},
+						{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"dediserver"}}}},
+					}},
+				}},
+			}}
+		})
+		It("should use the first required node affinity term", func() {
+			reqs := NewStrictPodRequirements(pod)
+			Expect(reqs.Get("role").Values()).To(ConsistOf("apps"))
+			Expect(reqs.Get("zone").Values()).To(ConsistOf("a"))
+		})
+		It("should use the required node affinity term at the given index", func() {
+			reqs := NewStrictPodRequirementsForTerm(pod, 1)
+			Expect(reqs.Get("role").Values()).To(ConsistOf("dediserver"))
+			Expect(reqs.Get("zone").Values()).To(ConsistOf("a"))
+			Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms).To(HaveLen(2))
+		})
+		It("should only use the node selector when the index is out of range", func() {
+			reqs := NewStrictPodRequirementsForTerm(pod, 2)
+			Expect(reqs.Has("role")).To(BeFalse())
+			Expect(reqs.Get("zone").Values()).To(ConsistOf("a"))
+		})
+	})
 	Context("Stringify Requirements", func() {
 		It("should print Requirements in the same order", func() {
 			reqs := NewRequirements(
