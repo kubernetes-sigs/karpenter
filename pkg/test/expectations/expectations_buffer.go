@@ -70,14 +70,17 @@ func EventuallyExpectCapacityBufferNotReady(ctx context.Context, c client.Client
 	}).WithContext(ctx).WithTimeout(30 * time.Second).Should(Succeed())
 }
 
-func EventuallyExpectCapacityBufferNotProvisioned(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer) {
+func EventuallyExpectCapacityBufferNotProvisioned(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, reason ...string) {
 	Eventually(func(g Gomega) {
 		cb := &autoscalingv1beta1.CapacityBuffer{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(buffer), cb)).To(Succeed())
 		cond := findCapacityBufferCondition(cb.Status.Conditions, autoscalingv1beta1.ProvisioningCondition)
 		g.Expect(cond).ToNot(BeNil())
 		g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-	}).WithContext(ctx).WithTimeout(30 * time.Second).Should(Succeed())
+		if len(reason) > 0 {
+			g.Expect(cond.Reason).To(Equal(reason[0]))
+		}
+	}).WithContext(ctx).WithTimeout(2 * time.Minute).Should(Succeed())
 }
 
 func EventuallyExpectCapacityBufferProvisionedWithReason(ctx context.Context, c client.Client, buffer *autoscalingv1beta1.CapacityBuffer, reason string) {

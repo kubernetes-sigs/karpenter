@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
+
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -84,7 +86,8 @@ func bufferKeyOf(pod *corev1.Pod) string {
 type bufferProvisioningStatus struct {
 	existing         int
 	requiresNewClaim int
-	failed           int
+	infeasible       int // permanent: InstanceTypeFilterError with no fitting instance type
+	transientFailure int // transient: limits, reserved offerings (may resolve)
 	desiredReplicas  int
 }
 
@@ -170,12 +173,25 @@ func computeProvisioningCondition(cb *autoscalingv1beta1.CapacityBuffer, s *buff
 		// this scheduling cycle (e.g. results empty). Leave condition unchanged.
 		return nil
 	}
-	if s.requiresNewClaim > 0 || s.failed > 0 {
+	if s.infeasible > 0 {
 		return &metav1.Condition{
 			Type:               autoscalingv1beta1.ProvisioningCondition,
 			Status:             metav1.ConditionFalse,
-			Reason:             "RequiresNewCapacity",
-			Message:            fmt.Sprintf("%d/%d virtual pods required new capacity, %d failed", s.requiresNewClaim, s.desiredReplicas, s.failed),
+			Reason:             "Infeasible",
+			Message:            fmt.Sprintf("%d/%d virtual pods are infeasible (no instance type can satisfy the requirements)", s.infeasible, s.desiredReplicas),
+			ObservedGeneration: cb.Generation,
+			LastTransitionTime: now,
+		}
+	}
+	if s.requiresNewClaim > 0 || s.transientFailure > 0 {
+		return &metav1.Condition{
+			Type:   autoscalingv1beta1.ProvisioningCondition,
+			Status: metav1.ConditionFalse,
+			Reason: "RequiresNewCapacity",
+			Message: lo.Ternary(s.transientFailure > 0,
+				fmt.Sprintf("%d/%d virtual pods required new capacity, %d had failures", s.requiresNewClaim, s.desiredReplicas, s.transientFailure),
+				fmt.Sprintf("%d/%d virtual pods required new capacity", s.requiresNewClaim, s.desiredReplicas),
+			),
 			ObservedGeneration: cb.Generation,
 			LastTransitionTime: now,
 		}
@@ -231,12 +247,17 @@ func classifyBufferPods(results scheduler.Results, buffers map[string]*autoscali
 	for _, nc := range results.NewNodeClaims {
 		countVirtualPods(nc.Pods, buffers, out, func(s *bufferProvisioningStatus) { s.requiresNewClaim++ })
 	}
-	for pod := range results.PodErrors {
+	for pod, err := range results.PodErrors {
 		key := bufferKeyOf(pod)
 		if key == "" {
 			continue
 		}
-		ensureStatus(key, buffers, out).failed++
+		s := ensureStatus(key, buffers, out)
+		if itfErr, ok := lo.ErrorsAs[scheduler.InstanceTypeFilterError](err); ok && itfErr.IsInfeasible() {
+			s.infeasible++
+		} else {
+			s.transientFailure++
+		}
 	}
 	return out
 }
