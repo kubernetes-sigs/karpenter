@@ -10,6 +10,7 @@ linters:
     - bidichk
     - copyloopvar
     - errorlint
+    - forbidigo
     - gocyclo
     - goheader
     - gosec
@@ -32,6 +33,20 @@ linters:
         settings:
           linters: {}
           lintersConfig: {}
+    # Use the injected clock in production code: #3009, #3045, #3406, #3038.
+    # Background deletion in e2e helpers: #3316.
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^time\.(Now|Since|Until)$
+          pkg: ^time$
+          msg: use the injected clock.Clock
+        - pattern: ^clock\.RealClock$
+          pkg: ^k8s\.io/utils/clock$
+          msg: use the injected clock.Clock
+        - pattern: ^v1\.DeletePropagationForeground$
+          pkg: ^k8s\.io/apimachinery/pkg/apis/meta/v1$
+          msg: use background deletion in e2e helpers
     gocyclo:
       min-complexity: 11
     goheader:
@@ -84,6 +99,14 @@ linters:
       - path-except: pkg/apis/
         linters:
           - kubeapilinter
+      - path: (_test\.go$|^test/|^pkg/test/|^pkg/operator/)
+        linters:
+          - forbidigo
+        text: use the injected clock
+      - path-except: ^test/
+        linters:
+          - forbidigo
+        text: use background deletion
     paths:
       - tools
       - website
