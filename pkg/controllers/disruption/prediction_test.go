@@ -436,7 +436,10 @@ var _ = Describe("Prediction", func() {
 		go func() {
 			defer GinkgoRecover()
 			defer wg.Done()
-			ExpectSingletonReconciled(reconcileCtx, dc)
+			// The cancel below can land after the server applies the condition patch but before the client
+			// handles the response, so the reconcile may surface the cancellation as an error.
+			_, err := dc.Reconcile(reconcileCtx)
+			Expect(err).To(Or(Succeed(), MatchError(context.Canceled)))
 		}()
 		Eventually(func(g Gomega) {
 			g.Expect(ExpectNodeExists(ctx, env.Client, node.Name).Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
