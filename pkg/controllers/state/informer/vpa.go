@@ -132,7 +132,11 @@ func (c *VPAController) processVPA(vpa *vpav1.VerticalPodAutoscaler, key types.N
 		c.recorder.Publish(PredictionTargetUnsupportedEvent(vpa))
 		return c.store.Delete(key)
 	}
-	return c.store.Set(key, workload, p, vpa.CreationTimestamp.Time)
+	if !c.store.Set(key, workload, p, vpa.CreationTimestamp.Time) {
+		return false
+	}
+	c.recorder.Publish(PredictionStoredEvent(vpa))
+	return true
 }
 
 func (c *VPAController) Name() string {
