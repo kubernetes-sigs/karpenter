@@ -18,6 +18,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"fmt"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -835,6 +836,7 @@ var _ = Describe("Emptiness", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 
 			// Now: buffer consumed (real pods took the space, or buffer deleted)
+			env.Clock.Step(time.Second)
 			cluster.UpdateBufferPodCounts(map[string]int{})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
@@ -884,21 +886,82 @@ var _ = Describe("Emptiness", func() {
 		})
 
 		It("should protect multiple nodes that each host buffer pods", func() {
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, nodeClaim2, node2)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			bufferCtx := capacityBufferContext()
+			ExpectApplied(bufferCtx, env.Client, append(capacityBuffer("12"), nodePool, nodeClaim, node, nodeClaim2, node2)...)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(bufferCtx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 			// Both nodes host buffer pods
 			cluster.UpdateBufferPodCounts(map[string]int{
 				node.Spec.ProviderID:  2,
-				node2.Spec.ProviderID: 3,
+				node2.Spec.ProviderID: 2,
 			})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectSingletonReconciled(bufferCtx, disruptionController)
+			Expect(recorder.DetectedEvent(fmt.Sprintf("NodePool %q has consolidation policy WhenEmpty, but node is not empty", nodePool.Name))).To(BeFalse())
 
 			// Neither node should be deleted
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 			ExpectExists(ctx, env.Client, nodeClaim)
 			ExpectExists(ctx, env.Client, nodeClaim2)
+		})
+
+		It("should disrupt a node with buffer pods when the buffer fits on another node", func() {
+			bufferCtx := capacityBufferContext()
+			// A pending pod that needs its own node shouldn't block the disruption
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("40")}},
+			})
+			ExpectApplied(bufferCtx, env.Client, append(capacityBuffer("1"), nodePool, nodeClaim, node, nodeClaim2, node2, pod)...)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(bufferCtx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID:  2,
+				node2.Spec.ProviderID: 2,
+			})
+
+			ExpectSingletonReconciled(bufferCtx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates).To(HaveLen(1))
+		})
+
+		It("should disrupt the smaller node when the larger node fits the buffer", func() {
+			bufferCtx := capacityBufferContext()
+			large, small := onDemandInstanceType("large", "8", 0.318), onDemandInstanceType("small", "4", 0.179)
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{large, small}
+			largeNodeClaim, largeNode := consolidatableNodeClaimAndNode(nodePool, large)
+			smallNodeClaim, smallNode := consolidatableNodeClaimAndNode(nodePool, small)
+			ExpectApplied(bufferCtx, env.Client, append(capacityBuffer("1800m"), nodePool, largeNodeClaim, largeNode, smallNodeClaim, smallNode)...)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(bufferCtx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{largeNode, smallNode}, []*v1.NodeClaim{largeNodeClaim, smallNodeClaim})
+
+			cluster.UpdateBufferPodCounts(map[string]int{
+				largeNode.Spec.ProviderID: 2,
+				smallNode.Spec.ProviderID: 2,
+			})
+
+			ExpectSingletonReconciled(bufferCtx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].Name()).To(Equal(smallNode.Name))
+		})
+
+		It("should disrupt an empty node without buffer pods even if another node's buffer could move to it", func() {
+			bufferCtx := capacityBufferContext()
+			ExpectApplied(bufferCtx, env.Client, append(capacityBuffer("1"), nodePool, nodeClaim, node, nodeClaim2, node2)...)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(bufferCtx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			cluster.UpdateBufferPodCounts(map[string]int{
+				node.Spec.ProviderID: 4,
+			})
+
+			ExpectSingletonReconciled(bufferCtx, disruptionController)
+
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].Name()).To(Equal(node2.Name))
 		})
 
 		It("should not protect a node with zero buffer pod count", func() {
