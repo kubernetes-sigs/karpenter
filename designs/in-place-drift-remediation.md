@@ -37,18 +37,21 @@ Tracking issue: [aws/karpenter-provider-aws#8735](https://github.com/aws/karpent
 
 No new core API fields or CRDs.
 
-Two `CloudProvider` additions:
+One breaking `CloudProvider` change: `GetDriftStatus` replaces `IsDrifted`.
 
 ```go
-// DriftRemediation decides how to resolve a drifted NodeClaim before core commits to it.
-// Providers that do not support in-place remediation return ReplaceNode.
-DriftRemediation(ctx context.Context, nodeClaim *v1.NodeClaim, reason DriftReason) (RepairAction, error)
-
-// RebootStatus reports the provider-side state of a reboot operation.
-RebootStatus(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) (RebootState, error) // InProgress | Failed | Succeeded
+// GetDriftStatus returns how core should resolve drift on a NodeClaim.
+// Providers that do not support in-place remediation never return Reboot.
+GetDriftStatus(ctx context.Context, nodeClaim *v1.NodeClaim) (DisruptionAction, error)
 ```
 
-`RepairAction` (`RebootNode | ReplaceNode`) and `Reboot(ctx, nodeClaim, operationID)` already exist.
+`DisruptionAction` is today's `RepairAction` renamed and generalized, so drift and repair share one type:
+
+- `NoOp`: not drifted. Previously `IsDrifted` returned no reason.
+- `Replace`: drifted, replace the node. Previously `IsDrifted` returned a reason.
+- `Reboot`: drifted, and the provider resolves it in place through the reboot lifecycle. New.
+
+`Reboot(ctx, nodeClaim, operationID)` already exists and is unchanged.
 
 ### How It Works
 
@@ -56,33 +59,31 @@ RebootStatus(ctx context.Context, nodeClaim *v1.NodeClaim, operationID string) (
 sequenceDiagram
     participant Core as Core (drift + reboot controller)
     participant CP as CloudProvider
-    Core->>CP: IsDrifted(nc)
-    CP-->>Core: DriftReason
-    Core->>CP: DriftRemediation(nc, reason)
-    CP-->>Core: RebootNode or ReplaceNode
+    Core->>CP: GetDriftStatus(nc)
+    CP-->>Core: Reboot
     Core->>Core: commit reboot (Rebooting=Requested, DisruptionReason=Drifted)
     Core->>Core: fence + drain
     Core->>CP: Reboot(nc, opID)
     loop every 15s, up to 20m
-        Core->>CP: RebootStatus(nc, opID)
-        CP-->>Core: InProgress / Failed / Succeeded
+        Core->>Core: new boot ID and Ready?
     end
     Core->>CP: Get(providerID)
     CP-->>Core: observed ImageID
-    Core->>Core: RebootSucceeded, refresh Status.ImageID, hold budget until Initialized
-    Core->>CP: IsDrifted(nc)
-    CP-->>Core: not drifted
+    Core->>Core: refresh Status.ImageID
+    Core->>CP: GetDriftStatus(nc)
+    CP-->>Core: NoOp
+    Core->>Core: RebootSucceeded, hold budget until Initialized
 ```
 
-1. **Decide before committing.** Core only knows the drift reason. It cannot tell whether an in-place change is safe for this node, and committing drains the node, so the provider answers first. `RebootNode` means the provider will resolve this drift in place. `ReplaceNode` means today's drift path: simulate, pre-spin a replacement, terminate.
+1. **Decide before committing.** Core cannot tell whether an in-place change is safe for this node, and committing drains the node, so the provider answers first through `GetDriftStatus`. `Reboot` means the provider will resolve this drift in place. `Replace` means today's drift path: simulate, pre-spin a replacement, terminate.
 2. **Reuse the reboot lifecycle.** Core commits the node to the existing reboot controller with `DisruptionReason=Drifted`, skipping scheduling simulation and replacement. `Reboot` has no action field: the provider reads `DisruptionReason` and the `Drifted` condition to choose its in-place operation, and re-checks that it is still safe. Any other reason stays a plain reboot. `operationID` is the provider's idempotency key.
-3. **Confirm the operation, not just the reboot.** A new boot ID and `Ready` prove the node restarted, not that the drift was resolved. A failed operation that reboots on the old image looks the same. Core waits for `RebootStatus`, and fails fast on `Failed` instead of waiting out the window.
-4. **Record what is running.** Core writes `Status.ImageID` only at launch today. After success it reads the image back with `Get`, so drift clears on the image the node actually runs.
+3. **Record what is running.** Core writes `Status.ImageID` only at launch today. Once the node is `Ready` on a new boot, core reads the image back with `Get`, so drift is evaluated against the image the node actually runs.
+4. **Confirm the drift is resolved, not just the reboot.** A new boot ID and `Ready` prove the node restarted, not that the drift was resolved. A failed operation that reboots on the old image looks the same. Core asks `GetDriftStatus` again: `NoOp` completes the reboot, and any other answer fails it, so the node is replaced instead of rebooted a second time.
 
 ### Interaction with Existing Features
 
 - **Disruption budgets.** In-place nodes count against the `Drifted` budget until they are `Initialized` again. A `Drifted` budget of `0` stops in-place remediation and replacements alike.
-- **Blocking pods.** Drift admits nodes with PDB or `do-not-disrupt` blockers only when the NodeClaim has a `terminationGracePeriod`. The reboot drain is unbounded without one, so in-place remediation requires it too: core takes the replace path for a NodeClaim without a `terminationGracePeriod`, without asking the provider.
+- **Blocking pods.** Drift admits nodes with PDB or `do-not-disrupt` blockers only when the NodeClaim has a `terminationGracePeriod`.
 - **Repair.** `ValidateNodeDisruptable` already blocks all other disruption while a node is rebooting. An `Unhealthy` node that is also drifted can be resolved by the same in-place operation when the provider supports it.
 - **Failure.** The reboot controller already escalates a failed reboot after disruption to NodeClaim replacement, with the drain bounded by the committed grace period. No new failure state is added.
 - **Consolidation.** Unchanged. A node that finishes in-place remediation is no longer drifted and is evaluated normally.
@@ -90,13 +91,14 @@ sequenceDiagram
 ### Observability
 
 - `Rebooting` condition with `DisruptionReason=Drifted` for the in-place lifecycle. The existing reboot events and metrics cover it.
-- An event on every `ReplaceNode` decision, carrying the provider's reason.
+- An event on every `Replace` decision for a NodeClaim whose provider supports in-place remediation.
 
 ### Edge Cases
 
-- **More than one drift reason.** The provider returns `ReplaceNode` unless it can resolve every reason in place.
+- **More than one drift reason.** The provider returns `Replace` unless it can resolve every reason in place.
 - **Controller restart mid-operation.** `Reboot` is called again with the same `operationID`, so the provider joins the existing operation.
-- **Operation fails after the drain.** `RebootStatus` reports `Failed`, the reboot fails fast, and the node is replaced.
+- **Operation fails and the node reboots on the old image.** `GetDriftStatus` still reports drift after the reboot, the reboot fails, and the node is replaced.
+- **Operation fails before the node reboots.** No new boot ID appears, so the reboot fails when the observation window ends and the node is replaced. The node stays drained for that window.
 
 ## Alternatives Considered
 
@@ -108,9 +110,15 @@ NodeClasses for stateful pools are already separate in practice.
 
 ### A dedicated `ReplaceImage` primitive with a target image
 
-`DriftRemediation` returns a target image and core calls a new method with it.
+`GetDriftStatus` returns a target image and core calls a new method with it.
 Rejected because the reboot lifecycle already covers drain, fence, observe and failure.
 The provider can resolve the image from its NodeClass, so core never needs to know what an image is.
+
+### Separate `DriftRemediation` and `RebootStatus` hooks
+
+Keep `IsDrifted`, add `DriftRemediation` to choose between in-place and replace, and add `RebootStatus` so core polls the provider for the operation's state.
+Rejected because `GetDriftStatus` answers both questions with one method: before the reboot it picks the action, and after it confirms the drift is gone.
+The cost is fail-fast: an operation that fails before the node reboots is detected when the observation window ends rather than immediately.
 
 ### Operator tooling outside Karpenter
 
@@ -119,12 +127,12 @@ Rejected because they bypass disruption budgets, drains and drift state, and rac
 
 ## Backward Compatibility
 
-- No core API changes. Upgrading changes nothing.
-- Providers that do not implement in-place return `ReplaceNode` from `DriftRemediation`. Drift behaves as today.
+- No new core API fields or CRDs. Users see no change until their provider returns `Reboot`.
+- Breaking for providers: `IsDrifted` is replaced by `GetDriftStatus`, and `RepairAction` is renamed to `DisruptionAction`. A provider migrates by returning `NoOp` where `IsDrifted` returned no reason and `Replace` where it returned one, so drift behaves as today. Repair policies move to the renamed type.
 
 ## Graduation Criteria
 
-- **Alpha:** behind a feature gate. Proves the `DriftRemediation` decision and the `RebootStatus` loop with one provider (AWS) on real fleets.
+- **Alpha:** behind a feature gate. Proves the `GetDriftStatus` decision and the post-reboot confirmation with one provider (AWS) on real fleets.
 - **Beta:** enabled by default after production data on operation duration, used to tune the 20 minute window.
 
 ## Open Questions
@@ -132,3 +140,4 @@ Rejected because they bypass disruption budgets, drains and drift state, and rac
 1. Is the 20 minute observation window right, or should the provider supply it per operation? AWS root volume replacements typically take 2 to 10 minutes.
 2. Should the repair path (`Unhealthy` and drifted) ship with drift, or follow it?
 3. Does the feature gate belong in core, in each provider, or both?
+4. `IsDrifted` returns a `DriftReason` that core writes as the `Drifted` condition reason. Should `GetDriftStatus` return it alongside the action?
