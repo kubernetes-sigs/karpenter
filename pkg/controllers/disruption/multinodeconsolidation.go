@@ -31,7 +31,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
+var MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
 
 type MultiNodeConsolidation struct {
 	consolidation
@@ -49,6 +49,7 @@ func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOp
 // nolint:gocyclo
 func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if m.IsConsolidated() {
+		m.report.skipped = true
 		return []Command{}, nil
 	}
 	candidates = m.sortCandidates(ctx, candidates)
@@ -102,6 +103,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		if IsValidationError(err) {
 			reason := getValidationFailureReason(err)
 			cmd.EmitRejectedEvents(m.recorder, reason)
+			m.report.validationFailed = true
 			return []Command{}, nil
 		}
 		return []Command{}, fmt.Errorf("validating consolidation, %w", err)
@@ -121,8 +123,19 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	if len(candidates) <= max {
 		max = len(candidates) - 1
 	}
-
+	// The largest batch the search can try is candidates[0:max+1]
+	window, lastTried, failed := max+1, 0, false
 	lastSavedCommand := Command{}
+	defer func() {
+		if failed {
+			return
+		}
+		outcome := lo.Ternary(m.report.timedOut, EvaluationOutcomeTimeout.Name, SearchOutcomeCompleted.Name)
+		for stage, n := range map[string]int{BatchStageWindow.Name: window, BatchStageLastTried.Name: lastTried, EvaluationStageSelected.Name: len(lastSavedCommand.Candidates)} {
+			MultiNodeBatchSize.Observe(float64(n), map[string]string{stageLabel: stage, outcomeLabel: outcome})
+		}
+	}()
+
 	var lastSavedPerPool map[string]ScoreResult
 	// Defer rejection events until search completes to avoid log2(N) * pools
 	// duplicate emissions.
@@ -134,12 +147,15 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	for min <= max {
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
+		lastTried = len(candidatesToConsolidate)
+		m.report.evaluated = lo.Max([]int{m.report.evaluated, lastTried})
 
 		// Pass the timeout context to ensure sub-operations can be canceled
 		cmd, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
+				m.report.timedOut = true
 				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
 				if lastSavedCommand.Candidates == nil {
 					log.FromContext(ctx).V(1).Info("failed to find a multi-node consolidation after timeout", "last_batch_size", (min+max)/2)
@@ -149,6 +165,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 				return lastSavedCommand, lastSavedPerPool, nil
 
 			}
+			failed = true
 			return Command{}, nil, err
 		}
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
