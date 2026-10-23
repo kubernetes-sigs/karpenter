@@ -33,6 +33,7 @@ import (
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -754,7 +755,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod, volu
 		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
 			// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
 			nodesRemaining, ok := remaining[resources.Node]
-			if ok && nodesRemaining.IsZero() {
+			if ok && nodesRemaining.Cmp(resource.MustParse("1")) < 0 {
 				errs[i] = serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 				return true
 			}
@@ -1106,6 +1107,8 @@ func subtractMax(remaining corev1.ResourceList, instanceTypes []*cloudprovider.I
 	}
 	result := corev1.ResourceList{}
 	itResources := resources.MaxResources(allInstanceResources...)
+	// Instance type capacity has no nodes entry, but every NodeClaim launches one node.
+	itResources[resources.Node] = resource.MustParse("1")
 	for k, v := range remaining {
 		cp := v.DeepCopy()
 		cp.Sub(itResources[k])
