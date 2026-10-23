@@ -42,6 +42,8 @@ type ExistingNode struct {
 	// instanceType is the resolved cloud provider instance type backing the node, used to source DRA template devices
 	// for uninitialized nodes. It is nil for unmanaged nodes or when the node's instance type is not in the current set.
 	instanceType *cloudprovider.InstanceType
+	// score is the node's NodeResourcesFit score, cached for ordering. It is only set when a scoring strategy is configured.
+	score int64
 }
 
 func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList, instanceType *cloudprovider.InstanceType, isUnderConsolidateAfter bool) *ExistingNode {

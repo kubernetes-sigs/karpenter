@@ -184,6 +184,15 @@ func Cmp(lhs resource.Quantity, rhs resource.Quantity) int {
 	return lhs.Cmp(rhs)
 }
 
+// ScaledValue returns the quantity as an integer in the unit Kubernetes accounts the resource in: millicores for CPU,
+// and the base unit for every other resource.
+func ScaledValue(name v1.ResourceName, quantity resource.Quantity) int64 {
+	if name == v1.ResourceCPU {
+		return quantity.MilliValue()
+	}
+	return quantity.Value()
+}
+
 // Fits returns true if the candidate set of resources is less than or equal to the total set of resources.
 func Fits(candidate, total v1.ResourceList) bool {
 	// If any of the total resource values are negative then the resource will never fit
