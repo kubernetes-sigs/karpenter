@@ -1152,9 +1152,26 @@ func (env *Environment) ExpectNoCrashes() {
 	GinkgoHelper()
 	for k, v := range env.Monitor.RestartCount("kube-system") {
 		if strings.Contains(k, "karpenter") && v > 0 {
-			Fail(fmt.Sprintf("expected karpenter containers to not crash, but %q restarted %d time(s)", k, v))
+			Fail(fmt.Sprintf("expected karpenter containers to not crash, but %q restarted %d time(s), %s", k, v, env.describeRestart(k)))
 		}
 	}
+}
+
+// describeRestart reports the last termination state of the "<pod>/<container>" container. Its previous logs are
+// printed separately by printControllerLogs.
+func (env *Environment) describeRestart(key string) string {
+	podName, containerName, _ := strings.Cut(key, "/")
+	pod := &corev1.Pod{}
+	if err := env.Client.Get(env.Context, types.NamespacedName{Namespace: "kube-system", Name: podName}, pod); err != nil {
+		return fmt.Sprintf("failed getting pod, %s", err)
+	}
+	status, ok := lo.Find(pod.Status.ContainerStatuses, func(s corev1.ContainerStatus) bool { return s.Name == containerName })
+	if !ok || status.LastTerminationState.Terminated == nil {
+		return "last termination state unknown"
+	}
+	t := status.LastTerminationState.Terminated
+	return fmt.Sprintf("last terminated: reason=%s exitCode=%d signal=%d finishedAt=%s message=%q",
+		t.Reason, t.ExitCode, t.Signal, t.FinishedAt.UTC().Format(time.RFC3339), t.Message)
 }
 
 var (

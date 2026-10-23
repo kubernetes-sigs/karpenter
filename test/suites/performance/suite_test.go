@@ -66,6 +66,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
+	// Cleanup fails the spec on Karpenter restarts, so defer AfterEach to still dump the controller logs.
+	DeferCleanup(env.AfterEach)
 	env.Cleanup()
-	env.AfterEach()
 })
