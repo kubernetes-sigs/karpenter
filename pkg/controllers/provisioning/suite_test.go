@@ -3401,6 +3401,28 @@ var _ = Describe("Provisioning", func() {
 							MinValues: new(1),
 						}))
 				})
+
+				It("should only annotate the NodeClaims whose minValues were relaxed", func() {
+					cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{multiZoneInstanceType("instance-type-1", "test-zone-1", "test-zone-2", "test-zone-3")}
+
+					ExpectApplied(ctx, env.Client, nodePool)
+					requests := corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("3"),
+						corev1.ResourceMemory: resource.MustParse("3Gi")},
+					}
+					relaxedPod := test.UnschedulablePod(test.PodOptions{
+						NodeSelector:         map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
+						ResourceRequirements: requests,
+					})
+					unrelaxedPod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: requests})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, relaxedPod, unrelaxedPod)
+					relaxedNode := ExpectScheduled(ctx, env.Client, relaxedPod)
+					unrelaxedNode := ExpectScheduled(ctx, env.Client, unrelaxedPod)
+					Expect(relaxedNode.Name).ToNot(Equal(unrelaxedNode.Name))
+					Expect(relaxedNode.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
+					Expect(unrelaxedNode.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("false"))
+				})
 			})
 		})
 
