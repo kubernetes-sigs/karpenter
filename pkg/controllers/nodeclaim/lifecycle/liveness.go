@@ -37,6 +37,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -47,11 +48,7 @@ type Liveness struct {
 	npState    *nodepoolhealth.State
 }
 
-// registrationTimeout is a heuristic time that we expect the node to register within
-// If we don't see the node within this time, then we should delete the NodeClaim and try again
-
 const (
-	registrationTimeout = time.Minute * 15
 	// Sourced from pkg/metrics so the documented reason values stay in one place.
 	registrationTimeoutReason = metrics.RegistrationTimeoutReason
 	launchTimeoutReason       = metrics.LaunchTimeoutReason
@@ -94,6 +91,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	}
 	// If the Registered statusCondition hasn't gone True during the timeout since we first updated it, we should terminate the NodeClaim
 	// NOTE: Timeout has to be stored and checked in the same place since l.clock can advance after the check causing a race
+	registrationTimeout := options.FromContext(ctx).RegistrationTimeout
 	if timeUntilTimeout := registrationTimeout - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
 		return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 	}
