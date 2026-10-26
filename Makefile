@@ -165,10 +165,12 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 vulncheck: ## Verify code vulnerabilities
 	@go tool -modfile=go.tools.mod govulncheck ./pkg/...
 
+# Licenses allowed by the CNCF allowlist policy: https://github.com/cncf/foundation/blob/main/policies-guidance/allowed-third-party-license-policy.md
+# Any other license needs an approved CNCF exception (https://exceptions.cncf.io) before it's added here.
 licenses: download ## Verifies dependency licenses
 	LICENSEFILE=$$(mktemp /tmp/licenses-XXXXXX.csv) && \
 	go tool -modfile=go.tools.mod go-licenses csv ./... > $$LICENSEFILE && \
-	! grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0' $$LICENSEFILE
+	awk -F, '$$3 !~ /^(Apache-2.0|0BSD|BSD-2-Clause|BSD-2-Clause-FreeBSD|BSD-3-Clause|MIT|MIT-0|ISC|OpenSSL|OpenSSL-standalone|PSF-2.0|Python-2.0|Python-2.0.1|PostgreSQL|SSLeay-standalone|UPL-1.0|X11|Zlib)$$/ { print; bad = 1 } END { exit bad }' $$LICENSEFILE
 
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
