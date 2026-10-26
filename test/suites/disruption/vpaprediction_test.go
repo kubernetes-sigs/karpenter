@@ -166,7 +166,7 @@ var _ = Describe("VPAPrediction", func() {
 				},
 			},
 		})
-		dep.Spec.Template.Spec.RuntimeClassName = lo.ToPtr("test-overhead")
+		dep.Spec.Template.Spec.RuntimeClassName = new("test-overhead")
 
 		env.ExpectCreated(nodeClass, nodePool, dep)
 		env.EventuallyExpectHealthyPodCount(labelSelector, 1)
