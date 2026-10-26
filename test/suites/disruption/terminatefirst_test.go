@@ -78,7 +78,7 @@ var _ = Describe("TerminateFirst", Ordered, func() {
 	})
 
 	configureStaticNodePool := func() {
-		nodePool.Spec.Replicas = lo.ToPtr(int64(terminateFirstNodeCount))
+		nodePool.Spec.Replicas = new(int64(terminateFirstNodeCount))
 		nodePool.Spec.Limits = v1.Limits{
 			corev1.ResourceName("nodes"): resource.MustParse("1"),
 		}

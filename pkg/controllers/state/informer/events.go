@@ -36,3 +36,14 @@ func PredictionTargetUnsupportedEvent(vpa *vpav1.VerticalPodAutoscaler) events.E
 		DedupeTimeout:  time.Hour,
 	}
 }
+
+func PredictionStoredEvent(vpa *vpav1.VerticalPodAutoscaler) events.Event {
+	return events.Event{
+		InvolvedObject: vpa,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.PredictionStored,
+		Message:        fmt.Sprintf("Prediction stored for %s %s/%s, used when Karpenter moves its pods", vpa.Spec.TargetRef.Kind, vpa.Namespace, vpa.Spec.TargetRef.Name),
+		DedupeValues:   []string{string(vpa.UID)},
+		DedupeTimeout:  time.Hour,
+	}
+}

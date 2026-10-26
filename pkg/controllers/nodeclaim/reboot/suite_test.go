@@ -189,7 +189,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 		})
 
 		It("issues a committed reboot even when node repair is disabled", func() {
-			repairDisabled := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
+			repairDisabled := options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(false)}}))
 			ExpectApplied(repairDisabled, env.Client, nodePool, nodeClaim, node)
 			stepPastDrainFloor()
 			ExpectObjectReconciled(repairDisabled, env.Client, rebootController, nodeClaim)
@@ -314,7 +314,7 @@ var _ = Describe("Reboot Lifecycle", func() {
 				Phase:                         corev1.PodRunning,
 				TerminationGracePeriodSeconds: lo.ToPtr[int64](30),
 			})
-			pdb := test.PodDisruptionBudget(test.PDBOptions{Labels: labels, MinAvailable: lo.ToPtr(intstr.FromInt32(1))})
+			pdb := test.PodDisruptionBudget(test.PDBOptions{Labels: labels, MinAvailable: new(intstr.FromInt32(1))})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pdbBlocked, doNotDisrupt, pdb)
 			pods := []*corev1.Pod{pdbBlocked, doNotDisrupt}
 

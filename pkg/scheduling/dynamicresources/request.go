@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/samber/lo"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
@@ -450,7 +449,7 @@ func DeviceMatchesSelectors(
 			Driver:                   deviceID.Driver.Value(),
 			Attributes:               device.Attributes,
 			Capacity:                 device.Capacity,
-			AllowMultipleAllocations: lo.ToPtr(device.AllowMultipleAllocations),
+			AllowMultipleAllocations: new(device.AllowMultipleAllocations),
 		})
 		if err != nil {
 			return false, fmt.Errorf("CEL expression %q evaluation failed: %w", s.CEL.Expression, err)

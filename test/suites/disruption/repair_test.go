@@ -77,7 +77,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 			PodOptions: test.PodOptions{
 				ObjectMeta:                    metav1.ObjectMeta{Labels: appLabels},
 				PodAntiRequirements:           hostnameAntiAffinity(appLabels),
-				TerminationGracePeriodSeconds: lo.ToPtr(int64(30)),
+				TerminationGracePeriodSeconds: new(int64(30)),
 			},
 		})
 		selector := labels.SelectorFromSet(appLabels)
@@ -169,7 +169,7 @@ var _ = Describe("Repair", Ordered, ContinueOnFailure, func() {
 					Annotations: map[string]string{v1.DoNotDisruptAnnotationKey: "true"},
 				},
 				PodAntiRequirements:           hostnameAntiAffinity(appLabels),
-				TerminationGracePeriodSeconds: lo.ToPtr(int64(10)),
+				TerminationGracePeriodSeconds: new(int64(10)),
 			},
 		})
 		selector := labels.SelectorFromSet(appLabels)

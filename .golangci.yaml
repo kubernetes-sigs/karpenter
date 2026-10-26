@@ -15,6 +15,7 @@ linters:
     - gosec
     - kubeapilinter
     - misspell
+    - modernize
     - nilerr
     - revive
     - staticcheck
@@ -54,6 +55,8 @@ linters:
       enable-all: true
     misspell:
       locale: US
+    # Keeps `go fix ./...` from #3024 from drifting back (lo.ToPtr/ptr.To went 1110 -> 91 -> 641).
+    modernize: {}
     revive:
       rules:
         - name: dot-imports

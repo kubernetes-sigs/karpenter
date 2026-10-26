@@ -273,7 +273,7 @@ var _ = Describe("DRA Initialization Gating", func() {
 			Skip("DRA is only available in K8s versions >= 1.34.x")
 		}
 		// Enable DRA so the initialization gate is active.
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(false)}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: new(false)}))
 		nodePool = test.NodePool()
 	})
 
@@ -320,7 +320,7 @@ var _ = Describe("DRA Initialization Gating", func() {
 			},
 			Spec: resourcev1.ResourceSliceSpec{
 				Driver:   driver,
-				NodeName: lo.ToPtr(node.Name),
+				NodeName: new(node.Name),
 				Pool:     resourcev1.ResourcePool{Name: pool, Generation: generation, ResourceSliceCount: count},
 				Devices:  []resourcev1.Device{{Name: device}},
 			},
@@ -392,7 +392,7 @@ var _ = Describe("DRA Initialization Gating", func() {
 
 	It("skips the gate when DRA is disabled (e)", func() {
 		// Even with an annotation and no published slices, a DRA-disabled cluster initializes normally.
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(true)}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: new(true)}))
 		nodeClaim, _ := registeredReadyNodeClaim(driverA)
 		nodeClaim = reconcile(nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())

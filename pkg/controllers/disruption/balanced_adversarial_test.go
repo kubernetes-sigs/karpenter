@@ -32,7 +32,7 @@ import (
 
 var _ = Describe("Adversarial", func() {
 	It("should not allow NaN price to poison NodePool totals", func() {
-		np := makeBalancedNodePool("pool-nan", int32Ptr(2))
+		np := makeBalancedNodePool("pool-nan", new(int32(2)))
 		pod := makePod("pod", "")
 
 		normalIT := makeInstanceType("m7i.xlarge", 4.84)
@@ -71,9 +71,9 @@ var _ = Describe("Adversarial", func() {
 		ctx := options.ToContext(context.Background(), &options.Options{})
 
 		// Pool A: strict (k=1, threshold=1.0) -- will reject a marginal move
-		poolA := makeBalancedNodePool("pool-a", int32Ptr(1))
+		poolA := makeBalancedNodePool("pool-a", new(int32(1)))
 		// Pool B: lenient (k=3, threshold=0.33)
-		poolB := makeBalancedNodePool("pool-b", int32Ptr(3))
+		poolB := makeBalancedNodePool("pool-b", new(int32(3)))
 
 		itA := makeInstanceType("a-type", 1.0)
 		itB := makeInstanceType("b-type", 1.0)
@@ -115,7 +115,7 @@ var _ = Describe("Adversarial", func() {
 	})
 
 	It("should sum candidate costs correctly with nil instanceType", func() {
-		np := makeBalancedNodePool("pool-mixed", int32Ptr(2))
+		np := makeBalancedNodePool("pool-mixed", new(int32(2)))
 		it := makeInstanceType("m7i.xlarge", 4.84)
 		pod := makePod("pod", "")
 
@@ -131,7 +131,7 @@ var _ = Describe("Adversarial", func() {
 	})
 
 	It("should use source pricing that ignores availability", func() {
-		np := makeBalancedNodePool("pool-avail", int32Ptr(2))
+		np := makeBalancedNodePool("pool-avail", new(int32(2)))
 		pod := makePod("pod", "")
 
 		// Source instance type: cheapest compatible offering is "unavailable" ($1.00)
@@ -172,7 +172,7 @@ var _ = Describe("Adversarial", func() {
 
 	It("should approve single-node pool DELETE with expected scoring", func() {
 		ctx := context.Background()
-		np := makeBalancedNodePool("pool-single", int32Ptr(2))
+		np := makeBalancedNodePool("pool-single", new(int32(2)))
 		it := makeInstanceType("m7i.xlarge", 4.84)
 		pod := makePod("pod", "")
 
