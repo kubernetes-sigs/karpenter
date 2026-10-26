@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	SupportedNodeSelectorOps = sets.NewString(
+	SupportedNodeSelectorOps = sets.New[string](
 		string(v1.NodeSelectorOpIn),
 		string(v1.NodeSelectorOpNotIn),
 		string(v1.NodeSelectorOpExists),
@@ -41,14 +41,14 @@ var (
 		string(NodeSelectorOpLte),
 	)
 
-	SupportedReservedResources = sets.NewString(
+	SupportedReservedResources = sets.New[string](
 		v1.ResourceCPU.String(),
 		v1.ResourceMemory.String(),
 		v1.ResourceEphemeralStorage.String(),
 		"pid",
 	)
 
-	SupportedEvictionSignals = sets.NewString(
+	SupportedEvictionSignals = sets.New[string](
 		"memory.available",
 		"nodefs.available",
 		"nodefs.inodesFree",
