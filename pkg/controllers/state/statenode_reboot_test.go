@@ -17,12 +17,16 @@ limitations under the License.
 package state_test
 
 import (
+	"time"
+
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/clock"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -61,6 +65,52 @@ var _ = Describe("StateNode Reboot", func() {
 		})
 		It("is false when the StateNode has no NodeClaim", func() {
 			Expect((&state.StateNode{Node: test.Node()}).RebootInProgress()).To(BeFalse())
+		})
+	})
+
+	Context("RebootReinitializing", func() {
+		var clk *clocktesting.FakeClock
+		BeforeEach(func() {
+			clk = clocktesting.NewFakeClock(time.Now())
+		})
+		// rebooted builds a StateNode whose reboot reached the given terminal reason at the fake clock's current time.
+		// When uninitialized, the Node's initialized label is removed, as the reboot controller does at issuance.
+		rebooted := func(reason string, initialized bool) *state.StateNode {
+			n := stateNode("")
+			n.NodeClaim.StatusConditions(status.WithClock(clk)).SetFalse(v1.ConditionTypeRebooting, reason, "done")
+			if !initialized {
+				delete(n.Node.Labels, v1.NodeInitializedLabelKey)
+			}
+			return n
+		}
+		It("is true right after a successful reboot while the node is uninitialized", func() {
+			Expect(rebooted(v1.RebootReasonSucceeded, false).RebootReinitializing(clk)).To(BeTrue())
+		})
+		It("is true until the reboot observation window elapses", func() {
+			n := rebooted(v1.RebootReasonSucceeded, false)
+			clk.Step(state.RebootObservationWindow - time.Second)
+			Expect(n.RebootReinitializing(clk)).To(BeTrue())
+			clk.Step(time.Second)
+			Expect(n.RebootReinitializing(clk)).To(BeFalse())
+		})
+		It("is false once the node re-initializes", func() {
+			Expect(rebooted(v1.RebootReasonSucceeded, true).RebootReinitializing(clk)).To(BeFalse())
+		})
+		It("is false after a failed reboot", func() {
+			Expect(rebooted(v1.RebootReasonFailed, false).RebootReinitializing(clk)).To(BeFalse())
+		})
+		It("is false while the reboot is still in progress", func() {
+			n := stateNode(metav1.ConditionTrue)
+			delete(n.Node.Labels, v1.NodeInitializedLabelKey)
+			Expect(n.RebootReinitializing(clk)).To(BeFalse())
+		})
+		It("is false for an uninitialized node that never rebooted", func() {
+			n := stateNode("")
+			delete(n.Node.Labels, v1.NodeInitializedLabelKey)
+			Expect(n.RebootReinitializing(clk)).To(BeFalse())
+		})
+		It("is false when the StateNode has no NodeClaim", func() {
+			Expect((&state.StateNode{Node: test.Node()}).RebootReinitializing(clk)).To(BeFalse())
 		})
 	})
 

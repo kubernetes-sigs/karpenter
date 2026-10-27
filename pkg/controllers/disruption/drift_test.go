@@ -230,6 +230,55 @@ var _ = Describe("Drift", func() {
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
+		It("should not drift a node while a rebooted node in the same nodepool is re-initializing", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "1"}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims[1].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			for i := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, env.Clock, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			// nodes[0] just rebooted successfully and is waiting on initialization to re-run, so it isn't serving yet.
+			nodeClaims[0].StatusConditions(status.WithClock(env.Clock)).SetFalse(v1.ConditionTypeRebooting, v1.RebootReasonSucceeded, "node rebooted and rejoined the cluster")
+			ExpectApplied(ctx, env.Client, nodeClaims[0])
+			delete(nodes[0].Labels, v1.NodeInitializedLabelKey)
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[0]))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+
+			// The reboot still holds the nodepool's only disruption, so the drifted node waits.
+			ExpectSingletonReconciled(ctx, disruptionController)
+			Expect(queue.GetCommands()).To(BeEmpty())
+			Expect(ExpectExists(ctx, env.Client, nodes[1]).Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+
+			// Once the rebooted node re-initializes, the budget frees up and drift proceeds.
+			nodes[0] = ExpectExists(ctx, env.Client, nodes[0])
+			nodes[0].Labels[v1.NodeInitializedLabelKey] = "true"
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+			ExpectSingletonReconciled(ctx, disruptionController)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			Expect(cmds[0].Candidates[0].NodeClaim.Name).To(Equal(nodeClaims[1].Name))
+			Expect(ExpectExists(ctx, env.Client, nodes[1]).Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
+		})
 		It("should respect budgets for multiple nodepools", func() {
 			// Create 10 nodepools
 			nps := test.NodePools(10, v1.NodePool{

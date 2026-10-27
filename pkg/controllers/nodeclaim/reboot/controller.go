@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	rebootevents "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/reboot/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -55,7 +56,7 @@ import (
 
 const (
 	// Maximum time to observe a new boot and Ready node after reboot issuance.
-	observationWindow = 20 * time.Minute
+	observationWindow = state.RebootObservationWindow
 	// How often reboot recovery is re-checked.
 	pollInterval = 15 * time.Second
 	// Maximum time to retry provider acceptance after drain.

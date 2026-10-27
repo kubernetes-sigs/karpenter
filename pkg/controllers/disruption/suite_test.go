@@ -36,6 +36,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -942,6 +943,48 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			Expect(err).To(Succeed())
 			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
+	})
+	Context("after a successful reboot", func() {
+		// markRebootSucceeded leaves nodes[0] where the reboot controller does on success: Rebooting=False/RebootSucceeded
+		// and the initialized label still removed, waiting on initialization to re-run.
+		markRebootSucceeded := func() {
+			nodeClaims[0].StatusConditions(status.WithClock(env.Clock)).SetFalse(v1.ConditionTypeRebooting, v1.RebootReasonSucceeded, "node rebooted and rejoined the cluster")
+			ExpectApplied(ctx, env.Client, nodeClaims[0])
+			delete(nodes[0].Labels, v1.NodeInitializedLabelKey)
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[0]))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+		}
+		expectStats := func(total, disrupting int) {
+			GinkgoHelper()
+			for _, reason := range allKnownDisruptionReasons {
+				numNodes, numDisrupting := disruption.NodePoolStats(cluster, env.Clock, reason)
+				Expect(numNodes[nodePool.Name]).To(Equal(total), "reason %s", reason)
+				Expect(numDisrupting[nodePool.Name]).To(Equal(disrupting), "reason %s", reason)
+			}
+		}
+		It("should count a rebooted node that hasn't re-initialized in the total and as disrupting for all reasons", func() {
+			markRebootSucceeded()
+			expectStats(10, 1)
+		})
+		It("should stop counting a rebooted node that hasn't re-initialized within the reboot observation window", func() {
+			markRebootSucceeded()
+			env.Clock.Step(state.RebootObservationWindow)
+			expectStats(9, 0)
+		})
+		It("should count a rebooted node normally once it re-initializes", func() {
+			markRebootSucceeded()
+			nodes[0].Labels[v1.NodeInitializedLabelKey] = "true"
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+			expectStats(10, 0)
+		})
+		It("should not count an uninitialized node that never rebooted", func() {
+			delete(nodes[0].Labels, v1.NodeInitializedLabelKey)
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+			expectStats(9, 0)
+		})
 	})
 })
 

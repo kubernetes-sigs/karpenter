@@ -69,7 +69,7 @@ func RankNodes(ctx context.Context, kubeClient client.Client, clk clock.Clock, n
 	cleanupOnly := groups[partitionCleanupOnly]
 
 	budgetFor := func(reason v1.DisruptionReason) map[string]int {
-		numNodes, disrupting := disruption.NodePoolStatsFromNodes(nodes, reason)
+		numNodes, disrupting := disruption.NodePoolStatsFromNodes(nodes, clk, reason)
 		return disruption.NodePoolBudgetMap(ctx, clk, nodePoolMap, numNodes, disrupting, reason)
 	}
 	driftBudget := budgetFor(v1.DisruptionReasonDrifted)
