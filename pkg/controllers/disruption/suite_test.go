@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -37,6 +38,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
+	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -49,6 +51,7 @@ import (
 	clock "k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -943,6 +946,63 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			Expect(err).To(Succeed())
 			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
+	})
+	Context("Budget exhausted by nodes already disrupting", func() {
+		blockedMessage := func(reason v1.DisruptionReason) string {
+			return fmt.Sprintf("No allowed disruptions for disruption reason %s due to blocking budget", reason)
+		}
+		markForDeletion := func(n int) {
+			cluster.MarkForDeletion(lo.Map(nodeClaims[:n], func(nc *v1.NodeClaim, _ int) string { return nc.Status.ProviderID })...)
+		}
+		BeforeEach(func() {
+			// A non-zero absolute budget: the budget itself never evaluates to 0, only (allowed - disrupting) does.
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "2"}}
+			ExpectApplied(ctx, env.Client, nodePool)
+		})
+		It("should publish the blocked event when disrupting nodes consume the entire non-zero budget", func() {
+			markForDeletion(2)
+			for _, reason := range allKnownDisruptionReasons {
+				recorder.Reset()
+				budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, reason)
+				Expect(err).To(Succeed())
+				Expect(budgets[nodePool.Name]).To(Equal(0))
+				Expect(recorder.DetectedEvent(blockedMessage(reason))).To(BeTrue(), "expected DisruptionBlocked event for reason %s", reason)
+			}
+		})
+		It("should publish the blocked event and log the clamp when disrupting nodes exceed the budget", func() {
+			markForDeletion(3)
+			var logLines []string
+			logCtx := log.IntoContext(ctx, funcr.New(func(prefix, args string) {
+				logLines = append(logLines, args)
+			}, funcr.Options{Verbosity: 1}))
+			for _, reason := range allKnownDisruptionReasons {
+				recorder.Reset()
+				logLines = nil
+				budgets, err := disruption.BuildDisruptionBudgetMapping(logCtx, cluster, env.Clock, env.Client, cloudProvider, recorder, reason)
+				Expect(err).To(Succeed())
+				Expect(budgets[nodePool.Name]).To(Equal(0))
+				Expect(logLines).To(ContainElement(And(
+					ContainSubstring("disruption budget already exhausted; clamping to 0"),
+					ContainSubstring(fmt.Sprintf(`"nodePool"="%s"`, nodePool.Name)),
+					ContainSubstring(`"allowed"=2`),
+					ContainSubstring(`"disrupting"=3`),
+				)), "expected clamp log for reason %s", reason)
+				Expect(recorder.DetectedEvent(blockedMessage(reason))).To(BeTrue(), "expected DisruptionBlocked event for reason %s", reason)
+			}
+		})
+		It("should keep allowed_disruptions as the raw budget and expose the consumption via nodes_consuming_budgets", func() {
+			markForDeletion(3)
+			for _, reason := range allKnownDisruptionReasons {
+				budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, env.Clock, env.Client, cloudProvider, recorder, reason)
+				Expect(err).To(Succeed())
+				Expect(budgets[nodePool.Name]).To(Equal(0))
+				labels := map[string]string{metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: strings.ToLower(string(reason))}
+				// GA gauge semantics are intentionally unchanged: it reports the budget, not the remaining headroom.
+				// The effective budget is max(allowed_disruptions - nodes_consuming_budgets, 0) = max(2 - 3, 0) = 0.
+				ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 2, labels)
+				ExpectMetricGaugeValue(disruption.NodePoolNodesConsumingBudgets, 3, labels)
+			}
+		})
 	})
 })
 
