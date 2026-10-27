@@ -394,24 +394,41 @@ func (i *InstanceType) Allocatable() corev1.ResourceList {
 }
 
 func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
-	// Order instance types so that we get the cheapest instance types of the available offerings
-	sort.Slice(its, func(i, j int) bool {
-		iPrice := math.MaxFloat64
-		jPrice := math.MaxFloat64
-
-		for _, of := range its[i].Offerings {
-			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
-				iPrice = of.Price
-			}
-		}
-		for _, of := range its[j].Offerings {
-			if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
-				jPrice = of.Price
-			}
-		}
-		return iPrice < jPrice
-	})
+	// Order instance types so that we get the cheapest instance types of the available offerings. Each instance type's
+	// cheapest compatible price is computed once up front rather than inside the comparator, which would otherwise
+	// re-evaluate offering compatibility O(n log n) times. sort.Sort runs the same pdqsort as sort.Slice, so the
+	// resulting order (including the order of equally priced instance types) is unchanged.
+	prices := make([]float64, len(its))
+	for i, it := range its {
+		prices[i] = it.cheapestLaunchablePrice(reqs)
+	}
+	sort.Sort(instanceTypesByPrice{its: its, prices: prices})
 	return its
+}
+
+// cheapestLaunchablePrice returns the lowest price of the instance type's launchable offerings that are compatible with
+// reqs, or math.MaxFloat64 if there are none.
+func (i *InstanceType) cheapestLaunchablePrice(reqs scheduling.Requirements) float64 {
+	price := math.MaxFloat64
+	for _, of := range i.Offerings {
+		if of.Launchable() && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < price {
+			price = of.Price
+		}
+	}
+	return price
+}
+
+// instanceTypesByPrice sorts instance types by a precomputed price, keeping each price aligned with its instance type.
+type instanceTypesByPrice struct {
+	its    InstanceTypes
+	prices []float64
+}
+
+func (s instanceTypesByPrice) Len() int           { return len(s.its) }
+func (s instanceTypesByPrice) Less(i, j int) bool { return s.prices[i] < s.prices[j] }
+func (s instanceTypesByPrice) Swap(i, j int) {
+	s.its[i], s.its[j] = s.its[j], s.its[i]
+	s.prices[i], s.prices[j] = s.prices[j], s.prices[i]
 }
 
 // Compatible returns the list of instanceTypes based on the supported capacityType and zones in the requirements
