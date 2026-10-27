@@ -695,8 +695,10 @@ func checkPlacements(ctx context.Context, t *caseT, cfg Config, s scenario, resu
 		nodeClaim := nc.ToNodeClaim()
 		for _, it := range nc.InstanceTypeOptions {
 			launch := nodeClaim.DeepCopy()
-			launch.Spec.Requirements = append(lo.Reject(launch.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues, _ int) bool {
-				return r.Key == corev1.LabelInstanceTypeStable
+			launch.Spec.Requirements = append(lo.FilterMap(launch.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues, _ int) (v1.NodeSelectorRequirementWithMinValues, bool) {
+				// Each option launches alone, so minValues, which checkMinValues judges across the options, can't hold.
+				r.MinValues = nil
+				return r, r.Key != corev1.LabelInstanceTypeStable
 			}), v1.NodeSelectorRequirementWithMinValues{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{it.Name}})
 			launched, err := cfg.Launch(ctx, launch)
 			if err != nil {
