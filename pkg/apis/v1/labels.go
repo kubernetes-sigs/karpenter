@@ -282,6 +282,8 @@ func IsRestrictedLabel(key string) error {
 }
 
 // HasKnownValues returns an error if the requirement has well known values and is only presented with unknown values.
+//
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 func HasKnownValues(requirement NodeSelectorRequirementWithMinValues) error {
 	if !WellKnownLabels.Has(requirement.Key) {
 		return nil
