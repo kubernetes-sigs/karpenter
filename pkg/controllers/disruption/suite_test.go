@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2394,48 +2393,6 @@ func ExpectTaintedNodeCount(ctx context.Context, c client.Client, numTainted int
 	})
 	Expect(len(tainted)).To(Equal(numTainted))
 	return tainted
-}
-
-// ExpectNewNodeClaimsDeleted simulates the nodeClaims being created and then removed, similar to what would happen
-// during an ICE error on the created nodeClaim
-func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewNodeClaims int) {
-	GinkgoHelper()
-	existingNodeClaims := ExpectNodeClaims(ctx, c)
-	existingNodeClaimNames := sets.NewString(lo.Map(existingNodeClaims, func(nc *v1.NodeClaim, _ int) string {
-		return nc.Name
-	})...)
-
-	wg.Add(1)
-	go func() {
-		GinkgoHelper()
-		nodeClaimsDeleted := 0
-		ctx, cancel := context.WithTimeout(ctx, time.Second*30) // give up after 30s
-		defer GinkgoRecover()
-		defer wg.Done()
-		defer cancel()
-		for {
-			select {
-			case <-time.After(50 * time.Millisecond):
-				nodeClaimList := &v1.NodeClaimList{}
-				if err := c.List(ctx, nodeClaimList); err != nil {
-					continue
-				}
-				for i := range nodeClaimList.Items {
-					m := &nodeClaimList.Items[i]
-					if existingNodeClaimNames.Has(m.Name) {
-						continue
-					}
-					Expect(client.IgnoreNotFound(c.Delete(ctx, m))).To(Succeed())
-					nodeClaimsDeleted++
-					if nodeClaimsDeleted == numNewNodeClaims {
-						return
-					}
-				}
-			case <-ctx.Done():
-				Fail(fmt.Sprintf("waiting for nodeclaims to be deleted, %s", ctx.Err()))
-			}
-		}
-	}()
 }
 
 func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, clk clock.Clock, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, cmd *disruption.Command) {

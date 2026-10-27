@@ -630,12 +630,6 @@ func ExpectResourceClaimAllocated(ctx context.Context, c client.Client, namespac
 	return devices
 }
 
-// ExpectInstanceTypeOptionNames returns the names of a NodeClaim's candidate instance type options.
-func ExpectInstanceTypeOptionNames(nc *scheduling.NodeClaim) []string {
-	GinkgoHelper()
-	return lo.Map(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })
-}
-
 func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.Pod, binding *Binding, claimMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
 	GinkgoHelper()
 
@@ -1046,6 +1040,8 @@ func EventuallyExpectTerminating(ctx context.Context, c client.Client, objs ...c
 
 // ConsistentlyExpectNotTerminating ensures that the deletion timestamp is not set
 // We need this since there is some propagation time for the eviction API to set the deletionTimestamp
+//
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 func ConsistentlyExpectNotTerminating(ctx context.Context, c client.Client, objs ...client.Object) {
 	GinkgoHelper()
 
