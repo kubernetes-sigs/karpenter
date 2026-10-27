@@ -155,18 +155,6 @@ func NodePoolBlockedForDisruptionReason(nodePool *v1.NodePool, reason v1.Disrupt
 	}
 }
 
-func NodePoolBlocked(nodePool *v1.NodePool) events.Event {
-	return events.Event{
-		InvolvedObject: nodePool,
-		Type:           corev1.EventTypeNormal,
-		Reason:         events.DisruptionBlocked,
-		Message:        "No allowed disruptions due to blocking budget",
-		DedupeValues:   []string{string(nodePool.UID)},
-		// Set a small timeout as a NodePool's disruption budget can change every minute.
-		DedupeTimeout: 1 * time.Minute,
-	}
-}
-
 // ConsolidationCandidate is an event that informs the user that a consolidation candidate has been generated
 func ConsolidationCandidate(node *corev1.Node, nodeClaim *v1.NodeClaim, command string, savings float64) []events.Event {
 	message := fmt.Sprintf("Consolidation candidate: %s (savings: $%.2f)", command, savings)
