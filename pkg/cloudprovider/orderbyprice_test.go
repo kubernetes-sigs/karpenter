@@ -118,8 +118,8 @@ var _ = Describe("OrderByPrice", func() {
 		// Sizes cover pdqsort's insertion-sort cutoff (12), its ninther pivot selection (>50) and realistic instance
 		// type counts.
 		sizes := []int{0, 1, 2, 3, 5, 8, 12, 13, 20, 33, 50, 51, 64, 100, 257, 600, 1000}
-		for seed := uint64(0); seed < 400; seed++ {
-			r := rand.New(rand.NewPCG(seed, 0x6f726465726279))
+		for seed := range uint64(400) {
+			r := rand.New(rand.NewPCG(seed, 0x6f726465726279)) //nolint:gosec // deterministic seed for reproducible test inputs
 			n := sizes[int(seed)%len(sizes)]
 			its := randomInstanceTypes(r, n, seed%2 == 0)
 			reqs := randomRequirements(r)
@@ -152,7 +152,7 @@ var _ = Describe("OrderByPrice", func() {
 // benchmarkInstanceTypes builds n instance types with an offering per zone and capacity type (8 per instance type), in
 // a shuffled order, plus NodeClaim-like requirements that are compatible with a subset of those offerings.
 func benchmarkInstanceTypes(n int) (cloudprovider.InstanceTypes, scheduling.Requirements) {
-	r := rand.New(rand.NewPCG(uint64(n), 1))
+	r := rand.New(rand.NewPCG(uint64(n), 1)) //nolint:gosec // deterministic seed for stable benchmark inputs
 	its := make(cloudprovider.InstanceTypes, 0, n)
 	for i := range n {
 		var offerings cloudprovider.Offerings
