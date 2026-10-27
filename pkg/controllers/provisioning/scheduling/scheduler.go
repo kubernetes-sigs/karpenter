@@ -1008,6 +1008,7 @@ func parallelizeUntil(workers, pieces int, doWorkPiece func(int) bool) {
 type DaemonOverheadGroup struct {
 	InstanceTypes  []*cloudprovider.InstanceType
 	DaemonOverhead corev1.ResourceList
+	DaemonPodCount int
 	HostPortUsage  *scheduling.HostPortUsage
 }
 
@@ -1043,6 +1044,7 @@ func buildDaemonOverheadGroups(ctx context.Context, store *prediction.Store, nod
 				groups[key] = &DaemonOverheadGroup{
 					InstanceTypes:  []*cloudprovider.InstanceType{it},
 					DaemonOverhead: overhead,
+					DaemonPodCount: len(compatible),
 					HostPortUsage:  hostPortUsage,
 				}
 			}

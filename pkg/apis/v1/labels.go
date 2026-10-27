@@ -62,6 +62,7 @@ const (
 	RebootTerminationGracePeriodAnnotationKey  = apis.Group + "/reboot-termination-grace-period"
 	DRADriversAnnotationKey                    = apis.Group + "/requested-dra-drivers"
 	DisruptionCostAnnotationKey                = apis.Group + "/disruption-cost"
+	ExpectedPodCountAnnotationKey              = apis.Group + "/expected-pod-count"
 )
 
 var (
@@ -172,6 +173,19 @@ var (
 			"controller.kubernetes.io/pod-deletion-cost itself.",
 		Stage: docs.Alpha,
 	}
+	ExpectedPodCountAnnotation = wellknown.Annotation{
+		Name:    ExpectedPodCountAnnotationKey,
+		Example: "50",
+		UsedOn:  []runtime.Object{&NodeClaim{}},
+		Help: "Karpenter sets this at NodeClaim creation to the pods it has already decided the node will run: " +
+			"the pods the scheduler assigned to this NodeClaim, plus the largest set of DaemonSet pods " +
+			"compatible with an instance type the NodeClaim can still launch. It is a snapshot of that " +
+			"scheduling decision, not a prediction of the pod density the node settles at, and Karpenter never " +
+			"updates it. It is not clamped to the pod capacity of the instance type that launches, since the " +
+			"NodeClaim is created with several acceptable instance types. A consumer clamps it itself, and " +
+			"behaves the same way when the annotation is absent.",
+		Stage: docs.Alpha,
+	}
 )
 
 // KarpenterAnnotations are the well known annotations Karpenter reads or writes.
@@ -186,6 +200,7 @@ var KarpenterAnnotations = []wellknown.Annotation{
 	RebootTerminationGracePeriodAnnotation,
 	DRADriversAnnotation,
 	DisruptionCostAnnotation,
+	ExpectedPodCountAnnotation,
 }
 
 // Karpenter specific finalizers

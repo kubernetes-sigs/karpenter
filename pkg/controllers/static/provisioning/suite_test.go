@@ -265,6 +265,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			for _, nc := range nodeClaims.Items {
 				Expect(nc.Spec.NodeClassRef).To(Equal(nodePool.Spec.Template.Spec.NodeClassRef))
 				Expect(nc.Labels).To(HaveKeyWithValue(v1.NodePoolLabelKey, nodePool.Name))
+				Expect(nc.Annotations).ToNot(HaveKey(v1.ExpectedPodCountAnnotationKey))
 			}
 		})
 		It("should create additional nodeclaims to reach desired replicas", func() {

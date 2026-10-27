@@ -1573,6 +1573,47 @@ var _ = Describe("Provisioning", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Annotations).To(HaveKeyWithValue(v1.DoNotDisruptAnnotationKey, "true"))
 		})
+		It("should annotate the nodeclaim with the number of pods scheduled to it", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool())
+			pods := test.UnschedulablePods(test.PodOptions{}, 3)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			ExpectPodsScheduled(ctx, env.Client, pods...)
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodeClaims[0].Annotations).To(HaveKeyWithValue(v1.ExpectedPodCountAnnotationKey, "3"))
+		})
+		It("should count daemonset pods in the expected pod count annotation", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(), test.DaemonSet())
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodeClaims[0].Annotations).To(HaveKeyWithValue(v1.ExpectedPodCountAnnotationKey, "3"))
+		})
+		It("should not count daemonset pods that don't tolerate the nodepool's taints in the expected pod count annotation", func() {
+			taint := corev1.Taint{Key: "test", Value: "true", Effect: corev1.TaintEffectNoSchedule}
+			ExpectApplied(ctx, env.Client,
+				test.NodePool(v1.NodePool{
+					Spec: v1.NodePoolSpec{
+						Template: v1.NodeClaimTemplate{
+							Spec: v1.NodeClaimTemplateSpec{
+								Taints: []corev1.Taint{taint},
+							},
+						},
+					},
+				}),
+				test.DaemonSet(),
+			)
+			pod := test.UnschedulablePod(test.PodOptions{
+				Tolerations: []corev1.Toleration{{Key: taint.Key, Operator: corev1.TolerationOpExists}},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodeClaims[0].Annotations).To(HaveKeyWithValue(v1.ExpectedPodCountAnnotationKey, "1"))
+		})
 	})
 	Context("Labels", func() {
 		It("should label nodes", func() {

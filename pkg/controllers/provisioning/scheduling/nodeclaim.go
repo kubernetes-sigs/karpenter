@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"unique"
@@ -108,6 +109,7 @@ func NewNodeClaim(
 		groupsForNodeClaim[i] = DaemonOverheadGroup{
 			InstanceTypes:  g.InstanceTypes,
 			DaemonOverhead: g.DaemonOverhead,
+			DaemonPodCount: g.DaemonPodCount,
 			HostPortUsage:  g.HostPortUsage.DeepCopy(),
 		}
 	}
@@ -422,6 +424,18 @@ func (n *NodeClaim) addDaemonRequests() {
 	}
 }
 
+func (n *NodeClaim) expectedPodCount() int {
+	remaining := sets.New(n.InstanceTypeOptions...)
+	var daemonPods int
+	for _, g := range n.daemonOverheadGroups {
+		if !slices.ContainsFunc(g.InstanceTypes, remaining.Has) {
+			continue
+		}
+		daemonPods = max(daemonPods, g.DaemonPodCount)
+	}
+	return len(n.Pods) + daemonPods
+}
+
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
 // necessary before its requirements are used for instance launching. drivers is the set of DRA driver names whose
 // devices were allocated to pods scheduled to this NodeClaim; when non-empty it is recorded as an annotation for the
@@ -436,6 +450,9 @@ func (n *NodeClaim) FinalizeScheduling(drivers ...string) {
 			v1.DRADriversAnnotationKey: strings.Join(drivers, ","),
 		})
 	}
+	n.Annotations = lo.Assign(n.Annotations, map[string]string{
+		v1.ExpectedPodCountAnnotationKey: strconv.Itoa(n.expectedPodCount()),
+	})
 	// If there are any reserved offerings tracked, inject those requirements onto the NodeClaim. This ensures that if
 	// there are multiple reserved offerings for an instance type, we don't attempt to overlaunch into a single offering.
 	if len(n.reservedOfferings) != 0 {
