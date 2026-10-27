@@ -276,6 +276,20 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 		}
 	}
 
+	// KWOK nodes don't support overriding Karpenter's WellKnownResources, so capacity comes from the resource requests.
+	// Extended resources from a NodeOverlay's capacity or maxCapacity reach the node through the requests. For a
+	// flexible resource, the requests equal the amount chosen in the annotation, and hugepages are taken out of
+	// allocatable memory, as on a real node.
+	flexible, err := cloudprovider.FlexibleCapacityFromNodeClaim(nodeClaim)
+	if err != nil {
+		return nil, err
+	}
+	capacity, allocatable := cloudprovider.ApplyFlexibleCapacity(
+		nodeClaim.Spec.Resources.Requests,
+		lo.Assign(nodeClaim.Spec.Resources.Requests, instanceType.Allocatable()),
+		flexible,
+	)
+
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        newName,
@@ -287,11 +301,8 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		},
 		Status: corev1.NodeStatus{
-			// KWOK nodes don't support overriding Karpenter's WellKnownResources,
-			// so we only apply resource requests, since NodeOverlay will not apply.
-			// If this changes in the future, we'll need to update capacity and allocatable values for KWOK nodes.
-			Capacity:    nodeClaim.Spec.Resources.Requests,
-			Allocatable: lo.Assign(nodeClaim.Spec.Resources.Requests, instanceType.Allocatable()),
+			Capacity:    capacity,
+			Allocatable: allocatable,
 			Phase:       corev1.NodePending,
 		},
 	}, nil

@@ -25,11 +25,17 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/test"
+	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 type erroringCloudProvider struct {
@@ -41,10 +47,31 @@ func (e *erroringCloudProvider) GetInstanceTypes(context.Context, *v1.NodePool) 
 	return nil, e.err
 }
 
+var (
+	ctx                   context.Context
+	env                   *test.Environment
+	nodeOverlayController *nodeoverlay.Controller
+	store                 *nodeoverlay.InstanceTypeStore
+	fakeCloudProvider     *fake.CloudProvider
+)
+
 func TestOverlay(t *testing.T) {
+	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "CloudProvider Overlay Suite")
 }
+
+var _ = BeforeSuite(func() {
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
+	fakeCloudProvider = fake.NewCloudProvider()
+	store = nodeoverlay.NewInstanceTypeStore()
+	cluster := state.NewCluster(env.Clock, env.Client, fakeCloudProvider)
+	nodeOverlayController = nodeoverlay.NewController(env.Clock, env.Client, fakeCloudProvider, store, cluster)
+})
+
+var _ = AfterSuite(func() {
+	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
+})
 
 var _ = Describe("CloudProvider Overlay", func() {
 	It("should add NodePool context to cloud provider errors", func() {

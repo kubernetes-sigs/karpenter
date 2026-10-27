@@ -258,7 +258,7 @@ func (c *Controller) isPriceUpdatesConflicting(store *internalInstanceTypeStore,
 }
 
 func (c *Controller) isCapacityUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, overlay v1alpha1.NodeOverlay) bool {
-	if overlay.Spec.Capacity == nil {
+	if overlay.Spec.Capacity == nil && overlay.Spec.MaxCapacity == nil {
 		return false
 	}
 

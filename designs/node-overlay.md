@@ -4,12 +4,12 @@
 
 Node launch decisions are the output a scheduling simulation algorithm that involves satisfying pod scheduling constraints with available instance type offerings. Cloud provider implementations are responsible for surfacing these offerings to the Karpenter scheduler through the `cloudprovider.GetInstanceTypes()` API. This separation of responsibilities enables cloud providers to make simplifying assumptions, but limits extensibility for more advanced use cases. NodeOverlays enable users to inject alternative assumptions into the scheduling simulation for more accurate scheduling simulations.
 
-## Use Cases 
+## Use Cases
 
 Price considerations in instance selection present a unique challenge. While each instance offering includes a base price that Karpenter uses in its scheduling algorithm's minimization function, the true cost equation is often more complex. External factors such as vendor fees, negotiated pricing discounts, or environmental considerations like carbon-offset costs remain opaque to Karpenter's decision-making process, potentially leading to suboptimal economic choices. User data points:
 
 * Support for Saving plan: https://github.com/aws/karpenter-provider-aws/issues/3860
-* Custom cost adjustment for licensing fee per host [https://github.com/aws/karpenter-provider-aws/issues/5033](https://github.com/aws/karpenter-provider-aws/issues/7346) 
+* Custom cost adjustment for licensing fee per host [https://github.com/aws/karpenter-provider-aws/issues/5033](https://github.com/aws/karpenter-provider-aws/issues/7346)
 * Capacity type discount as a percentage: https://github.com/aws/karpenter-provider-aws/pull/4697
 * Instance Type Price Adjustment for Carbon Efficiency: https://github.com/aws/karpenter-provider-aws/pull/4686
 
@@ -25,7 +25,7 @@ While users have requested features to adjustment for node capacity on VM memory
 * Support per provisioner(NodePool)/Instance type VM_MEMORY_OVERHEAD: https://github.com/aws/karpenter-provider-aws/issues/2141
 * Set System Reserved as percentage: https://github.com/kubernetes-sigs/karpenter/issues/1595
 
-## Proposal 
+## Proposal
 
 NodeOverlays are a new Karpenter API that enable users to fine-tune the scheduling simulation for advanced use cases. NodeOverlays can be configured with a `requirements` which flexibly constrain when they are applied to a simulation. Requirements can match well-known labels like `node.kubernetes.io/instance-type` or  `karpenter.sh/nodepool` and custom labels defined in a NodePool's `.spec.labels` or `.spec.requirements`. When multiple NodeOverlays match an offering for a given simulation, they are merged together using `spec.weight` to resolve conflicts.
 
@@ -39,10 +39,10 @@ metadata:
 spec:
   weight: ...
   requirements:
-    ... 
-  price: 
-  priceAdjustment: ... 
-  capacity: 
+    ...
+  price:
+  priceAdjustment: ...
+  capacity:
     ...
 status:
   condition:
@@ -89,13 +89,13 @@ spec:
   priceAdjustment: "+5.00" # Set price to $5.00 more than the original
   # or
   priceAdjustment: "-7.50" # Set price to $7.50 less than the original
-  # or 
+  # or
   priceAdjustment: "-10%" # Reduce price by 10% of original
-  # or 
+  # or
   priceAdjustment: "+15%" # Increase price to 15% of original
 ```
 
-**Capacity:** Define capacity that will **add extended resources only**, and not replace any existing resources on the nodes. 
+**Capacity:** Define capacity that will **add extended resources only**, and not replace any existing resources on the nodes.
 
 ```
 kind: NodeOverlay
@@ -106,13 +106,13 @@ spec:
   - key: node.kubernetes.io/instance-type
     operator: In
     values: ["m5.large", "m5.2xlarge", "m5.4xlarge", "m5.8xlarge", "m5.12xlarge"]
-  capacity: 
+  capacity:
     smarter-devices/fuse: 1
 ```
 
-### HugePage Support 
+### HugePage Support
 
-A primary validation case for NodeOverlay capacity field is its handling of HugePages - a Linux kernel memory management optimization that enables larger page sizes (2MB or 1GB) compared to the default 4KB pages. This feature is particularly important for applications that manage large memory segments, such as databases, as it reduces TLB (Translation Lookaside Buffer) misses and improves overall memory access performance. However, HugePages must be allocated at system boot time and cannot be dynamically resized, requiring careful upfront planning of memory resources. This static nature, combined with their hardware-dependent characteristics and application-specific requirements, makes it challenging for schedulers to make accurate node provisioning decisions without explicit configuration of HugePage requirements. 
+A primary validation case for NodeOverlay capacity field is its handling of HugePages - a Linux kernel memory management optimization that enables larger page sizes (2MB or 1GB) compared to the default 4KB pages. This feature is particularly important for applications that manage large memory segments, such as databases, as it reduces TLB (Translation Lookaside Buffer) misses and improves overall memory access performance. However, HugePages must be allocated at system boot time and cannot be dynamically resized, requiring careful upfront planning of memory resources. This static nature, combined with their hardware-dependent characteristics and application-specific requirements, makes it challenging for schedulers to make accurate node provisioning decisions without explicit configuration of HugePage requirements.
 
 HugePages serve as an excellent example of extended resources that present unique challenges beyond simple resource allocation. Their configuration depends on both instance type and specific user requirements, leading to potential variations even within identical instance types. NodeOverlay addresses this challenge by providing a mechanism for users to explicitly define expected HugePage resources for specific instance types, enabling Karpenter to make informed scheduling decisions.
 
@@ -121,18 +121,18 @@ kind: NodeOverlay
 metadata:
  name: hugepage-overlay
 spec:
-  requirements: 
+  requirements:
   - key: node.kubernetes.io/instance-category
     operator: In
     values: ["c", "m", "r"]
-  capacity:  
+  capacity:
     hugepages-2Mi: 100Mi
     hugepages-1Gi: 2Gi
 ```
 
-## Requirements  
+## Requirements
 
-The NodeOverlay's requirement mechanism provides precise control over value injection during scheduling simulations. 
+The NodeOverlay's requirement mechanism provides precise control over value injection during scheduling simulations.
 Requirements operate the same way as the `spec.template.spec.requirements` from the NodePools CRDs. Requirements can be configured in multiple ways: an empty requirements affects all simulations universally, while specific requirements can establish various relationships with InstanceTypes - from one-to-many, one-to-one, or many-to-one mappings. These relationships can be further refined using additional constraints such as NodePool, NodeClass, availability zone, or other scheduling parameters, allowing for highly flexible and granular control over the simulation process.
 
 However, supporting many-to-one mapping relationships introduces significant complexity in conflict resolution and value precedence. When multiple NodeOverlays target the same InstanceType, the system must deterministically handle overlapping or conflicting specifications. This raises important questions about priority ordering, value merging strategies, and how to maintain predictable outcomes during scheduling decisions. Care must be taken to design clear resolution rules that operators can understand and reason about, particularly when NodeOverlays have intersecting requirements for the same scheduling dimensions.
@@ -144,7 +144,7 @@ The `priceAdjustment` field enables users to modify instance pricing information
 
 Since Karpenter considers pod resources through its consolidation process, any Node Overlay capacity changes will be automatically applied as part of the regular consolidation cycle. During consolidation, Karpenter reassesses instance type selection based on the pods running on Karpenter-provisioned capacity. This natural integration means that Node Overlay changes take effect through normal consolidation operations, eliminating the need for additional drift detection or forced updates.
 
-## Conflict Resolution 
+## Conflict Resolution
 
 The n:m relationship between NodeOverlays and instance types creates scenarios where multiple NodeOverlays could match a single instance type with different values. To manage these conflicts, we introduce an optional `.spec.weight` parameter that helps determine precedence. We have evaluated three distinct approaches for handling overlapping NodeOverlays:
 
@@ -312,7 +312,7 @@ Cons
 
 While integrating overlay functionality into NodePools might appear to simplify the API surface, it would force operators to create multiple NodePools to handle different override scenarios, leading to increased operational complexity and potential scheduling inefficiencies. Additionally, this approach would make it more difficult to evolve the API as new requirements emerge and complicate the implementation of gradual rollouts. In contrast, the separate NodeOverlay CRD provides better separation of concerns, more flexible configuration options through overlay stacking, and a more maintainable system that can better adapt to future needs while keeping the NodePool API focused on its core provisioning responsibilities.
 
-## Observability 
+## Observability
 
 Observability for Node Overlay will center around providing users with practical tools to understand the impact of their configurations. We will develop a diagnostic tool that allows users to preview how their Node Overlay configurations affect instance pricing and capacity allocations before deployment. This tool will help operators visualize and validate changes to instance selection patterns, price modifications, and capacity adjustments without requiring extensive logging or event generation. While we maintain basic metrics for overlay application status, this proactive tooling approach provides more actionable insights than high-volume logs or events, which could create operational overhead and scalability concerns in large clusters.
 
@@ -342,7 +342,7 @@ spec:
 ```
 > karpenteradm diagnose --type instance-type --overlay price-modification extended-resource --nodepool default
 NODEPOOL    OVERLAY                      INSTANCE_TYPE   CAPACITY TYPE      PRICE    CAPCITY
-default     "price-modification"         m5.large        spot               0.47     
+default     "price-modification"         m5.large        spot               0.47
 default     "extended-resource"          c5.large        spot               0         smarter-devices/fuse: 1
 ...
 ```
@@ -367,5 +367,4 @@ The NodeOverlay CRD will be introduced as a v1alpha1 feature, gated behind a fea
 
 * [Understanding HugePages](https://www.netdata.cloud/blog/understanding-huge-pages/) - Comprehensive breakdown of HugePage concepts and implementation
 * [Kubernetes HugePage Scheduling](https://kubernetes.io/docs/tasks/manage-hugepages/scheduling-hugepages/) - Official Kubernetes documentation on HugePage management
-* [GPU Operator](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html) - Official NVIDIA GPU Operator documentation  
-
+* [GPU Operator](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html) - Official NVIDIA GPU Operator documentation

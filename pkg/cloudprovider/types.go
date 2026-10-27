@@ -194,6 +194,9 @@ type InstanceType struct {
 	once                   sync.Once
 	allocatableOfferings   []AllocatableOfferings
 	capacityOverlayApplied bool
+	// flexibleCapacity holds the ceiling of each extended resource whose amount is chosen for each node at launch.
+	// The ceiling is also in Capacity. Treat this map as read-only, because instance types may share it.
+	flexibleCapacity corev1.ResourceList
 }
 
 type InstanceTypes []*InstanceType
@@ -248,6 +251,14 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 		in, out := &in.Overhead, &out.Overhead
 		*out = new(InstanceTypeOverhead)
 		(*in).DeepCopyInto(*out)
+	}
+	out.capacityOverlayApplied = in.capacityOverlayApplied
+	if in.flexibleCapacity != nil {
+		in, out := &in.flexibleCapacity, &out.flexibleCapacity
+		*out = make(corev1.ResourceList, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val.DeepCopy()
+		}
 	}
 }
 
@@ -339,9 +350,10 @@ func (i *InstanceType) computeAllocatable(capacityOverride corev1.ResourceList, 
 	}
 	allocatable := resources.Subtract(capacity, overhead)
 
-	// Adjust allocatable memory to account for hugepage reservations.
+	// Adjust allocatable memory to account for hugepage reservations. Flexible hugepages are not reserved here,
+	// because the amount is chosen for each node. FitsAllocatable charges them against memory instead.
 	for name, quantity := range capacity {
-		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
+		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) && !i.IsFlexible(name) {
 			current := allocatable.Memory()
 			current.Sub(quantity)
 			if current.Sign() == -1 {
@@ -370,9 +382,61 @@ func (i *InstanceType) IsPricingOverlayApplied() bool {
 	})
 }
 
+// ApplyCapacityOverlay adds fixed extended resource amounts to the instance type. A resource set here is no longer
+// flexible. Overlays must be applied before the first call to Allocatable or AllocatableOfferingsList.
 func (i *InstanceType) ApplyCapacityOverlay(updatedCapacity corev1.ResourceList) {
 	i.Capacity = lo.Assign(i.Capacity, updatedCapacity)
 	i.capacityOverlayApplied = true
+	if lo.SomeBy(lo.Keys(updatedCapacity), i.IsFlexible) {
+		// Copy before removing keys, because the map may be shared with other instance types.
+		i.flexibleCapacity = lo.OmitByKeys(i.flexibleCapacity, lo.Keys(updatedCapacity))
+	}
+}
+
+// ApplyMaxCapacityOverlay adds extended resources whose amount is chosen for each node at launch, up to the given
+// ceiling. The ceiling goes into Capacity, so a request above it does not fit. The map is kept without copying, so
+// callers must not change it afterwards. Overlays must be applied before the first call to Allocatable or
+// AllocatableOfferingsList.
+func (i *InstanceType) ApplyMaxCapacityOverlay(maxCapacity corev1.ResourceList) {
+	i.Capacity = lo.Assign(i.Capacity, maxCapacity)
+	i.capacityOverlayApplied = true
+	if len(i.flexibleCapacity) == 0 {
+		i.flexibleCapacity = maxCapacity
+		return
+	}
+	i.flexibleCapacity = lo.Assign(i.flexibleCapacity, maxCapacity)
+}
+
+// IsFlexible reports whether the amount of the resource is chosen for each node at launch.
+func (i *InstanceType) IsFlexible(name corev1.ResourceName) bool {
+	_, ok := i.flexibleCapacity[name]
+	return ok
+}
+
+// FlexibleCapacity returns the ceiling of each flexible resource. The caller must not change the returned map.
+func (i *InstanceType) FlexibleCapacity() corev1.ResourceList {
+	return i.flexibleCapacity
+}
+
+// FitsAllocatable reports whether the requests fit in the allocatable resources of this instance type. Flexible
+// hugepages are not taken out of allocatable memory ahead of time, so their requests are charged against memory here.
+func (i *InstanceType) FitsAllocatable(requests, allocatable corev1.ResourceList) bool {
+	if !resources.Fits(requests, allocatable) {
+		return false
+	}
+	if len(i.flexibleCapacity) == 0 {
+		return true
+	}
+	memory := requests.Memory().DeepCopy()
+	for name := range i.flexibleCapacity {
+		if !strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
+			continue
+		}
+		if quantity, ok := requests[name]; ok {
+			memory.Add(quantity)
+		}
+	}
+	return memory.Cmp(*allocatable.Memory()) <= 0
 }
 
 func (i *InstanceType) IsCapacityOverlayApplied() bool {

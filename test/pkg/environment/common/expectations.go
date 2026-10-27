@@ -459,6 +459,46 @@ func (env *Environment) ExpectSettingsRemoved(vars ...corev1.EnvVar) {
 	}
 }
 
+// WithFeatureGate returns the FEATURE_GATES value with the gate set to enabled, and the other gates unchanged.
+func WithFeatureGate(featureGates, gate string, enabled bool) string {
+	entry := fmt.Sprintf("%s=%t", gate, enabled)
+	if featureGates == "" {
+		return entry
+	}
+	parts := strings.Split(featureGates, ",")
+	found := false
+	for i, part := range parts {
+		if key, _, ok := strings.Cut(strings.TrimSpace(part), "="); ok && key == gate {
+			parts[i] = entry
+			found = true
+		}
+	}
+	if !found {
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, ",")
+}
+
+// ExpectFeatureGatesEnabled turns on the given feature gates on the karpenter deployment, which restarts it. It
+// returns a function that restores the original FEATURE_GATES value.
+func (env *Environment) ExpectFeatureGatesEnabled(gates ...string) (restore func()) {
+	GinkgoHelper()
+	original, found := lo.Find(env.ExpectSettings(), func(v corev1.EnvVar) bool { return v.Name == "FEATURE_GATES" })
+	featureGates := lo.Ternary(found, original.Value, "")
+	for _, gate := range gates {
+		featureGates = WithFeatureGate(featureGates, gate, true)
+	}
+	env.ExpectSettingsOverridden(corev1.EnvVar{Name: "FEATURE_GATES", Value: featureGates})
+	return func() {
+		GinkgoHelper()
+		if !found {
+			env.ExpectSettingsRemoved(corev1.EnvVar{Name: "FEATURE_GATES"})
+			return
+		}
+		env.ExpectSettingsOverridden(original)
+	}
+}
+
 func (env *Environment) ExpectConfigMapExists(key types.NamespacedName) *corev1.ConfigMap {
 	GinkgoHelper()
 	cm := &corev1.ConfigMap{}

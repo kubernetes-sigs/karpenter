@@ -692,7 +692,10 @@ func checkPlacements(ctx context.Context, t *caseT, cfg Config, s scenario, resu
 	var placements []placement
 	for i, nc := range results.NewNodeClaims {
 		p := placement{name: fmt.Sprintf("nodeclaim-%d", i), pods: lo.Map(nc.Pods, func(pod *corev1.Pod, _ int) *corev1.Pod { return submitted[pod.UID] })}
-		nodeClaim := nc.ToNodeClaim()
+		nodeClaim, err := nc.ToNodeClaim()
+		if err != nil {
+			t.Fatalf("converting nodeclaim %d, %v", i, err)
+		}
 		for _, it := range nc.InstanceTypeOptions {
 			launch := nodeClaim.DeepCopy()
 			launch.Spec.Requirements = append(lo.Reject(launch.Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues, _ int) bool {

@@ -503,7 +503,9 @@ var _ = Describe("Provisioning", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(results.NewNodeClaims).To(HaveLen(1))
-		Expect(results.NewNodeClaims[0].ToNodeClaim().Annotations).To(HaveKeyWithValue(v1.NodePoolHashAnnotationKey, hash))
+		templateNodeClaim, err := results.NewNodeClaims[0].ToNodeClaim()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(templateNodeClaim.Annotations).To(HaveKeyWithValue(v1.NodePoolHashAnnotationKey, hash))
 
 		nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{
 			"new-label": "new-value",

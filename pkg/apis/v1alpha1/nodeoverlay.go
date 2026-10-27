@@ -85,6 +85,18 @@ type NodeOverlaySpec struct {
 	// +optional
 	Capacity corev1.ResourceList `json:"capacity,omitempty"`
 	//nolint:kubeapilinter
+	// MaxCapacity adds extended resources whose amount Karpenter chooses for each node when it launches the node.
+	// The value is the most the node can get. Karpenter gives the node the total that the pods packed onto it
+	// request, including daemonset overhead, and never more than this value. A node whose pods request none gets
+	// none. Karpenter records the chosen amounts in the karpenter.sh/flexible-capacity annotation on the NodeClaim,
+	// and the cloud provider must give the node exactly those amounts. For hugepages-* resources, the chosen amount
+	// is taken out of the node's allocatable memory.
+	// A resource must not be set in both capacity and maxCapacity of the same NodeOverlay.
+	// Note: This field does not modify or override standard resources like cpu, memory, ephemeral-storage, or pods.
+	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))"
+	// +optional
+	MaxCapacity corev1.ResourceList `json:"maxCapacity,omitempty"`
+	//nolint:kubeapilinter
 	// Weight defines the priority of this NodeOverlay when overriding node attributes.
 	// NodeOverlays with higher numerical weights take precedence over those with lower weights.
 	// If no weight is specified, the NodeOverlay is treated as having a weight of 0.
@@ -109,6 +121,7 @@ type NodeOverlay struct {
 
 	//nolint:kubeapilinter
 	// +kubebuilder:validation:XValidation:message="cannot set both 'price' and 'priceAdjustment'",rule="!has(self.price) || !has(self.priceAdjustment)"
+	// +kubebuilder:validation:XValidation:message="a resource cannot be set in both 'capacity' and 'maxCapacity'",rule="!has(self.capacity) || !has(self.maxCapacity) || self.maxCapacity.all(x, !(x in self.capacity))"
 	Spec   NodeOverlaySpec   `json:"spec"`
 	Status NodeOverlayStatus `json:"status,omitempty"` //nolint:kubeapilinter
 }

@@ -33,8 +33,12 @@ type priceUpdate struct {
 }
 
 type capacityUpdate struct {
-	OverlayUpdate                 corev1.ResourceList
-	lowestWeightCapacityResources corev1.ResourceList
+	// OverlayUpdate holds the fixed amounts from spec.capacity.
+	OverlayUpdate corev1.ResourceList
+	// FlexibleUpdate holds the ceilings from spec.maxCapacity. Its keys never overlap with OverlayUpdate.
+	FlexibleUpdate corev1.ResourceList
+	// lowestWeightCapacityResources holds the resource names that the lowest weight overlay set in either field.
+	lowestWeightCapacityResources sets.Set[corev1.ResourceName]
 	lowestWeight                  *int32
 }
 
@@ -88,6 +92,13 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 	return internalStore.apply(nodePoolName, it), nil
 }
 
+// HasFlexibleCapacity reports whether a NodeOverlay sets maxCapacity for the instance type in the NodePool.
+func (s *InstanceTypeStore) HasFlexibleCapacity(nodePoolName string, instanceTypeName string) bool {
+	internalStore := lo.FromPtr(s.store.Load())
+	update, ok := internalStore.updates[nodePoolName][instanceTypeName]
+	return ok && update.Capacity != nil && len(update.Capacity.FlexibleUpdate) != 0
+}
+
 // InstanceTypeStore manages instance type updates for node pools.
 // It maintains a nested mapping structure where:
 //   - First level:  nodePoolName -> map of instance updates
@@ -139,6 +150,10 @@ func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider
 		// ApplyCapacityOverlay replaces Capacity with a new merged map (original untouched)
 		overriddenInstanceType.ApplyCapacityOverlay(instanceTypeUpdate.Capacity.OverlayUpdate)
 	}
+	if len(instanceTypeUpdate.Capacity.FlexibleUpdate) != 0 {
+		// ApplyMaxCapacityOverlay replaces Capacity with a new merged map and keeps the store's map as read-only
+		overriddenInstanceType.ApplyMaxCapacityOverlay(instanceTypeUpdate.Capacity.FlexibleUpdate)
+	}
 
 	// Handle offerings - copy-on-write only for offerings that need price overlay
 	if len(instanceTypeUpdate.Price) != 0 {
@@ -164,6 +179,8 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 				Price:               offering.Price,
 				Available:           offering.Available,
 				ReservationCapacity: offering.ReservationCapacity,
+				CapacityOverride:    offering.CapacityOverride, // Shared - never modified
+				OverheadOverride:    offering.OverheadOverride, // Shared - never modified
 			}
 			copiedOffering.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
 			result[i] = copiedOffering
@@ -176,9 +193,10 @@ func (s *internalInstanceTypeStore) applyPriceOverlays(offerings cloudprovider.O
 }
 
 // updateInstanceTypeCapacity add a new Capacity overlay update to the associated instance type.
+// For each resource, the first overlay to set it wins, whether it set the resource in capacity or maxCapacity.
 // NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
 func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay) {
-	if nodeOverlay.Spec.Capacity == nil {
+	if nodeOverlay.Spec.Capacity == nil && nodeOverlay.Spec.MaxCapacity == nil {
 		return
 	}
 
@@ -188,27 +206,49 @@ func (i *internalInstanceTypeStore) updateInstanceTypeCapacity(nodePoolName stri
 	}
 	_, ok = i.updates[nodePoolName][instanceTypeName]
 	if !ok {
-		i.updates[nodePoolName][instanceTypeName] = &instanceTypeUpdate{Price: map[string]*priceUpdate{}, Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}}}
+		i.updates[nodePoolName][instanceTypeName] = &instanceTypeUpdate{Price: map[string]*priceUpdate{}, Capacity: newCapacityUpdate()}
+	}
+	update := i.updates[nodePoolName][instanceTypeName].Capacity
+	if update.OverlayUpdate == nil {
+		update.OverlayUpdate = corev1.ResourceList{}
+	}
+	if update.FlexibleUpdate == nil {
+		update.FlexibleUpdate = corev1.ResourceList{}
 	}
 
-	if i.updates[nodePoolName][instanceTypeName].Capacity == nil {
-		i.updates[nodePoolName][instanceTypeName].Capacity = &capacityUpdate{
-			OverlayUpdate:                 nodeOverlay.Spec.Capacity,
-			lowestWeightCapacityResources: nodeOverlay.Spec.Capacity,
-			lowestWeight:                  nodeOverlay.Spec.Weight,
+	for resource, quantity := range nodeOverlay.Spec.Capacity {
+		if update.hasResource(resource) {
+			continue
 		}
-	} else {
-		for resource, quantity := range nodeOverlay.Spec.Capacity {
-			if _, foundCapacityUpdate := i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource]; foundCapacityUpdate {
-				continue
-			}
-
-			i.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource] = quantity
-		}
-
-		i.updates[nodePoolName][instanceTypeName].Capacity.lowestWeightCapacityResources = nodeOverlay.Spec.Capacity
-		i.updates[nodePoolName][instanceTypeName].Capacity.lowestWeight = nodeOverlay.Spec.Weight
+		update.OverlayUpdate[resource] = quantity
 	}
+	for resource, quantity := range nodeOverlay.Spec.MaxCapacity {
+		if update.hasResource(resource) {
+			continue
+		}
+		update.FlexibleUpdate[resource] = quantity
+	}
+
+	update.lowestWeightCapacityResources = capacityResourceNames(nodeOverlay)
+	update.lowestWeight = nodeOverlay.Spec.Weight
+}
+
+func newCapacityUpdate() *capacityUpdate {
+	return &capacityUpdate{OverlayUpdate: corev1.ResourceList{}, FlexibleUpdate: corev1.ResourceList{}}
+}
+
+// hasResource reports whether a higher weight overlay already set the resource in either field.
+func (c *capacityUpdate) hasResource(resource corev1.ResourceName) bool {
+	if _, ok := c.OverlayUpdate[resource]; ok {
+		return true
+	}
+	_, ok := c.FlexibleUpdate[resource]
+	return ok
+}
+
+// capacityResourceNames returns the resource names that the overlay sets in capacity or maxCapacity.
+func capacityResourceNames(nodeOverlay v1alpha1.NodeOverlay) sets.Set[corev1.ResourceName] {
+	return sets.New(append(lo.Keys(nodeOverlay.Spec.Capacity), lo.Keys(nodeOverlay.Spec.MaxCapacity)...)...)
 }
 
 func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay) bool {
@@ -228,13 +268,7 @@ func (i *internalInstanceTypeStore) isCapacityUpdateConflicting(nodePoolName str
 		return false
 	}
 
-	for resource := range nodeOverlay.Spec.Capacity {
-		if _, found := instanceTypeUpdate.Capacity.lowestWeightCapacityResources[resource]; found {
-			return true
-		}
-	}
-
-	return false
+	return capacityResourceNames(nodeOverlay).HasAny(instanceTypeUpdate.Capacity.lowestWeightCapacityResources.UnsortedList()...)
 }
 
 // updateInstanceTypeOffering add a new Price overlay update to the associated instance type.
@@ -251,7 +285,7 @@ func (i *internalInstanceTypeStore) updateInstanceTypeOffering(nodePoolName stri
 	}
 	_, ok = i.updates[nodePoolName][instanceTypeName]
 	if !ok {
-		i.updates[nodePoolName][instanceTypeName] = &instanceTypeUpdate{Price: map[string]*priceUpdate{}, Capacity: &capacityUpdate{OverlayUpdate: corev1.ResourceList{}}}
+		i.updates[nodePoolName][instanceTypeName] = &instanceTypeUpdate{Price: map[string]*priceUpdate{}, Capacity: newCapacityUpdate()}
 	}
 
 	for _, of := range offerings {

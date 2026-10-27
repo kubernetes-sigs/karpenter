@@ -169,4 +169,7 @@ settings:
     # -- predictionEnabled is ALPHA and is disabled by default.
     # Setting this to true will enable Karpenter to size nodes using VPA predictions during provisioning and disruption.
     predictionEnabled: false
+    # -- nodeOverlay is ALPHA and is disabled by default.
+    # Setting this to true will enable NodeOverlays, which adjust instance type price and capacity during scheduling.
+    nodeOverlay: false
 

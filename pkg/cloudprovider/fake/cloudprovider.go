@@ -156,7 +156,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 		if !i.Offerings.Available().HasCompatible(reqs) {
 			return false
 		}
-		if !resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable()) {
+		if !i.FitsAllocatable(nodeClaim.Spec.Resources.Requests, i.Allocatable()) {
 			return false
 		}
 		return true
@@ -199,6 +199,16 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 		labels[req.Key] = req.Any()
 	}
 
+	// A flexible resource gets only the amount chosen in the annotation, not the instance type's ceiling.
+	flexible, err := cloudprovider.FlexibleCapacityFromNodeClaim(nodeClaim)
+	if err != nil {
+		return nil, err
+	}
+	capacity, allocatable := cloudprovider.ApplyFlexibleCapacity(
+		lo.OmitByKeys(instanceType.Capacity, lo.Keys(instanceType.FlexibleCapacity())),
+		lo.OmitByKeys(instanceType.Allocatable(), lo.Keys(instanceType.FlexibleCapacity())),
+		flexible,
+	)
 	created := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        nodeClaim.Name,
@@ -208,8 +218,8 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 		Spec: *nodeClaim.Spec.DeepCopy(),
 		Status: v1.NodeClaimStatus{
 			ProviderID:  test.RandomProviderID(),
-			Capacity:    lo.PickBy(instanceType.Capacity, func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
-			Allocatable: lo.PickBy(instanceType.Allocatable(), func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
+			Capacity:    lo.PickBy(capacity, func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
+			Allocatable: lo.PickBy(allocatable, func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
 	}
 	c.CreatedNodeClaims[created.Status.ProviderID] = created

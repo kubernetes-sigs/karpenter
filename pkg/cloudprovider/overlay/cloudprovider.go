@@ -21,8 +21,11 @@ import (
 	"fmt"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -54,4 +57,56 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool)
 		}
 	}
 	return its, nil
+}
+
+// Create delegates to the cloud provider. When a NodeOverlay sets maxCapacity for the launched instance type, Create
+// then corrects the returned status, so that it reports the chosen amount of each flexible resource instead of the
+// ceiling. Cloud providers therefore do not have to do this themselves.
+func (d *decorator) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
+	created, err := d.CloudProvider.Create(ctx, nodeClaim)
+	if err != nil || !options.FromContext(ctx).FeatureGates.NodeOverlay {
+		return created, err
+	}
+	// The instance exists now. If Create returned an error, Karpenter would launch again and leak this instance, so a
+	// failed correction is only logged.
+	if err := d.correctFlexibleCapacity(ctx, nodeClaim, created); err != nil {
+		log.FromContext(ctx).Error(err, "failed setting flexible capacity in nodeclaim status", "NodeClaim", klog.KObj(nodeClaim))
+	}
+	return created, nil
+}
+
+func (d *decorator) correctFlexibleCapacity(ctx context.Context, nodeClaim *v1.NodeClaim, created *v1.NodeClaim) error {
+	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if !ok {
+		return nil
+	}
+	instanceTypeName, ok := created.Labels[corev1.LabelInstanceTypeStable]
+	if !ok {
+		return nil
+	}
+	if !d.store.HasFlexibleCapacity(nodePoolName, instanceTypeName) {
+		return nil
+	}
+	flexible, err := cloudprovider.FlexibleCapacityFromNodeClaim(nodeClaim)
+	if err != nil {
+		return err
+	}
+	nodePool := &v1.NodePool{}
+	if err := d.kubeClient.Get(ctx, client.ObjectKey{Name: nodePoolName}, nodePool); err != nil {
+		return fmt.Errorf("getting nodepool, %w", err)
+	}
+	its, err := d.CloudProvider.GetInstanceTypes(ctx, nodePool)
+	if err != nil {
+		return fmt.Errorf("getting cloud provider instance types, %w", err)
+	}
+	it, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool { return it.Name == instanceTypeName })
+	if !ok {
+		return serrors.Wrap(fmt.Errorf("instance type not found"), "instance-type", instanceTypeName)
+	}
+	it, err = d.store.Apply(nodePoolName, it)
+	if err != nil {
+		return fmt.Errorf("applying nodeoverlays, %w", err)
+	}
+	created.Status.Capacity, created.Status.Allocatable = cloudprovider.FlexibleCapacityStatus(it, created.Status.Capacity, created.Status.Allocatable, flexible)
+	return nil
 }

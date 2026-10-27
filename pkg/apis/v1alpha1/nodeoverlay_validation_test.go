@@ -374,4 +374,76 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
 	})
+	Context("MaxCapacity", func() {
+		It("should allow hugepages", func() {
+			nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{
+				corev1.ResourceName("hugepages-2Mi"): resource.MustParse("4Gi"),
+				corev1.ResourceName("hugepages-1Gi"): resource.MustParse("2Gi"),
+			}
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
+		})
+		It("should allow custom resources", func() {
+			nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{
+				corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("10"),
+			}
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
+		})
+		It("should allow different resources in capacity and maxCapacity", func() {
+			nodeOverlay.Spec.Capacity = corev1.ResourceList{
+				corev1.ResourceName("hugepages-1Gi"): resource.MustParse("2Gi"),
+			}
+			nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{
+				corev1.ResourceName("hugepages-2Mi"): resource.MustParse("4Gi"),
+			}
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
+		})
+		It("should not allow the same resource in capacity and maxCapacity", func() {
+			nodeOverlay.Spec.Capacity = corev1.ResourceList{
+				corev1.ResourceName("hugepages-2Mi"): resource.MustParse("2Gi"),
+			}
+			nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{
+				corev1.ResourceName("hugepages-2Mi"): resource.MustParse("4Gi"),
+			}
+			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+		})
+		DescribeTable("should not allow well known resources",
+			func(name corev1.ResourceName) {
+				nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{name: resource.MustParse("1")}
+				Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+				Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+			},
+			Entry("cpu", corev1.ResourceCPU),
+			Entry("memory", corev1.ResourceMemory),
+			Entry("ephemeral-storage", corev1.ResourceEphemeralStorage),
+			Entry("pods", corev1.ResourcePods),
+		)
+		It("should fail runtime validation for a zero value", func() {
+			nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{
+				corev1.ResourceName("hugepages-2Mi"): resource.MustParse("0"),
+			}
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+		})
+		It("should fail runtime validation for a negative value", func() {
+			nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{
+				corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("-1"),
+			}
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+		})
+		It("should fail runtime validation for hugepages that are not a whole number of pages", func() {
+			nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{
+				corev1.ResourceName("hugepages-2Mi"): resource.MustParse("3Mi"),
+			}
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+		})
+		It("should fail runtime validation for hugepages with an invalid page size", func() {
+			nodeOverlay.Spec.MaxCapacity = corev1.ResourceList{
+				corev1.ResourceName("hugepages-abc"): resource.MustParse("2Mi"),
+			}
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+		})
+	})
 })

@@ -112,6 +112,13 @@ func (in *NodeOverlaySpec) DeepCopyInto(out *NodeOverlaySpec) {
 			(*out)[key] = val.DeepCopy()
 		}
 	}
+	if in.MaxCapacity != nil {
+		in, out := &in.MaxCapacity, &out.MaxCapacity
+		*out = make(v1.ResourceList, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val.DeepCopy()
+		}
+	}
 	if in.Weight != nil {
 		in, out := &in.Weight, &out.Weight
 		*out = new(int32)

@@ -62,6 +62,7 @@ const (
 	RebootTerminationGracePeriodAnnotationKey  = apis.Group + "/reboot-termination-grace-period"
 	DRADriversAnnotationKey                    = apis.Group + "/requested-dra-drivers"
 	DisruptionCostAnnotationKey                = apis.Group + "/disruption-cost"
+	FlexibleCapacityAnnotationKey              = apis.Group + "/flexible-capacity"
 )
 
 var (
@@ -172,6 +173,18 @@ var (
 			"controller.kubernetes.io/pod-deletion-cost itself.",
 		Stage: docs.Alpha,
 	}
+	FlexibleCapacityAnnotation = wellknown.Annotation{
+		Name:    FlexibleCapacityAnnotationKey,
+		Example: `{"hugepages-2Mi":"8602Mi"}`,
+		UsedOn:  []runtime.Object{&NodeClaim{}, &v1.Node{}},
+		Help: "Karpenter sets this to a JSON map of the extended resources that a NodeOverlay declares in " +
+			"maxCapacity, and the amount it chose for this node. The cloud provider must give the node exactly " +
+			"these amounts. Karpenter sets the amounts in the NodeClaim's status capacity and allocatable, and " +
+			"takes hugepages-* amounts out of allocatable memory. When the annotation is absent, the node gets " +
+			"none of these resources.",
+		Stage:        docs.Alpha,
+		InternalOnly: true,
+	}
 )
 
 // KarpenterAnnotations are the well known annotations Karpenter reads or writes.
@@ -186,6 +199,7 @@ var KarpenterAnnotations = []wellknown.Annotation{
 	RebootTerminationGracePeriodAnnotation,
 	DRADriversAnnotation,
 	DisruptionCostAnnotation,
+	FlexibleCapacityAnnotation,
 }
 
 // Karpenter specific finalizers

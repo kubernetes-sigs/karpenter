@@ -22,6 +22,7 @@ import (
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -61,6 +62,8 @@ type NodeClaimTemplate struct {
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
 	IsStaticNodeClaim   bool
+	// FlexibleCapacityRequests holds the amount chosen for each flexible resource when scheduling finishes.
+	FlexibleCapacityRequests corev1.ResourceList
 }
 
 func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
@@ -106,7 +109,7 @@ func (i *NodeClaimTemplate) resolveCustomLabelsFromRequirements() map[string]str
 	return labels
 }
 
-func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
+func (i *NodeClaimTemplate) ToNodeClaim() (*v1.NodeClaim, error) {
 	// Inject instanceType requirements for NodeClaims belonging to dynamic NodePool
 	// For static we let cloudprovider.Create()
 	if !i.IsStaticNodeClaim {
@@ -137,6 +140,20 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 		if foundCapacityOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); foundCapacityOverlay {
 			i.Annotations = lo.Assign(i.Annotations, map[string]string{
 				v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
+			})
+		}
+		// Tell the cloud provider the amount of each flexible resource to give the node. Only resources that every
+		// launchable instance type treats as flexible are recorded.
+		flexible := lo.PickBy(i.FlexibleCapacityRequests, func(name corev1.ResourceName, _ resource.Quantity) bool {
+			return lo.EveryBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsFlexible(name) })
+		})
+		if len(flexible) != 0 {
+			value, err := cloudprovider.FlexibleCapacityAnnotationValue(flexible)
+			if err != nil {
+				return nil, err
+			}
+			i.Annotations = lo.Assign(i.Annotations, map[string]string{
+				v1.FlexibleCapacityAnnotationKey: value,
 			})
 		}
 	}
@@ -174,5 +191,5 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 		nc.Spec.TerminationGracePeriod = DefaultTerminationGracePeriod
 	}
 
-	return nc
+	return nc, nil
 }

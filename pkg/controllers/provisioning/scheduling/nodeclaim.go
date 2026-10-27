@@ -448,10 +448,16 @@ func (n *NodeClaim) FinalizeScheduling(drivers ...string) {
 			lo.Map(n.reservedOfferings, func(o *cloudprovider.Offering, _ int) string { return o.ReservationID() })...,
 		))
 	}
+	// Choose the amount of each flexible resource from the pod requests, before daemon requests are added to them.
+	n.FlexibleCapacityRequests = n.flexibleCapacityRequests(n.Spec.Resources.Requests)
 	// Add min Daemon resource requests
 	// Daemon resource requests are excluded during bin packing to avoid double-counting
 	// Adding during bin-packing would add it every time a pod is added
 	n.addDaemonRequests()
+	// The requests of a flexible resource must equal the chosen amount, which includes the largest daemon overhead.
+	if len(n.FlexibleCapacityRequests) != 0 {
+		n.Spec.Resources.Requests = lo.Assign(n.Spec.Resources.Requests, n.FlexibleCapacityRequests)
+	}
 }
 
 func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {
@@ -647,6 +653,8 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			}
 		}
 	}
+	remaining = narrowFlexibleConsistency(remaining, totalRequests, daemonOverheadGroups)
+	remaining = fitFlexibleAmounts(remaining, requirements, totalRequests, daemonOverheadGroups)
 
 	if requirements.HasMinValues() {
 		// We don't care about the minimum number of instance types that meet our requirements here, we only care if they meet our requirements.
@@ -666,13 +674,120 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 	return remaining, unsatisfiableKeys, nil
 }
 
+// narrowFlexibleConsistency keeps only the instance types that treat a requested resource as flexible, when the
+// remaining instance types disagree about it. A NodeClaim must get one amount of each flexible resource, and the
+// cloud provider must give it exactly that amount, so the instance types it can launch as must agree. Narrowing here,
+// while pods are added, keeps every later subset of the options consistent too.
+func narrowFlexibleConsistency(remaining cloudprovider.InstanceTypes, totalRequests corev1.ResourceList, daemonOverheadGroups []DaemonOverheadGroup) cloudprovider.InstanceTypes {
+	if !lo.SomeBy(remaining, func(it *cloudprovider.InstanceType) bool { return len(it.FlexibleCapacity()) != 0 }) {
+		return remaining
+	}
+	requested := sets.New[corev1.ResourceName]()
+	for name, quantity := range totalRequests {
+		if !quantity.IsZero() {
+			requested.Insert(name)
+		}
+	}
+	remainingSet := sets.New(remaining...)
+	for _, group := range daemonOverheadGroups {
+		// A daemonset requests resources only on the instance types it runs on
+		if !lo.SomeBy(group.InstanceTypes, remainingSet.Has) {
+			continue
+		}
+		for name, quantity := range group.DaemonOverhead {
+			if !quantity.IsZero() {
+				requested.Insert(name)
+			}
+		}
+	}
+	for _, name := range sets.List(requested) {
+		flexible := lo.Filter(remaining, func(it *cloudprovider.InstanceType, _ int) bool { return it.IsFlexible(name) })
+		if len(flexible) != 0 && len(flexible) != len(remaining) {
+			remaining = flexible
+		}
+	}
+	return remaining
+}
+
+// fitFlexibleAmounts keeps only the instance types that can hold the amount of each flexible resource the NodeClaim
+// would get. The filter above checks each instance type against the pod requests plus its own daemonset overhead.
+// But the NodeClaim gets one amount, which includes the largest daemonset overhead across all remaining instance
+// types. That amount can be above another instance type's ceiling, or leave too little memory for the pods.
+// Removing an instance type can lower the amount, so this repeats until no more instance types are removed.
+func fitFlexibleAmounts(remaining cloudprovider.InstanceTypes, requirements scheduling.Requirements, totalRequests corev1.ResourceList, daemonOverheadGroups []DaemonOverheadGroup) cloudprovider.InstanceTypes {
+	if len(remaining) == 0 || len(remaining[0].FlexibleCapacity()) == 0 {
+		return remaining
+	}
+	overheads := map[*cloudprovider.InstanceType]corev1.ResourceList{}
+	for _, group := range daemonOverheadGroups {
+		for _, it := range group.InstanceTypes {
+			overheads[it] = group.DaemonOverhead
+		}
+	}
+	for {
+		amounts := flexibleAmounts(remaining, totalRequests, daemonOverheadGroups)
+		if len(amounts) == 0 {
+			return remaining
+		}
+		fitting := lo.Filter(remaining, func(it *cloudprovider.InstanceType, _ int) bool {
+			requests := lo.Assign(resources.Merge(totalRequests, overheads[it]), amounts)
+			itFits, _ := fits(it, requests, requirements)
+			return itFits
+		})
+		if len(fitting) == len(remaining) {
+			return remaining
+		}
+		remaining = fitting
+	}
+}
+
+// flexibleCapacityRequests returns the amount of each flexible resource the NodeClaim needs. See flexibleAmounts.
+func (n *NodeClaim) flexibleCapacityRequests(podRequests corev1.ResourceList) corev1.ResourceList {
+	return flexibleAmounts(n.InstanceTypeOptions, podRequests, n.daemonOverheadGroups)
+}
+
+// flexibleAmounts returns the amount of each flexible resource a NodeClaim with these instance types needs, for the
+// resources that every instance type treats as flexible. The amount is the pod requests plus the largest daemonset
+// overhead across the instance types, so the daemonsets fit whichever instance type launches. Only amounts greater
+// than zero are returned.
+func flexibleAmounts(instanceTypes []*cloudprovider.InstanceType, podRequests corev1.ResourceList, daemonOverheadGroups []DaemonOverheadGroup) corev1.ResourceList {
+	if len(instanceTypes) == 0 || len(instanceTypes[0].FlexibleCapacity()) == 0 {
+		return nil
+	}
+	names := lo.Filter(lo.Keys(instanceTypes[0].FlexibleCapacity()), func(name corev1.ResourceName, _ int) bool {
+		return lo.EveryBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsFlexible(name) })
+	})
+	if len(names) == 0 {
+		return nil
+	}
+	remaining := sets.New(instanceTypes...)
+	result := corev1.ResourceList{}
+	for _, name := range names {
+		amount := podRequests[name].DeepCopy()
+		var daemonOverhead resource.Quantity
+		for _, g := range daemonOverheadGroups {
+			if !lo.SomeBy(g.InstanceTypes, remaining.Has) {
+				continue
+			}
+			if q, ok := g.DaemonOverhead[name]; ok && q.Cmp(daemonOverhead) > 0 {
+				daemonOverhead = q.DeepCopy()
+			}
+		}
+		amount.Add(daemonOverhead)
+		if amount.Sign() > 0 {
+			result[name] = amount
+		}
+	}
+	return result
+}
+
 func compatible(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
 	return instanceType.Requirements.Intersects(requirements) == nil
 }
 
 func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList, requirements scheduling.Requirements) (itFits bool, hasOffering bool) {
 	for _, group := range instanceType.AllocatableOfferingsList() {
-		resourceFit := resources.Fits(requests, group.Allocatable)
+		resourceFit := instanceType.FitsAllocatable(requests, group.Allocatable)
 		for _, of := range group.Offerings {
 			if requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 				hasOffering = true

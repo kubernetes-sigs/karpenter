@@ -18,7 +18,6 @@ package disruption_test
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -36,45 +35,14 @@ import (
 const terminateFirstNodeCount = 1
 
 var _ = Describe("TerminateFirst", Ordered, func() {
-	var originalFeatureGates *corev1.EnvVar
-
-	withFeatureGate := func(featureGates, gate string, enabled bool) string {
-		entry := fmt.Sprintf("%s=%t", gate, enabled)
-		if featureGates == "" {
-			return entry
-		}
-		parts := strings.Split(featureGates, ",")
-		found := false
-		for i, part := range parts {
-			if key, _, ok := strings.Cut(strings.TrimSpace(part), "="); ok && key == gate {
-				parts[i] = entry
-				found = true
-			}
-		}
-		if !found {
-			parts = append(parts, entry)
-		}
-		return strings.Join(parts, ",")
-	}
+	var restoreFeatureGates func()
 
 	BeforeAll(func() {
-		for _, setting := range env.ExpectSettings() {
-			if setting.Name == "FEATURE_GATES" {
-				originalFeatureGates = setting.DeepCopy()
-			}
-		}
-		featureGates := withFeatureGate(lo.FromPtrOr(originalFeatureGates, corev1.EnvVar{}).Value, "NodeRepair", true)
-		featureGates = withFeatureGate(featureGates, "TerminateFirstRepair", true)
-		featureGates = withFeatureGate(featureGates, "TerminateFirstDrift", true)
-		env.ExpectSettingsOverridden(corev1.EnvVar{Name: "FEATURE_GATES", Value: featureGates})
+		restoreFeatureGates = env.ExpectFeatureGatesEnabled("NodeRepair", "TerminateFirstRepair", "TerminateFirstDrift")
 	})
 
 	AfterAll(func() {
-		if originalFeatureGates == nil {
-			env.ExpectSettingsRemoved(corev1.EnvVar{Name: "FEATURE_GATES"})
-		} else {
-			env.ExpectSettingsOverridden(*originalFeatureGates)
-		}
+		restoreFeatureGates()
 	})
 
 	configureStaticNodePool := func() {
