@@ -133,7 +133,7 @@ var _ = Describe("Requirement-scoped template sets", func() {
 				dynamicresources.NewTemplateSlice(makeTemplate("gpu.example.com", "unscoped-gpus", "gpu-1")),
 			},
 		})
-		nc.strict = true
+		nc.existing = true
 		claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 		result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
 		Expect(err).ToNot(HaveOccurred())

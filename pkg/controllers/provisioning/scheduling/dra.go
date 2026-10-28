@@ -99,7 +99,7 @@ func (d *draNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dy
 // ResourceSlices() is empty. While uninitialized (pre-initialized), template devices are the source of truth, so
 // ResourceSlices() returns every DynamicResources set for the node's instance type. Sets aren't filtered by
 // availability, since an offering becoming unavailable after launch doesn't change what the node publishes; the node's
-// labels select the launched configuration's sets through the allocator's strict requirement checks.
+// labels select the launched configuration's sets, since an existing node isn't superposed (see Superposed).
 type draExistingNode struct {
 	en *ExistingNode
 	// instanceType is the resolved cloud provider instance type for the node, or nil if it could not be resolved
