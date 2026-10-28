@@ -174,7 +174,7 @@ func NewAllocator(
 	}
 	// Pre-initialize shared counter budgets for all pools. This ensures InitRemainingCounters is
 	// never called during parallel Allocate() calls, keeping the tracker read-only under concurrency.
-	for _, pool := range GatherPools(inClusterSlices, scheduling.NewRequirements(), "", scheduling.AllowUndefinedWellKnownLabels) {
+	for _, pool := range GatherPools(inClusterSlices, scheduling.NewRequirements(), "", true) {
 		a.allocationTracker.InitRemainingCounters(pool)
 	}
 	return a
@@ -332,9 +332,9 @@ func (a *Allocator) Allocate(
 	// Phase 2: Pool gathering with cache, using the tightened effective requirements.
 	var pools []*Pool
 	if cached, ok := a.poolCache[nodeClaim.ID()]; ok {
-		pools = FilterPools(cached, classifyRes.requirements, nodeClaim.NodeName(), compatibilityOptions(nodeClaim)...)
+		pools = FilterPools(cached, classifyRes.requirements, nodeClaim.NodeName(), nodeClaim.Superposed())
 	} else {
-		pools = GatherPools(a.inClusterSlices, classifyRes.requirements, nodeClaim.NodeName(), compatibilityOptions(nodeClaim)...)
+		pools = GatherPools(a.inClusterSlices, classifyRes.requirements, nodeClaim.NodeName(), nodeClaim.Superposed())
 	}
 
 	// Build template devices by instance type.
@@ -427,7 +427,7 @@ func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.Res
 		if claim.Status.Allocation != nil {
 			reqs := nodeSelectorsToRequirements(claim.Status.Allocation.NodeSelector)
 			if reqs != nil {
-				if !result.requirements.IsCompatible(*reqs, compatibilityOptions(nodeClaim)...) {
+				if !result.requirements.IsCompatible(*reqs, compatibilityOptions(nodeClaim.Superposed())...) {
 					return classificationResult{}, serrors.Wrap(fmt.Errorf("in-cluster allocation topology is incompatible with NodeClaim requirements"), "ResourceClaim", klog.KObj(claim))
 				}
 				result.requirements.Add(reqs.Values()...)
@@ -446,7 +446,7 @@ func (a *Allocator) ClassifyClaims(nodeClaim NodeClaim, claims []*resourcev1.Res
 			} else {
 				// In-cluster only — check topology compatibility.
 				if len(meta.TotalRequirements) != 0 {
-					if !result.requirements.IsCompatible(meta.TotalRequirements, compatibilityOptions(nodeClaim)...) {
+					if !result.requirements.IsCompatible(meta.TotalRequirements, compatibilityOptions(nodeClaim.Superposed())...) {
 						return classificationResult{}, serrors.Wrap(fmt.Errorf("in-memory allocation topology is incompatible with NodeClaim requirements"), "ResourceClaim", klog.KObj(claim))
 					}
 					result.requirements.Add(meta.TotalRequirements.Values()...)
@@ -698,7 +698,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			allocator:                       a.Allocator,
 			nodeClaimID:                     a.nodeClaim.ID(),
 			deviceIDsByIT:                   deviceIDsByIT,
-			filteredPools:                   FilterPools(initialPools, a.requirements, a.nodeClaim.NodeName(), compatibilityOptions(a.nodeClaim)...),
+			filteredPools:                   FilterPools(initialPools, a.requirements, a.nodeClaim.NodeName(), a.nodeClaim.Superposed()),
 			claimMetadata:                   claimAllocMetaByRC,
 			counterConsumptionByIT:          counterConsumptionByIT,
 			templateCounterConsumptionByIT:  templateCounterConsumptionByIT,
@@ -917,7 +917,7 @@ func (a *allocator) tryDevice(
 	// 4. Requirement compatibility (devices with topology requirements only).
 	pushedSnapshot := false
 	if dw.TopologyRequirements != nil {
-		if !a.requirements.IsCompatible(*dw.TopologyRequirements, compatibilityOptions(a.nodeClaim)...) {
+		if !a.requirements.IsCompatible(*dw.TopologyRequirements, compatibilityOptions(a.nodeClaim.Superposed())...) {
 			for j := constraintsAdded - 1; j >= 0; j-- {
 				cd.Constraints[j].Remove(rd.Name, dw.Device, deviceID)
 			}
@@ -929,7 +929,7 @@ func (a *allocator) tryDevice(
 			pools: a.pools,
 		})
 		a.requirements.Add(dw.TopologyRequirements.Values()...)
-		a.pools = FilterPools(a.pools, a.requirements, a.nodeClaim.NodeName(), compatibilityOptions(a.nodeClaim)...)
+		a.pools = FilterPools(a.pools, a.requirements, a.nodeClaim.NodeName(), a.nodeClaim.Superposed())
 		a.buildPoolIndex()
 		pushedSnapshot = true
 	}
@@ -1058,10 +1058,11 @@ func computeTemplateTotals(slices []ResourceSlice) map[PoolKey]map[string]map[st
 	return totalsByPool
 }
 
-// compatibilityOptions returns the options for checking device and slice requirements against the NodeClaim's
-// requirements: strict for existing nodes, and allowing undefined well-known labels for in-flight NodeClaims.
-func compatibilityOptions(nodeClaim NodeClaim) []option.Function[scheduling.CompatibilityOptions] {
-	if nodeClaim.StrictRequirements() {
+// compatibilityOptions returns the options for checking device and slice requirements against a NodeClaim's
+// requirements. A superposed NodeClaim is open to any value for a well-known label it doesn't define. A NodeClaim that
+// isn't superposed is compared strictly: a label it doesn't define is absent.
+func compatibilityOptions(superposed bool) []option.Function[scheduling.CompatibilityOptions] {
+	if !superposed {
 		return nil
 	}
 	return []option.Function[scheduling.CompatibilityOptions]{scheduling.AllowUndefinedWellKnownLabels}

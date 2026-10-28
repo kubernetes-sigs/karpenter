@@ -19,7 +19,6 @@ package dynamicresources
 import (
 	"unique"
 
-	"github.com/awslabs/operatorpkg/option"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -86,18 +85,19 @@ type Pool struct {
 // nodeName is the name of the concrete node backing the NodeClaim being evaluated, or "" for in-flight/new
 // NodeClaims. Slices pinned to a node via spec.nodeName contribute devices only when nodeName matches.
 //
-// compatibilityOptions are used when matching a slice's NodeSelector against the requirements (see
-// NodeClaim.StrictRequirements).
+// superposed reports whether the requirements describe a NodeClaim that's still a superposition of the nodes it could
+// launch as (see NodeClaim.Superposed). It decides whether a well-known label the requirements don't define is open to
+// any value when matching a slice's NodeSelector.
 func GatherPools(
 	inClusterSlices []ResourceSlice,
 	requirements scheduling.Requirements,
 	nodeName string,
-	compatibilityOptions ...option.Function[scheduling.CompatibilityOptions],
+	superposed bool,
 ) []*Pool {
 	builders := map[PoolKey]*poolBuilder{}
 
 	for _, s := range inClusterSlices {
-		matched := sliceMatchesRequirements(s, requirements, nodeName, compatibilityOptions...)
+		matched := sliceMatchesRequirements(s, requirements, nodeName, superposed)
 		key := PoolKey{Driver: s.Driver(), Pool: s.Pool().Name}
 		b, ok := builders[key]
 		if !ok {
@@ -121,10 +121,10 @@ func GatherPools(
 // matching slices after filtering are dropped entirely. This is used for incremental cache
 // narrowing — the cached superset is re-filtered against tightened requirements without
 // rebuilding from scratch.
-func FilterPools(pools []*Pool, requirements scheduling.Requirements, nodeName string, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) []*Pool {
+func FilterPools(pools []*Pool, requirements scheduling.Requirements, nodeName string, superposed bool) []*Pool {
 	var filtered []*Pool
 	for _, pool := range pools {
-		if p := filterPool(pool, requirements, nodeName, compatibilityOptions...); p != nil {
+		if p := filterPool(pool, requirements, nodeName, superposed); p != nil {
 			filtered = append(filtered, p)
 		}
 	}
@@ -134,7 +134,7 @@ func FilterPools(pools []*Pool, requirements scheduling.Requirements, nodeName s
 // filterPool returns a copy of the pool containing only slices (and their devices) that match
 // the requirements. Devices with ConsumesCounters on non-matching slices are moved to
 // NonTargetingDevices. Returns nil if no slices match and no NonTargetingDevices exist.
-func filterPool(pool *Pool, requirements scheduling.Requirements, nodeName string, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) *Pool {
+func filterPool(pool *Pool, requirements scheduling.Requirements, nodeName string, superposed bool) *Pool {
 	p := &Pool{
 		Key:                 pool.Key,
 		Incomplete:          pool.Incomplete,
@@ -143,7 +143,7 @@ func filterPool(pool *Pool, requirements scheduling.Requirements, nodeName strin
 		NonTargetingDevices: pool.NonTargetingDevices,
 	}
 	for _, s := range pool.Slices {
-		if !sliceMatchesRequirements(s, requirements, nodeName, compatibilityOptions...) {
+		if !sliceMatchesRequirements(s, requirements, nodeName, superposed) {
 			// If the slice no longer matches but has device(s) that consume counters,
 			// we move the device over to NonTargetingDevices
 			for _, d := range s.Devices() {
@@ -182,7 +182,7 @@ func filterPool(pool *Pool, requirements scheduling.Requirements, nodeName strin
 //   - it pins itself to a node via spec.nodeName and that name equals the NodeClaim's node (so it only ever matches an
 //     existing node, never an in-flight one), or
 //   - it uses a label NodeSelector compatible with the NodeClaim's requirements.
-func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requirements, nodeName string, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
+func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requirements, nodeName string, superposed bool) bool {
 	if s.Potential() {
 		panic("potential slices must not be passed to pool gathering or filtering")
 	}
@@ -196,7 +196,7 @@ func sliceMatchesRequirements(s ResourceSlice, requirements scheduling.Requireme
 		return nodeName != "" && sliceNodeName == nodeName
 	}
 	if ns := s.NodeSelector(); ns != nil {
-		return nodeSelectorsMatch(ns, requirements, compatibilityOptions...)
+		return nodeSelectorsMatch(ns, requirements, superposed)
 	}
 	return false
 }
@@ -221,10 +221,10 @@ func sliceTopologyRequirements(s ResourceSlice) *scheduling.Requirements {
 
 // nodeSelectorsMatch checks if any term in the NodeSelector is compatible with the requirements.
 // Terms are OR'd; within a term, match expressions are AND'd.
-func nodeSelectorsMatch(ns *corev1.NodeSelector, requirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
+func nodeSelectorsMatch(ns *corev1.NodeSelector, requirements scheduling.Requirements, superposed bool) bool {
 	for _, term := range ns.NodeSelectorTerms {
 		termReqs := scheduling.NewNodeSelectorRequirements(term.MatchExpressions...)
-		if requirements.IsCompatible(termReqs, compatibilityOptions...) {
+		if requirements.IsCompatible(termReqs, compatibilityOptions(superposed)...) {
 			return true
 		}
 	}

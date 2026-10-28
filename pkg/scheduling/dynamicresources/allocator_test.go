@@ -45,14 +45,15 @@ type fakeNodeClaim struct {
 	requirements   scheduling.Requirements
 	instanceTypes  []dynamicresources.InstanceTypeID
 	resourceSlices map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice
-	strict         bool
+	// existing models an existing node, which isn't superposed. The zero value is a superposed (planned) NodeClaim.
+	existing bool
 }
 
 func (f *fakeNodeClaim) ID() dynamicresources.NodeClaimID                 { return f.id }
 func (f *fakeNodeClaim) NodeName() string                                 { return f.nodeName }
 func (f *fakeNodeClaim) NodePoolID() dynamicresources.NodePoolID          { return f.nodePoolID }
 func (f *fakeNodeClaim) Requirements() scheduling.Requirements            { return f.requirements }
-func (f *fakeNodeClaim) StrictRequirements() bool                         { return f.strict }
+func (f *fakeNodeClaim) Superposed() bool                                 { return !f.existing }
 func (f *fakeNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID { return f.instanceTypes }
 func (f *fakeNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
 	return f.resourceSlices
@@ -3047,8 +3048,8 @@ var _ = Describe("Allocator", func() {
 		})
 	})
 
-	// Existing nodes are strict: a well-known label the node doesn't define (here, windows-build) has an unknown value, so
-	// a device or allocation that requires a value for it isn't accessible. In-flight NodeClaims are lenient.
+	// Existing nodes aren't superposed: a well-known label the node doesn't define (here, windows-build) is absent, so a
+	// device or allocation that requires a value for it isn't accessible. A superposed NodeClaim is open to any value.
 	Describe("Well-known labels the NodeClaim doesn't define", func() {
 		windowsBuildSelector := func(op corev1.NodeSelectorOperator, values ...string) *corev1.NodeSelector {
 			return &corev1.NodeSelector{
@@ -3057,14 +3058,14 @@ var _ = Describe("Allocator", func() {
 				},
 			}
 		}
-		makeNC := func(id string, strict bool) *fakeNodeClaim {
+		makeNC := func(id string, superposed bool) *fakeNodeClaim {
 			nc := makeNodeClaimWithID(id, "it-1")
-			nc.strict = strict
+			nc.existing = !superposed
 			return nc
 		}
 
 		DescribeTable("should check in-cluster devices with a nodeSelector",
-			func(op corev1.NodeSelectorOperator, values []string, strict, allocatable bool) {
+			func(op corev1.NodeSelectorOperator, values []string, superposed, allocatable bool) {
 				inClusterSlices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a",
 						withRawNodeSelector(windowsBuildSelector(op, values...)),
@@ -3073,37 +3074,37 @@ var _ = Describe("Allocator", func() {
 					),
 				}
 				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
-				_, err := alloc.Allocate(ctx, makeNC("test-nc", strict), []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
+				_, err := alloc.Allocate(ctx, makeNC("test-nc", superposed), []*resourcev1.ResourceClaim{makeClaim("c1", exactRequest("req-1", "gpu", 1))})
 				if allocatable {
 					Expect(err).ToNot(HaveOccurred())
 				} else {
 					Expect(err).To(HaveOccurred())
 				}
 			},
-			Entry("In is allocatable when lenient", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, false, true),
-			Entry("In isn't allocatable when strict", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, true, false),
-			Entry("NotIn is allocatable when strict", corev1.NodeSelectorOpNotIn, []string{"10.0.20348"}, true, true),
-			Entry("DoesNotExist is allocatable when strict", corev1.NodeSelectorOpDoesNotExist, nil, true, true),
+			Entry("In is allocatable when superposed", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, true, true),
+			Entry("In isn't allocatable on an existing node", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, false, false),
+			Entry("NotIn is allocatable on an existing node", corev1.NodeSelectorOpNotIn, []string{"10.0.20348"}, false, true),
+			Entry("DoesNotExist is allocatable on an existing node", corev1.NodeSelectorOpDoesNotExist, nil, false, true),
 		)
 
 		DescribeTable("should check an in-cluster allocation's nodeSelector",
-			func(strict bool) {
+			func(superposed bool) {
 				alloc = dynamicresources.NewAllocator(nil, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
 				claim := makeAllocatedClaim("c1", windowsBuildSelector(corev1.NodeSelectorOpIn, "10.0.20348"))
-				_, err := alloc.Allocate(ctx, makeNC("test-nc", strict), []*resourcev1.ResourceClaim{claim})
-				if strict {
+				_, err := alloc.Allocate(ctx, makeNC("test-nc", superposed), []*resourcev1.ResourceClaim{claim})
+				if !superposed {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("in-cluster allocation topology is incompatible"))
 				} else {
 					Expect(err).ToNot(HaveOccurred())
 				}
 			},
-			Entry("compatible when lenient", false),
-			Entry("incompatible when strict", true),
+			Entry("compatible when superposed", true),
+			Entry("incompatible on an existing node", false),
 		)
 
 		DescribeTable("should check an in-memory allocation's requirements",
-			func(strict bool) {
+			func(superposed bool) {
 				inClusterSlices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a",
 						withRawNodeSelector(windowsBuildSelector(corev1.NodeSelectorOpIn, "10.0.20348")),
@@ -3114,20 +3115,20 @@ var _ = Describe("Allocator", func() {
 				alloc = dynamicresources.NewAllocator(inClusterSlices, dynamicresources.AllocatedDeviceState{ExclusiveDevices: sets.New[cloudprovider.DeviceID]()}, nil, env.Client, nil)
 				claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 				// Allocate the claim in memory for an in-flight NodeClaim, which records the device's topology.
-				result, err := alloc.Allocate(ctx, makeNC("in-flight-nc", false), []*resourcev1.ResourceClaim{claim})
+				result, err := alloc.Allocate(ctx, makeNC("in-flight-nc", true), []*resourcev1.ResourceClaim{claim})
 				Expect(err).ToNot(HaveOccurred())
 				result.Allocation.Commit(ctx)
 
-				_, err = alloc.Allocate(ctx, makeNC("other-nc", strict), []*resourcev1.ResourceClaim{claim})
-				if strict {
+				_, err = alloc.Allocate(ctx, makeNC("other-nc", superposed), []*resourcev1.ResourceClaim{claim})
+				if !superposed {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("in-memory allocation topology is incompatible"))
 				} else {
 					Expect(err).ToNot(HaveOccurred())
 				}
 			},
-			Entry("compatible when lenient", false),
-			Entry("incompatible when strict", true),
+			Entry("compatible when superposed", true),
+			Entry("incompatible on an existing node", false),
 		)
 	})
 

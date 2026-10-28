@@ -60,9 +60,10 @@ func (d *draNodeClaim) Requirements() scheduling.Requirements {
 	return d.nc.Requirements
 }
 
-func (d *draNodeClaim) StrictRequirements() bool {
-	// A label the in-flight NodeClaim doesn't define is still open: the cloud provider can launch any value for it.
-	return false
+// Superposed is true: a NodeClaim being planned is still a superposition of the instance types it could launch as, and
+// of the label values the cloud provider will resolve at launch.
+func (d *draNodeClaim) Superposed() bool {
+	return true
 }
 
 func (d *draNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID {
@@ -110,9 +111,10 @@ func (d *draExistingNode) Requirements() scheduling.Requirements {
 	return d.en.requirements
 }
 
-func (d *draExistingNode) StrictRequirements() bool {
-	// The node's labels describe what was launched, so a label the node doesn't define has an unknown value.
-	return true
+// Superposed is false: the node has launched, so its labels describe what was launched, and a label the node doesn't
+// define is absent from it.
+func (d *draExistingNode) Superposed() bool {
+	return false
 }
 
 func (d *draExistingNode) InstanceTypes() []dynamicresources.InstanceTypeID {

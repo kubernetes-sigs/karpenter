@@ -188,7 +188,7 @@ var _ = Describe("Pool Gathering", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0", "gpu-1")),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(1))
 			Expect(pools[0].Key.Driver).To(Equal(unique.Make("gpu.example.com")))
 			Expect(pools[0].Key.Pool).To(Equal(unique.Make("pool-a")))
@@ -202,7 +202,7 @@ var _ = Describe("Pool Gathering", func() {
 					withAPIDevices("gpu-0"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(1))
 		})
 
@@ -213,7 +213,7 @@ var _ = Describe("Pool Gathering", func() {
 					withAPIDevices("gpu-0"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(BeEmpty())
 		})
 
@@ -221,27 +221,27 @@ var _ = Describe("Pool Gathering", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAPIDevices("gpu-0")),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(BeEmpty())
 		})
 
-		// The requirements don't define the well-known windows-build label. In-flight NodeClaims are open to any value
-		// for it (lenient), while existing nodes don't have it (strict).
+		// The requirements don't define the well-known windows-build label. A superposed NodeClaim is open to any value
+		// for it, while an existing node doesn't have it.
 		Context("well-known labels the requirements don't define", func() {
 			DescribeTable("should match nodeSelector slices",
-				func(op corev1.NodeSelectorOperator, values []string, lenient, strict bool) {
+				func(op corev1.NodeSelectorOperator, values []string, superposed, existing bool) {
 					slices := []dynamicresources.ResourceSlice{
 						makeAPISlice("s1", "gpu.example.com", "pool-a",
 							withLabelSelector(corev1.LabelWindowsBuild, op, values...),
 							withAPIDevices("gpu-0"),
 						),
 					}
-					Expect(dynamicresources.GatherPools(slices, reqs, "", scheduling.AllowUndefinedWellKnownLabels)).To(HaveLen(lo.Ternary(lenient, 1, 0)))
-					Expect(dynamicresources.GatherPools(slices, reqs, "")).To(HaveLen(lo.Ternary(strict, 1, 0)))
+					Expect(dynamicresources.GatherPools(slices, reqs, "", true)).To(HaveLen(lo.Ternary(superposed, 1, 0)))
+					Expect(dynamicresources.GatherPools(slices, reqs, "", false)).To(HaveLen(lo.Ternary(existing, 1, 0)))
 				},
-				Entry("In matches only when lenient", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, true, false),
-				Entry("NotIn matches when lenient and strict", corev1.NodeSelectorOpNotIn, []string{"10.0.20348"}, true, true),
-				Entry("DoesNotExist matches when lenient and strict", corev1.NodeSelectorOpDoesNotExist, nil, true, true),
+				Entry("In matches only when superposed", corev1.NodeSelectorOpIn, []string{"10.0.20348"}, true, false),
+				Entry("NotIn matches when superposed and on an existing node", corev1.NodeSelectorOpNotIn, []string{"10.0.20348"}, true, true),
+				Entry("DoesNotExist matches when superposed and on an existing node", corev1.NodeSelectorOpDoesNotExist, nil, true, true),
 			)
 		})
 
@@ -250,7 +250,7 @@ var _ = Describe("Pool Gathering", func() {
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withNodeName("node-a"), withAPIDevices("gpu-0")),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "node-a")
+				pools := dynamicresources.GatherPools(slices, reqs, "node-a", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(1))
 			})
@@ -259,7 +259,7 @@ var _ = Describe("Pool Gathering", func() {
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withNodeName("node-a"), withAPIDevices("gpu-0")),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "node-b")
+				pools := dynamicresources.GatherPools(slices, reqs, "node-b", true)
 				Expect(pools).To(BeEmpty())
 			})
 
@@ -267,7 +267,7 @@ var _ = Describe("Pool Gathering", func() {
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withNodeName("node-a"), withAPIDevices("gpu-0")),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(BeEmpty())
 			})
 
@@ -276,13 +276,13 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 				}
 				// AllNodes slices are accessible regardless of the candidate node name, including in-flight NodeClaims.
-				Expect(dynamicresources.GatherPools(slices, reqs, "")).To(HaveLen(1))
-				Expect(dynamicresources.GatherPools(slices, reqs, "node-a")).To(HaveLen(1))
+				Expect(dynamicresources.GatherPools(slices, reqs, "", true)).To(HaveLen(1))
+				Expect(dynamicresources.GatherPools(slices, reqs, "node-a", true)).To(HaveLen(1))
 			})
 		})
 
 		It("should return an empty list when no slices are provided", func() {
-			pools := dynamicresources.GatherPools(nil, reqs, "")
+			pools := dynamicresources.GatherPools(nil, reqs, "", true)
 			Expect(pools).To(BeEmpty())
 		})
 
@@ -304,7 +304,7 @@ var _ = Describe("Pool Gathering", func() {
 					withAPIDevices("gpu-0"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(1))
 		})
 
@@ -325,7 +325,7 @@ var _ = Describe("Pool Gathering", func() {
 					withAPIDevices("gpu-0"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(BeEmpty())
 		})
 
@@ -334,7 +334,7 @@ var _ = Describe("Pool Gathering", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 				makeAPISlice("s2", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-1")),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(1))
 			Expect(pools[0].Devices).To(HaveLen(2))
 			Expect(pools[0].Slices).To(HaveLen(2))
@@ -345,7 +345,7 @@ var _ = Describe("Pool Gathering", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 				makeAPISlice("s2", "gpu.example.com", "pool-b", withAllNodes(), withAPIDevices("gpu-1")),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(2))
 		})
 
@@ -354,7 +354,7 @@ var _ = Describe("Pool Gathering", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 				makeAPISlice("s2", "nic.example.com", "pool-a", withAllNodes(), withAPIDevices("nic-0")),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(2))
 		})
 
@@ -364,7 +364,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 					makeAPISlice("s2", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")), // duplicate
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeTrue())
 			})
@@ -374,7 +374,7 @@ var _ = Describe("Pool Gathering", func() {
 					makePotentialSlice("gpu.example.com", "pool-a"),
 				}
 				Expect(func() {
-					dynamicresources.GatherPools(slices, reqs, "")
+					dynamicresources.GatherPools(slices, reqs, "", true)
 				}).To(PanicWith("potential slices must not be passed to pool gathering or filtering"))
 			})
 
@@ -382,7 +382,7 @@ var _ = Describe("Pool Gathering", func() {
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0", "gpu-0")),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeTrue())
 			})
@@ -392,14 +392,14 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 					makeAPISlice("s2", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-1")),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeFalse())
 			})
 
 			DescribeTable("should mark pool invalid when counter set names are duplicated",
 				func(slices []dynamicresources.ResourceSlice) {
-					pools := dynamicresources.GatherPools(slices, reqs, "")
+					pools := dynamicresources.GatherPools(slices, reqs, "", true)
 					Expect(pools).To(HaveLen(1))
 					Expect(pools[0].Invalid).To(BeTrue())
 				},
@@ -444,7 +444,7 @@ var _ = Describe("Pool Gathering", func() {
 
 			DescribeTable("should mark pool invalid when counter references are invalid",
 				func(slices []dynamicresources.ResourceSlice) {
-					pools := dynamicresources.GatherPools(slices, reqs, "")
+					pools := dynamicresources.GatherPools(slices, reqs, "", true)
 					Expect(pools).To(HaveLen(1))
 					Expect(pools[0].Invalid).To(BeTrue())
 				},
@@ -588,7 +588,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeFalse())
 			})
@@ -599,7 +599,7 @@ var _ = Describe("Pool Gathering", func() {
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices[0].ID.Driver).To(Equal(unique.Make("gpu.example.com")))
 				Expect(pools[0].Devices[0].ID.Pool).To(Equal(unique.Make("pool-a")))
@@ -610,7 +610,7 @@ var _ = Describe("Pool Gathering", func() {
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0", "gpu-1", "gpu-2")),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(3))
 				for i, name := range []string{"gpu-0", "gpu-1", "gpu-2"} {
@@ -626,7 +626,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s2", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-1"), withGeneration(1, 2)),
 					makeAPISlice("s3", "nic.example.com", "pool-b", withAllNodes(), withAPIDevices("nic-0"), withGeneration(1, 1)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(2))
 
 				// Build a map by pool key for order-independent assertions.
@@ -662,7 +662,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s-old", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-old"), withGeneration(1, 1)),
 					makeAPISlice("s-new", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-new"), withGeneration(2, 1)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(1))
 				Expect(pools[0].Devices[0].ID.Device).To(Equal(unique.Make("gpu-new")))
@@ -674,7 +674,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s-old-b", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-1"), withGeneration(1, 2)),
 					makeAPISlice("s-new", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-new"), withGeneration(2, 1)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(1))
 				Expect(pools[0].Devices[0].ID.Device).To(Equal(unique.Make("gpu-new")))
@@ -687,7 +687,7 @@ var _ = Describe("Pool Gathering", func() {
 					// Gen 2: incomplete (1 of 2)
 					makeAPISlice("s-new", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-new"), withGeneration(2, 2)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeTrue())
 				// Should only contain gen 2 devices
@@ -703,7 +703,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s-new-a", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-dup"), withGeneration(2, 2)),
 					makeAPISlice("s-new-b", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-dup"), withGeneration(2, 2)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeTrue())
 				Expect(pools[0].Devices).To(BeEmpty())
@@ -716,7 +716,7 @@ var _ = Describe("Pool Gathering", func() {
 					// Gen 2: complete (1 of 1)
 					makeAPISlice("s-new", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-new"), withGeneration(2, 1)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeFalse())
 				Expect(pools[0].Invalid).To(BeFalse())
@@ -732,7 +732,7 @@ var _ = Describe("Pool Gathering", func() {
 					// Gen 2: valid and complete
 					makeAPISlice("s-new", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-new"), withGeneration(2, 1)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeFalse())
 				Expect(pools[0].Invalid).To(BeFalse())
@@ -745,7 +745,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0"), withGeneration(1, 2)),
 					makeAPISlice("s2", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-1"), withGeneration(1, 2)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(2))
 			})
@@ -757,7 +757,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0"), withGeneration(1, 2)),
 					// Only 1 slice but ResourceSliceCount=2
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeTrue())
 			})
@@ -767,7 +767,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0"), withGeneration(1, 2)),
 					makeAPISlice("s2", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-1"), withGeneration(1, 2)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeFalse())
 			})
@@ -777,7 +777,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0"), withGeneration(1, 1)),
 					makeAPISlice("s2", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-1"), withGeneration(1, 1)),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeTrue())
 			})
@@ -786,7 +786,7 @@ var _ = Describe("Pool Gathering", func() {
 				slices := []dynamicresources.ResourceSlice{
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeTrue())
 			})
@@ -806,7 +806,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeFalse())
 				// Only the matching slice's devices should be visible.
@@ -830,7 +830,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(2, 1),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				// Gen 2 supersedes gen 1. Gen 2 has no matching slices, so pool is nil.
 				Expect(pools).To(BeEmpty())
 			})
@@ -854,7 +854,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 3),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeFalse())
 				Expect(pools[0].Devices).To(HaveLen(2))
@@ -881,7 +881,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].CounterSets).To(HaveKey("memory-budget"))
 				Expect(pools[0].CounterSets["memory-budget"]).To(HaveKey("memory"))
@@ -906,7 +906,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Slices).To(HaveLen(1))
 				Expect(pools[0].CounterSets).To(HaveKey("budget"))
@@ -932,7 +932,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 3),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeFalse())
 			})
@@ -946,7 +946,7 @@ var _ = Describe("Pool Gathering", func() {
 					),
 					// counter-set slice is missing (only 1 of 2 slices present)
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeTrue())
 			})
@@ -970,7 +970,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].CounterSets).To(HaveLen(2))
 				Expect(pools[0].CounterSets).To(HaveKey("memory-budget"))
@@ -997,7 +997,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 3),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeFalse())
 				Expect(pools[0].CounterSets).To(HaveLen(2))
@@ -1023,7 +1023,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeFalse())
 				Expect(pools[0].CounterSets).To(HaveKey("budget"))
@@ -1045,7 +1045,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(1))
 				Expect(pools[0].Devices[0].ID.Device).To(Equal(unique.Make("gpu-0")))
@@ -1069,7 +1069,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, narrowReqs, "")
+				pools := dynamicresources.GatherPools(slices, narrowReqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].CounterSets).To(HaveKey("budget"))
 			})
@@ -1088,7 +1088,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].CounterSets).To(HaveKey("budget"))
 				Expect(pools[0].Devices).To(HaveLen(2))
@@ -1131,7 +1131,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeFalse())
 				Expect(pools[0].Devices).To(HaveLen(1))
@@ -1152,7 +1152,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(BeEmpty())
 			})
 
@@ -1183,7 +1183,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 3),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(1))
 				Expect(pools[0].Devices[0].ID.Device).To(Equal(unique.Make("gpu-0")))
@@ -1204,7 +1204,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(1))
 				Expect(pools[0].NonTargetingDevices).To(BeEmpty())
@@ -1239,7 +1239,7 @@ var _ = Describe("Pool Gathering", func() {
 						},
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(1))
 				Expect(pools[0].NonTargetingDevices).To(HaveLen(2))
@@ -1273,7 +1273,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 3),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].NonTargetingDevices).To(HaveLen(1))
 				ntd := pools[0].NonTargetingDevices[0]
@@ -1305,7 +1305,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Slices).To(BeEmpty())
 				Expect(pools[0].Devices).To(BeEmpty())
@@ -1317,21 +1317,21 @@ var _ = Describe("Pool Gathering", func() {
 	})
 
 	Describe("FilterPools", func() {
-		It("should drop a nodeSelector slice on a well-known label the requirements don't define only when strict", func() {
+		It("should drop a nodeSelector slice on a well-known label the requirements don't define only when not superposed", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a",
 					withLabelSelector(corev1.LabelWindowsBuild, corev1.NodeSelectorOpIn, "10.0.20348"),
 					withAPIDevices("gpu-0"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "", scheduling.AllowUndefinedWellKnownLabels)
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(1))
-			Expect(dynamicresources.FilterPools(pools, reqs, "", scheduling.AllowUndefinedWellKnownLabels)).To(HaveLen(1))
-			Expect(dynamicresources.FilterPools(pools, reqs, "")).To(BeEmpty())
+			Expect(dynamicresources.FilterPools(pools, reqs, "", true)).To(HaveLen(1))
+			Expect(dynamicresources.FilterPools(pools, reqs, "", false)).To(BeEmpty())
 		})
 
 		It("should return an empty list when no pools are provided", func() {
-			filtered := dynamicresources.FilterPools(nil, reqs, "")
+			filtered := dynamicresources.FilterPools(nil, reqs, "", true)
 			Expect(filtered).To(BeEmpty())
 		})
 
@@ -1342,13 +1342,13 @@ var _ = Describe("Pool Gathering", func() {
 					withAPIDevices("gpu-0"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(1))
 
 			tightened := scheduling.NewRequirements(
 				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 			)
-			filtered := dynamicresources.FilterPools(pools, tightened, "")
+			filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 			Expect(filtered).To(HaveLen(1))
 		})
 
@@ -1359,13 +1359,13 @@ var _ = Describe("Pool Gathering", func() {
 					withAPIDevices("gpu-0"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(1))
 
 			tightened := scheduling.NewRequirements(
 				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
 			)
-			filtered := dynamicresources.FilterPools(pools, tightened, "")
+			filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 			Expect(filtered).To(BeEmpty())
 		})
 
@@ -1376,7 +1376,7 @@ var _ = Describe("Pool Gathering", func() {
 				},
 			}
 			Expect(func() {
-				dynamicresources.FilterPools([]*dynamicresources.Pool{pool}, reqs, "")
+				dynamicresources.FilterPools([]*dynamicresources.Pool{pool}, reqs, "", true)
 			}).To(PanicWith("potential slices must not be passed to pool gathering or filtering"))
 		})
 
@@ -1384,12 +1384,12 @@ var _ = Describe("Pool Gathering", func() {
 			slices := []dynamicresources.ResourceSlice{
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(), withAPIDevices("gpu-0")),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 
 			tightened := scheduling.NewRequirements(
 				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "ap-southeast-1a"),
 			)
-			filtered := dynamicresources.FilterPools(pools, tightened, "")
+			filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 			Expect(filtered).To(HaveLen(1))
 		})
 
@@ -1404,13 +1404,13 @@ var _ = Describe("Pool Gathering", func() {
 					withAPIDevices("nic-0"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, reqs, "")
+			pools := dynamicresources.GatherPools(slices, reqs, "", true)
 			Expect(pools).To(HaveLen(2))
 
 			tightened := scheduling.NewRequirements(
 				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 			)
-			filtered := dynamicresources.FilterPools(pools, tightened, "")
+			filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 			Expect(filtered).To(HaveLen(1))
 			Expect(filtered[0].Key.Pool).To(Equal(unique.Make("pool-a")))
 		})
@@ -1430,7 +1430,7 @@ var _ = Describe("Pool Gathering", func() {
 					withAPIDevices("gpu-1"),
 				),
 			}
-			pools := dynamicresources.GatherPools(slices, broad, "")
+			pools := dynamicresources.GatherPools(slices, broad, "", true)
 			Expect(pools).To(HaveLen(1))
 			Expect(pools[0].Slices).To(HaveLen(2))
 			Expect(pools[0].Devices).To(HaveLen(2))
@@ -1439,7 +1439,7 @@ var _ = Describe("Pool Gathering", func() {
 			tightened := scheduling.NewRequirements(
 				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 			)
-			filtered := dynamicresources.FilterPools(pools, tightened, "")
+			filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 			Expect(filtered).To(HaveLen(1))
 			Expect(filtered[0].Slices).To(HaveLen(1))
 			Expect(filtered[0].Devices).To(HaveLen(1))
@@ -1452,7 +1452,7 @@ var _ = Describe("Pool Gathering", func() {
 					makeAPISlice("s1", "gpu.example.com", "pool-a", withAPIDevices("gpu-0")),
 				},
 			}
-			filtered := dynamicresources.FilterPools([]*dynamicresources.Pool{pool}, reqs, "")
+			filtered := dynamicresources.FilterPools([]*dynamicresources.Pool{pool}, reqs, "", true)
 			Expect(filtered).To(BeEmpty())
 		})
 
@@ -1475,10 +1475,10 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 
-				filtered := dynamicresources.FilterPools(pools, reqs, "")
+				filtered := dynamicresources.FilterPools(pools, reqs, "", true)
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].CounterSets).To(HaveKey("budget"))
 				Expect(filtered[0].CounterSets["budget"]["memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
@@ -1514,7 +1514,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 3),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, broad, "")
+				pools := dynamicresources.GatherPools(slices, broad, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(2))
 				Expect(pools[0].NonTargetingDevices).To(BeEmpty())
@@ -1523,7 +1523,7 @@ var _ = Describe("Pool Gathering", func() {
 				tightened := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 				)
-				filtered := dynamicresources.FilterPools(pools, tightened, "")
+				filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].Devices).To(HaveLen(1))
 				Expect(filtered[0].Devices[0].ID.Device).To(Equal(unique.Make("gpu-0")))
@@ -1547,13 +1547,13 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, broad, "")
+				pools := dynamicresources.GatherPools(slices, broad, "", true)
 				Expect(pools).To(HaveLen(1))
 
 				tightened := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 				)
-				filtered := dynamicresources.FilterPools(pools, tightened, "")
+				filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].Devices).To(HaveLen(1))
 				Expect(filtered[0].NonTargetingDevices).To(BeEmpty())
@@ -1599,7 +1599,7 @@ var _ = Describe("Pool Gathering", func() {
 					),
 				}
 				// Gather with broad requirements — eu-west-1a is non-matching, gpu-2 goes to NonTargeting
-				pools := dynamicresources.GatherPools(slices, broad, "")
+				pools := dynamicresources.GatherPools(slices, broad, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].NonTargetingDevices).To(HaveLen(1))
 				Expect(pools[0].NonTargetingDevices[0].ID.Device).To(Equal(unique.Make("gpu-2")))
@@ -1608,7 +1608,7 @@ var _ = Describe("Pool Gathering", func() {
 				tightened := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 				)
-				filtered := dynamicresources.FilterPools(pools, tightened, "")
+				filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].Devices).To(HaveLen(1))
 				Expect(filtered[0].Devices[0].ID.Device).To(Equal(unique.Make("gpu-0")))
@@ -1639,14 +1639,14 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 
 				// Even with different zone requirements, the pool with AllNodes devices is retained
 				tightened := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "ap-southeast-1a"),
 				)
-				filtered := dynamicresources.FilterPools(pools, tightened, "")
+				filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].CounterSets).To(HaveKey("budget"))
 			})
@@ -1665,12 +1665,12 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 3),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, reqs, "")
+				pools := dynamicresources.GatherPools(slices, reqs, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Incomplete).To(BeTrue())
 				Expect(pools[0].Invalid).To(BeTrue())
 
-				filtered := dynamicresources.FilterPools(pools, reqs, "")
+				filtered := dynamicresources.FilterPools(pools, reqs, "", true)
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].Incomplete).To(BeTrue())
 				Expect(filtered[0].Invalid).To(BeTrue())
@@ -1686,7 +1686,7 @@ var _ = Describe("Pool Gathering", func() {
 				broad := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a", "us-west-2b"),
 				)
-				pools := dynamicresources.GatherPools(slices, broad, "")
+				pools := dynamicresources.GatherPools(slices, broad, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Invalid).To(BeTrue())
 
@@ -1695,7 +1695,7 @@ var _ = Describe("Pool Gathering", func() {
 				tightened := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
 				)
-				filtered := dynamicresources.FilterPools(pools, tightened, "")
+				filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].Invalid).To(BeTrue())
 				Expect(filtered[0].Devices).To(BeEmpty())
@@ -1743,7 +1743,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 4),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, broad, "")
+				pools := dynamicresources.GatherPools(slices, broad, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(2))
 				Expect(pools[0].NonTargetingDevices).To(HaveLen(1))
@@ -1753,7 +1753,7 @@ var _ = Describe("Pool Gathering", func() {
 				filter1 := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 				)
-				filtered1 := dynamicresources.FilterPools(pools, filter1, "")
+				filtered1 := dynamicresources.FilterPools(pools, filter1, "", true)
 				Expect(filtered1).To(HaveLen(1))
 				Expect(filtered1[0].Devices).To(HaveLen(1))
 				Expect(filtered1[0].NonTargetingDevices).To(HaveLen(2))
@@ -1763,7 +1763,7 @@ var _ = Describe("Pool Gathering", func() {
 				filter2 := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
 				)
-				filtered2 := dynamicresources.FilterPools(pools, filter2, "")
+				filtered2 := dynamicresources.FilterPools(pools, filter2, "", true)
 				Expect(filtered2).To(HaveLen(1))
 				Expect(filtered2[0].Devices).To(HaveLen(1))
 				Expect(filtered2[0].Devices[0].ID.Device).To(Equal(unique.Make("gpu-1")))
@@ -1796,7 +1796,7 @@ var _ = Describe("Pool Gathering", func() {
 						withGeneration(1, 2),
 					),
 				}
-				pools := dynamicresources.GatherPools(slices, broad, "")
+				pools := dynamicresources.GatherPools(slices, broad, "", true)
 				Expect(pools).To(HaveLen(1))
 				Expect(pools[0].Devices).To(HaveLen(1))
 
@@ -1805,7 +1805,7 @@ var _ = Describe("Pool Gathering", func() {
 				tightened := scheduling.NewRequirements(
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
 				)
-				filtered := dynamicresources.FilterPools(pools, tightened, "")
+				filtered := dynamicresources.FilterPools(pools, tightened, "", true)
 				Expect(filtered).To(HaveLen(1))
 				Expect(filtered[0].Slices).To(BeEmpty())
 				Expect(filtered[0].Devices).To(BeEmpty())
