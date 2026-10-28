@@ -467,13 +467,13 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/model": {StringValue: ptr.To("H100")},
+							"gpu.example.com/model": {StringValue: new("H100")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/model": {StringValue: ptr.To("A100")},
+							"gpu.example.com/model": {StringValue: new("A100")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/model": {StringValue: ptr.To("H100")},
+							"gpu.example.com/model": {StringValue: new("H100")},
 						}),
 					),
 				),
@@ -532,16 +532,16 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+							"gpu.example.com/numa": {StringValue: new("node-1")},
 						}),
 						deviceWithAttrs("gpu-3", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+							"gpu.example.com/numa": {StringValue: new("node-1")},
 						}),
 					),
 				),
@@ -1119,15 +1119,15 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 2),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrsAndCounters("gpu-0",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/numa": {StringValue: ptr.To("node-0")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/numa": {StringValue: new("node-0")}},
 							[]resourcev1.DeviceCounterConsumption{{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}}},
 						),
 						deviceWithAttrsAndCounters("gpu-2",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/numa": {StringValue: ptr.To("node-1")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/numa": {StringValue: new("node-1")}},
 							[]resourcev1.DeviceCounterConsumption{{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}}},
 						),
 						deviceWithAttrsAndCounters("gpu-1",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/numa": {StringValue: ptr.To("node-0")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/numa": {StringValue: new("node-0")}},
 							[]resourcev1.DeviceCounterConsumption{{CounterSet: "gpu-slices", Counters: map[string]resourcev1.Counter{"memory": {Value: resource.MustParse("40Gi")}}}},
 						),
 					),
@@ -1662,14 +1662,14 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 2),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrsAndCounters("gpu-0",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/tier": {StringValue: ptr.To("high")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/tier": {StringValue: new("high")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("memory-budget", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
 								counterConsumption("compute-budget", map[string]resource.Quantity{"flops": resource.MustParse("50")}),
 							},
 						),
 						deviceWithAttrsAndCounters("gpu-1",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/tier": {StringValue: ptr.To("low")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/tier": {StringValue: new("low")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("memory-budget", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
 							},
@@ -1730,7 +1730,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 2),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrsAndCounters("dev-full",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/tier": {StringValue: ptr.To("full")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/tier": {StringValue: new("full")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("resource-budget", map[string]resource.Quantity{
 									"memory":    resource.MustParse("50Gi"),
@@ -1739,7 +1739,7 @@ var _ = Describe("Allocator", func() {
 							},
 						),
 						deviceWithAttrsAndCounters("dev-lite",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/tier": {StringValue: ptr.To("lite")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/tier": {StringValue: new("lite")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("resource-budget", map[string]resource.Quantity{
 									"memory": resource.MustParse("50Gi"),
@@ -1797,19 +1797,19 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 2),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrsAndCounters("dev-mem-0",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: ptr.To("mem")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: new("mem")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("resource-budget", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
 							},
 						),
 						deviceWithAttrsAndCounters("dev-mem-1",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: ptr.To("mem")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: new("mem")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("resource-budget", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
 							},
 						),
 						deviceWithAttrsAndCounters("dev-compute-0",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: ptr.To("compute")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: new("compute")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("resource-budget", map[string]resource.Quantity{"flops": resource.MustParse("50")}),
 							},
@@ -1923,13 +1923,13 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 2),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrsAndCounters("gpu-mem",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: ptr.To("mem")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: new("mem")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("memory-budget", map[string]resource.Quantity{"memory": resource.MustParse("40Gi")}),
 							},
 						),
 						deviceWithAttrsAndCounters("gpu-compute",
-							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: ptr.To("compute")}},
+							map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{"gpu.example.com/kind": {StringValue: new("compute")}},
 							[]resourcev1.DeviceCounterConsumption{
 								counterConsumption("compute-budget", map[string]resource.Quantity{"flops": resource.MustParse("50")}),
 							},
@@ -2415,18 +2415,18 @@ var _ = Describe("Allocator", func() {
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-a": {makeTemplateWithAttrs("gpu.example.com", "pool-a",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+						"gpu.example.com/numa": {StringValue: new("node-0")},
 					}),
 					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+						"gpu.example.com/numa": {StringValue: new("node-0")},
 					}),
 				)},
 				"it-b": {makeTemplateWithAttrs("gpu.example.com", "pool-b",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+						"gpu.example.com/numa": {StringValue: new("node-1")},
 					}),
 					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+						"gpu.example.com/numa": {StringValue: new("node-1")},
 					}),
 				)},
 			})
@@ -2470,10 +2470,10 @@ var _ = Describe("Allocator", func() {
 				"it-a": {makeTemplate("gpu.example.com", "pool-a", "tgpu-0", "tgpu-1")},
 				"it-b": {makeTemplateWithAttrs("gpu.example.com", "pool-b",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+						"gpu.example.com/numa": {StringValue: new("node-1")},
 					}),
 					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+						"gpu.example.com/numa": {StringValue: new("node-1")},
 					}),
 				)},
 			})
@@ -2498,18 +2498,18 @@ var _ = Describe("Allocator", func() {
 			nc := makeMultiITNodeClaim(map[string][]*cloudprovider.ResourceSliceTemplate{
 				"it-a": {makeTemplateWithAttrs("gpu.example.com", "pool-a",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+						"gpu.example.com/numa": {StringValue: new("node-0")},
 					}),
 					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+						"gpu.example.com/numa": {StringValue: new("node-1")},
 					}),
 				)},
 				"it-b": {makeTemplateWithAttrs("gpu.example.com", "pool-b",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-2")},
+						"gpu.example.com/numa": {StringValue: new("node-2")},
 					}),
 					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-2")},
+						"gpu.example.com/numa": {StringValue: new("node-2")},
 					}),
 				)},
 			})
@@ -2656,13 +2656,13 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("compute")},
+							"gpu.example.com/type": {StringValue: new("compute")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("compute")},
+							"gpu.example.com/type": {StringValue: new("compute")},
 						}),
 						deviceWithAttrs("nic-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("network")},
+							"gpu.example.com/type": {StringValue: new("network")},
 						}),
 					),
 				),
@@ -2704,10 +2704,10 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 					),
 				),
@@ -3141,10 +3141,10 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+							"gpu.example.com/numa": {StringValue: new("node-1")},
 						}),
 					),
 				),
@@ -3154,10 +3154,10 @@ var _ = Describe("Allocator", func() {
 			nc := makeNodeClaimWithTemplates(
 				makeTemplateWithAttrs("gpu.example.com", "pool-b",
 					deviceWithAttrs("tgpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-2")},
+						"gpu.example.com/numa": {StringValue: new("node-2")},
 					}),
 					deviceWithAttrs("tgpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"gpu.example.com/numa": {StringValue: ptr.To("node-2")},
+						"gpu.example.com/numa": {StringValue: new("node-2")},
 					}),
 				),
 			)
@@ -3179,16 +3179,16 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
-							"gpu.example.com/pcie": {StringValue: ptr.To("root-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
+							"gpu.example.com/pcie": {StringValue: new("root-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
-							"gpu.example.com/pcie": {StringValue: ptr.To("root-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
+							"gpu.example.com/pcie": {StringValue: new("root-0")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
-							"gpu.example.com/pcie": {StringValue: ptr.To("root-1")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
+							"gpu.example.com/pcie": {StringValue: new("root-1")},
 						}),
 					),
 				),
@@ -3216,16 +3216,16 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
-							"gpu.example.com/pcie": {StringValue: ptr.To("root-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
+							"gpu.example.com/pcie": {StringValue: new("root-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
-							"gpu.example.com/pcie": {StringValue: ptr.To("root-1")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
+							"gpu.example.com/pcie": {StringValue: new("root-1")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
-							"gpu.example.com/pcie": {StringValue: ptr.To("root-0")},
+							"gpu.example.com/numa": {StringValue: new("node-1")},
+							"gpu.example.com/pcie": {StringValue: new("root-0")},
 						}),
 					),
 				),
@@ -3340,16 +3340,16 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+							"gpu.example.com/numa": {StringValue: new("node-1")},
 						}),
 						deviceWithAttrs("gpu-3", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+							"gpu.example.com/numa": {StringValue: new("node-1")},
 						}),
 					),
 				),
@@ -3419,16 +3419,16 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/model":  {StringValue: ptr.To("H100")},
-							"gpu.example.com/memory": {IntValue: ptr.To(int64(80))},
+							"gpu.example.com/model":  {StringValue: new("H100")},
+							"gpu.example.com/memory": {IntValue: new(int64(80))},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/model":  {StringValue: ptr.To("H100")},
-							"gpu.example.com/memory": {IntValue: ptr.To(int64(40))},
+							"gpu.example.com/model":  {StringValue: new("H100")},
+							"gpu.example.com/memory": {IntValue: new(int64(40))},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/model":  {StringValue: ptr.To("A100")},
-							"gpu.example.com/memory": {IntValue: ptr.To(int64(80))},
+							"gpu.example.com/model":  {StringValue: new("A100")},
+							"gpu.example.com/memory": {IntValue: new(int64(80))},
 						}),
 					),
 				),
@@ -3506,14 +3506,14 @@ var _ = Describe("Allocator", func() {
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-dup",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 								},
 							},
 							resourcev1.Device{
 								Name:                     "gpu-dup",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 								},
@@ -3543,14 +3543,14 @@ var _ = Describe("Allocator", func() {
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-dup",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 								},
 							},
 							resourcev1.Device{
 								Name:                     "gpu-dup",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
 								},
@@ -4281,7 +4281,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("dev-concrete", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 					),
 				),
@@ -4358,10 +4358,10 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 					),
 				),
@@ -4393,16 +4393,16 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("compute")},
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/type": {StringValue: new("compute")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("compute")},
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/type": {StringValue: new("compute")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("extra")},
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/type": {StringValue: new("extra")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 					),
 				),
@@ -4450,16 +4450,16 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("compute")},
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/type": {StringValue: new("compute")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("compute")},
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/type": {StringValue: new("compute")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/type": {StringValue: ptr.To("extra")},
-							"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+							"gpu.example.com/type": {StringValue: new("extra")},
+							"gpu.example.com/numa": {StringValue: new("node-1")},
 						}),
 					),
 				),
@@ -4679,13 +4679,13 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1),
 					withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-0")},
+							"gpu.example.com/numa": {StringValue: new("node-0")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/numa": {StringValue: ptr.To("node-1")},
+							"gpu.example.com/numa": {StringValue: new("node-1")},
 						}),
 					),
 				),
@@ -5140,7 +5140,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},
@@ -5182,7 +5182,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},
@@ -5214,7 +5214,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("32Gi")},
 							},
@@ -5264,7 +5264,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("24Gi")},
 							},
@@ -5300,14 +5300,14 @@ var _ = Describe("Allocator", func() {
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
 								},
 							},
 							resourcev1.Device{
 								Name:                     "gpu-1",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
 								},
@@ -5374,7 +5374,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("48Gi")},
 							},
@@ -5432,7 +5432,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},
@@ -5474,7 +5474,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},
@@ -5517,14 +5517,14 @@ var _ = Describe("Allocator", func() {
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 								},
 							},
 							resourcev1.Device{
 								Name:                     "gpu-1",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/bandwidth": {Value: resource.MustParse("100Gi")},
 								},
@@ -5564,7 +5564,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},
@@ -5666,12 +5666,12 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("80Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default: ptr.To(resource.MustParse("8Gi")),
+											Default: new(resource.MustParse("8Gi")),
 										},
 									},
 								},
@@ -5717,12 +5717,12 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("80Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default:     ptr.To(resource.MustParse("4Gi")),
+											Default:     new(resource.MustParse("4Gi")),
 											ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
 										},
 									},
@@ -5762,12 +5762,12 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("80Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default:     ptr.To(resource.MustParse("4Gi")),
+											Default:     new(resource.MustParse("4Gi")),
 											ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
 										},
 									},
@@ -5798,15 +5798,15 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("80Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default: ptr.To(resource.MustParse("4Gi")),
+											Default: new(resource.MustParse("4Gi")),
 											ValidRange: &resourcev1.CapacityRequestPolicyRange{
-												Min:  ptr.To(resource.MustParse("4Gi")),
-												Step: ptr.To(resource.MustParse("4Gi")),
+												Min:  new(resource.MustParse("4Gi")),
+												Step: new(resource.MustParse("4Gi")),
 											},
 										},
 									},
@@ -5864,12 +5864,12 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("16Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default:     ptr.To(resource.MustParse("4Gi")),
+											Default:     new(resource.MustParse("4Gi")),
 											ValidValues: []resource.Quantity{resource.MustParse("4Gi"), resource.MustParse("8Gi"), resource.MustParse("16Gi")},
 										},
 									},
@@ -5923,16 +5923,16 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("100Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default: ptr.To(resource.MustParse("4Gi")),
+											Default: new(resource.MustParse("4Gi")),
 											ValidRange: &resourcev1.CapacityRequestPolicyRange{
-												Min:  ptr.To(resource.MustParse("4Gi")),
-												Max:  ptr.To(resource.MustParse("50Gi")),
-												Step: ptr.To(resource.MustParse("4Gi")),
+												Min:  new(resource.MustParse("4Gi")),
+												Max:  new(resource.MustParse("50Gi")),
+												Step: new(resource.MustParse("4Gi")),
 											},
 										},
 									},
@@ -5964,16 +5964,16 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("100Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default: ptr.To(resource.MustParse("4Gi")),
+											Default: new(resource.MustParse("4Gi")),
 											ValidRange: &resourcev1.CapacityRequestPolicyRange{
-												Min:  ptr.To(resource.MustParse("4Gi")),
-												Max:  ptr.To(resource.MustParse("48Gi")),
-												Step: ptr.To(resource.MustParse("4Gi")),
+												Min:  new(resource.MustParse("4Gi")),
+												Max:  new(resource.MustParse("48Gi")),
+												Step: new(resource.MustParse("4Gi")),
 											},
 										},
 									},
@@ -6006,15 +6006,15 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("100Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default: ptr.To(resource.MustParse("4Gi")),
+											Default: new(resource.MustParse("4Gi")),
 											ValidRange: &resourcev1.CapacityRequestPolicyRange{
-												Min: ptr.To(resource.MustParse("4Gi")),
-												Max: ptr.To(resource.MustParse("50Gi")),
+												Min: new(resource.MustParse("4Gi")),
+												Max: new(resource.MustParse("50Gi")),
 											},
 										},
 									},
@@ -6047,15 +6047,15 @@ var _ = Describe("Allocator", func() {
 						func(s *resourcev1.ResourceSlice) {
 							s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {
 										Value: resource.MustParse("100Gi"),
 										RequestPolicy: &resourcev1.CapacityRequestPolicy{
-											Default: ptr.To(resource.MustParse("4Gi")),
+											Default: new(resource.MustParse("4Gi")),
 											ValidRange: &resourcev1.CapacityRequestPolicyRange{
-												Min: ptr.To(resource.MustParse("4Gi")),
-												Max: ptr.To(resource.MustParse("50Gi")),
+												Min: new(resource.MustParse("4Gi")),
+												Max: new(resource.MustParse("50Gi")),
 											},
 										},
 									},
@@ -6099,14 +6099,14 @@ var _ = Describe("Allocator", func() {
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 								},
 							},
 							resourcev1.Device{
 								Name:                     "gpu-1",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram":      {Value: resource.MustParse("80Gi")},
 									"gpu.example.com/bandwidth": {Value: resource.MustParse("50Gi")},
@@ -6147,7 +6147,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram":      {Value: resource.MustParse("80Gi")},
 								"gpu.example.com/bandwidth": {Value: resource.MustParse("10Gi")},
@@ -6180,7 +6180,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram":      {Value: resource.MustParse("80Gi")},
 								"gpu.example.com/bandwidth": {Value: resource.MustParse("10Gi")},
@@ -6225,7 +6225,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram":      {Value: resource.MustParse("32Gi")},
 								"gpu.example.com/bandwidth": {Value: resource.MustParse("8Gi")},
@@ -6275,7 +6275,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("0")},
 							},
@@ -6307,7 +6307,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("48Gi")},
 							},
@@ -6361,7 +6361,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 						})
 					},
 				),
@@ -6402,7 +6402,7 @@ var _ = Describe("Allocator", func() {
 							resourcev1.Device{Name: "gpu-exclusive"},
 							resourcev1.Device{
 								Name:                     "gpu-shared",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("10Gi")},
 								},
@@ -6436,7 +6436,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 						})
 					},
 				),
@@ -6474,7 +6474,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 						})
 					},
 				),
@@ -6597,7 +6597,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 						})
 					},
 				),
@@ -6631,7 +6631,7 @@ var _ = Describe("Allocator", func() {
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 							},
 						)
 					},
@@ -6677,11 +6677,11 @@ var _ = Describe("Allocator", func() {
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 							},
 							resourcev1.Device{
 								Name:                     "gpu-1",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 							},
 						)
 					},
@@ -6861,7 +6861,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
 							},
@@ -6914,7 +6914,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},
@@ -6987,7 +6987,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},
@@ -7045,7 +7045,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("100Gi")},
 							},
@@ -7113,7 +7113,7 @@ var _ = Describe("Allocator", func() {
 					withDevicesConsumingCounters(
 						resourcev1.Device{
 							Name:                     "mig-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
 							},
@@ -7123,7 +7123,7 @@ var _ = Describe("Allocator", func() {
 						},
 						resourcev1.Device{
 							Name:                     "mig-1",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("20Gi")},
 							},
@@ -7175,7 +7175,7 @@ var _ = Describe("Allocator", func() {
 					withDevicesConsumingCounters(
 						resourcev1.Device{
 							Name:                     "gpu-shared",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/bandwidth": {Value: resource.MustParse("100Gi")},
 							},
@@ -7185,7 +7185,7 @@ var _ = Describe("Allocator", func() {
 						},
 						resourcev1.Device{
 							Name:                     "gpu-shared-2",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/bandwidth": {Value: resource.MustParse("100Gi")},
 							},
@@ -7195,7 +7195,7 @@ var _ = Describe("Allocator", func() {
 						},
 						resourcev1.Device{
 							Name:                     "gpu-shared-3",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/bandwidth": {Value: resource.MustParse("100Gi")},
 							},
@@ -7293,7 +7293,7 @@ var _ = Describe("Allocator", func() {
 					withDevicesConsumingCounters(
 						resourcev1.Device{
 							Name:                     "device-a",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},
@@ -7452,10 +7452,10 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevicesWithAttrs(
 						deviceWithAttrs("a100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"model": {StringValue: ptr.To("A100")},
+							"model": {StringValue: new("A100")},
 						}),
 						deviceWithAttrs("h100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"model": {StringValue: ptr.To("H100")},
+							"model": {StringValue: new("H100")},
 						}),
 					)),
 			}
@@ -7642,7 +7642,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
 							},
@@ -7695,7 +7695,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("40Gi")},
 							},
@@ -7799,13 +7799,13 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+							"gpu.example.com/zone": {StringValue: new("zone-a")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+							"gpu.example.com/zone": {StringValue: new("zone-a")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+							"gpu.example.com/zone": {StringValue: new("zone-b")},
 						}),
 					)),
 			}
@@ -7859,16 +7859,16 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"model":                {StringValue: ptr.To("A")},
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+							"model":                {StringValue: new("A")},
+							"gpu.example.com/zone": {StringValue: new("zone-a")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"model":                {StringValue: ptr.To("B")},
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+							"model":                {StringValue: new("B")},
+							"gpu.example.com/zone": {StringValue: new("zone-b")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"model":                {StringValue: ptr.To("B")},
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+							"model":                {StringValue: new("B")},
+							"gpu.example.com/zone": {StringValue: new("zone-b")},
 						}),
 					)),
 			}
@@ -7924,14 +7924,14 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s-a", "gpu.example.com", "pool-zone-a",
 					withZoneSelector("us-west-2a"),
 					withAPIDevicesWithAttrs(deviceWithAttrs("gpu-a0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"model": {StringValue: ptr.To("A")},
+						"model": {StringValue: new("A")},
 					})),
 					withGeneration(1, 1),
 				),
 				makeAPISlice("s-b", "gpu.example.com", "pool-zone-b",
 					withZoneSelector("us-west-2b"),
 					withAPIDevicesWithAttrs(deviceWithAttrs("gpu-b0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						"model": {StringValue: ptr.To("B")},
+						"model": {StringValue: new("B")},
 					})),
 					withGeneration(1, 1),
 				),
@@ -7982,10 +7982,10 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+							"gpu.example.com/zone": {StringValue: new("zone-a")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+							"gpu.example.com/zone": {StringValue: new("zone-b")},
 						}),
 					)),
 			}
@@ -8039,16 +8039,16 @@ var _ = Describe("Allocator", func() {
 				makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 					withGeneration(1, 1), withAPIDevicesWithAttrs(
 						deviceWithAttrs("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"model":                {StringValue: ptr.To("A")},
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+							"model":                {StringValue: new("A")},
+							"gpu.example.com/zone": {StringValue: new("zone-a")},
 						}),
 						deviceWithAttrs("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"model":                {StringValue: ptr.To("B")},
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-b")},
+							"model":                {StringValue: new("B")},
+							"gpu.example.com/zone": {StringValue: new("zone-b")},
 						}),
 						deviceWithAttrs("gpu-2", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-							"model":                {StringValue: ptr.To("B")},
-							"gpu.example.com/zone": {StringValue: ptr.To("zone-a")},
+							"model":                {StringValue: new("B")},
+							"gpu.example.com/zone": {StringValue: new("zone-a")},
 						}),
 					)),
 			}
@@ -8406,14 +8406,14 @@ var _ = Describe("Allocator", func() {
 						s.Spec.Devices = append(s.Spec.Devices,
 							resourcev1.Device{
 								Name:                     "gpu-0",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("50Gi")},
 								},
 							},
 							resourcev1.Device{
 								Name:                     "gpu-1",
-								AllowMultipleAllocations: ptr.To(true),
+								AllowMultipleAllocations: new(true),
 								Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 									"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 								},
@@ -8667,10 +8667,10 @@ var _ = Describe("Allocator", func() {
 						makeAPISlice("s1", "gpu.example.com", "pool-a", withAllNodes(),
 							withGeneration(1, 1), withAPIDevicesWithAttrs(
 								deviceWithAttrs("a100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"model": {StringValue: ptr.To("A100")},
+									"model": {StringValue: new("A100")},
 								}),
 								deviceWithAttrs("h100-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									"model": {StringValue: ptr.To("H100")},
+									"model": {StringValue: new("H100")},
 								}),
 							)),
 					}
@@ -8890,7 +8890,7 @@ var _ = Describe("Allocator", func() {
 					func(s *resourcev1.ResourceSlice) {
 						s.Spec.Devices = append(s.Spec.Devices, resourcev1.Device{
 							Name:                     "gpu-0",
-							AllowMultipleAllocations: ptr.To(true),
+							AllowMultipleAllocations: new(true),
 							Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 								"gpu.example.com/vram": {Value: resource.MustParse("80Gi")},
 							},

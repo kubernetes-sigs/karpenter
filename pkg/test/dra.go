@@ -159,7 +159,7 @@ func DeviceSubRequest(subName, className string, count int64) resourcev1.DeviceS
 func MatchAttributeConstraint(attribute string, requests ...string) resourcev1.DeviceConstraint {
 	return resourcev1.DeviceConstraint{
 		Requests:       requests,
-		MatchAttribute: lo.ToPtr(resourcev1.FullyQualifiedName(attribute)),
+		MatchAttribute: new(resourcev1.FullyQualifiedName(attribute)),
 	}
 }
 
@@ -199,7 +199,7 @@ func ResourceSlice(overrides ...resourcev1.ResourceSlice) *resourcev1.ResourceSl
 	// A slice must be node-local, cluster-wide, or use a node selector. Default to cluster-wide when unset so the
 	// slice is usable from any node.
 	if override.Spec.NodeName == nil && override.Spec.NodeSelector == nil && override.Spec.AllNodes == nil {
-		override.Spec.AllNodes = lo.ToPtr(true)
+		override.Spec.AllNodes = new(true)
 	}
 	return &resourcev1.ResourceSlice{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
@@ -207,27 +207,19 @@ func ResourceSlice(overrides ...resourcev1.ResourceSlice) *resourcev1.ResourceSl
 	}
 }
 
-// Device builds a ResourceSlice device with the given name and optional attributes.
-func Device(name string, attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute) resourcev1.Device {
-	return resourcev1.Device{
-		Name:       name,
-		Attributes: attributes,
-	}
-}
-
 // StringAttribute is a convenience for building a string-valued device attribute.
 func StringAttribute(value string) resourcev1.DeviceAttribute {
-	return resourcev1.DeviceAttribute{StringValue: lo.ToPtr(value)}
+	return resourcev1.DeviceAttribute{StringValue: new(value)}
 }
 
 // PodResourceClaimReference builds a PodResourceClaim referencing an existing ResourceClaim by name.
 func PodResourceClaimReference(name, claimName string) corev1.PodResourceClaim {
-	return corev1.PodResourceClaim{Name: name, ResourceClaimName: lo.ToPtr(claimName)}
+	return corev1.PodResourceClaim{Name: name, ResourceClaimName: new(claimName)}
 }
 
 // PodResourceClaimTemplateReference builds a PodResourceClaim referencing a ResourceClaimTemplate by name.
 func PodResourceClaimTemplateReference(name, templateName string) corev1.PodResourceClaim {
-	return corev1.PodResourceClaim{Name: name, ResourceClaimTemplateName: lo.ToPtr(templateName)}
+	return corev1.PodResourceClaim{Name: name, ResourceClaimTemplateName: new(templateName)}
 }
 
 const (
@@ -270,7 +262,7 @@ func NodeLocalSlice(node *corev1.Node, driver string, deviceNames ...string) *re
 		},
 		Spec: resourcev1.ResourceSliceSpec{
 			Driver:   driver,
-			NodeName: lo.ToPtr(node.Name),
+			NodeName: new(node.Name),
 			Pool:     resourcev1.ResourcePool{Name: NodeLocalPoolName(driver, node.Name), Generation: 1, ResourceSliceCount: 1},
 			Devices:  lo.Map(deviceNames, func(name string, _ int) resourcev1.Device { return resourcev1.Device{Name: name} }),
 		},
@@ -305,7 +297,7 @@ func ClusterWideSlice(name, driver string, deviceNames ...string) *resourcev1.Re
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: resourcev1.ResourceSliceSpec{
 			Driver:   driver,
-			AllNodes: lo.ToPtr(true),
+			AllNodes: new(true),
 			Pool:     resourcev1.ResourcePool{Name: name, Generation: 1, ResourceSliceCount: 1},
 			Devices:  lo.Map(deviceNames, func(n string, _ int) resourcev1.Device { return resourcev1.Device{Name: n} }),
 		},
@@ -320,11 +312,11 @@ func SharedCapacitySlice(name, driver, device, totalMemory string) *resourcev1.R
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: resourcev1.ResourceSliceSpec{
 			Driver:   driver,
-			AllNodes: lo.ToPtr(true),
+			AllNodes: new(true),
 			Pool:     resourcev1.ResourcePool{Name: name, Generation: 1, ResourceSliceCount: 1},
 			Devices: []resourcev1.Device{{
 				Name:                     device,
-				AllowMultipleAllocations: lo.ToPtr(true),
+				AllowMultipleAllocations: new(true),
 				Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{
 					CapacityMemory: {Value: resource.MustParse(totalMemory)},
 				},

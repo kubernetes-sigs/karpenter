@@ -19,8 +19,8 @@ package disruption_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -117,7 +117,7 @@ var _ = BeforeSuite(func() {
 func useRepairPolicies(policies []cloudprovider.RepairPolicy) {
 	cloudProvider.RepairPolicy = policies
 	repairPolicyMatcher := lo.Must(health.NewRepairPolicyMatcher(
-		options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}})), cloudProvider))
+		options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true)}})), cloudProvider))
 	cluster = state.NewCluster(env.Clock, env.Client, cloudProvider, state.WithRepairPolicyMatcher(repairPolicyMatcher))
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
@@ -2370,8 +2370,8 @@ func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 }
 
 func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
-	for i := len(onDemandInstances) - 1; i >= 0; i-- {
-		elem := onDemandInstances[i]
+	for _, v := range slices.Backward(onDemandInstances) {
+		elem := v
 		if len(elem.Offerings.Compatible(scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone)))) > 0 {
 			return elem
 		}
@@ -2393,48 +2393,6 @@ func ExpectTaintedNodeCount(ctx context.Context, c client.Client, numTainted int
 	})
 	Expect(len(tainted)).To(Equal(numTainted))
 	return tainted
-}
-
-// ExpectNewNodeClaimsDeleted simulates the nodeClaims being created and then removed, similar to what would happen
-// during an ICE error on the created nodeClaim
-func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewNodeClaims int) {
-	GinkgoHelper()
-	existingNodeClaims := ExpectNodeClaims(ctx, c)
-	existingNodeClaimNames := sets.NewString(lo.Map(existingNodeClaims, func(nc *v1.NodeClaim, _ int) string {
-		return nc.Name
-	})...)
-
-	wg.Add(1)
-	go func() {
-		GinkgoHelper()
-		nodeClaimsDeleted := 0
-		ctx, cancel := context.WithTimeout(ctx, time.Second*30) // give up after 30s
-		defer GinkgoRecover()
-		defer wg.Done()
-		defer cancel()
-		for {
-			select {
-			case <-time.After(50 * time.Millisecond):
-				nodeClaimList := &v1.NodeClaimList{}
-				if err := c.List(ctx, nodeClaimList); err != nil {
-					continue
-				}
-				for i := range nodeClaimList.Items {
-					m := &nodeClaimList.Items[i]
-					if existingNodeClaimNames.Has(m.Name) {
-						continue
-					}
-					Expect(client.IgnoreNotFound(c.Delete(ctx, m))).To(Succeed())
-					nodeClaimsDeleted++
-					if nodeClaimsDeleted == numNewNodeClaims {
-						return
-					}
-				}
-			case <-ctx.Done():
-				Fail(fmt.Sprintf("waiting for nodeclaims to be deleted, %s", ctx.Err()))
-			}
-		}
-	}()
 }
 
 func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, clk clock.Clock, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, cmd *disruption.Command) {

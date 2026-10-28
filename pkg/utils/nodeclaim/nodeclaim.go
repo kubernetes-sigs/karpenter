@@ -110,30 +110,6 @@ func ListManaged(ctx context.Context, c client.Client, cloudProvider cloudprovid
 	}), nil
 }
 
-// PodEventHandler is a watcher on corev1.Pods that maps Pods to NodeClaim based on the node names
-// and enqueues reconcile.Requests for the NodeClaims
-func PodEventHandler(c client.Client, cloudProvider cloudprovider.CloudProvider) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-		nodeName := o.(*corev1.Pod).Spec.NodeName
-		if nodeName == "" {
-			return nil
-		}
-		node := &corev1.Node{}
-		if err := c.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
-			return nil
-		}
-		// Because we get so many NodeClaims from this response, we are not DeepCopying the cached data here
-		// DO NOT MUTATE NodeClaims in this function as this will affect the underlying cached NodeClaim
-		ncs, err := ListManaged(ctx, c, cloudProvider, ForProviderID(node.Spec.ProviderID), client.UnsafeDisableDeepCopy)
-		if err != nil {
-			return nil
-		}
-		return lo.Map(ncs, func(nc *v1.NodeClaim, _ int) reconcile.Request {
-			return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(nc)}
-		})
-	})
-}
-
 // NodeEventHandler is a watcher on corev1.Node that maps Nodes to NodeClaims based on provider ids
 // and enqueues reconcile.Requests for the NodeClaims
 func NodeEventHandler(c client.Client, cloudProvider cloudprovider.CloudProvider) handler.EventHandler {

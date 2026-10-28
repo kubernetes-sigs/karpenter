@@ -268,6 +268,9 @@ func sortBySavingsRatio(ctx context.Context, kubeClient client.Client, nodes []*
 			it = m[labels[corev1.LabelInstanceTypeStable]]
 		}
 		offeringPrice := disruptionutils.ResolveOfferingPrice(labels, it)
+		if n.NodeClaim != nil {
+			offeringPrice, _ = cloudprovider.PriceNodeClaim(ctx, n.NodeClaim, it)
+		}
 		pods, err := n.Pods(ctx, kubeClient)
 		if err != nil {
 			// Fall back to the base-cost floor; the next reconcile re-reads.

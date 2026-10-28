@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
@@ -64,6 +65,8 @@ var (
 		&appsv1.Deployment{},
 		// autoscaling.x-k8s.io
 		&autoscalingv1beta1.CapacityBuffer{},
+		// batch
+		&batchv1.Job{},
 		// core
 		&corev1.LimitRange{},
 		&corev1.Node{},
@@ -94,6 +97,14 @@ func (env *Environment) BeforeEach() {
 
 	env.Monitor.Reset()
 	env.StartingNodeCount = env.Monitor.NodeCountAtReset()
+}
+
+// CleanupBeforeSuite removes test objects left behind by a previous run, so that clusters reused across runs don't fail
+// ExpectCleanCluster when an earlier run was interrupted before its AfterEach cleanup ran. It only deletes objects
+// carrying the test discovery label, the same as the per-spec cleanup, so it's a no-op on a clean cluster.
+func (env *Environment) CleanupBeforeSuite() {
+	By("cleaning up test objects left over from previous runs")
+	env.CleanupObjects(CleanableObjects...)
 }
 
 func (env *Environment) ExpectCleanCluster() {

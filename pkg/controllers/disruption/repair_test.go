@@ -118,7 +118,7 @@ var _ = Describe("Repair", func() {
 		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{"repair-test": "true"},
 			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: lo.ToPtr(true), BlockOwnerDeletion: lo.ToPtr(true),
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true), BlockOwnerDeletion: new(true),
 			}},
 		}})
 		ExpectApplied(ctx, env.Client, pod)
@@ -165,7 +165,7 @@ var _ = Describe("Repair", func() {
 	}
 
 	BeforeEach(func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(true)}}))
 		// Single default policy: BadNode/False, 30m toleration (the fake cloud provider default).
 		useRepairPolicies([]cloudprovider.RepairPolicy{
 			{ConditionType: "BadNode", ConditionStatus: corev1.ConditionFalse, TolerationDuration: 30 * time.Minute, Action: cloudprovider.ReplaceNode},
@@ -1214,7 +1214,7 @@ var _ = Describe("Repair", func() {
 
 	// Feature-gate off: repair does nothing even for an unhealthy node past toleration.
 	It("should not repair when the NodeRepair feature gate is disabled", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{NodeRepair: new(false)}}))
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
 		env.Clock.Step(31 * time.Minute)
@@ -1224,7 +1224,7 @@ var _ = Describe("Repair", func() {
 	})
 
 	It("should not repair when --legacy-node-repair is set", func() {
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{LegacyNodeRepair: lo.ToPtr(true), FeatureGates: test.FeatureGates{NodeRepair: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{LegacyNodeRepair: new(true), FeatureGates: test.FeatureGates{NodeRepair: new(true)}}))
 		initNode(nodeClaim, node)
 		markUnhealthy(node, "BadNode")
 		env.Clock.Step(31 * time.Minute)

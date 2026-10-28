@@ -19,6 +19,8 @@ package deviceallocation_test
 import (
 	"context"
 	"iter"
+	"maps"
+	"slices"
 	"testing"
 	"time"
 	"unique"
@@ -149,10 +151,7 @@ func deviceID(device string) cloudprovider.DeviceID {
 
 // collectDevices drains an iterator into a map for test assertions.
 func collectDevices(seq iter.Seq2[cloudprovider.DeviceID, deviceallocation.DeviceMetadata]) map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata {
-	m := make(map[cloudprovider.DeviceID]deviceallocation.DeviceMetadata)
-	for id, meta := range seq {
-		m[id] = meta
-	}
+	m := maps.Collect(seq)
 	return m
 }
 
@@ -836,10 +835,8 @@ var _ = Describe("DeviceAllocation Controller", func() {
 			Expect(meta.Contributions).To(HaveLen(2))
 			contributionForPod := func(uid types.UID) deviceallocation.ContributionMetadata {
 				for _, c := range meta.Contributions {
-					for _, podUID := range c.PodUIDs {
-						if podUID == uid {
-							return c
-						}
+					if slices.Contains(c.PodUIDs, uid) {
+						return c
 					}
 				}
 				return deviceallocation.ContributionMetadata{}

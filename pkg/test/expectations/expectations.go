@@ -49,6 +49,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -152,20 +153,30 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 		current := object.DeepCopyObject().(client.Object)
 		statuscopy := object.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
 
-		// Create or Update
-		if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
-			if errors.IsNotFound(err) {
-				Expect(c.Create(ctx, object)).To(Succeed())
-			} else {
-				Expect(err).ToNot(HaveOccurred())
+		// Create or Update, retrying on conflict. Under parallel test workloads
+		// (e.g. workqueue.ParallelizeUntil), the object's resource version in the
+		// informer cache can be stale so the Update returns 409.
+		// Each retry re-fetches the fresh resource version.
+		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
+				if errors.IsNotFound(err) {
+					return c.Create(ctx, object)
+				}
+				return err
 			}
-		} else {
 			object.SetResourceVersion(current.GetResourceVersion())
-			Expect(c.Update(ctx, object)).To(Succeed())
-		}
-		// Update status
-		statuscopy.SetResourceVersion(object.GetResourceVersion())
-		Expect(c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
+			return c.Update(ctx, object)
+		})).To(Succeed())
+
+		// Update status, also retrying on conflict.
+		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			fresh := statuscopy.DeepCopyObject().(client.Object)
+			if err := c.Get(ctx, client.ObjectKeyFromObject(statuscopy), fresh); err != nil {
+				return err
+			}
+			statuscopy.SetResourceVersion(fresh.GetResourceVersion())
+			return c.Status().Update(ctx, statuscopy)
+		})).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
 
 		// Re-get the object to grab the updated spec and status
 		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
@@ -234,9 +245,15 @@ func ExpectObjectReconcileFailed[T client.Object](ctx context.Context, c client.
 func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
-		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
-		controllerutil.AddFinalizer(object, "testing/finalizer")
-		Expect(c.Update(ctx, object)).To(Succeed())
+		// Same informer-cache staleness applies here as in ExpectApplied, so retry
+		// the Get+Update on conflict.
+		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := c.Get(ctx, client.ObjectKeyFromObject(object), object); err != nil {
+				return err
+			}
+			controllerutil.AddFinalizer(object, "testing/finalizer")
+			return c.Update(ctx, object)
+		})).To(Succeed())
 		Expect(c.Delete(ctx, object)).To(Succeed())
 		DeferCleanup(func(obj client.Object) {
 			mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
@@ -490,7 +507,7 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 				// Only set AllowMultipleAllocations when true; leaving it nil for exclusive devices preserves the
 				// pre-capacity publish behavior (and a capacity RequestPolicy requires it to be true).
 				if d.AllowMultipleAllocations {
-					device.AllowMultipleAllocations = lo.ToPtr(true)
+					device.AllowMultipleAllocations = new(true)
 				}
 				devices[j] = device
 			}
@@ -580,7 +597,7 @@ func ExpectResourceClaimsProcessed(ctx context.Context, c client.Client, pod *co
 		}
 		pod.Status.ResourceClaimStatuses = append(pod.Status.ResourceClaimStatuses, corev1.PodResourceClaimStatus{
 			Name:              pc.Name,
-			ResourceClaimName: lo.ToPtr(claimName),
+			ResourceClaimName: new(claimName),
 		})
 	}
 	ExpectApplied(ctx, c, pod)
@@ -628,12 +645,6 @@ func ExpectResourceClaimAllocated(ctx context.Context, c client.Client, namespac
 		devices = append(devices, fmt.Sprintf("%s/%s", r.Pool, r.Device))
 	}
 	return devices
-}
-
-// ExpectInstanceTypeOptionNames returns the names of a NodeClaim's candidate instance type options.
-func ExpectInstanceTypeOptionNames(nc *scheduling.NodeClaim) []string {
-	GinkgoHelper()
-	return lo.Map(nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })
 }
 
 func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.Pod, binding *Binding, claimMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
@@ -1046,6 +1057,8 @@ func EventuallyExpectTerminating(ctx context.Context, c client.Client, objs ...c
 
 // ConsistentlyExpectNotTerminating ensures that the deletion timestamp is not set
 // We need this since there is some propagation time for the eviction API to set the deletionTimestamp
+//
+// Deprecated: unused by Karpenter and will be removed in v1.18.
 func ConsistentlyExpectNotTerminating(ctx context.Context, c client.Client, objs ...client.Object) {
 	GinkgoHelper()
 

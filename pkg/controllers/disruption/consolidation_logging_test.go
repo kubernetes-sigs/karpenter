@@ -568,3 +568,34 @@ func TestConsolidationCandidateEvent(t *testing.T) {
 			recorder.Calls(events.ConsolidationCandidate))
 	}
 }
+
+func TestLaunchCapacityType(t *testing.T) {
+	const onDemandAlt = "on-demand-alt"
+	if err := cloudprovider.SetCapacityTypeClassResolver(cloudprovider.DefaultCapacityTypeClasses.With(cloudprovider.CapacityTypeClasses{
+		onDemandAlt: cloudprovider.CapacityTypeClassOnDemand,
+	})); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(test.ResetCapacityTypeClasses)
+
+	tests := []struct {
+		name     string
+		allowed  []string
+		expected string
+	}{
+		{name: "reserved first", allowed: []string{v1.CapacityTypeReserved, v1.CapacityTypeSpot, v1.CapacityTypeOnDemand}, expected: v1.CapacityTypeReserved},
+		{name: "spot before on-demand", allowed: []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand}, expected: v1.CapacityTypeSpot},
+		{name: "on-demand only", allowed: []string{v1.CapacityTypeOnDemand}, expected: v1.CapacityTypeOnDemand},
+		{name: "an additional on-demand class capacity type", allowed: []string{onDemandAlt}, expected: onDemandAlt},
+		{name: "more than one on-demand class capacity type", allowed: []string{v1.CapacityTypeOnDemand, onDemandAlt}, expected: string(cloudprovider.CapacityTypeClassOnDemand)},
+		{name: "spot before an additional on-demand class capacity type", allowed: []string{v1.CapacityTypeSpot, onDemandAlt}, expected: v1.CapacityTypeSpot},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requirement := pkgscheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, tt.allowed...)
+			if got := launchCapacityType(requirement); got != tt.expected {
+				t.Errorf("launchCapacityType() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
