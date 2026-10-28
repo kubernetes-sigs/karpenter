@@ -77,6 +77,8 @@ type LatencyHarness struct {
 }
 
 func StartLatencyHarness(env *Environment) (*LatencyHarness, error) {
+	GinkgoHelper()
+	env.RequireInClusterController("measuring karpenter latency metrics")
 	pod, err := env.EventuallyFindActiveKarpenterPod(env.Context)
 	if err != nil {
 		return nil, fmt.Errorf("finding karpenter pod: %w", err)
