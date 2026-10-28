@@ -117,8 +117,13 @@ type ResourceSlice interface {
 	//     published devices are tracked globally.
 	//   - Requirement narrowing: published (non-potential) non-node-local devices may carry
 	//     topology requirements that constrain the NodeClaim. Potential devices are always
-	//     node-local and do not constrain topology.
+	//     node-local; they constrain the NodeClaim only through TemplateRequirements.
 	Potential() bool
+	// TemplateRequirements returns the requirements of the cloud provider DynamicResources set a potential slice
+	// belongs to: the node must be launched in a configuration compatible with them to publish the slice's devices.
+	// Returns nil for unscoped template slices and for in-cluster slices, whose node affinity is expressed through
+	// NodeSelector.
+	TemplateRequirements() scheduling.Requirements
 	// NodeName returns the name of the node the slice's devices are local to when the slice pins itself to a single
 	// node via spec.nodeName, or "" otherwise. A node-name-pinned slice is accessible only from that exact node, so it
 	// can never satisfy an in-flight NodeClaim — only an existing node with the same name.
@@ -184,6 +189,10 @@ func (s *apiServerSlice) Potential() bool {
 	return false
 }
 
+func (s *apiServerSlice) TemplateRequirements() scheduling.Requirements {
+	return nil
+}
+
 func (s *apiServerSlice) NodeName() string {
 	return lo.FromPtr(s.slice.Spec.NodeName)
 }
@@ -213,12 +222,21 @@ func (s *apiServerSlice) SharedCounters() []resourcev1.CounterSet {
 
 // templateSlice adapts a cloudprovider.ResourceSliceTemplate to the ResourceSlice interface.
 type templateSlice struct {
-	template *cloudprovider.ResourceSliceTemplate
+	template     *cloudprovider.ResourceSliceTemplate
+	requirements scheduling.Requirements
 }
 
-// NewTemplateSlice wraps a cloud provider ResourceSliceTemplate to implement the ResourceSlice interface.
+// NewTemplateSlice wraps a cloud provider ResourceSliceTemplate from an unscoped DynamicResources set (published by
+// every offering) to implement the ResourceSlice interface.
 func NewTemplateSlice(t *cloudprovider.ResourceSliceTemplate) ResourceSlice {
 	return &templateSlice{template: t}
+}
+
+// NewScopedTemplateSlice wraps a cloud provider ResourceSliceTemplate from a DynamicResources set with the given
+// requirements. Devices from the slice are only eligible for a NodeClaim whose requirements are compatible with them,
+// and allocating one narrows the NodeClaim's requirements to them.
+func NewScopedTemplateSlice(t *cloudprovider.ResourceSliceTemplate, reqs scheduling.Requirements) ResourceSlice {
+	return &templateSlice{template: t, requirements: reqs}
 }
 
 func (s *templateSlice) Driver() unique.Handle[string] {
@@ -235,6 +253,10 @@ func (s *templateSlice) Devices() []cloudprovider.Device {
 
 func (s *templateSlice) Potential() bool {
 	return true
+}
+
+func (s *templateSlice) TemplateRequirements() scheduling.Requirements {
+	return s.requirements
 }
 
 func (s *templateSlice) NodeName() string {

@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 )
 
 var _ = Describe("DRA Scheduling Internals", func() {
@@ -72,9 +73,9 @@ var _ = Describe("DRA Scheduling Internals", func() {
 		BeforeEach(func() {
 			it1 = &cloudprovider.InstanceType{
 				Name: "it-1",
-				DynamicResources: cloudprovider.DynamicResources{
+				DynamicResources: []*cloudprovider.DynamicResources{{
 					ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-a")}},
-				},
+				}},
 			}
 			it2 = &cloudprovider.InstanceType{Name: "it-2"}
 			nc = &NodeClaim{hostname: "hostname-1"}
@@ -101,15 +102,93 @@ var _ = Describe("DRA Scheduling Internals", func() {
 		})
 	})
 
+	Describe("requirement-scoped DynamicResources sets", func() {
+		const modeKey = "example.com/driver-mode-gpu"
+		var it *cloudprovider.InstanceType
+		var nc *NodeClaim
+
+		offering := func(zone, mode string, available bool) *cloudprovider.Offering {
+			return &cloudprovider.Offering{
+				Requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+					scheduling.NewRequirement(modeKey, corev1.NodeSelectorOpIn, mode),
+				),
+				Available: available,
+			}
+		}
+		modeReqs := func(mode string) scheduling.Requirements {
+			return scheduling.NewRequirements(scheduling.NewRequirement(modeKey, corev1.NodeSelectorOpIn, mode))
+		}
+		slicesFor := func(adapter interface {
+			ResourceSlices() map[unique.Handle[string]][]dynamicresources.ResourceSlice
+		}) []string {
+			return lo.Map(adapter.ResourceSlices()[unique.Make("it-1")], func(s dynamicresources.ResourceSlice, _ int) string {
+				return s.Pool().Name.Value()
+			})
+		}
+
+		BeforeEach(func() {
+			v1.WellKnownLabels.Insert(modeKey)
+			DeferCleanup(func() { v1.WellKnownLabels.Delete(modeKey) })
+			it = &cloudprovider.InstanceType{
+				Name: "it-1",
+				Offerings: cloudprovider.Offerings{
+					offering("zone-a", "device-plugin", true),
+					offering("zone-a", "dra", false),
+					offering("zone-b", "dra", true),
+					offering("zone-a", "other", false),
+				},
+				DynamicResources: []*cloudprovider.DynamicResources{
+					{ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-a"), Pool: cloudprovider.ResourcePool{Name: unique.Make("unscoped")}}}},
+					{Requirements: modeReqs("dra"), ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-b"), Pool: cloudprovider.ResourcePool{Name: unique.Make("dra")}}}},
+					{Requirements: modeReqs("other"), ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-b"), Pool: cloudprovider.ResourcePool{Name: unique.Make("other")}}}},
+				},
+			}
+			nc = &NodeClaim{hostname: "hostname-1"}
+			nc.NodePoolName = "np-a"
+			nc.Requirements = scheduling.NewRequirements()
+			nc.InstanceTypeOptions = cloudprovider.InstanceTypes{it}
+		})
+
+		It("should expose sets with an available offering that are compatible with the NodeClaim", func() {
+			Expect(slicesFor(&draNodeClaim{nc: nc})).To(Equal([]string{"unscoped", "dra"}))
+		})
+		It("should exclude sets that are incompatible with the NodeClaim's requirements", func() {
+			nc.Requirements = modeReqs("device-plugin")
+			Expect(slicesFor(&draNodeClaim{nc: nc})).To(Equal([]string{"unscoped"}))
+		})
+		It("should check availability and NodeClaim compatibility independently", func() {
+			// The only available DRA offering is in zone-b, but the set is still a device source for a zone-a NodeClaim.
+			// The offering checks that follow allocation reject the instance type.
+			nc.Requirements = scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-a"))
+			Expect(slicesFor(&draNodeClaim{nc: nc})).To(Equal([]string{"unscoped", "dra"}))
+		})
+		It("should tag each slice with its set's requirements", func() {
+			slices := (&draNodeClaim{nc: nc}).ResourceSlices()[unique.Make("it-1")]
+			Expect(slices[0].TemplateRequirements()).To(BeEmpty())
+			Expect(slices[1].TemplateRequirements().Get(modeKey).Values()).To(ConsistOf("dra"))
+		})
+		It("should memoize the slices for the adapter's lifetime", func() {
+			adapter := &draNodeClaim{nc: nc}
+			Expect(slicesFor(adapter)).To(Equal([]string{"unscoped", "dra"}))
+			nc.Requirements = modeReqs("device-plugin")
+			Expect(slicesFor(adapter)).To(Equal([]string{"unscoped", "dra"}))
+			Expect(slicesFor(&draNodeClaim{nc: nc})).To(Equal([]string{"unscoped"}))
+		})
+		It("should expose every set on a pre-initialized existing node, regardless of availability", func() {
+			Expect(slicesFor(draExistingNodeForTest(false, it))).To(Equal([]string{"unscoped", "dra", "other"}))
+		})
+	})
+
 	Describe("draExistingNode adapter", func() {
 		var it *cloudprovider.InstanceType
 
 		BeforeEach(func() {
 			it = &cloudprovider.InstanceType{
 				Name: "it-1",
-				DynamicResources: cloudprovider.DynamicResources{
+				DynamicResources: []*cloudprovider.DynamicResources{{
 					ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-a")}},
-				},
+				}},
 			}
 		})
 

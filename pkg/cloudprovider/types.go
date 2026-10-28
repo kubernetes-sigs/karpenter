@@ -185,15 +185,22 @@ type InstanceType struct {
 	// CSI driver name. Cloud providers that do not know a driver's limit ahead of time may omit it; limits reported
 	// by a node's CSINode take precedence once the node registers.
 	VolumeAttachmentLimits map[string]int
-	// DynamicResources contains DRA device metadata for this instance type.
-	// Cloud providers that do not support DRA may leave this as the zero value.
-	DynamicResources DynamicResources
+	// DynamicResources lists the DRA device sets an instance of this type may publish, one driver per set. Each set is
+	// published by the offerings compatible with its requirements. Cloud providers that do not support DRA may leave
+	// this empty.
+	DynamicResources []*DynamicResources
+	// AttributeBindings declares devices, from any of the instance type's DynamicResources sets, that will share a
+	// common attribute value at runtime, even though the concrete value is not known at simulation time.
+	AttributeBindings []*AttributeBinding
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
 	Overhead               *InstanceTypeOverhead
 	once                   sync.Once
 	allocatableOfferings   []AllocatableOfferings
 	capacityOverlayApplied bool
+
+	dynamicResourcesOnce      sync.Once
+	availableDynamicResources []*DynamicResources
 }
 
 type InstanceTypes []*InstanceType
@@ -241,7 +248,22 @@ func (in *InstanceType) DeepCopyInto(out *InstanceType) {
 		*out = make(map[string]int, len(*in))
 		maps.Copy(*out, *in)
 	}
-	in.DynamicResources.DeepCopyInto(&out.DynamicResources)
+	if in.DynamicResources != nil {
+		out.DynamicResources = make([]*DynamicResources, len(in.DynamicResources))
+		for i := range in.DynamicResources {
+			if in.DynamicResources[i] != nil {
+				out.DynamicResources[i] = in.DynamicResources[i].DeepCopy()
+			}
+		}
+	}
+	if in.AttributeBindings != nil {
+		out.AttributeBindings = make([]*AttributeBinding, len(in.AttributeBindings))
+		for i := range in.AttributeBindings {
+			if in.AttributeBindings[i] != nil {
+				out.AttributeBindings[i] = in.AttributeBindings[i].DeepCopy()
+			}
+		}
+	}
 	if in.Overhead != nil {
 		in, out := &in.Overhead, &out.Overhead
 		*out = new(InstanceTypeOverhead)
@@ -383,6 +405,23 @@ func (i *InstanceType) IsCapacityOverlayApplied() bool {
 func (i *InstanceType) AllocatableOfferingsList() []AllocatableOfferings {
 	i.once.Do(i.precompute)
 	return i.allocatableOfferings
+}
+
+// AvailableDynamicResources returns the instance type's DynamicResources sets that can be a source of devices: sets
+// with empty requirements, and sets compatible with at least one available offering. The result is computed once,
+// since availability doesn't change for the lifetime of an InstanceType.
+func (i *InstanceType) AvailableDynamicResources() []*DynamicResources {
+	i.dynamicResourcesOnce.Do(func() {
+		i.availableDynamicResources = lo.Filter(i.DynamicResources, func(dr *DynamicResources, _ int) bool {
+			if len(dr.Requirements) == 0 {
+				return true
+			}
+			return lo.ContainsBy(i.Offerings, func(o *Offering) bool {
+				return o.Available && dr.Requirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels)
+			})
+		})
+	})
+	return i.availableDynamicResources
 }
 
 // Allocatable returns the base allocatable resources (no offering overrides applied).

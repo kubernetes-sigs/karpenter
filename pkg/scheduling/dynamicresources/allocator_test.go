@@ -2456,12 +2456,10 @@ var _ = Describe("Allocator", func() {
 				"test-np": {
 					&cloudprovider.InstanceType{
 						Name: "it-a",
-						DynamicResources: cloudprovider.DynamicResources{
-							AttributeBindings: []*cloudprovider.AttributeBinding{
-								{
-									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA0.DeviceID, devA1.DeviceID},
-								},
+						AttributeBindings: []*cloudprovider.AttributeBinding{
+							{
+								Attribute: "gpu.example.com/numa",
+								Devices:   []cloudprovider.DeviceID{devA0.DeviceID, devA1.DeviceID},
 							},
 						},
 					},
@@ -3341,12 +3339,10 @@ var _ = Describe("Allocator", func() {
 				"test-np": {
 					&cloudprovider.InstanceType{
 						Name: "it-1",
-						DynamicResources: cloudprovider.DynamicResources{
-							AttributeBindings: []*cloudprovider.AttributeBinding{
-								{
-									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
-								},
+						AttributeBindings: []*cloudprovider.AttributeBinding{
+							{
+								Attribute: "gpu.example.com/numa",
+								Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
 							},
 						},
 					},
@@ -4351,12 +4347,10 @@ var _ = Describe("Allocator", func() {
 				"test-np": {
 					&cloudprovider.InstanceType{
 						Name: "it-1",
-						DynamicResources: cloudprovider.DynamicResources{
-							AttributeBindings: []*cloudprovider.AttributeBinding{
-								{
-									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
-								},
+						AttributeBindings: []*cloudprovider.AttributeBinding{
+							{
+								Attribute: "gpu.example.com/numa",
+								Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
 							},
 						},
 					},
@@ -4406,12 +4400,10 @@ var _ = Describe("Allocator", func() {
 				"test-np": {
 					&cloudprovider.InstanceType{
 						Name: "it-1",
-						DynamicResources: cloudprovider.DynamicResources{
-							AttributeBindings: []*cloudprovider.AttributeBinding{
-								{
-									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
-								},
+						AttributeBindings: []*cloudprovider.AttributeBinding{
+							{
+								Attribute: "gpu.example.com/numa",
+								Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
 							},
 						},
 					},

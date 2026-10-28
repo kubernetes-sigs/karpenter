@@ -342,24 +342,7 @@ func (a *Allocator) Allocate(
 	// modeling a subset of the total possible slices - we exclude those from drivers that have already had pools
 	// published. Let's consider a new interface to model this (e.g. outstanding drivers / pools?)
 	resourceSlices := nodeClaim.ResourceSlices()
-	templateDevicesByIT := make(map[InstanceTypeID][]DeviceWithID, len(resourceSlices))
-	for itID, slices := range resourceSlices {
-		for _, s := range slices {
-			for _, d := range s.Devices() {
-				templateDevicesByIT[itID] = append(templateDevicesByIT[itID], DeviceWithID{
-					Device: d,
-					ID: DeviceID{
-						DeviceID: cloudprovider.DeviceID{
-							Driver: s.Driver(),
-							Pool:   s.Pool().Name,
-							Device: d.Name,
-						},
-						Template: true,
-					},
-				})
-			}
-		}
-	}
+	templateDevicesByIT := templateDevicesByInstanceType(resourceSlices)
 
 	// Create child allocator.
 	child := &allocator{
@@ -395,6 +378,36 @@ func (a *Allocator) Allocate(
 		return nil, err
 	}
 	return result, nil
+}
+
+// templateDevicesByInstanceType builds the template devices for each of the NodeClaim's candidate instance types.
+func templateDevicesByInstanceType(resourceSlices map[InstanceTypeID][]ResourceSlice) map[InstanceTypeID][]DeviceWithID {
+	templateDevicesByIT := make(map[InstanceTypeID][]DeviceWithID, len(resourceSlices))
+	for itID, slices := range resourceSlices {
+		for _, s := range slices {
+			// Devices from a requirement-scoped set carry the set's requirements, so they go through the same
+			// eligibility and narrowing path as devices from in-cluster slices with a NodeSelector.
+			var topoReqs *scheduling.Requirements
+			if reqs := s.TemplateRequirements(); len(reqs) != 0 {
+				topoReqs = &reqs
+			}
+			for _, d := range s.Devices() {
+				templateDevicesByIT[itID] = append(templateDevicesByIT[itID], DeviceWithID{
+					Device: d,
+					ID: DeviceID{
+						DeviceID: cloudprovider.DeviceID{
+							Driver: s.Driver(),
+							Pool:   s.Pool().Name,
+							Device: d.Name,
+						},
+						Template: true,
+					},
+					TopologyRequirements: topoReqs,
+				})
+			}
+		}
+	}
+	return templateDevicesByIT
 }
 
 type classificationResult struct {

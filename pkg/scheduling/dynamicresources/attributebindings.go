@@ -93,7 +93,7 @@ func BuildAttributeBindings(instanceTypesByNodePool map[string][]*cloudprovider.
 	bindings := make(map[resourcev1.QualifiedName]map[string]map[InstanceTypeID]map[cloudprovider.DeviceID]sets.Set[cloudprovider.DeviceID])
 	for nodePool, instanceTypes := range instanceTypesByNodePool {
 		for _, instanceType := range instanceTypes {
-			for _, itBinding := range instanceType.DynamicResources.AttributeBindings {
+			for _, itBinding := range instanceType.AttributeBindings {
 				if len(itBinding.Devices) < 2 {
 					continue
 				}

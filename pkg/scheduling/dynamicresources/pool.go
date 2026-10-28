@@ -35,8 +35,9 @@ type PoolKey struct {
 
 // DeviceWithID pairs a device with its globally unique identifier and any topology
 // requirements inherited from the slice that contains it. TopologyRequirements is
-// non-nil when the device's slice uses a NodeSelector (non-node-local device); nil
-// for AllNodes slices and template (potential) devices.
+// non-nil when the device's slice uses a NodeSelector (non-node-local device), or when it's
+// a template (potential) device from a requirement-scoped DynamicResources set; nil for
+// AllNodes slices and unscoped template devices.
 type DeviceWithID struct {
 	cloudprovider.Device
 	ID                   DeviceID

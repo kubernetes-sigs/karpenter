@@ -21,16 +21,19 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 var _ = Describe("DynamicResources", func() {
 	Describe("DeepCopy", func() {
-		It("should deep copy ResourceSliceTemplates and AttributeBindings", func() {
+		It("should deep copy Requirements and ResourceSliceTemplates", func() {
 			original := cloudprovider.DynamicResources{
+				Requirements: scheduling.NewRequirements(scheduling.NewRequirement("example.com/driver-mode", corev1.NodeSelectorOpIn, "dra")),
 				ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{
 					{
 						Driver: unique.Make("gpu.nvidia.com"),
@@ -49,6 +52,42 @@ var _ = Describe("DynamicResources", func() {
 						},
 					},
 				},
+			}
+
+			copied := original.DeepCopy()
+
+			Expect(copied.Requirements.Get("example.com/driver-mode").Has("dra")).To(BeTrue())
+			Expect(copied.ResourceSliceTemplates).To(HaveLen(1))
+			Expect(copied.ResourceSliceTemplates[0].Driver).To(Equal(unique.Make("gpu.nvidia.com")))
+			Expect(copied.ResourceSliceTemplates[0].Devices).To(HaveLen(1))
+
+			dev := copied.ResourceSliceTemplates[0].Devices[0]
+			Expect(dev.AllowMultipleAllocations).To(BeTrue())
+			Expect(dev.Capacity).To(HaveLen(1))
+			Expect(dev.Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+
+			// Mutating the copy should not affect the original
+			copied.Requirements.Get("example.com/driver-mode").Insert("device-plugin")
+			Expect(original.Requirements.Get("example.com/driver-mode").Has("device-plugin")).To(BeFalse())
+			copied.ResourceSliceTemplates[0].Devices[0].Attributes["gpu.nvidia.com/model"] = resourcev1.DeviceAttribute{
+				StringValue: new("A100"),
+			}
+			Expect(*original.ResourceSliceTemplates[0].Devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal("H100"))
+
+			dev.Capacity["gpu.nvidia.com/memory"] = resourcev1.DeviceCapacity{Value: resource.MustParse("40Gi")}
+			Expect(original.ResourceSliceTemplates[0].Devices[0].Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
+		})
+
+		It("should deep copy an instance type's DynamicResources sets and AttributeBindings", func() {
+			original := &cloudprovider.InstanceType{
+				Name: "it",
+				DynamicResources: []*cloudprovider.DynamicResources{
+					{ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("gpu.nvidia.com")}}},
+					{
+						Requirements:           scheduling.NewRequirements(scheduling.NewRequirement("example.com/driver-mode", corev1.NodeSelectorOpIn, "dra")),
+						ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("dra.net")}},
+					},
+				},
 				AttributeBindings: []*cloudprovider.AttributeBinding{
 					{
 						Attribute: "topology.nvidia.com/pcie-root",
@@ -62,26 +101,14 @@ var _ = Describe("DynamicResources", func() {
 
 			copied := original.DeepCopy()
 
-			Expect(copied.ResourceSliceTemplates).To(HaveLen(1))
-			Expect(copied.ResourceSliceTemplates[0].Driver).To(Equal(unique.Make("gpu.nvidia.com")))
-			Expect(copied.ResourceSliceTemplates[0].Devices).To(HaveLen(1))
+			Expect(copied.DynamicResources).To(HaveLen(2))
+			Expect(copied.DynamicResources[1]).ToNot(BeIdenticalTo(original.DynamicResources[1]))
+			Expect(copied.DynamicResources[1].ResourceSliceTemplates[0].Driver).To(Equal(unique.Make("dra.net")))
 			Expect(copied.AttributeBindings).To(HaveLen(1))
 			Expect(copied.AttributeBindings[0].Devices).To(HaveLen(2))
 
-			dev := copied.ResourceSliceTemplates[0].Devices[0]
-			Expect(dev.AllowMultipleAllocations).To(BeTrue())
-			Expect(dev.Capacity).To(HaveLen(1))
-			Expect(dev.Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
-
-			// Mutating the copy should not affect the original
-			copied.ResourceSliceTemplates[0].Devices[0].Attributes["gpu.nvidia.com/model"] = resourcev1.DeviceAttribute{
-				StringValue: new("A100"),
-			}
-			Expect(*original.ResourceSliceTemplates[0].Devices[0].Attributes["gpu.nvidia.com/model"].StringValue).To(Equal("H100"))
-
-			dev.Capacity["gpu.nvidia.com/memory"] = resourcev1.DeviceCapacity{Value: resource.MustParse("40Gi")}
-			Expect(original.ResourceSliceTemplates[0].Devices[0].Capacity["gpu.nvidia.com/memory"].Value.Equal(resource.MustParse("80Gi"))).To(BeTrue())
-
+			copied.DynamicResources[1].Requirements.Get("example.com/driver-mode").Insert("device-plugin")
+			Expect(original.DynamicResources[1].Requirements.Get("example.com/driver-mode").Has("device-plugin")).To(BeFalse())
 			copied.AttributeBindings[0].Devices = copied.AttributeBindings[0].Devices[:1]
 			Expect(original.AttributeBindings[0].Devices).To(HaveLen(2))
 		})
@@ -94,8 +121,8 @@ var _ = Describe("DynamicResources", func() {
 		It("should handle zero value", func() {
 			original := cloudprovider.DynamicResources{}
 			copied := original.DeepCopy()
+			Expect(copied.Requirements).To(BeNil())
 			Expect(copied.ResourceSliceTemplates).To(BeNil())
-			Expect(copied.AttributeBindings).To(BeNil())
 		})
 
 		It("should deep copy SharedCounters and ConsumesCounters", func() {

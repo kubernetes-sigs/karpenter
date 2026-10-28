@@ -37,10 +37,8 @@ func deviceID(driver, pool, device string) dynamicresources.DeviceID {
 
 func itType(name string, bindings ...*cloudprovider.AttributeBinding) *cloudprovider.InstanceType {
 	return &cloudprovider.InstanceType{
-		Name: name,
-		DynamicResources: cloudprovider.DynamicResources{
-			AttributeBindings: bindings,
-		},
+		Name:              name,
+		AttributeBindings: bindings,
 	}
 }
 

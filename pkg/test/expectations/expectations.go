@@ -480,14 +480,23 @@ func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 		return it.Name == instanceTypeName
 	})
 	Expect(found).To(BeTrue(), "instance type %q not found in cloud provider", instanceTypeName)
-	if len(it.DynamicResources.ResourceSliceTemplates) == 0 {
+	// Only the sets the node was launched with are published: unscoped sets, and sets whose requirements the node's
+	// labels satisfy.
+	nodeReqs := pscheduling.NewLabelRequirements(node.Labels)
+	var templates []*cloudprovider.ResourceSliceTemplate
+	for _, dr := range it.DynamicResources {
+		if nodeReqs.IsCompatible(dr.Requirements) {
+			templates = append(templates, dr.ResourceSliceTemplates...)
+		}
+	}
+	if len(templates) == 0 {
 		return
 	}
 	Expect(node.UID).ToNot(BeEmpty(), "node %q has no UID, cannot create owner reference", node.Name)
 
 	// Group templates by driver to set ResourceSliceCount correctly
 	templatesByDriver := map[string][]*cloudprovider.ResourceSliceTemplate{}
-	for _, t := range it.DynamicResources.ResourceSliceTemplates {
+	for _, t := range templates {
 		templatesByDriver[t.Driver.Value()] = append(templatesByDriver[t.Driver.Value()], t)
 	}
 
@@ -1089,4 +1098,13 @@ func ExpectStateNodePoolCount(cluster *state.Cluster, npName string, r, d, pd in
 	Expect(running).To(Equal(r))
 	Expect(deleting).To(Equal(d))
 	Expect(pendingdisruption).To(Equal(pd))
+}
+
+// ExpectDynamicResourcesConventions asserts that every instance type follows the DynamicResources conventions that
+// can be checked statically (see cloudprovider.ValidateDynamicResources).
+func ExpectDynamicResourcesConventions(instanceTypes ...*cloudprovider.InstanceType) {
+	GinkgoHelper()
+	for _, it := range instanceTypes {
+		Expect(cloudprovider.ValidateDynamicResources(it)).To(BeEmpty(), "instance type %q violates DynamicResources conventions", it.Name)
+	}
 }
