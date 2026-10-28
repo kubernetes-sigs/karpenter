@@ -73,7 +73,7 @@ var (
 	podScheduledLabel        = opmetrics.Label{Name: podScheduled, Help: "Whether the pod has been scheduled to a node.", Values: metrics.BoolValues}
 	podReadyLabel            = opmetrics.Label{Name: podReady, Help: "Whether the pod is ready.", Values: metrics.BoolValues}
 	managedLabel             = opmetrics.Label{Name: managed, Help: "Whether the pod is bound to a Karpenter-managed node.", Values: metrics.BoolValues}
-	podDynamicResourcesLabel = opmetrics.Label{Name: podDynamicResources, Help: "Whether the pod has DRA (dynamic resource allocation) requirements.", Values: metrics.BoolValues}
+	podDynamicResourcesLabel = opmetrics.Label{Name: podDynamicResources, Help: "Whether the pod has DRA (dynamic resource allocation) requirements.", Values: metrics.BoolValues, Exhaustive: true}
 	podPhaseLabel            = opmetrics.Label{
 		Name: podPhase,
 		Help: "The pod's lifecycle phase.",
